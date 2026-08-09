@@ -9,7 +9,7 @@ on:
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -33,7 +33,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -61,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [blacksmith-2vcpu-ubuntu-2404, blacksmith-6vcpu-macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
@@ -85,7 +85,7 @@ jobs:
 
   test-windows:
     name: Test (Windows)
-    runs-on: windows-latest
+    runs-on: blacksmith-2vcpu-windows-2025
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
