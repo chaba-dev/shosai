@@ -10,12 +10,13 @@ if tailscale_running; then
   exit 0
 fi
 
-if [[ -z "${TAILSCALE_CLIENT_ID:-}" || -z "${TAILSCALE_TRUST_AUDIENCE:-}" || -z "${TAILSCALE_TAG:-}" ]]; then
-  echo "Tailscale login deferred: set non-empty TAILSCALE_CLIENT_ID, TAILSCALE_TRUST_AUDIENCE, and the trust-credential-approved TAILSCALE_TAG." >&2
+if [[ -z "${TAILSCALE_CLIENT_ID:-}" || -z "${TAILSCALE_TRUST_AUDIENCE:-}" ]]; then
+  echo "Tailscale login deferred: set non-empty TAILSCALE_CLIENT_ID and TAILSCALE_TRUST_AUDIENCE." >&2
   exit 0
 fi
 
-if [[ "$TAILSCALE_TAG" != tag:* ]]; then
+tailscale_tag="${TAILSCALE_TAG:-tag:amp-demo}"
+if [[ "$tailscale_tag" != tag:* ]]; then
   echo "TAILSCALE_TAG must use the tag:<name> form." >&2
   exit 1
 fi
@@ -31,7 +32,7 @@ amp orb id-token --audience "$TAILSCALE_TRUST_AUDIENCE" >"$token_file"
 sudo tailscale up \
   --client-id="$TAILSCALE_CLIENT_ID?ephemeral=true&preauthorized=true" \
   --id-token="file:$token_file" \
-  --advertise-tags="$TAILSCALE_TAG" \
+  --advertise-tags="$tailscale_tag" \
   --hostname=amp-shosai
 
 if ! tailscale_running; then
