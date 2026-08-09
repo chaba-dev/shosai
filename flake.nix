@@ -42,6 +42,7 @@
 
           # tools
           git-cliff
+          jujutsu
 
           # build deps
           pkg-config
@@ -70,6 +71,12 @@
             libxi
             vulkan-loader
             vulkan-headers
+
+            # Headless desktop E2E and screenshot verification
+            xvfb
+            xwininfo
+            xdotool
+            imagemagick
           ];
 
         # macOS-specific dependencies
