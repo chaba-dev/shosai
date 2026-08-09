@@ -202,6 +202,25 @@ mod tests {
     }
 
     #[test]
+    fn test_find_matches_unicode_case_insensitive() {
+        let mut results = Vec::new();
+        find_matches_in_text("Σ", "ς", 0, &mut results);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_match_range_and_context_refer_to_original_unicode_text() {
+        let text = format!("{}target", "K".repeat(50));
+        let mut results = Vec::new();
+        find_matches_in_text(&text, "target", 0, &mut results);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].offset, 50);
+        assert_eq!(results[0].length, 6);
+        assert!(results[0].context.contains("target"));
+    }
+
+    #[test]
     fn test_extract_text_from_nodes() {
         let nodes = vec![
             ContentNode::Heading {

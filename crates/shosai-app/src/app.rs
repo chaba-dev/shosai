@@ -1951,3 +1951,72 @@ pub fn title(state: &State) -> String {
 pub fn subscription(_state: &State) -> Subscription<Message> {
     keyboard::listen().map(Message::KeyPressed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_document(document: OpenDocument) -> State {
+        State {
+            screen: Screen::Reader,
+            file_path: None,
+            document: Some(document),
+            current_page: 0,
+            total_pages: 1,
+            zoom: ZoomMode::default(),
+            rendered_page: None,
+            chapter_content: Vec::new(),
+            page_input: "1".to_string(),
+            error: None,
+            font_size: 16.0,
+            line_spacing: 1.6,
+            theme: ReaderTheme::default(),
+            reading_state: None,
+            library: None,
+            bookmark_store: None,
+            bookmarks: Vec::new(),
+            show_bookmarks_panel: false,
+            current_page_bookmarked: false,
+            editing_note_id: None,
+            editing_note_text: String::new(),
+            show_search_bar: false,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            search_current: 0,
+            library_books: Vec::new(),
+            library_search: String::new(),
+            library_filter: None,
+            library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
+        }
+    }
+
+    #[test]
+    fn opening_search_requests_focus_for_the_query_input() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(epub));
+
+        let task = update(&mut state, Message::ToggleSearchBar);
+
+        assert!(state.show_search_bar);
+        assert!(
+            task.units() > 0,
+            "opening search must issue a task that focuses the query input"
+        );
+    }
+
+    #[test]
+    fn search_bar_does_not_open_for_unsupported_cbz_documents() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(cbz));
+
+        let _ = update(&mut state, Message::ToggleSearchBar);
+
+        assert!(!state.show_search_bar);
+    }
+}
