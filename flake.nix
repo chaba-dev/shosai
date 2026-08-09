@@ -42,6 +42,7 @@
 
           # tools
           git-cliff
+          jujutsu
 
           # build deps
           pkg-config
