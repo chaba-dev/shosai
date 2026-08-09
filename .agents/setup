@@ -39,3 +39,8 @@ EOF
 cd "$repo_root"
 run_step "Fetching locked Cargo dependencies through the Nix development shell" \
   nix --extra-experimental-features 'nix-command flakes' develop --command cargo fetch --locked
+
+if [[ ! -d "$repo_root/.jj" ]]; then
+  run_step "Initializing colocated Jujutsu repository" \
+    nix --extra-experimental-features 'nix-command flakes' develop --command jj git init --colocate
+fi
