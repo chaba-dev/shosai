@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
+nix_bin="$HOME/.nix-profile/bin/nix"
+
+run_step() {
+  local label="$1"
+  shift
+  printf '\n==> %s\n' "$label"
+  time "$@"
+}
+
+if [[ ! -x "$nix_bin" ]]; then
+  run_step "Installing Nix" bash -c '
+    sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /nix
+    curl --fail --location --proto "=https" --tlsv1.2 https://nixos.org/nix/install |
+      sh -s -- --no-daemon
+  '
+fi
+
+# The installer cannot change this script's environment.
+# shellcheck disable=SC1091
+source "$HOME/.nix-profile/etc/profile.d/nix.sh"
+
+profile_marker="# shosai Nix development shell"
+if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  sed -i "\|$profile_marker|,/^fi$/d" "$HOME/.bash_profile"
+fi
+
+cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ -z "\$IN_NIX_SHELL" && "\$PWD" == "$repo_root" && -x "$nix_bin" ]]; then
+  eval "\$("$nix_bin" --extra-experimental-features 'nix-command flakes' print-dev-env "$repo_root")"
+fi
+EOF
+
+cd "$repo_root"
+run_step "Fetching locked Cargo dependencies through the Nix development shell" \
+  nix --extra-experimental-features 'nix-command flakes' develop --command cargo fetch --locked
