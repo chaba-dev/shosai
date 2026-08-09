@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
 nix_bin="$HOME/.nix-profile/bin/nix"
 
 if [[ ! -x "$nix_bin" ]]; then
@@ -9,5 +9,20 @@ if [[ ! -x "$nix_bin" ]]; then
   exit 1
 fi
 
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "Tailscale is not installed; run .agents/setup to restore orb connectivity." >&2
+  exit 1
+fi
+
+if ! sudo systemctl is-active --quiet tailscaled; then
+  sudo systemctl restart tailscaled
+fi
+
 cd "$repo_root"
-echo "Nix development environment is available for $repo_root."
+.agents/tailscale-connect
+if sudo tailscale status --json 2>/dev/null |
+  python3 -c 'import json, sys; raise SystemExit(0 if json.load(sys.stdin).get("BackendState") == "Running" else 1)'; then
+  echo "Nix development environment and Tailscale are available for $repo_root."
+else
+  echo "Nix development environment is available; Tailscale enrollment is deferred or disconnected." >&2
+fi

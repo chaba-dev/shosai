@@ -3,6 +3,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
 nix_bin="$HOME/.nix-profile/bin/nix"
+nix_version="2.35.1"
+nix_sha256="c3fe29778acaa93b5095ee66e36f11ec7c6a284c40970a24cc83ac4f04809db3"
+tailscale_version="1.102.2"
 
 run_step() {
   local label="$1"
@@ -12,35 +15,97 @@ run_step() {
 }
 
 if [[ ! -x "$nix_bin" ]]; then
-  run_step "Installing Nix" bash -c '
+  run_step "Installing Nix $nix_version" bash -o errexit -o nounset -o pipefail -c '
+    tarball="$(mktemp)"
+    trap "rm -f \"$tarball\"" EXIT
+    curl --fail --location --proto "=https" --tlsv1.2 \
+      "https://releases.nixos.org/nix/nix-'"$nix_version"'/nix-'"$nix_version"'-x86_64-linux.tar.xz" \
+      --output "$tarball"
+    echo "'"$nix_sha256"'  $tarball" | sha256sum --check --status
     sudo install -d -m 0755 -o "$USER" -g "$(id -gn)" /nix
-    curl --fail --location --proto "=https" --tlsv1.2 https://nixos.org/nix/install |
-      sh -s -- --no-daemon
+    unpack_dir="$(mktemp -d)"
+    trap "rm -f \"$tarball\"; rm -rf \"$unpack_dir\"" EXIT
+    tar -xJf "$tarball" -C "$unpack_dir"
+    "$unpack_dir"/nix-'"$nix_version"'-x86_64-linux/install --no-daemon
   '
 fi
+
+if [[ "$(tailscale version 2>/dev/null | head -n 1 || true)" != "$tailscale_version" ]]; then
+  run_step "Installing Tailscale $tailscale_version" bash -o errexit -o nounset -o pipefail -c '
+    sudo install -d -m 0755 /usr/share/keyrings
+    curl --fail --location --proto "=https" --tlsv1.2 \
+      https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg |
+      sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+    curl --fail --location --proto "=https" --tlsv1.2 \
+      https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list |
+      sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+    sudo apt-get update
+    sudo apt-get install -y tailscale='"$tailscale_version"' tailscale-archive-keyring
+  '
+fi
+
+run_step "Configuring Tailscale for orb networking" bash -o errexit -o nounset -o pipefail -c '
+  sudo install -d /etc/systemd/system/tailscaled.service.d
+  sudo tee /etc/systemd/system/tailscaled.service.d/amp-orb.conf >/dev/null <<EOF
+[Service]
+Environment=TS_ASSUME_NETWORK_UP_FOR_TEST=true
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl enable tailscaled
+  sudo systemctl restart tailscaled
+'
 
 # The installer cannot change this script's environment.
 # shellcheck disable=SC1091
 source "$HOME/.nix-profile/etc/profile.d/nix.sh"
 
-profile_marker="# shosai Nix development shell"
-if grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
-  sed -i "\|$profile_marker|,/^fi$/d" "$HOME/.bash_profile"
+profile_begin="# BEGIN shosai Nix development shell"
+profile_end="# END shosai Nix development shell"
+legacy_profile_marker="# shosai Nix development shell"
+if grep -Fqx "$legacy_profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  echo "Remove the legacy shosai Nix profile block from $HOME/.bash_profile before rerunning setup." >&2
+  exit 1
 fi
-
+sed -i "\|$profile_begin|,\|$profile_end|d" "$HOME/.bash_profile"
 cat >> "$HOME/.bash_profile" <<EOF
 
-$profile_marker
-if [[ -z "\$IN_NIX_SHELL" && "\$PWD" == "$repo_root" && -x "$nix_bin" ]]; then
+$profile_begin
+if [[ -z "\${IN_NIX_SHELL-}" && "\$PWD" == "$repo_root" && -x "$nix_bin" ]]; then
   eval "\$("$nix_bin" --extra-experimental-features 'nix-command flakes' print-dev-env "$repo_root")"
 fi
+$profile_end
 EOF
 
 cd "$repo_root"
 run_step "Fetching locked Cargo dependencies through the Nix development shell" \
-  nix --extra-experimental-features 'nix-command flakes' develop --command cargo fetch --locked
+  .agents/dev cargo fetch --locked
 
 if [[ ! -d "$repo_root/.jj" ]]; then
-  run_step "Initializing colocated Jujutsu repository" \
-    nix --extra-experimental-features 'nix-command flakes' develop --command jj git init --colocate
+  run_step "Initializing colocated Jujutsu repository" .agents/dev jj git init --colocate
 fi
+
+if ! .agents/dev jj --ignore-working-copy root >/dev/null; then
+  echo "Existing .jj metadata is invalid; repair it before rerunning setup." >&2
+  exit 1
+fi
+
+colocation_status="$(.agents/dev jj git colocation status)"
+if [[ "$colocation_status" != *"currently colocated"* ]]; then
+  echo "Existing .jj metadata is not colocated with Git; repair it before rerunning setup." >&2
+  exit 1
+fi
+
+jj_user_name="$(.agents/dev jj config get user.name 2>/dev/null || true)"
+jj_user_email="$(.agents/dev jj config get user.email 2>/dev/null || true)"
+if [[ -z "$jj_user_name" || -z "$jj_user_email" ]]; then
+  author_name="$(git show -s --format=%an HEAD)"
+  author_email="$(git show -s --format=%ae HEAD)"
+  if [[ -z "$author_name" || -z "$author_email" ]]; then
+    echo "Configure Jujutsu user.name and user.email before committing." >&2
+    exit 1
+  fi
+  .agents/dev jj config set --repo user.name "$author_name"
+  .agents/dev jj config set --repo user.email "$author_email"
+fi
+
+.agents/tailscale-connect

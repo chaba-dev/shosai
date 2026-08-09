@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tailscale_running() {
+  sudo tailscale status --json 2>/dev/null |
+    python3 -c 'import json, sys; raise SystemExit(0 if json.load(sys.stdin).get("BackendState") == "Running" else 1)'
+}
+
+if tailscale_running; then
+  exit 0
+fi
+
+if [[ -z "${TAILSCALE_CLIENT_ID:-}" || -z "${TAILSCALE_TRUST_AUDIENCE:-}" || -z "${TAILSCALE_TAG:-}" ]]; then
+  echo "Tailscale login deferred: set non-empty TAILSCALE_CLIENT_ID, TAILSCALE_TRUST_AUDIENCE, and the trust-credential-approved TAILSCALE_TAG." >&2
+  exit 0
+fi
+
+if [[ "$TAILSCALE_TAG" != tag:* ]]; then
+  echo "TAILSCALE_TAG must use the tag:<name> form." >&2
+  exit 1
+fi
+
+umask 077
+token_file="$(mktemp)"
+cleanup() {
+  rm -f "$token_file"
+}
+trap cleanup EXIT INT TERM
+
+amp orb id-token --audience "$TAILSCALE_TRUST_AUDIENCE" >"$token_file"
+sudo tailscale up \
+  --client-id="$TAILSCALE_CLIENT_ID?ephemeral=true&preauthorized=true" \
+  --id-token="file:$token_file" \
+  --advertise-tags="$TAILSCALE_TAG" \
+  --hostname=amp-shosai
+
+if ! tailscale_running; then
+  echo "Tailscale did not reach Running state after enrollment." >&2
+  exit 1
+fi
