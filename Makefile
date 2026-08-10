@@ -14,4 +14,4 @@ fmt:
 
 ## Run all tests
 test:
-	cargo test --workspace
+	cargo test --workspace --no-fail-fast
