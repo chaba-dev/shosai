@@ -120,6 +120,25 @@ impl PdfDoc {
 
         Ok(text.all())
     }
+
+    /// Extract text from every page while loading the PDF only once.
+    pub fn page_texts(&self) -> Result<Vec<String>> {
+        let pdfium = create_pdfium()?;
+        let document = pdfium
+            .load_pdf_from_byte_slice(&self.data, None)
+            .map_err(|e| anyhow::anyhow!("failed to load PDF for text extraction: {e}"))?;
+
+        let mut pages = Vec::with_capacity(self.page_count);
+        for index in 0..self.page_count {
+            let text = match document.pages().get(index as u16) {
+                Ok(page) => page.text().map(|text| text.all()).unwrap_or_default(),
+                Err(_) => String::new(),
+            };
+            pages.push(text);
+        }
+
+        Ok(pages)
+    }
 }
 
 impl Document for PdfDoc {

@@ -4,10 +4,10 @@
 //! returning a list of [`SearchMatch`] values that the GUI can use to navigate
 //! results and highlight matches.
 
-use crate::document::Document;
 use crate::epub::EpubDoc;
 use crate::epub::render::{ContentNode, TextSpan};
 use crate::pdf::PdfDoc;
+use unicode_casefold::UnicodeCaseFold;
 
 /// A single search match within a document.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,18 +31,10 @@ pub fn search_pdf(doc: &PdfDoc, query: &str) -> Vec<SearchMatch> {
         return Vec::new();
     }
 
-    let query_lower = query.to_lowercase();
     let mut results = Vec::new();
-
-    for page_idx in 0..doc.page_count() {
-        let page_text = match doc.page_text(page_idx) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-
-        find_matches_in_text(&page_text, &query_lower, page_idx, &mut results);
+    if let Ok(pages) = doc.page_texts() {
+        find_matches_in_pages(&pages, query, &mut results);
     }
-
     results
 }
 
@@ -54,28 +46,44 @@ pub fn search_epub(doc: &EpubDoc, query: &str) -> Vec<SearchMatch> {
         return Vec::new();
     }
 
-    let query_lower = query.to_lowercase();
     let mut results = Vec::new();
-
-    for (chapter_idx, chapter) in doc.content.chapters.iter().enumerate() {
-        // Parse the chapter XHTML into content nodes.
-        let base_path = chapter
-            .path
-            .rsplit_once('/')
-            .map(|(dir, _)| dir)
-            .unwrap_or("");
-        let nodes = crate::epub::render::parse_chapter_xhtml(
-            &chapter.content,
-            base_path,
-            &doc.content.styles,
-        );
-
-        // Flatten content nodes into plain text for searching.
-        let plain_text = extract_text_from_nodes(&nodes);
-        find_matches_in_text(&plain_text, &query_lower, chapter_idx, &mut results);
-    }
-
+    let chapters = extract_epub_text(doc);
+    find_matches_in_pages(&chapters, query, &mut results);
     results
+}
+
+/// Extract searchable plain text from every EPUB chapter.
+pub fn extract_epub_text(doc: &EpubDoc) -> Vec<String> {
+    doc.content
+        .chapters
+        .iter()
+        .map(|chapter| {
+            let base_path = chapter
+                .path
+                .rsplit_once('/')
+                .map(|(dir, _)| dir)
+                .unwrap_or("");
+            let nodes = crate::epub::render::parse_chapter_xhtml(
+                &chapter.content,
+                base_path,
+                &doc.content.styles,
+            );
+            extract_text_from_nodes(&nodes)
+        })
+        .collect()
+}
+
+/// Search pre-extracted page or chapter text.
+pub fn search_pages(pages: &[String], query: &str) -> Vec<SearchMatch> {
+    let mut results = Vec::new();
+    find_matches_in_pages(pages, query, &mut results);
+    results
+}
+
+fn find_matches_in_pages(pages: &[String], query: &str, results: &mut Vec<SearchMatch>) {
+    for (page, text) in pages.iter().enumerate() {
+        find_matches_in_text(text, query, page, results);
+    }
 }
 
 /// Extract plain text from a list of content nodes.
@@ -117,52 +125,81 @@ fn extract_spans_text(spans: &[TextSpan], out: &mut String) {
     }
 }
 
-/// Find all occurrences of `query_lower` (already lowercased) in `text`
-/// (case-insensitive) and append to `results`.
+/// Find all case-insensitive occurrences of `query` in `text` and append to
+/// `results`.
 ///
 /// This is the public entry point for callers that already have extracted text
 /// (e.g. the app layer extracting PDF text page-by-page via pdfium).
 pub fn find_matches_in_text_pub(
     text: &str,
-    query_lower: &str,
+    query: &str,
     page: usize,
     results: &mut Vec<SearchMatch>,
 ) {
-    find_matches_in_text(text, query_lower, page, results);
+    find_matches_in_text(text, query, page, results);
 }
 
-/// Find all occurrences of `query_lower` in `text` (case-insensitive) and append
+/// Find all occurrences of `query` in `text` (case-insensitive) and append
 /// to `results`.
-fn find_matches_in_text(
-    text: &str,
-    query_lower: &str,
-    page: usize,
-    results: &mut Vec<SearchMatch>,
-) {
-    if query_lower.is_empty() {
+fn find_matches_in_text(text: &str, query: &str, page: usize, results: &mut Vec<SearchMatch>) {
+    if query.is_empty() {
         return;
     }
 
-    let text_lower = text.to_lowercase();
-    let query_len = query_lower.len();
+    let query_folded: String = query.case_fold().collect();
+    if query_folded.is_empty() {
+        return;
+    }
+
+    let original: Vec<char> = text.chars().collect();
+    let mut text_folded = String::new();
+    let mut original_boundaries = vec![Some(0)];
+    for (original_index, character) in original.iter().copied().enumerate() {
+        let folded_start = text_folded.len();
+        for folded in character.case_fold() {
+            text_folded.push(folded);
+        }
+        original_boundaries.resize(text_folded.len() + 1, None);
+        if text_folded.len() == folded_start {
+            original_boundaries[folded_start] = Some(original_index + 1);
+        } else {
+            original_boundaries[text_folded.len()] = Some(original_index + 1);
+        }
+    }
 
     let mut start = 0;
-    while let Some(pos) = text_lower[start..].find(query_lower) {
+    while let Some(pos) = text_folded[start..].find(&query_folded) {
         let absolute_pos = start + pos;
+        let folded_end = absolute_pos + query_folded.len();
+        match (
+            original_boundaries[absolute_pos],
+            original_boundaries[folded_end],
+        ) {
+            (Some(original_start), Some(original_end)) => {
+                // Build a context snippet (up to 40 chars before and after).
+                let ctx_start = original_start.saturating_sub(40);
+                let ctx_end = (original_end + 40).min(original.len());
+                let context: String = original[ctx_start..ctx_end].iter().collect();
+                let context = context.trim().replace('\n', " ");
 
-        // Build a context snippet (up to 40 chars before and after).
-        let ctx_start = text.floor_char_boundary(absolute_pos.saturating_sub(40));
-        let ctx_end = text.ceil_char_boundary((absolute_pos + query_len + 40).min(text.len()));
-        let context = text[ctx_start..ctx_end].trim().replace('\n', " ");
+                results.push(SearchMatch {
+                    page,
+                    offset: original_start,
+                    length: original_end - original_start,
+                    context,
+                });
 
-        results.push(SearchMatch {
-            page,
-            offset: absolute_pos,
-            length: query_len,
-            context,
-        });
-
-        start = absolute_pos + query_len;
+                start = folded_end;
+            }
+            _ => {
+                start = absolute_pos
+                    + text_folded[absolute_pos..]
+                        .chars()
+                        .next()
+                        .map(char::len_utf8)
+                        .unwrap_or(1);
+            }
+        }
     }
 }
 
@@ -218,6 +255,27 @@ mod tests {
         assert_eq!(results[0].offset, 50);
         assert_eq!(results[0].length, 6);
         assert!(results[0].context.contains("target"));
+    }
+
+    #[test]
+    fn test_full_case_fold_expansion_maps_to_complete_original_characters() {
+        let mut results = Vec::new();
+        find_matches_in_text("Straße ﬁnd", "STRASSE", 0, &mut results);
+        find_matches_in_text("Straße ﬁnd", "FIND", 0, &mut results);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!((results[0].offset, results[0].length), (0, 6));
+        assert_eq!((results[1].offset, results[1].length), (7, 3));
+    }
+
+    #[test]
+    fn test_partial_case_fold_expansions_do_not_match() {
+        let mut results = Vec::new();
+        find_matches_in_text("aßb", "s", 0, &mut results);
+        find_matches_in_text("aßb", "as", 0, &mut results);
+        find_matches_in_text("aßb", "sb", 0, &mut results);
+
+        assert!(results.is_empty());
     }
 
     #[test]

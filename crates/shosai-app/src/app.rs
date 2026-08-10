@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use iced::keyboard;
 use iced::widget::{
@@ -116,6 +117,10 @@ pub struct State {
     search_query: String,
     search_results: Vec<SearchMatch>,
     search_current: usize, // index into search_results
+    search_text: Option<Arc<Vec<String>>>,
+    search_loading: bool,
+    search_document_generation: u64,
+    search_query_generation: u64,
 
     // -- Library state --
     library_books: Vec<Book>,
@@ -226,7 +231,15 @@ pub enum Message {
     // In-document search
     ToggleSearchBar,
     SearchQueryChanged(String),
-    SearchPerformed(Vec<SearchMatch>),
+    SearchTextExtracted {
+        document_generation: u64,
+        text: Arc<Vec<String>>,
+    },
+    SearchPerformed {
+        document_generation: u64,
+        query_generation: u64,
+        results: Vec<SearchMatch>,
+    },
     SearchNext,
     SearchPrev,
     CloseSearch,
@@ -295,6 +308,10 @@ pub fn boot() -> (State, Task<Message>) {
         search_query: String::new(),
         search_results: Vec::new(),
         search_current: 0,
+        search_text: None,
+        search_loading: false,
+        search_document_generation: 0,
+        search_query_generation: 0,
 
         library_books: Vec::new(),
         library_search: String::new(),
@@ -638,20 +655,29 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // In-document search
         Message::ToggleSearchBar => {
-            if state.screen == Screen::Reader && state.document.is_some() {
+            if state.screen == Screen::Reader
+                && matches!(
+                    state.document,
+                    Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Epub(_))
+                )
+            {
                 state.show_search_bar = !state.show_search_bar;
                 if !state.show_search_bar {
                     // Clear results when closing.
                     state.search_query.clear();
                     state.search_results.clear();
                     state.search_current = 0;
+                    state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                } else {
+                    return iced::widget::operation::focus(search_input_id());
                 }
             }
         }
 
         Message::SearchQueryChanged(query) => {
-            state.search_query = query.clone();
-            if query.is_empty() {
+            state.search_query = query;
+            state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            if state.search_query.is_empty() {
                 state.search_results.clear();
                 state.search_current = 0;
             } else {
@@ -659,11 +685,32 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::SearchPerformed(results) => {
-            state.search_results = results;
-            state.search_current = 0;
-            // Navigate to first result if any.
-            navigate_to_current_search_result(state);
+        Message::SearchTextExtracted {
+            document_generation,
+            text,
+        } => {
+            if document_generation == state.search_document_generation {
+                state.search_loading = false;
+                state.search_text = Some(text);
+                if !state.search_query.is_empty() {
+                    return perform_search(state);
+                }
+            }
+        }
+
+        Message::SearchPerformed {
+            document_generation,
+            query_generation,
+            results,
+        } => {
+            if document_generation == state.search_document_generation
+                && query_generation == state.search_query_generation
+            {
+                state.search_results = results;
+                state.search_current = 0;
+                // Navigate to first result if any.
+                navigate_to_current_search_result(state);
+            }
         }
 
         Message::SearchNext => {
@@ -689,6 +736,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_query.clear();
             state.search_results.clear();
             state.search_current = 0;
+            state.search_query_generation = state.search_query_generation.wrapping_add(1);
         }
 
         Message::KeyPressed(event) => {
@@ -700,6 +748,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 }
 
 fn open_file(state: &mut State, path: PathBuf) {
+    state.search_document_generation = state.search_document_generation.wrapping_add(1);
+    state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.error = None;
     state.rendered_page = None;
     state.chapter_content = Vec::new();
@@ -707,6 +757,8 @@ fn open_file(state: &mut State, path: PathBuf) {
     state.search_query.clear();
     state.search_results.clear();
     state.search_current = 0;
+    state.search_text = None;
+    state.search_loading = false;
 
     let ext = path
         .extension()
@@ -999,33 +1051,63 @@ fn save_library_cards_per_row(state: &State) {
     }
 }
 
-fn perform_search(state: &State) -> Task<Message> {
+fn perform_search(state: &mut State) -> Task<Message> {
     let query = state.search_query.clone();
+    let document_generation = state.search_document_generation;
+    let query_generation = state.search_query_generation;
+    let Some(path) = state.file_path.clone() else {
+        return Task::none();
+    };
 
-    match &state.document {
-        Some(OpenDocument::Pdf(doc)) => {
-            // PDF text extraction requires pdfium (not Send), so we do it
-            // synchronously. For large PDFs this will block briefly.
-            let mut results = Vec::new();
-            let query_lower = query.to_lowercase();
-            for page_idx in 0..doc.page_count() {
-                if let Ok(page_text) = doc.page_text(page_idx) {
-                    shosai_core::search::find_matches_in_text_pub(
-                        &page_text,
-                        &query_lower,
-                        page_idx,
-                        &mut results,
-                    );
-                }
-            }
-            Task::done(Message::SearchPerformed(results))
-        }
-        Some(OpenDocument::Epub(doc)) => {
-            let results = shosai_core::search::search_epub(doc, &query);
-            Task::done(Message::SearchPerformed(results))
-        }
-        _ => Task::none(),
+    if let Some(text) = state.search_text.clone() {
+        return Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    shosai_core::search::search_pages(&text, &query)
+                })
+                .await
+                .unwrap_or_default()
+            },
+            move |results| Message::SearchPerformed {
+                document_generation,
+                query_generation,
+                results,
+            },
+        );
     }
+
+    if state.search_loading {
+        return Task::none();
+    }
+    state.search_loading = true;
+
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let pages = match path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                {
+                    Some("pdf") => PdfDoc::open(&path)
+                        .and_then(|document| document.page_texts())
+                        .unwrap_or_default(),
+                    Some("epub") => EpubDoc::open(&path)
+                        .map(|document| shosai_core::search::extract_epub_text(&document))
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                Arc::new(pages)
+            })
+            .await
+            .unwrap_or_else(|_| Arc::new(Vec::new()))
+        },
+        move |text| Message::SearchTextExtracted {
+            document_generation,
+            text,
+        },
+    )
 }
 
 fn navigate_to_current_search_result(state: &mut State) {
@@ -1301,6 +1383,7 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
 
 fn search_bar(state: &State) -> Element<'_, Message> {
     let input = text_input("Search in document...", &state.search_query)
+        .id(search_input_id())
         .on_input(Message::SearchQueryChanged)
         .on_submit(Message::SearchNext)
         .width(300);
@@ -1353,6 +1436,10 @@ fn search_bar(state: &State) -> Element<'_, Message> {
             ..Default::default()
         })
         .into()
+}
+
+fn search_input_id() -> iced::widget::Id {
+    iced::widget::Id::new("document-search-query")
 }
 
 fn content_view(state: &State) -> Element<'_, Message> {
@@ -1983,6 +2070,10 @@ mod tests {
             search_query: String::new(),
             search_results: Vec::new(),
             search_current: 0,
+            search_text: None,
+            search_loading: false,
+            search_document_generation: 0,
+            search_query_generation: 0,
             library_books: Vec::new(),
             library_search: String::new(),
             library_filter: None,
@@ -2018,5 +2109,44 @@ mod tests {
         let _ = update(&mut state, Message::ToggleSearchBar);
 
         assert!(!state.show_search_bar);
+    }
+
+    #[test]
+    fn stale_search_completions_do_not_replace_current_state() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(epub));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.search_document_generation = 2;
+        state.search_query_generation = 3;
+        state.search_query = "same query again".to_string();
+        state.search_loading = true;
+
+        let _ = update(
+            &mut state,
+            Message::SearchTextExtracted {
+                document_generation: 1,
+                text: Arc::new(vec!["stale text".to_string()]),
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::SearchPerformed {
+                document_generation: 2,
+                query_generation: 1,
+                results: vec![SearchMatch {
+                    page: 0,
+                    offset: 0,
+                    length: 5,
+                    context: "stale".to_string(),
+                }],
+            },
+        );
+
+        assert!(state.search_loading);
+        assert!(state.search_text.is_none());
+        assert!(state.search_results.is_empty());
     }
 }
