@@ -663,11 +663,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 state.show_search_bar = !state.show_search_bar;
                 if !state.show_search_bar {
+                    let previous_highlights = current_page_search_highlights(state);
                     // Clear results when closing.
                     state.search_query.clear();
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
                 } else {
                     return iced::widget::operation::focus(search_input_id());
                 }
@@ -675,12 +677,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SearchQueryChanged(query) => {
+            let previous_highlights = current_page_search_highlights(state);
             state.search_query = query;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
-            if state.search_query.is_empty() {
-                state.search_results.clear();
-                state.search_current = 0;
-            } else {
+            state.search_results.clear();
+            state.search_current = 0;
+            refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+            if !state.search_query.is_empty() {
                 return perform_search(state);
             }
         }
@@ -706,37 +709,48 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
             {
+                let previous_highlights = current_page_search_highlights(state);
                 state.search_results = results;
                 state.search_current = 0;
                 // Navigate to first result if any.
-                navigate_to_current_search_result(state);
+                if !navigate_to_current_search_result(state) {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+                }
             }
         }
 
         Message::SearchNext => {
             if !state.search_results.is_empty() {
+                let previous_highlights = current_page_search_highlights(state);
                 state.search_current = (state.search_current + 1) % state.search_results.len();
-                navigate_to_current_search_result(state);
+                if !navigate_to_current_search_result(state) {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+                }
             }
         }
 
         Message::SearchPrev => {
             if !state.search_results.is_empty() {
+                let previous_highlights = current_page_search_highlights(state);
                 state.search_current = if state.search_current == 0 {
                     state.search_results.len() - 1
                 } else {
                     state.search_current - 1
                 };
-                navigate_to_current_search_result(state);
+                if !navigate_to_current_search_result(state) {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+                }
             }
         }
 
         Message::CloseSearch => {
+            let previous_highlights = current_page_search_highlights(state);
             state.show_search_bar = false;
             state.search_query.clear();
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
         }
 
         Message::KeyPressed(event) => {
@@ -943,10 +957,21 @@ fn handle_link_click(state: &mut State, href: &str) {
 
 /// Refresh the visible content for the current page/chapter.
 fn refresh_content(state: &mut State) {
+    let pdf_highlights = current_page_search_highlights(state)
+        .into_iter()
+        .map(|highlight| {
+            (
+                highlight.start,
+                highlight.end - highlight.start,
+                highlight.current,
+            )
+        })
+        .collect::<Vec<_>>();
+
     match &state.document {
         Some(OpenDocument::Pdf(doc)) => {
             let scale = state.zoom.scale();
-            match doc.render_page(state.current_page, scale) {
+            match doc.render_page_with_highlights(state.current_page, scale, &pdf_highlights) {
                 Ok(page) => {
                     state.rendered_page = Some(page);
                     state.chapter_content = Vec::new();
@@ -1110,7 +1135,7 @@ fn perform_search(state: &mut State) -> Task<Message> {
     )
 }
 
-fn navigate_to_current_search_result(state: &mut State) {
+fn navigate_to_current_search_result(state: &mut State) -> bool {
     if let Some(result) = state.search_results.get(state.search_current) {
         let target_page = result.page;
         if target_page != state.current_page && target_page < state.total_pages {
@@ -1118,7 +1143,20 @@ fn navigate_to_current_search_result(state: &mut State) {
             state.page_input = format!("{}", state.current_page + 1);
             refresh_content(state);
             save_reading_state(state);
+            return true;
         }
+    }
+    false
+}
+
+fn refresh_pdf_search_highlights_if_changed(
+    state: &mut State,
+    previous_highlights: &[SearchHighlight],
+) {
+    if matches!(state.document, Some(OpenDocument::Pdf(_)))
+        && previous_highlights != current_page_search_highlights(state)
+    {
+        refresh_content(state);
     }
 }
 
@@ -1480,6 +1518,27 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SearchHighlight {
+    start: usize,
+    end: usize,
+    current: bool,
+}
+
+fn current_page_search_highlights(state: &State) -> Vec<SearchHighlight> {
+    state
+        .search_results
+        .iter()
+        .enumerate()
+        .filter(|(_, result)| result.page == state.current_page)
+        .map(|(index, result)| SearchHighlight {
+            start: result.offset,
+            end: result.offset + result.length,
+            current: index == state.search_current,
+        })
+        .collect()
+}
+
 fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     let font_size = state.font_size;
     let text_color = state.theme.text_color();
@@ -1500,8 +1559,19 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
         _ => &std::collections::HashMap::new(),
     };
 
+    let highlights = current_page_search_highlights(state);
+    let mut text_offset = 0;
+
     for node in &state.chapter_content {
-        content_col = content_col.push(render_content_node(node, font_size, text_color, resources));
+        content_col = content_col.push(render_content_node(
+            node,
+            font_size,
+            text_color,
+            resources,
+            text_offset,
+            &highlights,
+        ));
+        text_offset += content_node_text_len(node) + 1;
     }
 
     let padded = container(content_col)
@@ -1526,6 +1596,8 @@ fn render_content_node<'a>(
     font_size: f32,
     text_color: iced::Color,
     resources: &std::collections::HashMap<String, Vec<u8>>,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     match node {
         ContentNode::Heading {
@@ -1545,7 +1617,7 @@ fn render_content_node<'a>(
                 .map(|m| base_size * m)
                 .unwrap_or(base_size);
             let align = node_style_to_alignment(style);
-            let heading = text(t.clone()).size(size).color(text_color);
+            let heading = render_highlighted_text(t, text_offset, size, text_color, highlights);
             container(heading).width(Length::Fill).align_x(align).into()
         }
 
@@ -1555,7 +1627,7 @@ fn render_content_node<'a>(
                 .map(|m| font_size * m)
                 .unwrap_or(font_size);
             let align = node_style_to_alignment(style);
-            let rendered = render_spans(spans, size, text_color);
+            let rendered = render_spans(spans, size, text_color, text_offset, highlights);
             let mut c = container(rendered).width(Length::Fill).align_x(align);
             if let Some(margin) = style.margin_left_em {
                 c = c.padding(iced::Padding {
@@ -1576,13 +1648,17 @@ fn render_content_node<'a>(
                 ..text_color
             };
             let mut col = column![].spacing(8);
+            let mut child_offset = text_offset;
             for child in children {
                 col = col.push(render_content_node(
                     child,
                     font_size,
                     quote_color,
                     resources,
+                    child_offset,
+                    highlights,
                 ));
+                child_offset += content_node_text_len(child) + 1;
             }
             row![
                 container(column![])
@@ -1601,41 +1677,47 @@ fn render_content_node<'a>(
 
         ContentNode::UnorderedList(items) => {
             let mut col = column![].spacing(4);
+            let mut item_offset = text_offset;
             for item_spans in items {
-                let bullet_text = "  \u{2022} ".to_string();
-                let mut all_spans = vec![shosai_core::epub::render::TextSpan {
-                    text: bullet_text,
-                    bold: false,
-                    italic: false,
-                    monospace: false,
-                    link: None,
-                }];
-                all_spans.extend(item_spans.iter().cloned());
-                col = col.push(render_spans(&all_spans, font_size, text_color));
+                col = col.push(render_spans_with_prefix(
+                    "  \u{2022} ",
+                    item_spans,
+                    font_size,
+                    text_color,
+                    item_offset,
+                    highlights,
+                ));
+                item_offset += spans_text_len(item_spans) + 1;
             }
             col.into()
         }
 
         ContentNode::OrderedList(items) => {
             let mut col = column![].spacing(4);
+            let mut item_offset = text_offset;
             for (i, item_spans) in items.iter().enumerate() {
                 let num_text = format!("  {}. ", i + 1);
-                let mut all_spans = vec![shosai_core::epub::render::TextSpan {
-                    text: num_text,
-                    bold: false,
-                    italic: false,
-                    monospace: false,
-                    link: None,
-                }];
-                all_spans.extend(item_spans.iter().cloned());
-                col = col.push(render_spans(&all_spans, font_size, text_color));
+                col = col.push(render_spans_with_prefix(
+                    &num_text,
+                    item_spans,
+                    font_size,
+                    text_color,
+                    item_offset,
+                    highlights,
+                ));
+                item_offset += spans_text_len(item_spans) + 1;
             }
             col.into()
         }
 
-        ContentNode::CodeBlock { code, language } => {
-            render_code_block(code, language.as_deref(), font_size, text_color)
-        }
+        ContentNode::CodeBlock { code, language } => render_code_block(
+            code,
+            language.as_deref(),
+            font_size,
+            text_color,
+            text_offset,
+            highlights,
+        ),
 
         ContentNode::InlineCode(code_text) => {
             // Render as monospace span inline
@@ -1643,16 +1725,25 @@ fn render_content_node<'a>(
                 family: iced::font::Family::Monospace,
                 ..Font::DEFAULT
             };
-            text(code_text.clone())
-                .size(font_size * 0.9)
-                .font(mono_font)
-                .color(text_color)
-                .into()
+            render_highlighted_text_with_font(
+                code_text,
+                text_offset,
+                font_size * 0.9,
+                text_color,
+                mono_font,
+                highlights,
+            )
         }
 
-        ContentNode::Image { src, alt } => {
-            render_epub_image(src, alt, font_size, text_color, resources)
-        }
+        ContentNode::Image { src, alt } => render_epub_image(
+            src,
+            alt,
+            font_size,
+            text_color,
+            resources,
+            text_offset,
+            highlights,
+        ),
 
         ContentNode::HorizontalRule => text("───────────────────")
             .size(font_size)
@@ -1668,6 +1759,8 @@ fn render_epub_image<'a>(
     font_size: f32,
     text_color: iced::Color,
     resources: &std::collections::HashMap<String, Vec<u8>>,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     if let Some(data) = resources.get(src) {
         // Try to decode the image and display as RGBA via iced::widget::image.
@@ -1688,10 +1781,20 @@ fn render_epub_image<'a>(
     }
 
     // Fallback: show alt text placeholder.
-    text(format!("[Image: {alt}]"))
-        .size(font_size)
-        .color(text_color)
-        .into()
+    let mut spans: Vec<iced::widget::text::Span<'_, String>> = vec![
+        span("[Image: ".to_string())
+            .size(font_size)
+            .color(text_color),
+    ];
+    spans.extend(
+        highlighted_fragments(alt, text_offset, highlights)
+            .into_iter()
+            .map(|(fragment, highlight)| {
+                apply_search_highlight(span(fragment).size(font_size).color(text_color), highlight)
+            }),
+    );
+    spans.push(span("]".to_string()).size(font_size).color(text_color));
+    rich_text(spans).into()
 }
 
 /// Render a code block with optional syntax highlighting.
@@ -1700,6 +1803,8 @@ fn render_code_block<'a>(
     language: Option<&str>,
     font_size: f32,
     text_color: iced::Color,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     use shosai_core::highlight;
 
@@ -1720,25 +1825,30 @@ fn render_code_block<'a>(
             .unwrap_or(iced::Color::from_rgb(0.15, 0.15, 0.18));
 
         let mut lines_col = column![].spacing(0);
+        let mut code_offset = text_offset;
 
         for line_spans in &highlighted_lines {
-            let rich_spans: Vec<iced::widget::text::Span<'_, Message>> = line_spans
-                .iter()
-                .map(|hs| {
-                    let (r, g, b) = hs.color;
-                    let mut font = mono_font;
-                    if hs.bold {
-                        font.weight = iced::font::Weight::Bold;
-                    }
-                    if hs.italic {
-                        font.style = iced::font::Style::Italic;
-                    }
-                    span(hs.text.clone())
-                        .size(code_size)
-                        .font(font)
-                        .color(iced::Color::from_rgb8(r, g, b))
-                })
-                .collect();
+            let rich_spans: Vec<iced::widget::text::Span<'_, Message>> =
+                highlighted_code_line(line_spans, &mut code_offset, highlights)
+                    .into_iter()
+                    .map(|fragment| {
+                        let (r, g, b) = fragment.color;
+                        let mut font = mono_font;
+                        if fragment.bold {
+                            font.weight = iced::font::Weight::Bold;
+                        }
+                        if fragment.italic {
+                            font.style = iced::font::Style::Italic;
+                        }
+                        apply_search_highlight(
+                            span(fragment.text)
+                                .size(code_size)
+                                .font(font)
+                                .color(iced::Color::from_rgb8(r, g, b)),
+                            fragment.search_highlight,
+                        )
+                    })
+                    .collect();
 
             lines_col = lines_col.push(rich_text(rich_spans));
         }
@@ -1758,12 +1868,14 @@ fn render_code_block<'a>(
     }
 
     // Fallback: plain monospace text.
-    container(
-        text(code.to_string())
-            .size(code_size)
-            .font(mono_font)
-            .color(text_color),
-    )
+    container(render_highlighted_text_with_font(
+        code,
+        text_offset,
+        code_size,
+        text_color,
+        mono_font,
+        highlights,
+    ))
     .padding(12)
     .width(Length::Fill)
     .style(move |_theme| container::Style {
@@ -1777,6 +1889,38 @@ fn render_code_block<'a>(
         ..Default::default()
     })
     .into()
+}
+
+#[derive(Debug, PartialEq)]
+struct HighlightedCodeFragment {
+    text: String,
+    color: (u8, u8, u8),
+    bold: bool,
+    italic: bool,
+    search_highlight: Option<bool>,
+}
+
+fn highlighted_code_line(
+    line: &[shosai_core::highlight::HighlightSpan],
+    code_offset: &mut usize,
+    highlights: &[SearchHighlight],
+) -> Vec<HighlightedCodeFragment> {
+    let mut fragments = Vec::new();
+    for syntax_span in line {
+        fragments.extend(
+            highlighted_fragments(&syntax_span.text, *code_offset, highlights)
+                .into_iter()
+                .map(|(text, search_highlight)| HighlightedCodeFragment {
+                    text,
+                    color: syntax_span.color,
+                    bold: syntax_span.bold,
+                    italic: syntax_span.italic,
+                    search_highlight,
+                }),
+        );
+        *code_offset += syntax_span.text.chars().count();
+    }
+    fragments
 }
 
 fn node_style_to_alignment(
@@ -1798,49 +1942,202 @@ const LINK_COLOR: iced::Color = iced::Color {
     a: 1.0,
 };
 
+const SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
+    r: 1.0,
+    g: 0.88,
+    b: 0.28,
+    a: 0.7,
+};
+
+const CURRENT_SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
+    r: 1.0,
+    g: 0.55,
+    b: 0.18,
+    a: 0.82,
+};
+
 fn render_spans<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
     font_size: f32,
     text_color: iced::Color,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
-    let rich_spans: Vec<iced::widget::text::Span<'a, String>> = spans
-        .iter()
-        .map(|s| {
-            let is_link = s.link.is_some();
-            let family = if s.monospace {
-                iced::font::Family::Monospace
-            } else {
-                iced::font::Family::default()
-            };
-            let font = Font {
-                family,
-                weight: if s.bold {
-                    iced::font::Weight::Bold
-                } else {
-                    iced::font::Weight::Normal
-                },
-                style: if s.italic {
-                    iced::font::Style::Italic
-                } else {
-                    iced::font::Style::Normal
-                },
-                ..Font::DEFAULT
-            };
-            let color = if is_link { LINK_COLOR } else { text_color };
-            let mut sp = span(s.text.clone()).size(font_size).font(font).color(color);
-            if is_link {
-                sp = sp.underline(true);
-            }
-            if let Some(href) = &s.link {
-                sp = sp.link(href.clone());
-            }
-            sp
-        })
-        .collect();
+    render_spans_with_prefix("", spans, font_size, text_color, text_offset, highlights)
+}
+
+fn render_spans_with_prefix<'a>(
+    prefix: &str,
+    spans: &[shosai_core::epub::render::TextSpan],
+    font_size: f32,
+    text_color: iced::Color,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
+) -> Element<'a, Message> {
+    let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
+    if !prefix.is_empty() {
+        rich_spans.push(span(prefix.to_string()).size(font_size).color(text_color));
+    }
+
+    let mut span_offset = text_offset;
+    for text_span in spans {
+        for (fragment, highlight) in highlighted_fragments(&text_span.text, span_offset, highlights)
+        {
+            rich_spans.push(styled_epub_span(
+                text_span, fragment, font_size, text_color, highlight,
+            ));
+        }
+        span_offset += text_span.text.chars().count();
+    }
 
     rich_text(rich_spans)
         .on_link_click(Message::LinkClicked)
         .into()
+}
+
+fn styled_epub_span<'a>(
+    text_span: &shosai_core::epub::render::TextSpan,
+    fragment: String,
+    font_size: f32,
+    text_color: iced::Color,
+    highlight: Option<bool>,
+) -> iced::widget::text::Span<'a, String> {
+    let is_link = text_span.link.is_some();
+    let family = if text_span.monospace {
+        iced::font::Family::Monospace
+    } else {
+        iced::font::Family::default()
+    };
+    let font = Font {
+        family,
+        weight: if text_span.bold {
+            iced::font::Weight::Bold
+        } else {
+            iced::font::Weight::Normal
+        },
+        style: if text_span.italic {
+            iced::font::Style::Italic
+        } else {
+            iced::font::Style::Normal
+        },
+        ..Font::DEFAULT
+    };
+    let color = if is_link { LINK_COLOR } else { text_color };
+    let mut rendered = span(fragment).size(font_size).font(font).color(color);
+    if is_link {
+        rendered = rendered.underline(true);
+    }
+    if let Some(href) = &text_span.link {
+        rendered = rendered.link(href.clone());
+    }
+    apply_search_highlight(rendered, highlight)
+}
+
+fn render_highlighted_text<'a>(
+    value: &str,
+    text_offset: usize,
+    font_size: f32,
+    text_color: iced::Color,
+    highlights: &[SearchHighlight],
+) -> Element<'a, Message> {
+    render_highlighted_text_with_font(
+        value,
+        text_offset,
+        font_size,
+        text_color,
+        Font::DEFAULT,
+        highlights,
+    )
+}
+
+fn render_highlighted_text_with_font<'a>(
+    value: &str,
+    text_offset: usize,
+    font_size: f32,
+    text_color: iced::Color,
+    font: Font,
+    highlights: &[SearchHighlight],
+) -> Element<'a, Message> {
+    let spans = highlighted_fragments(value, text_offset, highlights)
+        .into_iter()
+        .map(|(fragment, highlight)| {
+            apply_search_highlight(
+                span(fragment).size(font_size).font(font).color(text_color),
+                highlight,
+            )
+        })
+        .collect::<Vec<iced::widget::text::Span<'a, String>>>();
+    rich_text(spans).into()
+}
+
+fn apply_search_highlight<'a, Link>(
+    text_span: iced::widget::text::Span<'a, Link>,
+    highlight: Option<bool>,
+) -> iced::widget::text::Span<'a, Link> {
+    match highlight {
+        Some(true) => text_span.background(CURRENT_SEARCH_HIGHLIGHT_COLOR),
+        Some(false) => text_span.background(SEARCH_HIGHLIGHT_COLOR),
+        None => text_span,
+    }
+}
+
+fn highlighted_fragments(
+    value: &str,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
+) -> Vec<(String, Option<bool>)> {
+    let characters = value.chars().collect::<Vec<_>>();
+    let text_end = text_offset + characters.len();
+    let mut boundaries = vec![text_offset, text_end];
+
+    for highlight in highlights {
+        if highlight.start < text_end && highlight.end > text_offset {
+            boundaries.push(highlight.start.max(text_offset));
+            boundaries.push(highlight.end.min(text_end));
+        }
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    boundaries
+        .windows(2)
+        .filter(|range| range[0] < range[1])
+        .map(|range| {
+            let start = range[0];
+            let end = range[1];
+            let highlight = highlights
+                .iter()
+                .find(|highlight| highlight.start <= start && highlight.end >= end)
+                .map(|highlight| highlight.current);
+            (
+                characters[start - text_offset..end - text_offset]
+                    .iter()
+                    .collect(),
+                highlight,
+            )
+        })
+        .collect()
+}
+
+fn spans_text_len(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
+    spans.iter().map(|span| span.text.chars().count()).sum()
+}
+
+fn content_node_text_len(node: &ContentNode) -> usize {
+    match node {
+        ContentNode::Heading { text, .. } => text.chars().count(),
+        ContentNode::Paragraph(spans, _) => spans_text_len(spans),
+        ContentNode::BlockQuote(children) => children
+            .iter()
+            .map(|child| content_node_text_len(child) + 1)
+            .sum(),
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList(items) => {
+            items.iter().map(|spans| spans_text_len(spans) + 1).sum()
+        }
+        ContentNode::CodeBlock { code, .. } | ContentNode::InlineCode(code) => code.chars().count(),
+        ContentNode::Image { alt, .. } => alt.chars().count(),
+        ContentNode::HorizontalRule => 0,
+    }
 }
 
 fn library_view(state: &State) -> Element<'_, Message> {
@@ -2148,5 +2445,103 @@ mod tests {
         assert!(state.search_loading);
         assert!(state.search_text.is_none());
         assert!(state.search_results.is_empty());
+    }
+
+    #[test]
+    fn changing_query_immediately_clears_previous_results() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(epub));
+        state.search_query = "old".to_string();
+        state.search_results = vec![SearchMatch {
+            page: 0,
+            offset: 4,
+            length: 3,
+            context: "old result".to_string(),
+        }];
+
+        let _ = update(&mut state, Message::SearchQueryChanged("new".to_string()));
+
+        assert_eq!(state.search_query, "new");
+        assert!(state.search_results.is_empty());
+        assert_eq!(state.search_current, 0);
+    }
+
+    #[test]
+    fn search_highlights_split_unicode_text_at_character_offsets() {
+        let highlights = [SearchHighlight {
+            start: 11,
+            end: 13,
+            current: true,
+        }];
+
+        assert_eq!(
+            highlighted_fragments("aé日z", 10, &highlights),
+            vec![
+                ("a".to_string(), None),
+                ("é日".to_string(), Some(true)),
+                ("z".to_string(), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn code_search_highlights_preserve_syntax_colors() {
+        let code = "fn main() {\n    let target = true;\n}";
+        let syntax_lines =
+            shosai_core::highlight::highlight_code(code, Some("rust"), "base16-ocean.dark")
+                .unwrap();
+        let target_offset = code.find("target").unwrap();
+        let highlights = [SearchHighlight {
+            start: target_offset,
+            end: target_offset + "target".len(),
+            current: true,
+        }];
+        let mut code_offset = 0;
+        let fragments = syntax_lines
+            .iter()
+            .flat_map(|line| highlighted_code_line(line, &mut code_offset, &highlights))
+            .collect::<Vec<_>>();
+
+        assert!(fragments.iter().any(|fragment| {
+            fragment.text == "target" && fragment.search_highlight == Some(true)
+        }));
+        let mut colors = fragments
+            .iter()
+            .map(|fragment| fragment.color)
+            .collect::<Vec<_>>();
+        colors.sort_unstable();
+        colors.dedup();
+        assert!(
+            colors.len() > 1,
+            "syntax foreground colors must be retained"
+        );
+    }
+
+    #[test]
+    fn rendered_node_lengths_match_search_text_offsets() {
+        let nodes = vec![ContentNode::BlockQuote(vec![
+            ContentNode::Heading {
+                level: 2,
+                text: "A heading".to_string(),
+                style: Default::default(),
+            },
+            ContentNode::OrderedList(vec![vec![shosai_core::epub::render::TextSpan {
+                text: "list item".to_string(),
+                bold: true,
+                italic: false,
+                monospace: false,
+                link: None,
+            }]]),
+        ])];
+        let extracted = shosai_core::search::extract_text_from_nodes(&nodes);
+        let rendered_length: usize = nodes
+            .iter()
+            .map(|node| content_node_text_len(node) + 1)
+            .sum();
+
+        assert_eq!(rendered_length, extracted.chars().count());
     }
 }

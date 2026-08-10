@@ -118,7 +118,7 @@ impl PdfDoc {
             .text()
             .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
 
-        Ok(text.all())
+        Ok(searchable_page_text(&page, &text))
     }
 
     /// Extract text from every page while loading the PDF only once.
@@ -131,13 +131,175 @@ impl PdfDoc {
         let mut pages = Vec::with_capacity(self.page_count);
         for index in 0..self.page_count {
             let text = match document.pages().get(index as u16) {
-                Ok(page) => page.text().map(|text| text.all()).unwrap_or_default(),
+                Ok(page) => page
+                    .text()
+                    .map(|text| searchable_page_text(&page, &text))
+                    .unwrap_or_default(),
                 Err(_) => String::new(),
             };
             pages.push(text);
         }
 
         Ok(pages)
+    }
+
+    /// Render a page and tint the text ranges used by in-document search.
+    ///
+    /// Each tuple contains a character offset, character count, and whether
+    /// the range is the currently selected search result.
+    pub fn render_page_with_highlights(
+        &self,
+        index: usize,
+        scale: f32,
+        highlights: &[(usize, usize, bool)],
+    ) -> Result<RenderedPage> {
+        self.render_page_impl(index, scale, highlights)
+    }
+
+    fn render_page_impl(
+        &self,
+        index: usize,
+        scale: f32,
+        highlights: &[(usize, usize, bool)],
+    ) -> Result<RenderedPage> {
+        if index >= self.page_count {
+            anyhow::bail!(
+                "page index {index} out of range (total: {})",
+                self.page_count
+            );
+        }
+
+        let pdfium = create_pdfium()?;
+        let document = pdfium
+            .load_pdf_from_byte_slice(&self.data, None)
+            .map_err(|e| anyhow::anyhow!("failed to load PDF for rendering: {e}"))?;
+        let page = document
+            .pages()
+            .get(index as u16)
+            .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
+
+        let (pt_w, pt_h) = self.page_sizes[index];
+        let pixel_w = (pt_w * scale) as i32;
+        let pixel_h = (pt_h * scale) as i32;
+        let config = PdfRenderConfig::new()
+            .set_target_width(pixel_w)
+            .set_maximum_height(pixel_h);
+        let bitmap = page
+            .render_with_config(&config)
+            .map_err(|e| anyhow::anyhow!("failed to render page {index}: {e}"))?;
+
+        let width = bitmap.width() as u32;
+        let height = bitmap.height() as u32;
+        let mut pixels = bitmap.as_rgba_bytes();
+
+        if !highlights.is_empty()
+            && let Ok(text) = page.text()
+        {
+            let chars = text.chars();
+
+            for &(offset, length, current) in highlights {
+                let end = offset.saturating_add(length).min(chars.len());
+                for char_index in offset..end {
+                    let Ok(character) = chars.get(char_index) else {
+                        continue;
+                    };
+                    let Ok(bounds) = character.loose_bounds() else {
+                        continue;
+                    };
+                    if let Some(bounds) = rect_to_pixels(&page, bounds, &config) {
+                        tint_rectangle(&mut pixels, width, height, bounds, current);
+                    }
+                }
+            }
+        }
+
+        Ok(RenderedPage {
+            width,
+            height,
+            pixels: bytes::Bytes::from(pixels),
+        })
+    }
+}
+
+fn searchable_page_text(page: &PdfPage<'_>, text: &PdfPageText<'_>) -> String {
+    let page_bounds = page
+        .boundaries()
+        .bounding()
+        .ok()
+        .map(|boundary| boundary.bounds);
+    let mut result = String::with_capacity(text.chars().len());
+
+    for character in text.chars().iter() {
+        // Generated whitespace and line breaks must remain to preserve PDFium
+        // character indexes even though they often have no visible bounds.
+        let visible = character.is_generated().unwrap_or(false)
+            || character.loose_bounds().is_ok_and(|bounds| {
+                page_bounds.is_some_and(|page_bounds| bounds.does_overlap(&page_bounds))
+            });
+        result.push(if visible {
+            character
+                .unicode_char()
+                .filter(|character| *character != '\0')
+                .unwrap_or('\u{FFFD}')
+        } else {
+            '\u{FFFD}'
+        });
+    }
+
+    result
+}
+
+fn rect_to_pixels(
+    page: &PdfPage<'_>,
+    bounds: PdfRect,
+    config: &PdfRenderConfig,
+) -> Option<(i32, i32, i32, i32)> {
+    let corners = [
+        page.points_to_pixels(bounds.left(), bounds.bottom(), config)
+            .ok()?,
+        page.points_to_pixels(bounds.left(), bounds.top(), config)
+            .ok()?,
+        page.points_to_pixels(bounds.right(), bounds.bottom(), config)
+            .ok()?,
+        page.points_to_pixels(bounds.right(), bounds.top(), config)
+            .ok()?,
+    ];
+    Some((
+        corners.iter().map(|(x, _)| *x).min()?,
+        corners.iter().map(|(_, y)| *y).min()?,
+        corners.iter().map(|(x, _)| *x).max()?,
+        corners.iter().map(|(_, y)| *y).max()?,
+    ))
+}
+
+fn tint_rectangle(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    bounds: (i32, i32, i32, i32),
+    current: bool,
+) {
+    let (left, top, right, bottom) = bounds;
+    let left = left.clamp(0, width as i32) as u32;
+    let right = right.clamp(0, width as i32) as u32;
+    let top = top.clamp(0, height as i32) as u32;
+    let bottom = bottom.clamp(0, height as i32) as u32;
+    let color = if current {
+        [255_u16, 160_u16, 60_u16]
+    } else {
+        [255_u16, 225_u16, 70_u16]
+    };
+    let alpha = if current { 120_u16 } else { 95_u16 };
+
+    for y in top..bottom {
+        for x in left..right {
+            let pixel = ((y * width + x) * 4) as usize;
+            for channel in 0..3 {
+                pixels[pixel + channel] = ((pixels[pixel + channel] as u16 * (255 - alpha)
+                    + color[channel] * alpha)
+                    / 255) as u8;
+            }
+        }
     }
 }
 
@@ -154,48 +316,7 @@ impl Document for PdfDoc {
     }
 
     fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
-        if index >= self.page_count {
-            anyhow::bail!(
-                "page index {index} out of range (total: {})",
-                self.page_count
-            );
-        }
-
-        let pdfium = create_pdfium()?;
-
-        // Re-open the document from stored bytes for rendering.
-        // PdfDocument borrows from Pdfium, so both must live together
-        // and are dropped at the end of this call, releasing the lock.
-        let document = pdfium
-            .load_pdf_from_byte_slice(&self.data, None)
-            .map_err(|e| anyhow::anyhow!("failed to load PDF for rendering: {e}"))?;
-
-        let page = document
-            .pages()
-            .get(index as u16)
-            .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
-
-        let (pt_w, pt_h) = self.page_sizes[index];
-        let pixel_w = (pt_w * scale) as i32;
-        let pixel_h = (pt_h * scale) as i32;
-
-        let config = PdfRenderConfig::new()
-            .set_target_width(pixel_w)
-            .set_maximum_height(pixel_h);
-
-        let bitmap = page
-            .render_with_config(&config)
-            .map_err(|e| anyhow::anyhow!("failed to render page {index}: {e}"))?;
-
-        let width = bitmap.width() as u32;
-        let height = bitmap.height() as u32;
-        let pixels = bytes::Bytes::from(bitmap.as_rgba_bytes());
-
-        Ok(RenderedPage {
-            width,
-            height,
-            pixels,
-        })
+        self.render_page_impl(index, scale, &[])
     }
 
     fn metadata(&self) -> DocumentMetadata {
