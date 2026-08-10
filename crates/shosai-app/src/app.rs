@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use iced::keyboard;
 use iced::widget::{
@@ -14,6 +15,7 @@ use shosai_core::epub::render::{ContentNode, parse_chapter_xhtml};
 use shosai_core::library::{Book, Library};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
+use shosai_core::search::SearchMatch;
 
 // ---------------------------------------------------------------------------
 // Open document wrapper
@@ -109,6 +111,16 @@ pub struct State {
     current_page_bookmarked: bool,
     editing_note_id: Option<i64>,
     editing_note_text: String,
+
+    // -- In-document search --
+    show_search_bar: bool,
+    search_query: String,
+    search_results: Vec<SearchMatch>,
+    search_current: usize, // index into search_results
+    search_text: Option<Arc<Vec<String>>>,
+    search_loading: bool,
+    search_document_generation: u64,
+    search_query_generation: u64,
 
     // -- Library state --
     library_books: Vec<Book>,
@@ -216,6 +228,22 @@ pub enum Message {
     DeleteBookmark(i64),
     ExportBookmarks,
 
+    // In-document search
+    ToggleSearchBar,
+    SearchQueryChanged(String),
+    SearchTextExtracted {
+        document_generation: u64,
+        text: Arc<Vec<String>>,
+    },
+    SearchPerformed {
+        document_generation: u64,
+        query_generation: u64,
+        results: Vec<SearchMatch>,
+    },
+    SearchNext,
+    SearchPrev,
+    CloseSearch,
+
     // Keyboard
     KeyPressed(keyboard::Event),
 }
@@ -275,6 +303,15 @@ pub fn boot() -> (State, Task<Message>) {
         current_page_bookmarked: false,
         editing_note_id: None,
         editing_note_text: String::new(),
+
+        show_search_bar: false,
+        search_query: String::new(),
+        search_results: Vec::new(),
+        search_current: 0,
+        search_text: None,
+        search_loading: false,
+        search_document_generation: 0,
+        search_query_generation: 0,
 
         library_books: Vec::new(),
         library_search: String::new(),
@@ -616,6 +653,92 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        // In-document search
+        Message::ToggleSearchBar => {
+            if state.screen == Screen::Reader
+                && matches!(
+                    state.document,
+                    Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Epub(_))
+                )
+            {
+                state.show_search_bar = !state.show_search_bar;
+                if !state.show_search_bar {
+                    // Clear results when closing.
+                    state.search_query.clear();
+                    state.search_results.clear();
+                    state.search_current = 0;
+                    state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                } else {
+                    return iced::widget::operation::focus(search_input_id());
+                }
+            }
+        }
+
+        Message::SearchQueryChanged(query) => {
+            state.search_query = query;
+            state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            if state.search_query.is_empty() {
+                state.search_results.clear();
+                state.search_current = 0;
+            } else {
+                return perform_search(state);
+            }
+        }
+
+        Message::SearchTextExtracted {
+            document_generation,
+            text,
+        } => {
+            if document_generation == state.search_document_generation {
+                state.search_loading = false;
+                state.search_text = Some(text);
+                if !state.search_query.is_empty() {
+                    return perform_search(state);
+                }
+            }
+        }
+
+        Message::SearchPerformed {
+            document_generation,
+            query_generation,
+            results,
+        } => {
+            if document_generation == state.search_document_generation
+                && query_generation == state.search_query_generation
+            {
+                state.search_results = results;
+                state.search_current = 0;
+                // Navigate to first result if any.
+                navigate_to_current_search_result(state);
+            }
+        }
+
+        Message::SearchNext => {
+            if !state.search_results.is_empty() {
+                state.search_current = (state.search_current + 1) % state.search_results.len();
+                navigate_to_current_search_result(state);
+            }
+        }
+
+        Message::SearchPrev => {
+            if !state.search_results.is_empty() {
+                state.search_current = if state.search_current == 0 {
+                    state.search_results.len() - 1
+                } else {
+                    state.search_current - 1
+                };
+                navigate_to_current_search_result(state);
+            }
+        }
+
+        Message::CloseSearch => {
+            state.show_search_bar = false;
+            state.search_query.clear();
+            state.search_results.clear();
+            state.search_current = 0;
+            state.search_query_generation = state.search_query_generation.wrapping_add(1);
+        }
+
         Message::KeyPressed(event) => {
             return handle_key_event(state, event);
         }
@@ -625,9 +748,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 }
 
 fn open_file(state: &mut State, path: PathBuf) {
+    state.search_document_generation = state.search_document_generation.wrapping_add(1);
+    state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.error = None;
     state.rendered_page = None;
     state.chapter_content = Vec::new();
+    state.show_search_bar = false;
+    state.search_query.clear();
+    state.search_results.clear();
+    state.search_current = 0;
+    state.search_text = None;
+    state.search_loading = false;
 
     let ext = path
         .extension()
@@ -700,13 +831,6 @@ fn open_file(state: &mut State, path: PathBuf) {
 fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
     if let keyboard::Event::KeyPressed { key, modifiers, .. } = event {
         match key.as_ref() {
-            // Escape: go back to library from reader
-            keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                if state.screen == Screen::Reader {
-                    return Task::done(Message::ShowLibrary);
-                }
-            }
-
             keyboard::Key::Named(keyboard::key::Named::ArrowRight)
             | keyboard::Key::Named(keyboard::key::Named::PageDown) => {
                 return Task::done(Message::NextPage);
@@ -738,6 +862,22 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
             keyboard::Key::Character(c) if c == "b" && !modifiers.command() => {
                 if state.screen == Screen::Reader {
                     return Task::done(Message::ToggleBookmarksPanel);
+                }
+            }
+
+            // Ctrl+F: toggle search bar
+            keyboard::Key::Character(c) if c == "f" && modifiers.command() => {
+                if state.screen == Screen::Reader {
+                    return Task::done(Message::ToggleSearchBar);
+                }
+            }
+
+            // Escape: close search bar if open, otherwise go to library
+            keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                if state.show_search_bar {
+                    return Task::done(Message::CloseSearch);
+                } else if state.screen == Screen::Reader {
+                    return Task::done(Message::ShowLibrary);
                 }
             }
 
@@ -911,6 +1051,77 @@ fn save_library_cards_per_row(state: &State) {
     }
 }
 
+fn perform_search(state: &mut State) -> Task<Message> {
+    let query = state.search_query.clone();
+    let document_generation = state.search_document_generation;
+    let query_generation = state.search_query_generation;
+    let Some(path) = state.file_path.clone() else {
+        return Task::none();
+    };
+
+    if let Some(text) = state.search_text.clone() {
+        return Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    shosai_core::search::search_pages(&text, &query)
+                })
+                .await
+                .unwrap_or_default()
+            },
+            move |results| Message::SearchPerformed {
+                document_generation,
+                query_generation,
+                results,
+            },
+        );
+    }
+
+    if state.search_loading {
+        return Task::none();
+    }
+    state.search_loading = true;
+
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let pages = match path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref()
+                {
+                    Some("pdf") => PdfDoc::open(&path)
+                        .and_then(|document| document.page_texts())
+                        .unwrap_or_default(),
+                    Some("epub") => EpubDoc::open(&path)
+                        .map(|document| shosai_core::search::extract_epub_text(&document))
+                        .unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                Arc::new(pages)
+            })
+            .await
+            .unwrap_or_else(|_| Arc::new(Vec::new()))
+        },
+        move |text| Message::SearchTextExtracted {
+            document_generation,
+            text,
+        },
+    )
+}
+
+fn navigate_to_current_search_result(state: &mut State) {
+    if let Some(result) = state.search_results.get(state.search_current) {
+        let target_page = result.page;
+        if target_page != state.current_page && target_page < state.total_pages {
+            state.current_page = target_page;
+            state.page_input = format!("{}", state.current_page + 1);
+            refresh_content(state);
+            save_reading_state(state);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // View
 // ---------------------------------------------------------------------------
@@ -935,11 +1146,15 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 main_content
             };
 
-            column![toolbar(state), body]
-                .spacing(0)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+            let mut layout = column![toolbar(state)].spacing(0);
+
+            if state.show_search_bar {
+                layout = layout.push(search_bar(state));
+            }
+
+            layout = layout.push(body);
+
+            layout.width(Length::Fill).height(Length::Fill).into()
         }
     }
 }
@@ -1052,6 +1267,19 @@ fn toolbar(state: &State) -> Element<'_, Message> {
                 .on_press(Message::ToggleBookmarksPanel)
                 .into(),
         );
+        // Search button (PDF and EPUB only, not CBZ)
+        if !matches!(state.document, Some(OpenDocument::Cbz(_))) {
+            let search_label = if state.show_search_bar {
+                "Hide Search"
+            } else {
+                "Search"
+            };
+            toolbar_items.push(
+                button(search_label)
+                    .on_press(Message::ToggleSearchBar)
+                    .into(),
+            );
+        }
     }
 
     let toolbar_row = row(toolbar_items)
@@ -1151,6 +1379,67 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
             ..Default::default()
         })
         .into()
+}
+
+fn search_bar(state: &State) -> Element<'_, Message> {
+    let input = text_input("Search in document...", &state.search_query)
+        .id(search_input_id())
+        .on_input(Message::SearchQueryChanged)
+        .on_submit(Message::SearchNext)
+        .width(300);
+
+    let result_info = if state.search_results.is_empty() {
+        if state.search_query.is_empty() {
+            String::new()
+        } else {
+            "No results".to_string()
+        }
+    } else {
+        format!(
+            "{} / {}",
+            state.search_current + 1,
+            state.search_results.len()
+        )
+    };
+
+    let has_results = !state.search_results.is_empty();
+
+    let mut prev_btn = button("<");
+    if has_results {
+        prev_btn = prev_btn.on_press(Message::SearchPrev);
+    }
+
+    let mut next_btn = button(">");
+    if has_results {
+        next_btn = next_btn.on_press(Message::SearchNext);
+    }
+
+    let close_btn = button("\u{2715}").on_press(Message::CloseSearch);
+
+    let bar = row![
+        input,
+        text(result_info).size(14),
+        prev_btn,
+        next_btn,
+        close_btn,
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+
+    container(bar)
+        .padding(8)
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgb(
+                0.93, 0.93, 0.93,
+            ))),
+            ..Default::default()
+        })
+        .into()
+}
+
+fn search_input_id() -> iced::widget::Id {
+    iced::widget::Id::new("document-search-query")
 }
 
 fn content_view(state: &State) -> Element<'_, Message> {
@@ -1748,4 +2037,116 @@ pub fn title(state: &State) -> String {
 
 pub fn subscription(_state: &State) -> Subscription<Message> {
     keyboard::listen().map(Message::KeyPressed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_document(document: OpenDocument) -> State {
+        State {
+            screen: Screen::Reader,
+            file_path: None,
+            document: Some(document),
+            current_page: 0,
+            total_pages: 1,
+            zoom: ZoomMode::default(),
+            rendered_page: None,
+            chapter_content: Vec::new(),
+            page_input: "1".to_string(),
+            error: None,
+            font_size: 16.0,
+            line_spacing: 1.6,
+            theme: ReaderTheme::default(),
+            reading_state: None,
+            library: None,
+            bookmark_store: None,
+            bookmarks: Vec::new(),
+            show_bookmarks_panel: false,
+            current_page_bookmarked: false,
+            editing_note_id: None,
+            editing_note_text: String::new(),
+            show_search_bar: false,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            search_current: 0,
+            search_text: None,
+            search_loading: false,
+            search_document_generation: 0,
+            search_query_generation: 0,
+            library_books: Vec::new(),
+            library_search: String::new(),
+            library_filter: None,
+            library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
+        }
+    }
+
+    #[test]
+    fn opening_search_requests_focus_for_the_query_input() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(epub));
+
+        let task = update(&mut state, Message::ToggleSearchBar);
+
+        assert!(state.show_search_bar);
+        assert!(
+            task.units() > 0,
+            "opening search must issue a task that focuses the query input"
+        );
+    }
+
+    #[test]
+    fn search_bar_does_not_open_for_unsupported_cbz_documents() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(cbz));
+
+        let _ = update(&mut state, Message::ToggleSearchBar);
+
+        assert!(!state.show_search_bar);
+    }
+
+    #[test]
+    fn stale_search_completions_do_not_replace_current_state() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(epub));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.search_document_generation = 2;
+        state.search_query_generation = 3;
+        state.search_query = "same query again".to_string();
+        state.search_loading = true;
+
+        let _ = update(
+            &mut state,
+            Message::SearchTextExtracted {
+                document_generation: 1,
+                text: Arc::new(vec!["stale text".to_string()]),
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::SearchPerformed {
+                document_generation: 2,
+                query_generation: 1,
+                results: vec![SearchMatch {
+                    page: 0,
+                    offset: 0,
+                    length: 5,
+                    context: "stale".to_string(),
+                }],
+            },
+        );
+
+        assert!(state.search_loading);
+        assert!(state.search_text.is_none());
+        assert!(state.search_results.is_empty());
+    }
 }
