@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use pdfium_render::prelude::*;
@@ -14,15 +14,66 @@ use crate::document::{Document, DocumentMetadata, RenderedPage};
 /// — it keeps the lock held only as long as needed and allows other threads to
 /// proceed in between.
 fn create_pdfium() -> Result<Pdfium> {
-    let bindings = Pdfium::bind_to_system_library().map_err(|e| {
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|executable| bundled_pdfium_path(&executable))
+        .filter(|path| path.is_file());
+
+    let bindings = match bundled {
+        Some(path) => Pdfium::bind_to_library(&path).with_context(|| {
+            format!(
+                "failed to load bundled PDFium library at {}",
+                path.display()
+            )
+        }),
+        None => Pdfium::bind_to_system_library().context("failed to load PDFium system library"),
+    }
+    .map_err(|e| {
         anyhow::anyhow!(
-            "failed to load PDFium library: {e}. \
-             Ensure pdfium-binaries is available via LD_LIBRARY_PATH \
-             (enter the Nix dev shell with `nix develop`)"
+            "{e}. Install a Shosai package containing PDFium, or ensure \
+             pdfium-binaries is available through the system library path"
         )
     })?;
 
     Ok(Pdfium::new(bindings))
+}
+
+fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
+    let executable_dir = executable.parent()?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let contents_dir = executable_dir.parent()?;
+        Some(contents_dir.join("Frameworks/libpdfium.dylib"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let package_dir = executable_dir.parent()?;
+        Some(package_dir.join("lib/libpdfium.so"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bundled_pdfium_path;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn bundled_pdfium_is_resolved_relative_to_executable() {
+        #[cfg(target_os = "macos")]
+        let expected =
+            PathBuf::from("/Applications/Shosai.app/Contents/Frameworks/libpdfium.dylib");
+        #[cfg(target_os = "macos")]
+        let executable = Path::new("/Applications/Shosai.app/Contents/MacOS/Shosai");
+
+        #[cfg(not(target_os = "macos"))]
+        let expected = PathBuf::from("/opt/shosai/lib/libpdfium.so");
+        #[cfg(not(target_os = "macos"))]
+        let executable = Path::new("/opt/shosai/bin/shosai");
+
+        assert_eq!(bundled_pdfium_path(executable), Some(expected));
+    }
 }
 
 /// A PDF document backed by pdfium-render.

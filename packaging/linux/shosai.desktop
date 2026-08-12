@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Shosai
+Comment=Read PDF, EPUB, and CBZ books
+Exec=@SHOSAI_EXEC@
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/pdf;application/epub+zip;application/vnd.comicbook+zip;
