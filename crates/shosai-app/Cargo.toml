@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "shosai"
+path = "src/main.rs"
+
 [dependencies]
 shosai-core.workspace = true
 anyhow.workspace = true

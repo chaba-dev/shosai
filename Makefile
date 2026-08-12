@@ -1,4 +1,4 @@
-.PHONY: dev lint fmt test
+.PHONY: dev lint fmt test changelog next-version
 
 ## Run the application in debug mode
 dev:
@@ -15,3 +15,11 @@ fmt:
 ## Run all tests
 test:
 	cargo test --workspace --no-fail-fast
+
+## Regenerate CHANGELOG.md from conventional commits
+changelog:
+	git cliff -o CHANGELOG.md
+
+## Print the next semantic version inferred from conventional commits
+next-version:
+	git cliff --bumped-version
