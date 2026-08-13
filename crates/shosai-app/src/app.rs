@@ -4398,6 +4398,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn saved_manual_zoom_does_not_override_fit_page_on_reopen() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = runtime
+            .block_on(ReadingStateStore::open_at_async(
+                &directory.path().join("state.db"),
+            ))
+            .unwrap();
+        let path = directory.path().join("book.cbz");
+        runtime
+            .block_on(store.set_async(&path, &FileReadingState { page: 1, zoom: 2.5 }))
+            .unwrap();
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let (mut state, _) = boot();
+        state.reading_state = Some(store);
+
+        let _runtime = runtime.enter();
+        install_document(&mut state, path, OpenDocument::Cbz(Arc::new(cbz)));
+
+        assert_eq!(state.current_page, 1);
+        assert_eq!(state.zoom, ZoomMode::FitPage);
+    }
+
     fn test_book(id: i64) -> Book {
         Book {
             id,
