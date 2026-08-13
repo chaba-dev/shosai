@@ -923,7 +923,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.document,
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
             ) {
-                let new_scale = (state.zoom.scale() + 0.25).min(5.0);
+                let new_scale = zoom_step_scale(state, 0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
                 invalidate_continuous_rasters(state);
                 save_reading_state(state);
@@ -936,7 +936,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.document,
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
             ) {
-                let new_scale = (state.zoom.scale() - 0.25).max(0.25);
+                let new_scale = zoom_step_scale(state, -0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
                 invalidate_continuous_rasters(state);
                 save_reading_state(state);
@@ -2350,6 +2350,23 @@ fn paginated_raster_scale(state: &State, pages: &[usize]) -> f32 {
     .clamp(0.1, 5.0)
 }
 
+fn zoom_step_scale(state: &State, step: f32) -> f32 {
+    let current = if uses_paginated_raster_layout(state) {
+        let pages = paginated_raster_pages(state);
+        paginated_raster_scale(state, &pages)
+    } else {
+        state.zoom.scale()
+    };
+    (current + step).clamp(0.25, 5.0)
+}
+
+fn raster_page_slot_width(state: &State, page_count: usize, rendered_width: f32) -> f32 {
+    let gutter_width = PAGE_GUTTER * page_count.saturating_sub(1) as f32;
+    let available_width = (available_reader_size(state).width - gutter_width).max(1.0);
+    let stable_width = available_width / page_count.max(1) as f32;
+    stable_width.max(rendered_width)
+}
+
 fn next_page_location(state: &State) -> Option<usize> {
     state.document.as_ref()?;
     if uses_page_spreads(state) {
@@ -2840,8 +2857,8 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         } else {
             button("+")
         };
-        let mut fit_w = button("W");
-        let mut fit_p = button("P");
+        let mut fit_w = button("Fit Width");
+        let mut fit_p = button("Fit Page");
         if is_pdf_or_cbz {
             fit_w = fit_w.on_press(Message::SetZoomFitWidth);
             fit_p = fit_p.on_press(Message::SetZoomFitPage);
@@ -3249,9 +3266,12 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
         }
     };
 
+    let page_count = pages.len();
     let mut spread = row![].spacing(PAGE_GUTTER).padding(20);
     for page in pages {
-        let content: Element<'_, Message> = if let Some(rendered) = rendered_for(page) {
+        let rendered = rendered_for(page);
+        let rendered_width = rendered.map_or(0.0, |rendered| rendered.width as f32);
+        let content: Element<'_, Message> = if let Some(rendered) = rendered {
             let handle =
                 image::Handle::from_rgba(rendered.width, rendered.height, rendered.pixels.clone());
             match state.zoom {
@@ -3274,7 +3294,12 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
                 .height(Length::Fill)
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
-            ZoomMode::Manual(_) | ZoomMode::FitWidth => container(content),
+            ZoomMode::Manual(_) | ZoomMode::FitWidth => {
+                let slot_width = raster_page_slot_width(state, page_count, rendered_width);
+                container(content)
+                    .width(Length::Fixed(slot_width))
+                    .center_x(Length::Fixed(slot_width))
+            }
         };
         spread = spread.push(page_container);
     }
@@ -4317,6 +4342,43 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert!(width <= available.width + 0.01);
         assert!(height <= available.height + 0.01);
+    }
+
+    #[test]
+    fn zoom_step_starts_from_the_actual_fitted_scale() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+        let fitted = paginated_raster_scale(&state, &paginated_raster_pages(&state));
+
+        assert!((zoom_step_scale(&state, 0.25) - (fitted + 0.25)).abs() < 0.001);
+        assert!((zoom_step_scale(&state, -0.25) - (fitted - 0.25).max(0.25)).abs() < 0.001);
+    }
+
+    #[test]
+    fn page_slot_stays_fixed_while_the_raster_fits_inside_it() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = 2;
+        let slot_width = raster_page_slot_width(&state, 2, 0.0);
+
+        assert_eq!(
+            raster_page_slot_width(&state, 2, slot_width * 0.5),
+            slot_width
+        );
+        assert_eq!(raster_page_slot_width(&state, 2, slot_width), slot_width);
+        assert_eq!(
+            raster_page_slot_width(&state, 2, slot_width + 1.0),
+            slot_width + 1.0
+        );
     }
 
     #[test]
