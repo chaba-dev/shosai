@@ -202,6 +202,21 @@ async fn test_preferences_persist_across_opens() {
 }
 
 #[tokio::test]
+async fn test_multiple_preferences_are_saved_atomically() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shosai.db");
+    let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+
+    store
+        .set_pref_ints_async(&[("window.width", 900), ("window.height", 700)])
+        .await
+        .unwrap();
+
+    assert_eq!(store.get_pref_int_async("window.width").await, Some(900));
+    assert_eq!(store.get_pref_int_async("window.height").await, Some(700));
+}
+
+#[tokio::test]
 async fn test_migrations_are_idempotent() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
