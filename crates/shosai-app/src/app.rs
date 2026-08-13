@@ -1,13 +1,14 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
     button, center, column, container, image, rich_text, row, scrollable, sensor, span, text,
     text_input,
 };
-use iced::{Element, Font, Length, Subscription, Task};
+use iced::{Element, Font, Length, Point, Size, Subscription, Task, window};
 
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
@@ -23,7 +24,7 @@ use shosai_core::search::SearchMatch;
 // Open document wrapper
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum OpenDocument {
     Pdf(Arc<PdfDoc>),
     Epub(Arc<EpubDoc>),
@@ -97,6 +98,188 @@ const LIBRARY_CARDS_PER_ROW_KEY: &str = "library.cards_per_row";
 const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const PAGE_CACHE_CAPACITY: usize = 8;
+const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
+const WINDOW_WIDTH_KEY: &str = "window.width";
+const WINDOW_HEIGHT_KEY: &str = "window.height";
+const WINDOW_X_KEY: &str = "window.x";
+const WINDOW_Y_KEY: &str = "window.y";
+
+fn continuous_item_id(tab_id: u64, activation: u64, index: usize) -> WidgetId {
+    WidgetId::from(format!(
+        "continuous-reader-{tab_id}-{activation}-item-{index}"
+    ))
+}
+
+struct ContinuousItemOperation {
+    item_ids: Vec<WidgetId>,
+    scroll_id: WidgetId,
+    item_bounds: Vec<Option<iced::Rectangle>>,
+    content_top: Option<f32>,
+    content_height: Option<f32>,
+    viewport_height: Option<f32>,
+    current_tail_extent: f32,
+    requested_offset: Option<f32>,
+    target: Option<usize>,
+}
+
+impl ContinuousItemOperation {
+    fn resolve(tab_id: u64, activation: u64, total: usize, offset: f32) -> Self {
+        Self {
+            item_ids: (0..total)
+                .map(|index| continuous_item_id(tab_id, activation, index))
+                .collect(),
+            scroll_id: continuous_scroll_id(tab_id, activation),
+            item_bounds: vec![None; total],
+            content_top: None,
+            content_height: None,
+            viewport_height: None,
+            current_tail_extent: 0.0,
+            requested_offset: Some(offset),
+            target: None,
+        }
+    }
+
+    fn locate(
+        tab_id: u64,
+        activation: u64,
+        total: usize,
+        target: usize,
+        current_tail_extent: f32,
+    ) -> Self {
+        Self {
+            item_ids: (0..total)
+                .map(|index| continuous_item_id(tab_id, activation, index))
+                .collect(),
+            scroll_id: continuous_scroll_id(tab_id, activation),
+            item_bounds: vec![None; total],
+            content_top: None,
+            content_height: None,
+            viewport_height: None,
+            current_tail_extent,
+            requested_offset: None,
+            target: Some(target),
+        }
+    }
+}
+
+impl operation::Operation<(usize, f32, f32)> for ContinuousItemOperation {
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn operation::Operation<(usize, f32, f32)>),
+    ) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&WidgetId>, bounds: iced::Rectangle) {
+        if let Some(index) = id.and_then(|id| self.item_ids.iter().position(|item| item == id)) {
+            self.item_bounds[index] = Some(bounds);
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&WidgetId>,
+        bounds: iced::Rectangle,
+        content_bounds: iced::Rectangle,
+        _translation: iced::Vector,
+        _state: &mut dyn operation::Scrollable,
+    ) {
+        if id == Some(&self.scroll_id) {
+            self.content_top = Some(content_bounds.y);
+            self.content_height = Some(content_bounds.height);
+            self.viewport_height = Some(bounds.height);
+        }
+    }
+
+    fn finish(&self) -> operation::Outcome<(usize, f32, f32)> {
+        let Some(content_top) = self.content_top else {
+            return operation::Outcome::None;
+        };
+        if let Some(target) = self.target
+            && let Some(bounds) = self.item_bounds.get(target).copied().flatten()
+        {
+            let offset = (bounds.y - content_top).max(0.0);
+            let tail_extent = self
+                .content_height
+                .zip(self.viewport_height)
+                .map(|(content_height, viewport_height)| {
+                    (offset + viewport_height - (content_height - self.current_tail_extent))
+                        .max(0.0)
+                })
+                .unwrap_or(0.0);
+            return operation::Outcome::Some((target, offset, tail_extent));
+        }
+        let Some(offset) = self.requested_offset else {
+            return operation::Outcome::None;
+        };
+        let viewport_y = content_top + offset;
+        let resolved = self
+            .item_bounds
+            .iter()
+            .enumerate()
+            .filter_map(|(index, bounds)| bounds.map(|bounds| (index, bounds)))
+            .take_while(|(_, bounds)| bounds.y <= viewport_y + 1.0)
+            .map(|(index, _)| index)
+            .last()
+            .unwrap_or(0);
+        operation::Outcome::Some((resolved, offset, 0.0))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ReadingMode {
+    #[default]
+    Paginated,
+    Continuous,
+}
+
+#[derive(Debug, Clone)]
+struct ReaderTab {
+    id: u64,
+    file_path: PathBuf,
+    document: OpenDocument,
+    current_page: usize,
+    total_pages: usize,
+    zoom: ZoomMode,
+    rendered_page: Option<RenderedPage>,
+    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
+    chapter_content: Vec<ContentNode>,
+    continuous_pages: Vec<Option<RenderedPage>>,
+    continuous_pending: BTreeMap<usize, ContinuousRequest>,
+    continuous_visible: BTreeSet<usize>,
+    continuous_chapters: Vec<Vec<ContentNode>>,
+    continuous_tail_extent: f32,
+    render_generation: u64,
+    page_input: String,
+    error: Option<String>,
+    font_size: f32,
+    line_spacing: f32,
+    theme: ReaderTheme,
+    reading_mode: ReadingMode,
+    bookmarks: Vec<Bookmark>,
+    show_bookmarks_panel: bool,
+    current_page_bookmarked: bool,
+    editing_note_id: Option<i64>,
+    editing_note_text: String,
+    show_search_bar: bool,
+    search_query: String,
+    search_results: Vec<SearchMatch>,
+    search_current: usize,
+    search_text: Option<Arc<Vec<String>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ContinuousRequest {
+    id: u64,
+    generation: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct InitializedState {
+    store: ReadingStateStore,
+    cards_per_row: usize,
+    window_geometry: Option<(Size, Point)>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PageCacheKey {
@@ -123,11 +306,24 @@ pub struct State {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     chapter_content: Vec<ContentNode>,
+    continuous_pages: Vec<Option<RenderedPage>>,
+    continuous_pending: BTreeMap<usize, ContinuousRequest>,
+    continuous_visible: BTreeSet<usize>,
+    continuous_chapters: Vec<Vec<ContentNode>>,
+    continuous_tail_extent: f32,
+    continuous_activation: u64,
+    next_continuous_request_id: u64,
     page_input: String,
     error: Option<String>,
     font_size: f32,
     line_spacing: f32,
     theme: ReaderTheme,
+    reading_mode: ReadingMode,
+    tabs: Vec<ReaderTab>,
+    active_tab: Option<usize>,
+    active_tab_id: Option<u64>,
+    next_tab_id: u64,
+    open_error: Option<String>,
 
     // -- Shared --
     reading_state: Option<ReadingStateStore>,
@@ -164,6 +360,14 @@ pub struct State {
     storage_initializing: bool,
     storage_error: Option<String>,
     pending_open: Option<PendingOpen>,
+    window_id: Option<window::Id>,
+    window_size: Size,
+    window_position: Option<Point>,
+    saved_window_geometry: Option<(Size, Point)>,
+    window_geometry_generation: u64,
+    window_geometry_dirty: bool,
+    window_geometry_saving: bool,
+    close_after_geometry_save: Option<window::Id>,
 }
 
 /// Color theme for the EPUB reader.
@@ -215,7 +419,7 @@ impl ReaderTheme {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Initialized(Result<(ReadingStateStore, usize), String>),
+    Initialized(Result<InitializedState, String>),
 
     // File
     OpenFile,
@@ -226,6 +430,36 @@ pub enum Message {
     PrevPage,
     PageInputChanged(String),
     GoToPage,
+    FirstPage,
+    LastPage,
+    ToggleReadingMode,
+    ContinuousScrolled {
+        tab_id: u64,
+        activation: u64,
+        offset: f32,
+    },
+    ContinuousItemResolved {
+        tab_id: u64,
+        activation: u64,
+        page: usize,
+    },
+    ContinuousItemVisibility {
+        tab_id: u64,
+        activation: u64,
+        page: usize,
+        visible: bool,
+    },
+    ContinuousNavigationMeasured {
+        tab_id: u64,
+        activation: u64,
+        offset: f32,
+        tail_extent: f32,
+    },
+
+    // Document tabs
+    SelectTab(usize),
+    CloseTab(usize),
+    NextTab,
 
     // Zoom (PDF)
     ZoomIn,
@@ -268,7 +502,11 @@ pub enum Message {
     // Bookmarks
     ToggleBookmark,
     ToggleBookmarksPanel,
-    BookmarksLoaded(Vec<Bookmark>),
+    BookmarksLoaded {
+        tab_id: u64,
+        file_path: PathBuf,
+        bookmarks: Vec<Bookmark>,
+    },
     GoToBookmark(usize), // page index
     StartEditNote(i64, String),
     EditNoteChanged(String),
@@ -281,10 +519,12 @@ pub enum Message {
     ToggleSearchBar,
     SearchQueryChanged(String),
     SearchTextExtracted {
+        tab_id: u64,
         document_generation: u64,
         text: Arc<Vec<String>>,
     },
     SearchPerformed {
+        tab_id: u64,
         document_generation: u64,
         query_generation: u64,
         results: Vec<SearchMatch>,
@@ -295,13 +535,27 @@ pub enum Message {
 
     // Background page rendering
     PageRendered {
+        tab_id: u64,
         generation: u64,
         key: PageCacheKey,
         result: Result<RenderedPage, String>,
     },
+    ContinuousPageRendered {
+        tab_id: u64,
+        request: ContinuousRequest,
+        page: usize,
+        result: Result<RenderedPage, String>,
+    },
+    RenderContinuousPage {
+        tab_id: u64,
+        page: usize,
+    },
 
     // Keyboard
     KeyPressed(keyboard::Event),
+    WindowEvent(window::Id, window::Event),
+    PersistWindowGeometry(u64),
+    WindowGeometryPersisted,
 }
 
 // ---------------------------------------------------------------------------
@@ -321,11 +575,24 @@ pub fn boot() -> (State, Task<Message>) {
         page_cache: VecDeque::new(),
         render_generation: 0,
         chapter_content: Vec::new(),
+        continuous_pages: Vec::new(),
+        continuous_pending: BTreeMap::new(),
+        continuous_visible: BTreeSet::new(),
+        continuous_chapters: Vec::new(),
+        continuous_tail_extent: 0.0,
+        continuous_activation: 0,
+        next_continuous_request_id: 1,
         page_input: String::new(),
         error: None,
         font_size: 16.0,
         line_spacing: 1.6,
         theme: ReaderTheme::default(),
+        reading_mode: ReadingMode::default(),
+        tabs: Vec::new(),
+        active_tab: None,
+        active_tab_id: None,
+        next_tab_id: 1,
+        open_error: None,
 
         bookmark_store: None,
 
@@ -359,6 +626,14 @@ pub fn boot() -> (State, Task<Message>) {
         storage_initializing: true,
         storage_error: None,
         pending_open: None,
+        window_id: None,
+        window_size: Size::new(900.0, 700.0),
+        window_position: None,
+        saved_window_geometry: None,
+        window_geometry_generation: 0,
+        window_geometry_dirty: false,
+        window_geometry_saving: false,
+        close_after_geometry_save: None,
     };
     let initialize = Task::perform(
         async {
@@ -374,11 +649,29 @@ pub fn boot() -> (State, Task<Message>) {
                     (*value >= LIBRARY_CARDS_PER_ROW_MIN) && (*value <= LIBRARY_CARDS_PER_ROW_MAX)
                 })
                 .unwrap_or(LIBRARY_CARDS_PER_ROW_DEFAULT);
+            let geometry = match (
+                store.get_pref_int_async(WINDOW_WIDTH_KEY).await,
+                store.get_pref_int_async(WINDOW_HEIGHT_KEY).await,
+                store.get_pref_int_async(WINDOW_X_KEY).await,
+                store.get_pref_int_async(WINDOW_Y_KEY).await,
+            ) {
+                (Some(width), Some(height), Some(x), Some(y)) if width >= 480 && height >= 360 => {
+                    Some((
+                        Size::new(width as f32, height as f32),
+                        Point::new(x as f32, y as f32),
+                    ))
+                }
+                _ => None,
+            };
             eprintln!(
                 "startup: database and preferences initialized in {} ms",
                 started.elapsed().as_millis()
             );
-            Ok((store, cards_per_row))
+            Ok(InitializedState {
+                store,
+                cards_per_row,
+                window_geometry: geometry,
+            })
         },
         Message::Initialized,
     );
@@ -391,17 +684,31 @@ pub fn boot() -> (State, Task<Message>) {
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::Initialized(Ok((store, cards_per_row))) => {
+        Message::Initialized(Ok(initialized)) => {
+            let InitializedState {
+                store,
+                cards_per_row,
+                window_geometry: geometry,
+            } = initialized;
             let pool = store.pool().clone();
             state.library = Some(Library::new(pool.clone()));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state = Some(store);
             state.library_cards_per_row = cards_per_row;
             state.storage_initializing = false;
+            state.saved_window_geometry = geometry;
+            let geometry_task =
+                if let (Some(id), Some((size, position))) = (state.window_id, geometry) {
+                    state.window_size = size;
+                    state.window_position = Some(position);
+                    Task::batch([window::resize(id, size), window::move_to(id, position)])
+                } else {
+                    Task::none()
+                };
             if let Some(pending) = state.pending_open.take() {
-                return Task::done(pending.into_message());
+                return Task::batch([geometry_task, Task::done(pending.into_message())]);
             }
-            return reset_library(state);
+            return Task::batch([geometry_task, reset_library(state)]);
         }
 
         Message::Initialized(Err(error)) => {
@@ -437,7 +744,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.pending_open = Some(PendingOpen::FileSelected(path));
                 return Task::none();
             }
-            return open_file(state, path);
+            return open_document(state, path);
         }
 
         Message::FileSelected(None) => {}
@@ -447,7 +754,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.current_page += 1;
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
-                return refresh_content(state);
+                return content_navigation_task(state);
             }
         }
 
@@ -456,7 +763,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.current_page -= 1;
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
-                return refresh_content(state);
+                return content_navigation_task(state);
             }
         }
 
@@ -472,9 +779,135 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.current_page = page_num - 1;
                 save_reading_state(state);
                 state.page_input = format!("{}", state.current_page + 1);
-                return refresh_content(state);
+                return content_navigation_task(state);
             }
             state.page_input = format!("{}", state.current_page + 1);
+        }
+
+        Message::FirstPage => {
+            if state.document.is_some() {
+                state.current_page = 0;
+                state.page_input = "1".to_string();
+                save_reading_state(state);
+                return content_navigation_task(state);
+            }
+        }
+
+        Message::LastPage => {
+            if state.document.is_some() && state.total_pages > 0 {
+                state.current_page = state.total_pages - 1;
+                state.page_input = state.total_pages.to_string();
+                save_reading_state(state);
+                return content_navigation_task(state);
+            }
+        }
+
+        Message::ToggleReadingMode => {
+            invalidate_continuous_layout(state);
+            state.reading_mode = match state.reading_mode {
+                ReadingMode::Paginated => ReadingMode::Continuous,
+                ReadingMode::Continuous => ReadingMode::Paginated,
+            };
+            state.continuous_pages.clear();
+            state.continuous_visible.clear();
+            state.continuous_chapters.clear();
+            state.render_generation = state.render_generation.wrapping_add(1);
+            return refresh_content(state);
+        }
+
+        Message::ContinuousScrolled {
+            tab_id,
+            activation,
+            offset,
+        } => {
+            if state.reading_mode == ReadingMode::Continuous
+                && state.active_tab_id == Some(tab_id)
+                && state.continuous_activation == activation
+            {
+                return iced::advanced::widget::operate(ContinuousItemOperation::resolve(
+                    tab_id,
+                    activation,
+                    state.total_pages,
+                    offset,
+                ))
+                .map(move |(page, _, _)| Message::ContinuousItemResolved {
+                    tab_id,
+                    activation,
+                    page,
+                });
+            }
+        }
+
+        Message::ContinuousItemResolved {
+            tab_id,
+            activation,
+            page,
+        } => {
+            if state.reading_mode == ReadingMode::Continuous
+                && state.active_tab_id == Some(tab_id)
+                && state.continuous_activation == activation
+                && page < state.total_pages
+                && page != state.current_page
+            {
+                state.current_page = page;
+                state.page_input = (page + 1).to_string();
+                save_reading_state(state);
+                update_bookmark_status(state);
+                return reconcile_continuous_rasters(state);
+            }
+        }
+
+        Message::ContinuousItemVisibility {
+            tab_id,
+            activation,
+            page,
+            visible,
+        } => {
+            if state.active_tab_id != Some(tab_id) || state.continuous_activation != activation {
+                return Task::none();
+            }
+            if visible {
+                state.continuous_visible.insert(page);
+            } else {
+                state.continuous_visible.remove(&page);
+            }
+            return reconcile_continuous_rasters(state);
+        }
+
+        Message::ContinuousNavigationMeasured {
+            tab_id,
+            activation,
+            offset,
+            tail_extent,
+        } => {
+            if state.active_tab_id != Some(tab_id) || state.continuous_activation != activation {
+                return Task::none();
+            }
+            if (state.continuous_tail_extent - tail_extent).abs() > 1.0 {
+                state.continuous_tail_extent = tail_extent;
+                return Task::done(Message::ContinuousNavigationMeasured {
+                    tab_id,
+                    activation,
+                    offset,
+                    tail_extent,
+                });
+            }
+            return iced::widget::operation::scroll_to(
+                continuous_scroll_id(tab_id, activation),
+                iced::widget::operation::AbsoluteOffset {
+                    x: None,
+                    y: Some(offset),
+                },
+            );
+        }
+
+        Message::SelectTab(index) => return select_tab(state, index),
+        Message::CloseTab(index) => return close_tab(state, index),
+        Message::NextTab => {
+            if !state.tabs.is_empty() {
+                let next = (state.active_tab.unwrap_or(0) + 1) % state.tabs.len();
+                return select_tab(state, next);
+            }
         }
 
         Message::ZoomIn => {
@@ -484,6 +917,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             ) {
                 let new_scale = (state.zoom.scale() + 0.25).min(5.0);
                 state.zoom = ZoomMode::Manual(new_scale);
+                invalidate_continuous_rasters(state);
                 save_reading_state(state);
                 return refresh_content(state);
             }
@@ -496,6 +930,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             ) {
                 let new_scale = (state.zoom.scale() - 0.25).max(0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
+                invalidate_continuous_rasters(state);
                 save_reading_state(state);
                 return refresh_content(state);
             }
@@ -503,22 +938,28 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::SetZoomFitWidth => {
             state.zoom = ZoomMode::FitWidth;
+            invalidate_continuous_rasters(state);
             save_reading_state(state);
             return refresh_content(state);
         }
 
         Message::SetZoomFitPage => {
             state.zoom = ZoomMode::FitPage;
+            invalidate_continuous_rasters(state);
             save_reading_state(state);
             return refresh_content(state);
         }
 
         Message::FontSizeUp => {
             state.font_size = (state.font_size + 2.0).min(48.0);
+            invalidate_continuous_layout(state);
+            return scroll_to_current_page(state);
         }
 
         Message::FontSizeDown => {
             state.font_size = (state.font_size - 2.0).max(8.0);
+            invalidate_continuous_layout(state);
+            return scroll_to_current_page(state);
         }
 
         Message::CycleTheme => {
@@ -531,6 +972,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Library
         Message::ShowLibrary => {
+            invalidate_continuous_layout(state);
             state.screen = Screen::Library;
             return Task::done(Message::RefreshLibrary);
         }
@@ -632,7 +1074,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 });
             }
             state.screen = Screen::Reader;
-            return open_file(state, path);
+            return open_document(state, path);
         }
 
         Message::RemoveBook(id) => {
@@ -686,13 +1128,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ToggleBookmarksPanel => {
+            invalidate_continuous_layout(state);
             state.show_bookmarks_panel = !state.show_bookmarks_panel;
             if state.show_bookmarks_panel {
-                return refresh_bookmarks(state);
+                return Task::batch([refresh_bookmarks(state), scroll_to_current_page(state)]);
             }
+            return scroll_to_current_page(state);
         }
 
-        Message::BookmarksLoaded(bookmarks) => {
+        Message::BookmarksLoaded {
+            tab_id,
+            file_path,
+            bookmarks,
+        } => {
+            if state.active_tab_id != Some(tab_id) || state.file_path.as_ref() != Some(&file_path) {
+                return Task::none();
+            }
             state.bookmarks = bookmarks;
             // Update current page bookmark status.
             if let Some(path) = &state.file_path
@@ -707,7 +1158,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.page_input = format!("{}", page + 1);
             save_reading_state(state);
             update_bookmark_status(state);
-            return refresh_content(state);
+            return content_navigation_task(state);
         }
 
         Message::StartEditNote(id, existing) => {
@@ -776,6 +1227,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Epub(_))
                 )
             {
+                invalidate_continuous_layout(state);
                 state.show_search_bar = !state.show_search_bar;
                 if !state.show_search_bar {
                     let previous_highlights = current_page_search_highlights(state);
@@ -784,9 +1236,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
-                    return refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+                    return Task::batch([
+                        refresh_pdf_search_highlights_if_changed(state, &previous_highlights),
+                        scroll_to_current_page(state),
+                    ]);
                 } else {
-                    return iced::widget::operation::focus(search_input_id());
+                    return Task::batch([
+                        iced::widget::operation::focus(search_input_id()),
+                        scroll_to_current_page(state),
+                    ]);
                 }
             }
         }
@@ -805,10 +1263,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SearchTextExtracted {
+            tab_id,
             document_generation,
             text,
         } => {
-            if document_generation == state.search_document_generation {
+            if state.active_tab_id == Some(tab_id)
+                && document_generation == state.search_document_generation
+            {
                 state.search_loading = false;
                 state.search_text = Some(text);
                 if !state.search_query.is_empty() {
@@ -818,20 +1279,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SearchPerformed {
+            tab_id,
             document_generation,
             query_generation,
             results,
         } => {
-            if document_generation == state.search_document_generation
+            if state.active_tab_id == Some(tab_id)
+                && document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
             {
                 let previous_highlights = current_page_search_highlights(state);
                 state.search_results = results;
                 state.search_current = 0;
                 // Navigate to first result if any.
-                return navigate_to_current_search_result(state).unwrap_or_else(|| {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
-                });
+                return navigate_to_current_search_result(state, &previous_highlights);
             }
         }
 
@@ -839,9 +1300,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if !state.search_results.is_empty() {
                 let previous_highlights = current_page_search_highlights(state);
                 state.search_current = (state.search_current + 1) % state.search_results.len();
-                return navigate_to_current_search_result(state).unwrap_or_else(|| {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
-                });
+                return navigate_to_current_search_result(state, &previous_highlights);
             }
         }
 
@@ -853,28 +1312,31 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 } else {
                     state.search_current - 1
                 };
-                return navigate_to_current_search_result(state).unwrap_or_else(|| {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
-                });
+                return navigate_to_current_search_result(state, &previous_highlights);
             }
         }
 
         Message::CloseSearch => {
+            invalidate_continuous_layout(state);
             let previous_highlights = current_page_search_highlights(state);
             state.show_search_bar = false;
             state.search_query.clear();
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
-            return refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+            return Task::batch([
+                refresh_pdf_search_highlights_if_changed(state, &previous_highlights),
+                scroll_to_current_page(state),
+            ]);
         }
 
         Message::PageRendered {
+            tab_id,
             generation,
             key,
             result,
         } => {
-            if generation == state.render_generation {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
                     Ok(page) => {
                         cache_rendered_page(state, key, page.clone());
@@ -889,8 +1351,145 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::ContinuousPageRendered {
+            tab_id,
+            request,
+            page,
+            result,
+        } => {
+            if state.active_tab_id != Some(tab_id) {
+                if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                    && tab.continuous_pending.get(&page) == Some(&request)
+                {
+                    tab.continuous_pending.remove(&page);
+                    if request.generation == tab.render_generation
+                        && let (Some(slot), Ok(rendered)) =
+                            (tab.continuous_pages.get_mut(page), result)
+                    {
+                        *slot = Some(rendered);
+                    }
+                }
+                return reconcile_continuous_rasters(state);
+            }
+            if state.active_tab_id == Some(tab_id) {
+                if state.continuous_pending.get(&page) != Some(&request) {
+                    return Task::none();
+                }
+                state.continuous_pending.remove(&page);
+                if page >= state.continuous_pages.len() {
+                    return reconcile_continuous_rasters(state);
+                }
+                match (request.generation == state.render_generation, result) {
+                    (true, Ok(rendered)) => {
+                        state.continuous_pages[page] = Some(rendered);
+                        if page == state.current_page {
+                            return Task::batch([
+                                reconcile_continuous_rasters(state),
+                                scroll_to_current_page(state),
+                            ]);
+                        }
+                    }
+                    (true, Err(error)) => {
+                        if page == state.current_page {
+                            state.error = Some(format!("Failed to render page: {error}"));
+                            return Task::none();
+                        }
+                        state.continuous_visible.remove(&page);
+                        return reconcile_continuous_rasters(state);
+                    }
+                    (false, _) => {}
+                }
+                return reconcile_continuous_rasters(state);
+            }
+        }
+
+        Message::RenderContinuousPage { tab_id, page } => {
+            if state.reading_mode != ReadingMode::Continuous
+                || state.active_tab_id != Some(tab_id)
+                || page >= state.continuous_pages.len()
+                || state.continuous_pages[page].is_some()
+                || !state.continuous_pending.contains_key(&page)
+            {
+                return Task::none();
+            }
+            let Some(request) = state.continuous_pending.get(&page).copied() else {
+                return Task::none();
+            };
+            let scale = state.zoom.scale();
+            match &state.document {
+                Some(OpenDocument::Pdf(doc)) => {
+                    let doc = Arc::clone(doc);
+                    let highlights = search_highlights_for_page(state, page);
+                    return render_continuous_page_task(tab_id, request, page, move || {
+                        doc.render_page_with_highlights(page, scale, &highlights)
+                    });
+                }
+                Some(OpenDocument::Cbz(doc)) => {
+                    let doc = Arc::clone(doc);
+                    return render_continuous_page_task(tab_id, request, page, move || {
+                        doc.render_page(page, scale)
+                    });
+                }
+                _ => {}
+            }
+        }
+
         Message::KeyPressed(event) => {
             return handle_key_event(state, event);
+        }
+
+        Message::WindowEvent(id, event) => {
+            state.window_id = Some(id);
+            match event {
+                window::Event::Opened { position, size } => {
+                    state.window_size = size;
+                    state.window_position = position;
+                    if let Some((saved_size, saved_position)) = state.saved_window_geometry {
+                        return Task::batch([
+                            window::resize(id, saved_size),
+                            window::move_to(id, saved_position),
+                        ]);
+                    }
+                }
+                window::Event::Resized(size) => {
+                    state.window_size = size;
+                    invalidate_continuous_layout(state);
+                }
+                window::Event::Moved(position) => state.window_position = Some(position),
+                window::Event::CloseRequested => {
+                    state.close_after_geometry_save = Some(id);
+                    state.window_geometry_generation =
+                        state.window_geometry_generation.wrapping_add(1);
+                    state.window_geometry_dirty = true;
+                    return persist_window_geometry(state);
+                }
+                _ => return Task::none(),
+            }
+            state.window_geometry_generation = state.window_geometry_generation.wrapping_add(1);
+            state.window_geometry_dirty = true;
+            let generation = state.window_geometry_generation;
+            let persist = Task::perform(
+                async move { tokio::time::sleep(std::time::Duration::from_millis(350)).await },
+                move |_| Message::PersistWindowGeometry(generation),
+            );
+            return Task::batch([persist, scroll_to_current_page(state)]);
+        }
+
+        Message::PersistWindowGeometry(generation) => {
+            if generation != state.window_geometry_generation {
+                return Task::none();
+            }
+            return persist_window_geometry(state);
+        }
+
+        Message::WindowGeometryPersisted => {
+            state.window_geometry_saving = false;
+            if state.window_geometry_dirty {
+                return persist_window_geometry(state);
+            }
+            if let Some(id) = state.close_after_geometry_save.take() {
+                return window::close(id);
+            }
         }
     }
 
@@ -960,7 +1559,198 @@ fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
         .then_some((state.library_generation, state.library_offset))
 }
 
-fn open_file(state: &mut State, path: PathBuf) -> Task<Message> {
+fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
+    Some(ReaderTab {
+        id: state.active_tab_id?,
+        file_path: state.file_path.clone()?,
+        document: state.document.clone()?,
+        current_page: state.current_page,
+        total_pages: state.total_pages,
+        zoom: state.zoom,
+        rendered_page: state.rendered_page.clone(),
+        page_cache: state.page_cache.clone(),
+        chapter_content: state.chapter_content.clone(),
+        continuous_pages: state.continuous_pages.clone(),
+        continuous_pending: state.continuous_pending.clone(),
+        continuous_visible: BTreeSet::new(),
+        continuous_chapters: state.continuous_chapters.clone(),
+        continuous_tail_extent: state.continuous_tail_extent,
+        render_generation: state.render_generation,
+        page_input: state.page_input.clone(),
+        error: state.error.clone(),
+        font_size: state.font_size,
+        line_spacing: state.line_spacing,
+        theme: state.theme,
+        reading_mode: state.reading_mode,
+        bookmarks: state.bookmarks.clone(),
+        show_bookmarks_panel: state.show_bookmarks_panel,
+        current_page_bookmarked: state.current_page_bookmarked,
+        editing_note_id: state.editing_note_id,
+        editing_note_text: state.editing_note_text.clone(),
+        show_search_bar: state.show_search_bar,
+        search_query: state.search_query.clone(),
+        search_results: state.search_results.clone(),
+        search_current: state.search_current,
+        search_text: state.search_text.clone(),
+    })
+}
+
+fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
+    state.active_tab_id = Some(tab.id);
+    state.file_path = Some(tab.file_path);
+    state.document = Some(tab.document);
+    state.current_page = tab.current_page;
+    state.total_pages = tab.total_pages;
+    state.zoom = tab.zoom;
+    state.rendered_page = tab.rendered_page;
+    state.page_cache = tab.page_cache;
+    state.chapter_content = tab.chapter_content;
+    state.continuous_pages = tab.continuous_pages;
+    state.continuous_pending = tab.continuous_pending;
+    state.continuous_visible = tab.continuous_visible;
+    state.continuous_chapters = tab.continuous_chapters;
+    state.continuous_tail_extent = tab.continuous_tail_extent;
+    state.page_input = tab.page_input;
+    state.error = tab.error;
+    state.font_size = tab.font_size;
+    state.line_spacing = tab.line_spacing;
+    state.theme = tab.theme;
+    state.reading_mode = tab.reading_mode;
+    state.bookmarks = tab.bookmarks;
+    state.show_bookmarks_panel = tab.show_bookmarks_panel;
+    state.current_page_bookmarked = tab.current_page_bookmarked;
+    state.editing_note_id = tab.editing_note_id;
+    state.editing_note_text = tab.editing_note_text;
+    state.show_search_bar = tab.show_search_bar;
+    state.search_query = tab.search_query;
+    state.search_results = tab.search_results;
+    state.search_current = tab.search_current;
+    state.search_text = tab.search_text;
+    state.search_loading = false;
+    state.render_generation = tab.render_generation;
+    state.search_document_generation = state.search_document_generation.wrapping_add(1);
+    state.search_query_generation = state.search_query_generation.wrapping_add(1);
+}
+
+fn save_active_tab(state: &mut State) {
+    if let (Some(index), Some(tab)) = (state.active_tab, capture_reader_tab(state))
+        && index < state.tabs.len()
+    {
+        state.tabs[index] = tab;
+    }
+}
+
+fn select_tab(state: &mut State, index: usize) -> Task<Message> {
+    if index >= state.tabs.len() {
+        return Task::none();
+    }
+    if state.active_tab == Some(index) {
+        state.screen = Screen::Reader;
+        return Task::none();
+    }
+    save_active_tab(state);
+    let tab = state.tabs[index].clone();
+    restore_reader_tab(state, tab);
+    state.continuous_activation = state.continuous_activation.wrapping_add(1);
+    state.active_tab = Some(index);
+    state.screen = Screen::Reader;
+    let search_task = if state.show_search_bar && !state.search_query.is_empty() {
+        perform_search(state)
+    } else {
+        Task::none()
+    };
+    let content_task = if state.reading_mode == ReadingMode::Continuous {
+        scroll_to_current_page(state)
+    } else if state.rendered_page.is_some() || matches!(state.document, Some(OpenDocument::Epub(_)))
+    {
+        Task::none()
+    } else {
+        refresh_content(state)
+    };
+    let bookmarks_task = if state.show_bookmarks_panel {
+        refresh_bookmarks(state)
+    } else {
+        Task::none()
+    };
+    Task::batch([content_task, search_task, bookmarks_task])
+}
+
+fn close_tab(state: &mut State, index: usize) -> Task<Message> {
+    if index >= state.tabs.len() {
+        return Task::none();
+    }
+    let previous_active = state.active_tab;
+    save_active_tab(state);
+    state.tabs.remove(index);
+    if state.tabs.is_empty() {
+        state.active_tab = None;
+        state.active_tab_id = None;
+        state.file_path = None;
+        state.document = None;
+        state.rendered_page = None;
+        state.continuous_pages.clear();
+        state.continuous_chapters.clear();
+        state.screen = Screen::Library;
+        state.render_generation = state.render_generation.wrapping_add(1);
+        state.search_document_generation = state.search_document_generation.wrapping_add(1);
+        return Task::done(Message::RefreshLibrary);
+    }
+    let next = match previous_active {
+        Some(active) if active > index => active - 1,
+        Some(active) if active < state.tabs.len() => active,
+        _ => index.min(state.tabs.len() - 1),
+    };
+    state.active_tab = None;
+    select_tab(state, next)
+}
+
+fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
+    if let Some(index) = state.tabs.iter().position(|tab| tab.file_path == path) {
+        return select_tab(state, index);
+    }
+    let document = match load_document(&path) {
+        Ok(document) => document,
+        Err(error) => {
+            state.open_error = Some(error);
+            return Task::none();
+        }
+    };
+    save_active_tab(state);
+    let tab_id = state.next_tab_id;
+    state.next_tab_id = state.next_tab_id.wrapping_add(1);
+    state.active_tab_id = Some(tab_id);
+    state.continuous_activation = state.continuous_activation.wrapping_add(1);
+    state.open_error = None;
+    install_document(state, path, document);
+    let task = refresh_content(state);
+    if let Some(tab) = capture_reader_tab(state) {
+        state.tabs.push(tab);
+        state.active_tab = Some(state.tabs.len() - 1);
+        state.screen = Screen::Reader;
+    }
+    task
+}
+
+fn load_document(path: &PathBuf) -> Result<OpenDocument, String> {
+    let ext = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "pdf" => PdfDoc::open(path)
+            .map(|document| OpenDocument::Pdf(Arc::new(document)))
+            .map_err(|error| format!("Failed to open PDF: {error}")),
+        "epub" => EpubDoc::open(path)
+            .map(|document| OpenDocument::Epub(Arc::new(document)))
+            .map_err(|error| format!("Failed to open EPUB: {error}")),
+        "cbz" => CbzDoc::open(path)
+            .map(|document| OpenDocument::Cbz(Arc::new(document)))
+            .map_err(|error| format!("Failed to open CBZ: {error}")),
+        _ => Err(format!("Unsupported file format: .{ext}")),
+    }
+}
+
+fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.render_generation = state.render_generation.wrapping_add(1);
@@ -968,6 +1758,11 @@ fn open_file(state: &mut State, path: PathBuf) -> Task<Message> {
     state.rendered_page = None;
     state.page_cache.clear();
     state.chapter_content = Vec::new();
+    state.continuous_pages.clear();
+    state.continuous_pending.clear();
+    state.continuous_visible.clear();
+    state.continuous_chapters.clear();
+    state.continuous_tail_extent = 0.0;
     state.show_search_bar = false;
     state.search_query.clear();
     state.search_results.clear();
@@ -975,78 +1770,79 @@ fn open_file(state: &mut State, path: PathBuf) -> Task<Message> {
     state.search_text = None;
     state.search_loading = false;
 
-    let ext = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    let result: Result<(), String> = match ext.as_str() {
-        "pdf" => match PdfDoc::open(&path) {
-            Ok(doc) => {
-                state.total_pages = doc.page_count();
-                state.document = Some(OpenDocument::Pdf(Arc::new(doc)));
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to open PDF: {e}")),
-        },
-        "epub" => match EpubDoc::open(&path) {
-            Ok(doc) => {
-                state.total_pages = doc.chapter_count();
-                state.document = Some(OpenDocument::Epub(Arc::new(doc)));
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to open EPUB: {e}")),
-        },
-        "cbz" => match CbzDoc::open(&path) {
-            Ok(doc) => {
-                state.total_pages = doc.page_count();
-                state.document = Some(OpenDocument::Cbz(Arc::new(doc)));
-                Ok(())
-            }
-            Err(e) => Err(format!("Failed to open CBZ: {e}")),
-        },
-        _ => Err(format!("Unsupported file format: .{ext}")),
+    state.total_pages = match &document {
+        OpenDocument::Pdf(document) => document.page_count(),
+        OpenDocument::Epub(document) => document.chapter_count(),
+        OpenDocument::Cbz(document) => document.page_count(),
     };
+    state.document = Some(document);
 
-    match result {
-        Ok(()) => {
-            // Restore reading position.
-            let saved = state
-                .reading_state
-                .as_ref()
-                .and_then(|store| store.get(&path));
-            if let Some(saved) = saved {
-                state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
-                if matches!(
-                    state.document,
-                    Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
-                ) {
-                    state.zoom = ZoomMode::Manual(saved.zoom);
-                }
-            } else {
-                state.current_page = 0;
-                state.zoom = ZoomMode::Manual(1.0);
-            }
-
-            state.page_input = format!("{}", state.current_page + 1);
-            state.file_path = Some(path);
-            update_bookmark_status(state);
-            // Load bookmarks for this file.
-            if let (Some(p), Some(store)) = (&state.file_path, &state.bookmark_store) {
-                state.bookmarks = store.list_for_file(p).unwrap_or_default();
-            }
-            return refresh_content(state);
+    let saved = state
+        .reading_state
+        .as_ref()
+        .and_then(|store| store.get(&path));
+    if let Some(saved) = saved {
+        state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
+        if matches!(
+            state.document,
+            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+        ) {
+            state.zoom = ZoomMode::Manual(saved.zoom);
         }
-        Err(msg) => {
-            state.error = Some(msg);
-        }
+    } else {
+        state.current_page = 0;
+        state.zoom = ZoomMode::Manual(1.0);
     }
 
-    Task::none()
+    state.page_input = format!("{}", state.current_page + 1);
+    state.file_path = Some(path);
+    update_bookmark_status(state);
+    if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
+        state.bookmarks = store.list_for_file(path).unwrap_or_default();
+    }
 }
 
 fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
     if let keyboard::Event::KeyPressed { key, modifiers, .. } = event {
+        if let keyboard::Key::Character(c) = key.as_ref() {
+            if c == "o" && modifiers.command() {
+                return Task::done(Message::OpenFile);
+            }
+            if c == "l" && modifiers.command() {
+                return Task::done(Message::ShowLibrary);
+            }
+            if c == "w"
+                && modifiers.command()
+                && state.screen == Screen::Reader
+                && let Some(index) = state.active_tab
+            {
+                return Task::done(Message::CloseTab(index));
+            }
+            if c == "b" && modifiers.command() && state.screen == Screen::Reader {
+                return Task::done(Message::ToggleBookmark);
+            }
+            if c == "f" && modifiers.command() && state.screen == Screen::Reader {
+                return Task::done(Message::ToggleSearchBar);
+            }
+            if modifiers.command()
+                && let Ok(number) = c.parse::<usize>()
+                && (1..=state.tabs.len()).contains(&number)
+            {
+                return Task::done(Message::SelectTab(number - 1));
+            }
+            if c == "/" && state.screen == Screen::Library {
+                return iced::widget::operation::focus(library_search_input_id());
+            }
+        }
+
+        if key.as_ref() == keyboard::Key::Named(keyboard::key::Named::Tab) && modifiers.control() {
+            return Task::done(Message::NextTab);
+        }
+
+        if state.screen != Screen::Reader {
+            return Task::none();
+        }
+
         match key.as_ref() {
             keyboard::Key::Named(keyboard::key::Named::ArrowRight)
             | keyboard::Key::Named(keyboard::key::Named::PageDown) => {
@@ -1057,22 +1853,18 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
                 return Task::done(Message::PrevPage);
             }
 
+            keyboard::Key::Named(keyboard::key::Named::Home) => {
+                return Task::done(Message::FirstPage);
+            }
+            keyboard::Key::Named(keyboard::key::Named::End) => {
+                return Task::done(Message::LastPage);
+            }
+
             keyboard::Key::Character(c) if c == "=" || c == "+" => {
                 return Task::done(Message::ZoomIn);
             }
             keyboard::Key::Character("-") => {
                 return Task::done(Message::ZoomOut);
-            }
-
-            keyboard::Key::Character(c) if c == "o" && modifiers.command() => {
-                return Task::done(Message::OpenFile);
-            }
-
-            // Ctrl+B: toggle bookmark on current page
-            keyboard::Key::Character(c) if c == "b" && modifiers.command() => {
-                if state.screen == Screen::Reader {
-                    return Task::done(Message::ToggleBookmark);
-                }
             }
 
             // B: toggle bookmarks panel
@@ -1082,11 +1874,9 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
                 }
             }
 
-            // Ctrl+F: toggle search bar
-            keyboard::Key::Character(c) if c == "f" && modifiers.command() => {
-                if state.screen == Screen::Reader {
-                    return Task::done(Message::ToggleSearchBar);
-                }
+            // C: switch between paginated and continuous reading.
+            keyboard::Key::Character(c) if c == "c" && !modifiers.command() => {
+                return Task::done(Message::ToggleReadingMode);
             }
 
             // Escape: close search bar if open, otherwise go to library
@@ -1162,9 +1952,57 @@ fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
 
 /// Refresh the visible content for the current page/chapter.
 fn refresh_content(state: &mut State) -> Task<Message> {
+    update_bookmark_status(state);
+
+    if state.reading_mode == ReadingMode::Continuous {
+        match &state.document {
+            Some(OpenDocument::Pdf(_)) => {
+                state.rendered_page = None;
+                if state.continuous_pages.len() != state.total_pages {
+                    state.continuous_pages = vec![None; state.total_pages];
+                }
+                state.error = None;
+                return Task::batch([
+                    reconcile_continuous_rasters(state),
+                    scroll_to_current_page(state),
+                ]);
+            }
+            Some(OpenDocument::Epub(doc)) => {
+                state.rendered_page = None;
+                state.continuous_chapters = doc
+                    .content
+                    .chapters
+                    .iter()
+                    .map(|chapter| {
+                        let base_path = chapter
+                            .path
+                            .rsplit_once('/')
+                            .map(|(directory, _)| directory)
+                            .unwrap_or("");
+                        parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
+                    })
+                    .collect();
+                state.error = None;
+                return scroll_to_current_page(state);
+            }
+            Some(OpenDocument::Cbz(_)) => {
+                state.rendered_page = None;
+                if state.continuous_pages.len() != state.total_pages {
+                    state.continuous_pages = vec![None; state.total_pages];
+                }
+                state.error = None;
+                return Task::batch([
+                    reconcile_continuous_rasters(state),
+                    scroll_to_current_page(state),
+                ]);
+            }
+            None => return Task::none(),
+        }
+    }
+
     state.render_generation = state.render_generation.wrapping_add(1);
     let generation = state.render_generation;
-    update_bookmark_status(state);
+    let tab_id = state.active_tab_id.unwrap_or(0);
     let pdf_highlights = current_page_search_highlights(state)
         .into_iter()
         .map(|highlight| {
@@ -1195,7 +2033,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             state.rendered_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(generation, key, move || {
+            return render_page_task(tab_id, generation, key, move || {
                 doc.render_page_with_highlights(page, scale, &pdf_highlights)
             });
         }
@@ -1233,7 +2071,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             state.rendered_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(generation, key, move || doc.render_page(page, scale));
+            return render_page_task(tab_id, generation, key, move || {
+                doc.render_page(page, scale)
+            });
         }
         None => {}
     }
@@ -1241,7 +2081,176 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
+fn search_highlights_for_page(state: &State, page: usize) -> Vec<(usize, usize, bool)> {
+    state
+        .search_results
+        .iter()
+        .enumerate()
+        .filter(|(_, result)| result.page == page)
+        .map(|(index, result)| (result.offset, result.length, index == state.search_current))
+        .collect()
+}
+
+fn render_continuous_page_task(
+    tab_id: u64,
+    request: ContinuousRequest,
+    page: usize,
+    render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(render)
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+        },
+        move |result| Message::ContinuousPageRendered {
+            tab_id,
+            request,
+            page,
+            result,
+        },
+    )
+}
+
+fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
+    iced::widget::Id::from(format!("continuous-reader-{tab_id}-{activation}"))
+}
+
+fn scroll_to_current_page(state: &State) -> Task<Message> {
+    if state.reading_mode != ReadingMode::Continuous {
+        return Task::none();
+    }
+    let Some(tab_id) = state.active_tab_id else {
+        return Task::none();
+    };
+    let activation = state.continuous_activation;
+    iced::advanced::widget::operate(ContinuousItemOperation::locate(
+        tab_id,
+        activation,
+        state.total_pages,
+        state.current_page,
+        state.continuous_tail_extent,
+    ))
+    .map(
+        move |(_, offset, tail_extent)| Message::ContinuousNavigationMeasured {
+            tab_id,
+            activation,
+            offset,
+            tail_extent,
+        },
+    )
+}
+
+fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
+    if !matches!(
+        state.document,
+        Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+    ) || state.reading_mode != ReadingMode::Continuous
+    {
+        return Task::none();
+    }
+    let Some(tab_id) = state.active_tab_id else {
+        return Task::none();
+    };
+    let mut desired = state.continuous_visible.iter().copied().collect::<Vec<_>>();
+    if state.current_page < state.total_pages && !desired.contains(&state.current_page) {
+        desired.push(state.current_page);
+    }
+    desired.sort_by_key(|page| (page.abs_diff(state.current_page), *page));
+    desired.truncate(CONTINUOUS_PAGE_CACHE_CAPACITY);
+    let desired = desired.into_iter().collect::<BTreeSet<_>>();
+
+    for (page, rendered) in state.continuous_pages.iter_mut().enumerate() {
+        if !desired.contains(&page) {
+            *rendered = None;
+        }
+    }
+
+    let active_ready = state
+        .continuous_pages
+        .iter()
+        .filter(|page| page.is_some())
+        .count();
+    let pending = state.continuous_pending.len()
+        + state
+            .tabs
+            .iter()
+            .filter(|tab| Some(tab.id) != state.active_tab_id)
+            .map(|tab| tab.continuous_pending.len())
+            .sum::<usize>();
+    let missing_desired = desired
+        .iter()
+        .filter(|page| {
+            state.continuous_pages[**page].is_none() && !state.continuous_pending.contains_key(page)
+        })
+        .count();
+    let mut inactive_ready_budget =
+        CONTINUOUS_PAGE_CACHE_CAPACITY.saturating_sub(active_ready + pending + missing_desired);
+    for tab in state
+        .tabs
+        .iter_mut()
+        .filter(|tab| Some(tab.id) != state.active_tab_id)
+    {
+        for rendered in &mut tab.continuous_pages {
+            if rendered.is_some() {
+                if inactive_ready_budget == 0 {
+                    *rendered = None;
+                } else {
+                    inactive_ready_budget -= 1;
+                }
+            }
+        }
+    }
+    let inactive_ready = state
+        .tabs
+        .iter()
+        .filter(|tab| Some(tab.id) != state.active_tab_id)
+        .flat_map(|tab| &tab.continuous_pages)
+        .filter(|page| page.is_some())
+        .count();
+    let mut occupied = active_ready + inactive_ready + pending;
+    let mut tasks = Vec::new();
+    for page in desired {
+        if occupied >= CONTINUOUS_PAGE_CACHE_CAPACITY {
+            break;
+        }
+        if state.continuous_pages[page].is_none() && !state.continuous_pending.contains_key(&page) {
+            let request = ContinuousRequest {
+                id: state.next_continuous_request_id,
+                generation: state.render_generation,
+            };
+            state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
+            state.continuous_pending.insert(page, request);
+            occupied += 1;
+            tasks.push(Task::done(Message::RenderContinuousPage { tab_id, page }));
+        }
+    }
+    Task::batch(tasks)
+}
+
+fn invalidate_continuous_rasters(state: &mut State) {
+    state.continuous_pages.fill(None);
+    state.render_generation = state.render_generation.wrapping_add(1);
+}
+
+fn invalidate_continuous_layout(state: &mut State) {
+    state.continuous_tail_extent = 0.0;
+    state.continuous_activation = state.continuous_activation.wrapping_add(1);
+    state.continuous_visible.clear();
+}
+
+fn content_navigation_task(state: &mut State) -> Task<Message> {
+    if state.reading_mode == ReadingMode::Continuous {
+        update_bookmark_status(state);
+        scroll_to_current_page(state)
+    } else {
+        refresh_content(state)
+    }
+}
+
 fn render_page_task(
+    tab_id: u64,
     generation: u64,
     key: PageCacheKey,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
@@ -1254,6 +2263,7 @@ fn render_page_task(
                 .and_then(|result| result.map_err(|error| error.to_string()))
         },
         move |result| Message::PageRendered {
+            tab_id,
             generation,
             key,
             result,
@@ -1287,12 +2297,19 @@ fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage)
 }
 
 fn refresh_bookmarks(state: &State) -> Task<Message> {
-    if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
+    if let (Some(tab_id), Some(path), Some(store)) =
+        (state.active_tab_id, &state.file_path, &state.bookmark_store)
+    {
         let store = store.clone();
         let path = path.clone();
+        let result_path = path.clone();
         Task::perform(
             async move { store.list_for_file_async(&path).await.unwrap_or_default() },
-            Message::BookmarksLoaded,
+            move |bookmarks| Message::BookmarksLoaded {
+                tab_id,
+                file_path: result_path.clone(),
+                bookmarks,
+            },
         )
     } else {
         Task::none()
@@ -1343,10 +2360,48 @@ fn save_library_cards_per_row(state: &State) {
     }
 }
 
+fn persist_window_geometry(state: &mut State) -> Task<Message> {
+    if state.window_geometry_saving {
+        return Task::none();
+    }
+    let Some(store) = state.reading_state.clone() else {
+        return state
+            .close_after_geometry_save
+            .take()
+            .map(window::close)
+            .unwrap_or_else(Task::none);
+    };
+    state.window_geometry_dirty = false;
+    state.window_geometry_saving = true;
+    let size = state.window_size;
+    let position = state.window_position;
+    Task::perform(
+        async move {
+            let mut values = vec![
+                (WINDOW_WIDTH_KEY, size.width.round() as i64),
+                (WINDOW_HEIGHT_KEY, size.height.round() as i64),
+            ];
+            if let Some(position) = position {
+                values.extend([
+                    (WINDOW_X_KEY, position.x.round() as i64),
+                    (WINDOW_Y_KEY, position.y.round() as i64),
+                ]);
+            }
+            if let Err(error) = store.set_pref_ints_async(&values).await {
+                eprintln!("warning: failed to save window geometry: {error}");
+            }
+        },
+        |_| Message::WindowGeometryPersisted,
+    )
+}
+
 fn perform_search(state: &mut State) -> Task<Message> {
     let query = state.search_query.clone();
     let document_generation = state.search_document_generation;
     let query_generation = state.search_query_generation;
+    let Some(tab_id) = state.active_tab_id else {
+        return Task::none();
+    };
     let Some(path) = state.file_path.clone() else {
         return Task::none();
     };
@@ -1361,6 +2416,7 @@ fn perform_search(state: &mut State) -> Task<Message> {
                 .unwrap_or_default()
             },
             move |results| Message::SearchPerformed {
+                tab_id,
                 document_generation,
                 query_generation,
                 results,
@@ -1396,23 +2452,36 @@ fn perform_search(state: &mut State) -> Task<Message> {
             .unwrap_or_else(|_| Arc::new(Vec::new()))
         },
         move |text| Message::SearchTextExtracted {
+            tab_id,
             document_generation,
             text,
         },
     )
 }
 
-fn navigate_to_current_search_result(state: &mut State) -> Option<Task<Message>> {
+fn navigate_to_current_search_result(
+    state: &mut State,
+    previous_highlights: &[SearchHighlight],
+) -> Task<Message> {
     if let Some(result) = state.search_results.get(state.search_current) {
         let target_page = result.page;
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
             state.page_input = format!("{}", state.current_page + 1);
             save_reading_state(state);
-            return Some(refresh_content(state));
         }
     }
-    None
+    if matches!(state.document, Some(OpenDocument::Pdf(_)))
+        && (state.reading_mode == ReadingMode::Continuous
+            || previous_highlights != current_page_search_highlights(state))
+    {
+        if state.reading_mode == ReadingMode::Continuous {
+            invalidate_continuous_rasters(state);
+        }
+        refresh_content(state)
+    } else {
+        content_navigation_task(state)
+    }
 }
 
 fn refresh_pdf_search_highlights_if_changed(
@@ -1420,8 +2489,12 @@ fn refresh_pdf_search_highlights_if_changed(
     previous_highlights: &[SearchHighlight],
 ) -> Task<Message> {
     if matches!(state.document, Some(OpenDocument::Pdf(_)))
-        && previous_highlights != current_page_search_highlights(state)
+        && (state.reading_mode == ReadingMode::Continuous
+            || previous_highlights != current_page_search_highlights(state))
     {
+        if state.reading_mode == ReadingMode::Continuous {
+            invalidate_continuous_rasters(state);
+        }
         return refresh_content(state);
     }
     Task::none()
@@ -1451,16 +2524,94 @@ pub fn view(state: &State) -> Element<'_, Message> {
                 main_content
             };
 
-            let mut layout = column![toolbar(state)].spacing(0);
+            let mut layout = column![tabs_view(state), toolbar(state)].spacing(0);
 
             if state.show_search_bar {
                 layout = layout.push(search_bar(state));
             }
 
-            layout = layout.push(body);
+            if let Some(error) = &state.open_error {
+                layout = layout.push(
+                    container(
+                        text(error)
+                            .size(13)
+                            .color(iced::Color::from_rgb(0.75, 0.1, 0.1)),
+                    )
+                    .padding([4, 10])
+                    .width(Length::Fill),
+                );
+            }
+
+            layout = layout.push(body).push(status_bar(state));
 
             layout.width(Length::Fill).height(Length::Fill).into()
         }
+    }
+}
+
+fn tabs_view(state: &State) -> Element<'_, Message> {
+    let mut tabs = row![].spacing(4).padding([4, 8]);
+    for (index, tab) in state.tabs.iter().enumerate() {
+        let name = tab
+            .file_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        let label = if state.active_tab == Some(index) {
+            format!("● {name}")
+        } else {
+            name.into_owned()
+        };
+        tabs = tabs.push(button(text(label).size(12)).on_press(Message::SelectTab(index)));
+        tabs = tabs.push(
+            button(text("×").size(12))
+                .padding([4, 6])
+                .on_press(Message::CloseTab(index)),
+        );
+    }
+    container(
+        scrollable(tabs).direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::default(),
+        )),
+    )
+    .width(Length::Fill)
+    .into()
+}
+
+fn status_bar(state: &State) -> Element<'_, Message> {
+    let kind = if matches!(state.document, Some(OpenDocument::Epub(_))) {
+        "Chapter"
+    } else {
+        "Page"
+    };
+    let percentage = reading_progress_percentage(state.current_page, state.total_pages);
+    let mode = match state.reading_mode {
+        ReadingMode::Paginated => "Paginated",
+        ReadingMode::Continuous => "Continuous",
+    };
+    container(
+        row![
+            text(format!(
+                "{kind} {} of {}  •  {percentage}%",
+                state.current_page.saturating_add(1),
+                state.total_pages
+            ))
+            .size(12),
+            iced::widget::Space::new().width(Length::Fill),
+            text(format!("{mode} mode")).size(12),
+        ]
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([5, 10])
+    .width(Length::Fill)
+    .into()
+}
+
+fn reading_progress_percentage(current_page: usize, total_pages: usize) -> u32 {
+    if total_pages == 0 {
+        0
+    } else {
+        (((current_page + 1) as f32 / total_pages as f32) * 100.0).round() as u32
     }
 }
 
@@ -1509,6 +2660,18 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         page_label.into(),
         next_btn.into(),
     ];
+
+    if has_doc {
+        let mode_label = match state.reading_mode {
+            ReadingMode::Paginated => "Mode: Paginated",
+            ReadingMode::Continuous => "Mode: Continuous",
+        };
+        toolbar_items.push(
+            button(mode_label)
+                .on_press(Message::ToggleReadingMode)
+                .into(),
+        );
+    }
 
     // PDF: zoom controls
     if is_pdf_or_cbz || !has_doc {
@@ -1755,9 +2918,158 @@ fn content_view(state: &State) -> Element<'_, Message> {
             .into();
     }
 
+    if state.reading_mode == ReadingMode::Continuous {
+        return continuous_content_view(state);
+    }
+
     match &state.document {
         Some(OpenDocument::Pdf(_) | OpenDocument::Cbz(_)) => pdf_page_view(state),
         Some(OpenDocument::Epub(_)) => epub_chapter_view(state),
+        None => welcome_view(),
+    }
+}
+
+fn continuous_content_view(state: &State) -> Element<'_, Message> {
+    let tab_id = state.active_tab_id.unwrap_or(0);
+    let activation = state.continuous_activation;
+    match &state.document {
+        Some(OpenDocument::Pdf(_) | OpenDocument::Cbz(_)) => {
+            let mut pages = column![].spacing(20).padding(20).width(Length::Fill);
+            for (index, rendered) in state.continuous_pages.iter().enumerate() {
+                let content: Element<'_, Message> = if let Some(rendered) = rendered {
+                    let handle = image::Handle::from_rgba(
+                        rendered.width,
+                        rendered.height,
+                        rendered.pixels.clone(),
+                    );
+                    image(handle)
+                        .width(Length::Fixed(rendered.width as f32))
+                        .height(Length::Fixed(rendered.height as f32))
+                        .into()
+                } else {
+                    let page_height = match &state.document {
+                        Some(OpenDocument::Pdf(doc)) => doc.page_size(index).ok(),
+                        Some(OpenDocument::Cbz(doc)) => doc.page_size(index).ok(),
+                        _ => None,
+                    }
+                    .map(|(_, height)| height * state.zoom.scale())
+                    .unwrap_or(600.0);
+                    center(text("Rendering...")).height(page_height).into()
+                };
+                let page = container(
+                    column![text(format!("Page {}", index + 1)).size(12), content]
+                        .spacing(4)
+                        .align_x(iced::Alignment::Center)
+                        .width(Length::Fill),
+                )
+                .id(continuous_item_id(tab_id, activation, index))
+                .width(Length::Fill);
+                let generation = state.render_generation;
+                pages = pages.push(
+                    sensor(page)
+                        .key((generation, index))
+                        .anticipate(1000)
+                        .on_show(move |_| Message::ContinuousItemVisibility {
+                            tab_id,
+                            activation,
+                            page: index,
+                            visible: true,
+                        })
+                        .on_hide(Message::ContinuousItemVisibility {
+                            tab_id,
+                            activation,
+                            page: index,
+                            visible: false,
+                        }),
+                );
+            }
+            pages = pages.push(iced::widget::Space::new().height(state.continuous_tail_extent));
+            scrollable(pages)
+                .id(continuous_scroll_id(tab_id, activation))
+                .on_scroll(move |viewport| Message::ContinuousScrolled {
+                    tab_id,
+                    activation,
+                    offset: viewport.absolute_offset().y,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
+        Some(OpenDocument::Epub(doc)) => {
+            let mut chapters = column![].spacing(32).padding(20).width(Length::Fill);
+            for (chapter_index, nodes) in state.continuous_chapters.iter().enumerate() {
+                let mut chapter = column![].spacing(state.font_size * state.line_spacing);
+                if let Some(title) = doc
+                    .chapter(chapter_index)
+                    .and_then(|chapter| chapter.title.as_ref())
+                    .filter(|title| !content_starts_with_heading(nodes, title))
+                {
+                    chapter = chapter.push(
+                        text(title.clone())
+                            .size(state.font_size * 1.5)
+                            .color(state.theme.text_color()),
+                    );
+                }
+                let highlights = search_highlight_models_for_page(state, chapter_index);
+                let mut text_offset = 0;
+                for node in nodes {
+                    chapter = chapter.push(render_content_node(
+                        node,
+                        state.font_size,
+                        state.theme.text_color(),
+                        &doc.content.resources,
+                        text_offset,
+                        &highlights,
+                    ));
+                    text_offset += content_node_text_len(node) + 1;
+                }
+                chapters = chapters.push(
+                    sensor(
+                        container(chapter.width(Length::Fill))
+                            .id(continuous_item_id(tab_id, activation, chapter_index))
+                            .width(Length::Fill),
+                    )
+                    .key(chapter_index)
+                    .on_show(move |_| Message::ContinuousItemVisibility {
+                        tab_id,
+                        activation,
+                        page: chapter_index,
+                        visible: true,
+                    })
+                    .on_hide(Message::ContinuousItemVisibility {
+                        tab_id,
+                        activation,
+                        page: chapter_index,
+                        visible: false,
+                    }),
+                );
+            }
+            chapters =
+                chapters.push(iced::widget::Space::new().height(state.continuous_tail_extent));
+            let content = container(chapters)
+                .max_width(800)
+                .width(Length::Fill)
+                .center_x(Length::Fill);
+            let background = state.theme.background();
+            container(
+                scrollable(content)
+                    .id(continuous_scroll_id(tab_id, activation))
+                    .on_scroll(move |viewport| Message::ContinuousScrolled {
+                        tab_id,
+                        activation,
+                        offset: viewport.absolute_offset().y,
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+            )
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(background)),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        }
         None => welcome_view(),
     }
 }
@@ -1793,11 +3105,15 @@ struct SearchHighlight {
 }
 
 fn current_page_search_highlights(state: &State) -> Vec<SearchHighlight> {
+    search_highlight_models_for_page(state, state.current_page)
+}
+
+fn search_highlight_models_for_page(state: &State, page: usize) -> Vec<SearchHighlight> {
     state
         .search_results
         .iter()
         .enumerate()
-        .filter(|(_, result)| result.page == state.current_page)
+        .filter(|(_, result)| result.page == page)
         .map(|(index, result)| SearchHighlight {
             start: result.offset,
             end: result.offset + result.length,
@@ -1817,6 +3133,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     if let Some(OpenDocument::Epub(doc)) = &state.document
         && let Some(chapter) = doc.chapter(state.current_page)
         && let Some(title) = &chapter.title
+        && !content_starts_with_heading(&state.chapter_content, title)
     {
         content_col = content_col.push(text(title.clone()).size(font_size * 1.5).color(text_color));
     }
@@ -1856,6 +3173,12 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+fn content_starts_with_heading(nodes: &[ContentNode], title: &str) -> bool {
+    nodes.first().is_some_and(
+        |node| matches!(node, ContentNode::Heading { text, .. } if text.trim() == title.trim()),
+    )
 }
 
 fn render_content_node<'a>(
@@ -2409,6 +3732,7 @@ fn content_node_text_len(node: &ContentNode) -> usize {
 
 fn library_view(state: &State) -> Element<'_, Message> {
     let search_input = text_input("Search by title or author...", &state.library_search)
+        .id(library_search_input_id())
         .on_input(Message::LibrarySearchChanged)
         .width(300);
 
@@ -2539,6 +3863,10 @@ fn library_view(state: &State) -> Element<'_, Message> {
     column![header, content].into()
 }
 
+fn library_search_input_id() -> iced::widget::Id {
+    iced::widget::Id::new("library-search-query")
+}
+
 fn render_book_card<'a>(book: &Book, width: f32, height: f32) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
 
@@ -2634,12 +3962,16 @@ pub fn title(state: &State) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn subscription(_state: &State) -> Subscription<Message> {
-    keyboard::listen().map(Message::KeyPressed)
+    Subscription::batch([
+        keyboard::listen().map(Message::KeyPressed),
+        window::events().map(|(id, event)| Message::WindowEvent(id, event)),
+    ])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iced::advanced::widget::Operation;
 
     #[test]
     fn boot_defers_storage_initialization() {
@@ -2650,52 +3982,61 @@ mod tests {
         assert!(task.units() > 0);
     }
 
+    #[test]
+    fn status_progress_is_page_based_and_handles_empty_documents() {
+        assert_eq!(reading_progress_percentage(0, 0), 0);
+        assert_eq!(reading_progress_percentage(0, 4), 25);
+        assert_eq!(reading_progress_percentage(2, 4), 75);
+        assert_eq!(reading_progress_percentage(3, 4), 100);
+    }
+
+    #[test]
+    fn continuous_position_uses_measured_item_boundaries() {
+        let mut operation = ContinuousItemOperation::resolve(1, 0, 3, 500.0);
+        operation.content_top = Some(100.0);
+        operation.item_bounds = vec![
+            Some(iced::Rectangle::new(
+                Point::new(0.0, 100.0),
+                Size::new(100.0, 800.0),
+            )),
+            Some(iced::Rectangle::new(
+                Point::new(0.0, 900.0),
+                Size::new(100.0, 100.0),
+            )),
+            Some(iced::Rectangle::new(
+                Point::new(0.0, 1000.0),
+                Size::new(100.0, 100.0),
+            )),
+        ];
+
+        assert!(matches!(
+            operation.finish(),
+            operation::Outcome::Some((0, _, _))
+        ));
+
+        let mut navigation = ContinuousItemOperation::locate(1, 0, 3, 1, 0.0);
+        navigation.content_top = operation.content_top;
+        navigation.item_bounds = operation.item_bounds;
+        navigation.content_height = Some(1000.0);
+        navigation.viewport_height = Some(700.0);
+        assert!(matches!(
+            navigation.finish(),
+            operation::Outcome::Some((1, offset, tail_extent))
+                if offset == 800.0 && tail_extent == 500.0
+        ));
+    }
+
     fn state_with_document(document: OpenDocument) -> State {
-        State {
-            screen: Screen::Reader,
-            file_path: None,
-            document: Some(document),
-            current_page: 0,
-            total_pages: 1,
-            zoom: ZoomMode::default(),
-            rendered_page: None,
-            page_cache: VecDeque::new(),
-            render_generation: 0,
-            chapter_content: Vec::new(),
-            page_input: "1".to_string(),
-            error: None,
-            font_size: 16.0,
-            line_spacing: 1.6,
-            theme: ReaderTheme::default(),
-            reading_state: None,
-            library: None,
-            bookmark_store: None,
-            bookmarks: Vec::new(),
-            show_bookmarks_panel: false,
-            current_page_bookmarked: false,
-            editing_note_id: None,
-            editing_note_text: String::new(),
-            show_search_bar: false,
-            search_query: String::new(),
-            search_results: Vec::new(),
-            search_current: 0,
-            search_text: None,
-            search_loading: false,
-            search_document_generation: 0,
-            search_query_generation: 0,
-            library_books: Vec::new(),
-            library_search: String::new(),
-            library_filter: None,
-            library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
-            library_has_more: false,
-            library_loading: false,
-            library_generation: 0,
-            library_book_ids: Arc::new(Vec::new()),
-            library_offset: 0,
-            storage_initializing: false,
-            storage_error: None,
-            pending_open: None,
-        }
+        let (mut state, _) = boot();
+        state.screen = Screen::Reader;
+        state.active_tab_id = Some(1);
+        state.next_tab_id = 2;
+        state.document = Some(document);
+        state.total_pages = 1;
+        state.page_input = "1".to_string();
+        state.library_loading = false;
+        state.storage_initializing = false;
+        state
     }
 
     fn test_book(id: i64) -> Book {
@@ -2710,6 +4051,612 @@ mod tests {
             date_added: "2026-01-01".to_string(),
             last_read: None,
         }
+    }
+
+    #[test]
+    fn switching_tabs_preserves_each_documents_reader_state() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.current_page = 1;
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.active_tab_id = Some(2);
+        state.current_page = 0;
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(&mut state, Message::SelectTab(0));
+        assert_eq!(
+            state.file_path.as_deref(),
+            Some(std::path::Path::new("first.epub"))
+        );
+        assert_eq!(state.current_page, 1);
+
+        let _ = update(&mut state, Message::SelectTab(1));
+        assert_eq!(
+            state.file_path.as_deref(),
+            Some(std::path::Path::new("second.epub"))
+        );
+        assert_eq!(state.current_page, 0);
+    }
+
+    #[test]
+    fn closing_a_background_tab_keeps_the_active_document() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("first.epub"));
+        let first = capture_reader_tab(&state).unwrap();
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.active_tab_id = Some(2);
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(&mut state, Message::CloseTab(0));
+
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.active_tab, Some(0));
+        assert_eq!(
+            state.file_path.as_deref(),
+            Some(std::path::Path::new("second.epub"))
+        );
+    }
+
+    #[test]
+    fn continuous_epub_mode_builds_every_chapter() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let chapter_count = epub.chapter_count();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.total_pages = chapter_count;
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        assert_eq!(state.continuous_chapters.len(), chapter_count);
+        assert!(
+            state
+                .continuous_chapters
+                .iter()
+                .all(|chapter| !chapter.is_empty())
+        );
+    }
+
+    #[test]
+    fn continuous_raster_cache_is_bounded_around_visible_pages() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.continuous_pages = (0..12)
+            .map(|_| {
+                Some(RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                })
+            })
+            .collect();
+        state.continuous_visible.extend(0..12);
+
+        state.reading_mode = ReadingMode::Continuous;
+        let _ = reconcile_continuous_rasters(&mut state);
+
+        assert_eq!(
+            state
+                .continuous_pages
+                .iter()
+                .filter(|page| page.is_some())
+                .count(),
+            CONTINUOUS_PAGE_CACHE_CAPACITY
+        );
+        assert!(state.continuous_pages[6].is_some());
+    }
+
+    #[test]
+    fn continuous_scheduler_bounds_pending_and_ready_rasters_together() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = 12;
+        state.current_page = 6;
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None; 12];
+        state.continuous_visible.extend(0..12);
+
+        let task = reconcile_continuous_rasters(&mut state);
+
+        assert_eq!(task.units(), CONTINUOUS_PAGE_CACHE_CAPACITY);
+        assert_eq!(
+            state.continuous_pending.len()
+                + state
+                    .continuous_pages
+                    .iter()
+                    .filter(|page| page.is_some())
+                    .count(),
+            CONTINUOUS_PAGE_CACHE_CAPACITY
+        );
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+    }
+
+    #[test]
+    fn stale_continuous_completion_releases_its_pending_slot() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        let request = ContinuousRequest {
+            id: 1,
+            generation: 1,
+        };
+        state.continuous_pending.insert(0, request);
+        state.render_generation = 2;
+
+        let task = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Ok(RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                }),
+            },
+        );
+
+        assert_eq!(
+            task.units(),
+            1,
+            "the page must be eligible for resubmission"
+        );
+        assert!(state.continuous_pending.contains_key(&0));
+        assert!(state.continuous_pages[0].is_none());
+    }
+
+    #[test]
+    fn old_continuous_completion_cannot_remove_a_newer_request() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        let old_request = ContinuousRequest {
+            id: 1,
+            generation: 1,
+        };
+        let new_request = ContinuousRequest {
+            id: 2,
+            generation: 1,
+        };
+        state.continuous_pending.insert(0, new_request);
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request: old_request,
+                page: 0,
+                result: Ok(RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                }),
+            },
+        );
+
+        assert_eq!(state.continuous_pending.get(&0), Some(&new_request));
+        assert!(state.continuous_pages[0].is_none());
+    }
+
+    #[test]
+    fn continuous_completion_is_saved_while_its_tab_is_inactive() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.file_path = Some(PathBuf::from("first.cbz"));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        let request = ContinuousRequest {
+            id: 1,
+            generation: state.render_generation,
+        };
+        state.continuous_pending.insert(0, request);
+        let first = capture_reader_tab(&state).unwrap();
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.cbz"));
+        state.continuous_pending.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Ok(RenderedPage {
+                    width: 7,
+                    height: 7,
+                    pixels: bytes::Bytes::from(vec![0; 7 * 7 * 4]),
+                }),
+            },
+        );
+
+        assert!(state.tabs[0].continuous_pending.is_empty());
+        assert_eq!(
+            state.tabs[0].continuous_pages[0]
+                .as_ref()
+                .map(|page| page.width),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn continuous_pdf_search_navigation_invalidates_cached_highlights() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![Some(RenderedPage {
+            width: 1,
+            height: 1,
+            pixels: bytes::Bytes::from(vec![0; 4]),
+        })];
+        state.continuous_visible.insert(0);
+        state.search_results = vec![
+            SearchMatch {
+                page: 0,
+                offset: 0,
+                length: 3,
+                context: "first".to_string(),
+            },
+            SearchMatch {
+                page: 0,
+                offset: 4,
+                length: 3,
+                context: "second".to_string(),
+            },
+        ];
+        let previous_highlights = current_page_search_highlights(&state);
+        let previous_generation = state.render_generation;
+        state.search_current = 1;
+
+        let task = navigate_to_current_search_result(&mut state, &previous_highlights);
+
+        assert!(state.render_generation > previous_generation);
+        assert!(state.continuous_pages[0].is_none());
+        assert!(state.continuous_pending.contains_key(&0));
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn closing_continuous_pdf_search_invalidates_other_pages() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![
+            Some(RenderedPage {
+                width: 1,
+                height: 1,
+                pixels: bytes::Bytes::from(vec![0; 4]),
+            }),
+            Some(RenderedPage {
+                width: 1,
+                height: 1,
+                pixels: bytes::Bytes::from(vec![0; 4]),
+            }),
+        ];
+        state.total_pages = 2;
+        state.search_results = vec![SearchMatch {
+            page: 1,
+            offset: 0,
+            length: 3,
+            context: "other page".to_string(),
+        }];
+        let previous_highlights = current_page_search_highlights(&state);
+        state.search_results.clear();
+
+        let _ = refresh_pdf_search_highlights_if_changed(&mut state, &previous_highlights);
+
+        assert!(state.continuous_pages.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn continuous_position_messages_are_scoped_to_the_active_tab() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = 2;
+        let activation = state.continuous_activation;
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousItemResolved {
+                tab_id: 2,
+                activation,
+                page: 1,
+            },
+        );
+
+        assert_eq!(state.current_page, 0);
+    }
+
+    #[test]
+    fn continuous_position_messages_are_scoped_to_the_activation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = 2;
+        state.continuous_activation = 3;
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousItemResolved {
+                tab_id: 1,
+                activation: 2,
+                page: 1,
+            },
+        );
+
+        assert_eq!(state.current_page, 0);
+    }
+
+    #[test]
+    fn removing_or_resizing_continuous_view_invalidates_its_layout_epoch() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_tail_extent = 500.0;
+        let first_activation = state.continuous_activation;
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        assert!(state.continuous_activation > first_activation);
+        assert_eq!(state.continuous_tail_extent, 0.0);
+
+        let second_activation = state.continuous_activation;
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_tail_extent = 300.0;
+        let task = update(
+            &mut state,
+            Message::WindowEvent(
+                window::Id::unique(),
+                window::Event::Resized(Size::new(800.0, 600.0)),
+            ),
+        );
+        assert!(state.continuous_activation > second_activation);
+        assert_eq!(state.continuous_tail_extent, 0.0);
+        assert!(task.units() > 1, "resize must persist and remeasure layout");
+    }
+
+    #[test]
+    fn continuous_home_and_end_keyboard_navigation_is_dispatched() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = 2;
+
+        for key in [keyboard::key::Named::Home, keyboard::key::Named::End] {
+            let task = handle_key_event(
+                &state,
+                keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(key),
+                    modified_key: keyboard::Key::Named(key),
+                    physical_key: keyboard::key::Physical::Unidentified(
+                        keyboard::key::NativeCode::Unidentified,
+                    ),
+                    location: keyboard::Location::Standard,
+                    modifiers: keyboard::Modifiers::empty(),
+                    text: None,
+                    repeat: false,
+                },
+            );
+            assert!(task.units() > 0);
+        }
+
+        state.current_page = 1;
+        assert!(update(&mut state, Message::FirstPage).units() > 0);
+        assert_eq!(state.current_page, 0);
+        assert!(update(&mut state, Message::LastPage).units() > 0);
+        assert_eq!(state.current_page, 1);
+    }
+
+    #[test]
+    fn tab_switch_preserves_completed_continuous_rasters() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![Some(RenderedPage {
+            width: 7,
+            height: 7,
+            pixels: bytes::Bytes::from(vec![0; 7 * 7 * 4]),
+        })];
+        let first = capture_reader_tab(&state).unwrap();
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.continuous_pages.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(&mut state, Message::SelectTab(0));
+
+        assert_eq!(
+            state.continuous_pages[0].as_ref().map(|page| page.width),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn stale_bookmark_completion_cannot_replace_another_tabs_bookmarks() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+
+        let _ = update(
+            &mut state,
+            Message::BookmarksLoaded {
+                tab_id: 1,
+                file_path: PathBuf::from("first.epub"),
+                bookmarks: vec![Bookmark {
+                    id: 1,
+                    file_path: "first.epub".to_string(),
+                    page: 0,
+                    title: None,
+                    note: None,
+                    color: "yellow".to_string(),
+                    created_at: "now".to_string(),
+                }],
+            },
+        );
+
+        assert!(state.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn restoring_a_tab_restarts_its_interrupted_search() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.show_search_bar = true;
+        state.search_query = "chapter".to_string();
+        state.search_loading = true;
+        let first = capture_reader_tab(&state).unwrap();
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.show_search_bar = false;
+        state.search_query.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let task = update(&mut state, Message::SelectTab(0));
+
+        assert!(!state.search_loading || task.units() > 0);
+        assert!(
+            task.units() > 0,
+            "restored query must have a live search task"
+        );
+    }
+
+    #[test]
+    fn window_geometry_writes_are_debounced() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let id = window::Id::unique();
+
+        let first = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::Resized(Size::new(800.0, 600.0))),
+        );
+        let first_generation = state.window_geometry_generation;
+        let second = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::Resized(Size::new(900.0, 700.0))),
+        );
+
+        assert!(first.units() > 0 && second.units() > 0);
+        assert!(state.window_geometry_generation > first_generation);
+        assert_eq!(
+            update(&mut state, Message::PersistWindowGeometry(first_generation)).units(),
+            0,
+            "an obsolete debounce must not write geometry"
+        );
+    }
+
+    #[tokio::test]
+    async fn close_flushes_the_latest_geometry_after_an_inflight_save() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let directory = tempfile::tempdir().unwrap();
+        state.reading_state = Some(
+            ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+                .await
+                .unwrap(),
+        );
+        let id = window::Id::unique();
+        state.window_geometry_dirty = true;
+        state.window_geometry_saving = true;
+
+        assert_eq!(
+            update(
+                &mut state,
+                Message::WindowEvent(id, window::Event::CloseRequested)
+            )
+            .units(),
+            0,
+            "close must wait for the in-flight snapshot"
+        );
+        assert_eq!(state.close_after_geometry_save, Some(id));
+        assert!(state.window_geometry_dirty);
+
+        let latest_save = update(&mut state, Message::WindowGeometryPersisted);
+        assert!(latest_save.units() > 0);
+        assert!(state.window_geometry_saving);
+        assert_eq!(state.close_after_geometry_save, Some(id));
+
+        let close = update(&mut state, Message::WindowGeometryPersisted);
+        assert!(close.units() > 0);
+        assert!(!state.window_geometry_saving);
+        assert!(state.close_after_geometry_save.is_none());
     }
 
     #[test]
@@ -2886,6 +4833,7 @@ mod tests {
         let _ = update(
             &mut state,
             Message::SearchTextExtracted {
+                tab_id: 1,
                 document_generation: 1,
                 text: Arc::new(vec!["stale text".to_string()]),
             },
@@ -2893,6 +4841,7 @@ mod tests {
         let _ = update(
             &mut state,
             Message::SearchPerformed {
+                tab_id: 1,
                 document_generation: 2,
                 query_generation: 1,
                 results: vec![SearchMatch {
@@ -2935,6 +4884,7 @@ mod tests {
         let _ = update(
             &mut state,
             Message::PageRendered {
+                tab_id: 1,
                 generation: first_generation,
                 key: PageCacheKey {
                     page: 0,
@@ -2955,6 +4905,7 @@ mod tests {
         let _ = update(
             &mut state,
             Message::PageRendered {
+                tab_id: 1,
                 generation: second_generation,
                 key: PageCacheKey {
                     page: 0,
@@ -2972,7 +4923,37 @@ mod tests {
     }
 
     #[test]
-    fn failed_open_invalidates_an_in_flight_page_render() {
+    fn render_completion_from_another_tab_is_rejected() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.render_generation = 4;
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 2,
+                generation: 4,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
+                result: Ok(RenderedPage {
+                    width: 99,
+                    height: 99,
+                    pixels: bytes::Bytes::from(vec![0; 99 * 99 * 4]),
+                }),
+            },
+        );
+
+        assert!(state.rendered_page.is_none());
+    }
+
+    #[test]
+    fn failed_open_preserves_the_active_document_and_render_state() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
@@ -2981,14 +4962,19 @@ mod tests {
 
         let render_task = refresh_content(&mut state);
         let old_generation = state.render_generation;
-        let open_task = open_file(&mut state, PathBuf::from("unsupported.txt"));
+        let old_document = state.document.clone();
+        let open_task = open_document(&mut state, PathBuf::from("unsupported.txt"));
 
         assert!(render_task.units() > 0);
         assert_eq!(open_task.units(), 0);
-        assert!(state.render_generation > old_generation);
+        assert_eq!(state.render_generation, old_generation);
+        assert!(matches!(
+            (&state.document, old_document),
+            (Some(OpenDocument::Cbz(_)), Some(OpenDocument::Cbz(_)))
+        ));
         assert!(
             state
-                .error
+                .open_error
                 .as_deref()
                 .is_some_and(|error| error.contains("Unsupported"))
         );
@@ -2996,6 +4982,7 @@ mod tests {
         let _ = update(
             &mut state,
             Message::PageRendered {
+                tab_id: 1,
                 generation: old_generation,
                 key: PageCacheKey {
                     page: 0,
@@ -3010,12 +4997,9 @@ mod tests {
             },
         );
 
-        assert!(state.rendered_page.is_none());
-        assert!(
-            state
-                .error
-                .as_deref()
-                .is_some_and(|error| error.contains("Unsupported"))
+        assert_eq!(
+            state.rendered_page.as_ref().map(|page| page.width),
+            Some(10)
         );
     }
 

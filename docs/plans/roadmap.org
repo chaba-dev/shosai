@@ -202,7 +202,7 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 * Phase 4 — Polish & Advanced Features
 :PROPERTIES:
 :PHASE: 4
-:STATUS: TODO
+:STATUS: DONE
 :END:
 
 *Goal*: Make it a daily-driver reader.
@@ -229,12 +229,12 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 - [X] Lazy loading for large libraries (infinite-scrolling grid)
 - [X] Profile and optimize startup time
 
-** TODO Reading experience improvements
-- [ ] Continuous scroll mode (vs. paginated mode)
-- [ ] Keyboard-driven navigation throughout the app
-- [ ] Remember window size and position
-- [ ] Multiple open documents (tabs or separate windows)
-- [ ] Status bar: current page, total pages, reading progress percentage
+** DONE Reading experience improvements
+- [X] Continuous scroll mode (vs. paginated mode)
+- [X] Keyboard-driven navigation throughout the app
+- [X] Remember window size and position
+- [X] Multiple open documents (tabs or separate windows)
+- [X] Status bar: current page, total pages, reading progress percentage
 
 * Phase 5 — Future & Stretch Goals
 :PROPERTIES:

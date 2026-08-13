@@ -12,8 +12,11 @@ path = "src/main.rs"
 shosai-core.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
-iced = { version = "0.14", features = ["image", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "image", "tokio"] }
 rfd = "0.15"
-tokio = { version = "1", features = ["fs"] }
+tokio = { version = "1", features = ["fs", "macros", "rt"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 open = "5.3.3"
+
+[dev-dependencies]
+tempfile = "3.27.0"

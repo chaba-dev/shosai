@@ -185,6 +185,28 @@ impl ReadingStateStore {
 
         Ok(())
     }
+
+    /// Async: atomically set multiple integer preferences.
+    pub async fn set_pref_ints_async(&self, values: &[(&str, i64)]) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        for (key, value) in values {
+            sqlx::query(
+                "INSERT INTO preferences (key, value, updated_at)
+                 VALUES (?, ?, datetime('now'))
+                 ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at",
+            )
+            .bind(key)
+            .bind(value.to_string())
+            .execute(&mut *transaction)
+            .await
+            .context("failed to save preference")?;
+        }
+        transaction.commit().await?;
+
+        Ok(())
+    }
 }
 
 /// Convert a file path to a canonical string key.
