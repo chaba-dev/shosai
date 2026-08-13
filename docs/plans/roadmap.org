@@ -223,7 +223,7 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 - [X] Highlight search matches in the reader view
 
 ** TODO Performance optimization
-- [ ] Async page rendering (background thread / ~tokio::task::spawn_blocking~)
+- [X] Async page rendering (background thread / ~tokio::task::spawn_blocking~)
 - [ ] LRU page cache (keep N rendered pages in memory)
 - [ ] Background thumbnail generation for library view
 - [ ] Lazy loading for large libraries (virtualized list)

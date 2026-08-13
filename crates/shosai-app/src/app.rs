@@ -23,9 +23,9 @@ use shosai_core::search::SearchMatch;
 
 #[derive(Debug)]
 enum OpenDocument {
-    Pdf(PdfDoc),
-    Epub(EpubDoc),
-    Cbz(CbzDoc),
+    Pdf(Arc<PdfDoc>),
+    Epub(Arc<EpubDoc>),
+    Cbz(Arc<CbzDoc>),
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +93,7 @@ pub struct State {
     total_pages: usize,
     zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
+    render_generation: u64,
     chapter_content: Vec<ContentNode>,
     page_input: String,
     error: Option<String>,
@@ -244,6 +245,12 @@ pub enum Message {
     SearchPrev,
     CloseSearch,
 
+    // Background page rendering
+    PageRendered {
+        generation: u64,
+        result: Result<RenderedPage, String>,
+    },
+
     // Keyboard
     KeyPressed(keyboard::Event),
 }
@@ -284,6 +291,7 @@ pub fn boot() -> (State, Task<Message>) {
         total_pages: 0,
         zoom: ZoomMode::default(),
         rendered_page: None,
+        render_generation: 0,
         chapter_content: Vec::new(),
         page_input: String::new(),
         error: None,
@@ -346,7 +354,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FileSelected(Some(path)) => {
-            open_file(state, path);
+            return open_file(state, path);
         }
 
         Message::FileSelected(None) => {}
@@ -355,8 +363,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.document.is_some() && state.current_page + 1 < state.total_pages {
                 state.current_page += 1;
                 state.page_input = format!("{}", state.current_page + 1);
-                refresh_content(state);
                 save_reading_state(state);
+                return refresh_content(state);
             }
         }
 
@@ -364,8 +372,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.document.is_some() && state.current_page > 0 {
                 state.current_page -= 1;
                 state.page_input = format!("{}", state.current_page + 1);
-                refresh_content(state);
                 save_reading_state(state);
+                return refresh_content(state);
             }
         }
 
@@ -379,8 +387,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && page_num <= state.total_pages
             {
                 state.current_page = page_num - 1;
-                refresh_content(state);
                 save_reading_state(state);
+                state.page_input = format!("{}", state.current_page + 1);
+                return refresh_content(state);
             }
             state.page_input = format!("{}", state.current_page + 1);
         }
@@ -392,8 +401,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             ) {
                 let new_scale = (state.zoom.scale() + 0.25).min(5.0);
                 state.zoom = ZoomMode::Manual(new_scale);
-                refresh_content(state);
                 save_reading_state(state);
+                return refresh_content(state);
             }
         }
 
@@ -404,21 +413,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             ) {
                 let new_scale = (state.zoom.scale() - 0.25).max(0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
-                refresh_content(state);
                 save_reading_state(state);
+                return refresh_content(state);
             }
         }
 
         Message::SetZoomFitWidth => {
             state.zoom = ZoomMode::FitWidth;
-            refresh_content(state);
             save_reading_state(state);
+            return refresh_content(state);
         }
 
         Message::SetZoomFitPage => {
             state.zoom = ZoomMode::FitPage;
-            refresh_content(state);
             save_reading_state(state);
+            return refresh_content(state);
         }
 
         Message::FontSizeUp => {
@@ -434,7 +443,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LinkClicked(href) => {
-            handle_link_click(state, &href);
+            return handle_link_click(state, &href);
         }
 
         // Library
@@ -515,8 +524,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     let _ = lib.import_file(&p).await;
                 });
             }
-            open_file(state, path);
             state.screen = Screen::Reader;
+            return open_file(state, path);
         }
 
         Message::RemoveBook(id) => {
@@ -590,9 +599,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::GoToBookmark(page) => {
             state.current_page = page;
             state.page_input = format!("{}", page + 1);
-            refresh_content(state);
             save_reading_state(state);
             update_bookmark_status(state);
+            return refresh_content(state);
         }
 
         Message::StartEditNote(id, existing) => {
@@ -669,7 +678,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+                    return refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
                 } else {
                     return iced::widget::operation::focus(search_input_id());
                 }
@@ -682,10 +691,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
             state.search_results.clear();
             state.search_current = 0;
-            refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+            let render_task = refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
             if !state.search_query.is_empty() {
-                return perform_search(state);
+                return Task::batch([render_task, perform_search(state)]);
             }
+            return render_task;
         }
 
         Message::SearchTextExtracted {
@@ -713,9 +723,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.search_results = results;
                 state.search_current = 0;
                 // Navigate to first result if any.
-                if !navigate_to_current_search_result(state) {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
-                }
+                return navigate_to_current_search_result(state).unwrap_or_else(|| {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
+                });
             }
         }
 
@@ -723,9 +733,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if !state.search_results.is_empty() {
                 let previous_highlights = current_page_search_highlights(state);
                 state.search_current = (state.search_current + 1) % state.search_results.len();
-                if !navigate_to_current_search_result(state) {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
-                }
+                return navigate_to_current_search_result(state).unwrap_or_else(|| {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
+                });
             }
         }
 
@@ -737,9 +747,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 } else {
                     state.search_current - 1
                 };
-                if !navigate_to_current_search_result(state) {
-                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
-                }
+                return navigate_to_current_search_result(state).unwrap_or_else(|| {
+                    refresh_pdf_search_highlights_if_changed(state, &previous_highlights)
+                });
             }
         }
 
@@ -750,7 +760,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
-            refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+            return refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
+        }
+
+        Message::PageRendered { generation, result } => {
+            if generation == state.render_generation {
+                match result {
+                    Ok(page) => {
+                        state.rendered_page = Some(page);
+                        state.error = None;
+                    }
+                    Err(error) => {
+                        state.rendered_page = None;
+                        state.error = Some(format!("Failed to render page: {error}"));
+                    }
+                }
+            }
         }
 
         Message::KeyPressed(event) => {
@@ -761,9 +786,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
     Task::none()
 }
 
-fn open_file(state: &mut State, path: PathBuf) {
+fn open_file(state: &mut State, path: PathBuf) -> Task<Message> {
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
+    state.render_generation = state.render_generation.wrapping_add(1);
     state.error = None;
     state.rendered_page = None;
     state.chapter_content = Vec::new();
@@ -783,7 +809,7 @@ fn open_file(state: &mut State, path: PathBuf) {
         "pdf" => match PdfDoc::open(&path) {
             Ok(doc) => {
                 state.total_pages = doc.page_count();
-                state.document = Some(OpenDocument::Pdf(doc));
+                state.document = Some(OpenDocument::Pdf(Arc::new(doc)));
                 Ok(())
             }
             Err(e) => Err(format!("Failed to open PDF: {e}")),
@@ -791,7 +817,7 @@ fn open_file(state: &mut State, path: PathBuf) {
         "epub" => match EpubDoc::open(&path) {
             Ok(doc) => {
                 state.total_pages = doc.chapter_count();
-                state.document = Some(OpenDocument::Epub(doc));
+                state.document = Some(OpenDocument::Epub(Arc::new(doc)));
                 Ok(())
             }
             Err(e) => Err(format!("Failed to open EPUB: {e}")),
@@ -799,7 +825,7 @@ fn open_file(state: &mut State, path: PathBuf) {
         "cbz" => match CbzDoc::open(&path) {
             Ok(doc) => {
                 state.total_pages = doc.page_count();
-                state.document = Some(OpenDocument::Cbz(doc));
+                state.document = Some(OpenDocument::Cbz(Arc::new(doc)));
                 Ok(())
             }
             Err(e) => Err(format!("Failed to open CBZ: {e}")),
@@ -829,17 +855,19 @@ fn open_file(state: &mut State, path: PathBuf) {
 
             state.page_input = format!("{}", state.current_page + 1);
             state.file_path = Some(path);
-            refresh_content(state);
             update_bookmark_status(state);
             // Load bookmarks for this file.
             if let (Some(p), Some(store)) = (&state.file_path, &state.bookmark_store) {
                 state.bookmarks = store.list_for_file(p).unwrap_or_default();
             }
+            return refresh_content(state);
         }
         Err(msg) => {
             state.error = Some(msg);
         }
     }
+
+    Task::none()
 }
 
 fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
@@ -902,13 +930,13 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
 }
 
 /// Handle a link click from the EPUB reader.
-fn handle_link_click(state: &mut State, href: &str) {
+fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
     // External links: open in system browser.
     if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("mailto:") {
         if let Err(e) = open::that(href) {
             eprintln!("warning: failed to open URL: {e}");
         }
-        return;
+        return Task::none();
     }
 
     // Internal EPUB links: navigate to the target chapter.
@@ -921,7 +949,7 @@ fn handle_link_click(state: &mut State, href: &str) {
 
         // If the path is empty, it's a same-chapter fragment link — nothing to navigate.
         if target_path.is_empty() {
-            return;
+            return Task::none();
         }
 
         // Find the chapter whose path ends with the target.
@@ -949,14 +977,19 @@ fn handle_link_click(state: &mut State, href: &str) {
         }) {
             state.current_page = chapter_idx;
             state.page_input = format!("{}", state.current_page + 1);
-            refresh_content(state);
             save_reading_state(state);
+            return refresh_content(state);
         }
     }
+
+    Task::none()
 }
 
 /// Refresh the visible content for the current page/chapter.
-fn refresh_content(state: &mut State) {
+fn refresh_content(state: &mut State) -> Task<Message> {
+    state.render_generation = state.render_generation.wrapping_add(1);
+    let generation = state.render_generation;
+    update_bookmark_status(state);
     let pdf_highlights = current_page_search_highlights(state)
         .into_iter()
         .map(|highlight| {
@@ -970,18 +1003,15 @@ fn refresh_content(state: &mut State) {
 
     match &state.document {
         Some(OpenDocument::Pdf(doc)) => {
+            let doc = Arc::clone(doc);
+            let page = state.current_page;
             let scale = state.zoom.scale();
-            match doc.render_page_with_highlights(state.current_page, scale, &pdf_highlights) {
-                Ok(page) => {
-                    state.rendered_page = Some(page);
-                    state.chapter_content = Vec::new();
-                    state.error = None;
-                }
-                Err(e) => {
-                    state.error = Some(format!("Failed to render page: {e}"));
-                    state.rendered_page = None;
-                }
-            }
+            state.rendered_page = None;
+            state.chapter_content.clear();
+            state.error = None;
+            return render_page_task(generation, move || {
+                doc.render_page_with_highlights(page, scale, &pdf_highlights)
+            });
         }
         Some(OpenDocument::Epub(doc)) => {
             state.rendered_page = None;
@@ -1000,23 +1030,33 @@ fn refresh_content(state: &mut State) {
             }
         }
         Some(OpenDocument::Cbz(doc)) => {
+            let doc = Arc::clone(doc);
+            let page = state.current_page;
             let scale = state.zoom.scale();
-            match doc.render_page(state.current_page, scale) {
-                Ok(page) => {
-                    state.rendered_page = Some(page);
-                    state.chapter_content = Vec::new();
-                    state.error = None;
-                }
-                Err(e) => {
-                    state.error = Some(format!("Failed to render page: {e}"));
-                    state.rendered_page = None;
-                }
-            }
+            state.rendered_page = None;
+            state.chapter_content.clear();
+            state.error = None;
+            return render_page_task(generation, move || doc.render_page(page, scale));
         }
         None => {}
     }
 
-    update_bookmark_status(state);
+    Task::none()
+}
+
+fn render_page_task(
+    generation: u64,
+    render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(render)
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+        },
+        move |result| Message::PageRendered { generation, result },
+    )
 }
 
 fn refresh_bookmarks(state: &State) -> Task<Message> {
@@ -1135,29 +1175,29 @@ fn perform_search(state: &mut State) -> Task<Message> {
     )
 }
 
-fn navigate_to_current_search_result(state: &mut State) -> bool {
+fn navigate_to_current_search_result(state: &mut State) -> Option<Task<Message>> {
     if let Some(result) = state.search_results.get(state.search_current) {
         let target_page = result.page;
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
             state.page_input = format!("{}", state.current_page + 1);
-            refresh_content(state);
             save_reading_state(state);
-            return true;
+            return Some(refresh_content(state));
         }
     }
-    false
+    None
 }
 
 fn refresh_pdf_search_highlights_if_changed(
     state: &mut State,
     previous_highlights: &[SearchHighlight],
-) {
+) -> Task<Message> {
     if matches!(state.document, Some(OpenDocument::Pdf(_)))
         && previous_highlights != current_page_search_highlights(state)
     {
-        refresh_content(state);
+        return refresh_content(state);
     }
+    Task::none()
 }
 
 // ---------------------------------------------------------------------------
@@ -2349,6 +2389,7 @@ mod tests {
             total_pages: 1,
             zoom: ZoomMode::default(),
             rendered_page: None,
+            render_generation: 0,
             chapter_content: Vec::new(),
             page_input: "1".to_string(),
             error: None,
@@ -2384,7 +2425,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
-        let mut state = state_with_document(OpenDocument::Epub(epub));
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
 
         let task = update(&mut state, Message::ToggleSearchBar);
 
@@ -2401,7 +2442,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
-        let mut state = state_with_document(OpenDocument::Cbz(cbz));
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
 
         let _ = update(&mut state, Message::ToggleSearchBar);
 
@@ -2414,7 +2455,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
-        let mut state = state_with_document(OpenDocument::Epub(epub));
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.file_path = Some(PathBuf::from("book.epub"));
         state.search_document_generation = 2;
         state.search_query_generation = 3;
@@ -2448,12 +2489,137 @@ mod tests {
     }
 
     #[test]
+    fn stale_page_renders_do_not_replace_the_latest_request() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+
+        let first_task = refresh_content(&mut state);
+        let first_generation = state.render_generation;
+        state.zoom = ZoomMode::Manual(1.25);
+        let second_task = refresh_content(&mut state);
+        let second_generation = state.render_generation;
+
+        assert!(first_task.units() > 0);
+        assert!(second_task.units() > 0);
+        assert!(second_generation > first_generation);
+
+        let stale_page = RenderedPage {
+            width: 10,
+            height: 10,
+            pixels: bytes::Bytes::from(vec![0; 400]),
+        };
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                generation: first_generation,
+                result: Ok(stale_page),
+            },
+        );
+
+        assert!(state.rendered_page.is_none());
+
+        let latest_page = RenderedPage {
+            width: 20,
+            height: 20,
+            pixels: bytes::Bytes::from(vec![0; 1600]),
+        };
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                generation: second_generation,
+                result: Ok(latest_page),
+            },
+        );
+
+        assert_eq!(
+            state.rendered_page.as_ref().map(|page| page.width),
+            Some(20)
+        );
+    }
+
+    #[test]
+    fn failed_open_invalidates_an_in_flight_page_render() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+
+        let render_task = refresh_content(&mut state);
+        let old_generation = state.render_generation;
+        let open_task = open_file(&mut state, PathBuf::from("unsupported.txt"));
+
+        assert!(render_task.units() > 0);
+        assert_eq!(open_task.units(), 0);
+        assert!(state.render_generation > old_generation);
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("Unsupported"))
+        );
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                generation: old_generation,
+                result: Ok(RenderedPage {
+                    width: 10,
+                    height: 10,
+                    pixels: bytes::Bytes::from(vec![0; 400]),
+                }),
+            },
+        );
+
+        assert!(state.rendered_page.is_none());
+        assert!(
+            state
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("Unsupported"))
+        );
+    }
+
+    #[test]
+    fn epub_refresh_remains_synchronous() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.chapter_content.is_empty());
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn raster_page_refresh_schedules_background_work() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+
+        let task = refresh_content(&mut state);
+
+        assert!(task.units() > 0);
+        assert!(state.rendered_page.is_none());
+        assert_eq!(state.render_generation, 1);
+    }
+
+    #[test]
     fn changing_query_immediately_clears_previous_results() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
-        let mut state = state_with_document(OpenDocument::Epub(epub));
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.search_query = "old".to_string();
         state.search_results = vec![SearchMatch {
             page: 0,
