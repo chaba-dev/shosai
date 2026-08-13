@@ -99,6 +99,11 @@ const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
+const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
+const READER_HORIZONTAL_PADDING: f32 = 48.0;
+const READER_VERTICAL_CHROME: f32 = 130.0;
+const PAGE_GUTTER: f32 = 20.0;
+const BOOKMARKS_PANEL_WIDTH: f32 = 300.0;
 const WINDOW_WIDTH_KEY: &str = "window.width";
 const WINDOW_HEIGHT_KEY: &str = "window.height";
 const WINDOW_X_KEY: &str = "window.x";
@@ -242,6 +247,7 @@ struct ReaderTab {
     total_pages: usize,
     zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
+    rendered_facing_page: Option<(usize, RenderedPage)>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     chapter_content: Vec<ContentNode>,
     continuous_pages: Vec<Option<RenderedPage>>,
@@ -303,6 +309,7 @@ pub struct State {
     total_pages: usize,
     zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
+    rendered_facing_page: Option<(usize, RenderedPage)>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     chapter_content: Vec<ContentNode>,
@@ -572,6 +579,7 @@ pub fn boot() -> (State, Task<Message>) {
         total_pages: 0,
         zoom: ZoomMode::default(),
         rendered_page: None,
+        rendered_facing_page: None,
         page_cache: VecDeque::new(),
         render_generation: 0,
         chapter_content: Vec::new(),
@@ -1131,9 +1139,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             invalidate_continuous_layout(state);
             state.show_bookmarks_panel = !state.show_bookmarks_panel;
             if state.show_bookmarks_panel {
-                return Task::batch([refresh_bookmarks(state), scroll_to_current_page(state)]);
+                return Task::batch([refresh_bookmarks(state), reader_layout_changed_task(state)]);
             }
-            return scroll_to_current_page(state);
+            return reader_layout_changed_task(state);
         }
 
         Message::BookmarksLoaded {
@@ -1236,6 +1244,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                    if uses_paginated_raster_layout(state) {
+                        return refresh_content(state);
+                    }
                     return Task::batch([
                         refresh_pdf_search_highlights_if_changed(state, &previous_highlights),
                         scroll_to_current_page(state),
@@ -1243,7 +1254,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 } else {
                     return Task::batch([
                         iced::widget::operation::focus(search_input_id()),
-                        scroll_to_current_page(state),
+                        reader_layout_changed_task(state),
                     ]);
                 }
             }
@@ -1324,6 +1335,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            if uses_paginated_raster_layout(state) {
+                return refresh_content(state);
+            }
             return Task::batch([
                 refresh_pdf_search_highlights_if_changed(state, &previous_highlights),
                 scroll_to_current_page(state),
@@ -1337,14 +1351,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             result,
         } => {
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+                let page_index = key.page;
                 match result {
                     Ok(page) => {
                         cache_rendered_page(state, key, page.clone());
-                        state.rendered_page = Some(page);
+                        set_paginated_rendered_page(state, page_index, page);
                         state.error = None;
                     }
                     Err(error) => {
                         state.rendered_page = None;
+                        state.rendered_facing_page = None;
                         state.error = Some(format!("Failed to render page: {error}"));
                     }
                 }
@@ -1472,7 +1488,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 async move { tokio::time::sleep(std::time::Duration::from_millis(350)).await },
                 move |_| Message::PersistWindowGeometry(generation),
             );
-            return Task::batch([persist, scroll_to_current_page(state)]);
+            let content = reader_layout_changed_task(state);
+            return Task::batch([persist, content]);
         }
 
         Message::PersistWindowGeometry(generation) => {
@@ -1568,6 +1585,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         total_pages: state.total_pages,
         zoom: state.zoom,
         rendered_page: state.rendered_page.clone(),
+        rendered_facing_page: state.rendered_facing_page.clone(),
         page_cache: state.page_cache.clone(),
         chapter_content: state.chapter_content.clone(),
         continuous_pages: state.continuous_pages.clone(),
@@ -1603,6 +1621,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.total_pages = tab.total_pages;
     state.zoom = tab.zoom;
     state.rendered_page = tab.rendered_page;
+    state.rendered_facing_page = tab.rendered_facing_page;
     state.page_cache = tab.page_cache;
     state.chapter_content = tab.chapter_content;
     state.continuous_pages = tab.continuous_pages;
@@ -1688,6 +1707,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.file_path = None;
         state.document = None;
         state.rendered_page = None;
+        state.rendered_facing_page = None;
         state.continuous_pages.clear();
         state.continuous_chapters.clear();
         state.screen = Screen::Library;
@@ -1756,6 +1776,7 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.render_generation = state.render_generation.wrapping_add(1);
     state.error = None;
     state.rendered_page = None;
+    state.rendered_facing_page = None;
     state.page_cache.clear();
     state.chapter_content = Vec::new();
     state.continuous_pages.clear();
@@ -1791,7 +1812,7 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
         }
     } else {
         state.current_page = 0;
-        state.zoom = ZoomMode::Manual(1.0);
+        state.zoom = ZoomMode::FitPage;
     }
 
     state.page_input = format!("{}", state.current_page + 1);
@@ -1958,6 +1979,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         match &state.document {
             Some(OpenDocument::Pdf(_)) => {
                 state.rendered_page = None;
+                state.rendered_facing_page = None;
                 if state.continuous_pages.len() != state.total_pages {
                     state.continuous_pages = vec![None; state.total_pages];
                 }
@@ -1969,6 +1991,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             }
             Some(OpenDocument::Epub(doc)) => {
                 state.rendered_page = None;
+                state.rendered_facing_page = None;
                 state.continuous_chapters = doc
                     .content
                     .chapters
@@ -1987,6 +2010,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             }
             Some(OpenDocument::Cbz(_)) => {
                 state.rendered_page = None;
+                state.rendered_facing_page = None;
                 if state.continuous_pages.len() != state.total_pages {
                     state.continuous_pages = vec![None; state.total_pages];
                 }
@@ -2003,42 +2027,38 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     state.render_generation = state.render_generation.wrapping_add(1);
     let generation = state.render_generation;
     let tab_id = state.active_tab_id.unwrap_or(0);
-    let pdf_highlights = current_page_search_highlights(state)
-        .into_iter()
-        .map(|highlight| {
-            (
-                highlight.start,
-                highlight.end - highlight.start,
-                highlight.current,
-            )
-        })
-        .collect::<Vec<_>>();
 
     match &state.document {
         Some(OpenDocument::Pdf(doc)) => {
             let doc = Arc::clone(doc);
-            let page = state.current_page;
-            let scale = state.zoom.scale();
-            let key = PageCacheKey {
-                page,
-                scale_bits: scale.to_bits(),
-                highlights: pdf_highlights.clone(),
-            };
-            if let Some(cached) = cached_page(state, &key) {
-                state.rendered_page = Some(cached);
-                state.chapter_content.clear();
-                state.error = None;
-                return Task::none();
-            }
+            let pages = paginated_raster_pages(state);
+            let scale = paginated_raster_scale(state, &pages);
             state.rendered_page = None;
+            state.rendered_facing_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(tab_id, generation, key, move || {
-                doc.render_page_with_highlights(page, scale, &pdf_highlights)
-            });
+            let mut tasks = Vec::new();
+            for page in pages {
+                let highlights = search_highlights_for_page(state, page);
+                let key = PageCacheKey {
+                    page,
+                    scale_bits: scale.to_bits(),
+                    highlights: highlights.clone(),
+                };
+                if let Some(cached) = cached_page(state, &key) {
+                    set_paginated_rendered_page(state, page, cached);
+                } else {
+                    let doc = Arc::clone(&doc);
+                    tasks.push(render_page_task(tab_id, generation, key, move || {
+                        doc.render_page_with_highlights(page, scale, &highlights)
+                    }));
+                }
+            }
+            return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
             state.rendered_page = None;
+            state.rendered_facing_page = None;
             if let Some(chapter) = doc.chapter(state.current_page) {
                 let base_path = chapter
                     .path
@@ -2055,25 +2075,29 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         }
         Some(OpenDocument::Cbz(doc)) => {
             let doc = Arc::clone(doc);
-            let page = state.current_page;
-            let scale = state.zoom.scale();
-            let key = PageCacheKey {
-                page,
-                scale_bits: scale.to_bits(),
-                highlights: Vec::new(),
-            };
-            if let Some(cached) = cached_page(state, &key) {
-                state.rendered_page = Some(cached);
-                state.chapter_content.clear();
-                state.error = None;
-                return Task::none();
-            }
+            let pages = paginated_raster_pages(state);
+            let scale = paginated_raster_scale(state, &pages);
             state.rendered_page = None;
+            state.rendered_facing_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(tab_id, generation, key, move || {
-                doc.render_page(page, scale)
-            });
+            let mut tasks = Vec::new();
+            for page in pages {
+                let key = PageCacheKey {
+                    page,
+                    scale_bits: scale.to_bits(),
+                    highlights: Vec::new(),
+                };
+                if let Some(cached) = cached_page(state, &key) {
+                    set_paginated_rendered_page(state, page, cached);
+                } else {
+                    let doc = Arc::clone(&doc);
+                    tasks.push(render_page_task(tab_id, generation, key, move || {
+                        doc.render_page(page, scale)
+                    }));
+                }
+            }
+            return Task::batch(tasks);
         }
         None => {}
     }
@@ -2249,7 +2273,7 @@ fn content_navigation_task(state: &mut State) -> Task<Message> {
     }
 }
 
-fn uses_page_spreads(state: &State) -> bool {
+fn uses_paginated_raster_layout(state: &State) -> bool {
     state.reading_mode == ReadingMode::Paginated
         && matches!(
             state.document,
@@ -2257,8 +2281,82 @@ fn uses_page_spreads(state: &State) -> bool {
         )
 }
 
+fn reader_layout_changed_task(state: &mut State) -> Task<Message> {
+    if uses_paginated_raster_layout(state) {
+        refresh_content(state)
+    } else {
+        scroll_to_current_page(state)
+    }
+}
+
+fn uses_page_spreads(state: &State) -> bool {
+    uses_paginated_raster_layout(state)
+        && available_reader_size(state).width >= MIN_TWO_PAGE_WIDTH
+        && state.total_pages > 1
+}
+
 fn spread_start(page: usize) -> usize {
     page - page % 2
+}
+
+fn available_reader_size(state: &State) -> Size {
+    let bookmarks_width = if state.show_bookmarks_panel {
+        BOOKMARKS_PANEL_WIDTH
+    } else {
+        0.0
+    };
+    let search_height = if state.show_search_bar { 44.0 } else { 0.0 };
+    Size::new(
+        (state.window_size.width - bookmarks_width - READER_HORIZONTAL_PADDING).max(1.0),
+        (state.window_size.height - READER_VERTICAL_CHROME - search_height).max(1.0),
+    )
+}
+
+fn paginated_raster_pages(state: &State) -> Vec<usize> {
+    if state.total_pages == 0 {
+        return Vec::new();
+    }
+    if uses_page_spreads(state) {
+        let start = spread_start(state.current_page);
+        (start..=(start + 1).min(state.total_pages - 1)).collect()
+    } else {
+        vec![state.current_page.min(state.total_pages - 1)]
+    }
+}
+
+fn raster_page_size(state: &State, page: usize) -> Option<(f32, f32)> {
+    match &state.document {
+        Some(OpenDocument::Pdf(document)) => document.page_size(page).ok(),
+        Some(OpenDocument::Cbz(document)) => document.page_size(page).ok(),
+        _ => None,
+    }
+}
+
+fn paginated_raster_scale(state: &State, pages: &[usize]) -> f32 {
+    if let ZoomMode::Manual(scale) = state.zoom {
+        return scale;
+    }
+    let sizes = pages
+        .iter()
+        .filter_map(|page| raster_page_size(state, *page))
+        .collect::<Vec<_>>();
+    if sizes.is_empty() {
+        return 1.0;
+    }
+    let available = available_reader_size(state);
+    let content_width = sizes.iter().map(|(width, _)| width).sum::<f32>();
+    let gutter_width = PAGE_GUTTER * sizes.len().saturating_sub(1) as f32;
+    let content_height = sizes
+        .iter()
+        .map(|(_, height)| *height)
+        .fold(0.0_f32, f32::max);
+    let width_scale = (available.width - gutter_width).max(1.0) / content_width.max(1.0);
+    match state.zoom {
+        ZoomMode::FitWidth => width_scale,
+        ZoomMode::FitPage => width_scale.min(available.height / content_height.max(1.0)),
+        ZoomMode::Manual(_) => unreachable!(),
+    }
+    .clamp(0.1, 5.0)
 }
 
 fn next_page_location(state: &State) -> Option<usize> {
@@ -2326,6 +2424,14 @@ fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage)
     state.page_cache.push_back((key, page));
     while state.page_cache.len() > PAGE_CACHE_CAPACITY {
         state.page_cache.pop_front();
+    }
+}
+
+fn set_paginated_rendered_page(state: &mut State, page_index: usize, page: RenderedPage) {
+    if page_index == state.current_page {
+        state.rendered_page = Some(page);
+    } else {
+        state.rendered_facing_page = Some((page_index, page));
     }
 }
 
@@ -3108,25 +3214,71 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
 }
 
 fn pdf_page_view(state: &State) -> Element<'_, Message> {
-    if let Some(rendered) = &state.rendered_page {
-        let handle =
-            image::Handle::from_rgba(rendered.width, rendered.height, rendered.pixels.clone());
-
-        let img = image(handle)
-            .width(Length::Fixed(rendered.width as f32))
-            .height(Length::Fixed(rendered.height as f32));
-
-        let page_container = container(img).width(Length::Fill).center_x(Length::Fill);
-
-        scrollable(page_container)
+    let pages = paginated_raster_pages(state);
+    if pages.is_empty() {
+        return center(text("Rendering...").size(16))
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
-    } else {
-        center(text("Rendering...").size(16))
+            .into();
+    }
+
+    let rendered_for = |page: usize| {
+        if page == state.current_page {
+            state.rendered_page.as_ref()
+        } else {
+            state
+                .rendered_facing_page
+                .as_ref()
+                .filter(|(index, _)| *index == page)
+                .map(|(_, rendered)| rendered)
+        }
+    };
+
+    let mut spread = row![].spacing(PAGE_GUTTER).padding(20);
+    for page in pages {
+        let content: Element<'_, Message> = if let Some(rendered) = rendered_for(page) {
+            let handle =
+                image::Handle::from_rgba(rendered.width, rendered.height, rendered.pixels.clone());
+            match state.zoom {
+                ZoomMode::Manual(_) | ZoomMode::FitWidth => image(handle)
+                    .width(Length::Fixed(rendered.width as f32))
+                    .height(Length::Fixed(rendered.height as f32))
+                    .into(),
+                ZoomMode::FitPage => image(handle)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .content_fit(iced::ContentFit::Contain)
+                    .into(),
+            }
+        } else {
+            center(text(format!("Rendering page {}...", page + 1))).into()
+        };
+        let page_container = match state.zoom {
+            ZoomMode::FitPage => container(content)
+                .width(Length::FillPortion(1))
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+            ZoomMode::Manual(_) | ZoomMode::FitWidth => container(content),
+        };
+        spread = spread.push(page_container);
+    }
+
+    match state.zoom {
+        ZoomMode::Manual(_) | ZoomMode::FitWidth => {
+            scrollable(container(spread).center_x(Length::Fill))
+                .direction(scrollable::Direction::Both {
+                    vertical: scrollable::Scrollbar::default(),
+                    horizontal: scrollable::Scrollbar::default(),
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        }
+        ZoomMode::FitPage => container(spread)
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into(),
     }
 }
 
@@ -4106,6 +4258,68 @@ mod tests {
 
         assert_eq!(next_page_location(&state), Some(3));
         assert_eq!(previous_page_location(&state), Some(1));
+    }
+
+    #[test]
+    fn narrow_reader_falls_back_to_single_page_navigation() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = 5;
+        state.window_size.width = 700.0;
+
+        assert_eq!(paginated_raster_pages(&state), vec![0]);
+        assert_eq!(next_page_location(&state), Some(1));
+    }
+
+    #[test]
+    fn fit_page_scale_keeps_the_complete_spread_in_the_reader() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+
+        let pages = paginated_raster_pages(&state);
+        let scale = paginated_raster_scale(&state, &pages);
+        let available = available_reader_size(&state);
+        let sizes = pages
+            .iter()
+            .map(|page| raster_page_size(&state, *page).unwrap())
+            .collect::<Vec<_>>();
+        let width = sizes.iter().map(|(width, _)| width * scale).sum::<f32>()
+            + PAGE_GUTTER * sizes.len().saturating_sub(1) as f32;
+        let height = sizes
+            .iter()
+            .map(|(_, height)| height * scale)
+            .fold(0.0_f32, f32::max);
+
+        assert_eq!(pages.len(), 2);
+        assert!(width <= available.width + 0.01);
+        assert!(height <= available.height + 0.01);
+    }
+
+    #[test]
+    fn raster_spread_refresh_schedules_both_visible_pages() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 2);
+        assert!(state.rendered_page.is_none());
+        assert!(state.rendered_facing_page.is_none());
     }
 
     fn test_book(id: i64) -> Book {
