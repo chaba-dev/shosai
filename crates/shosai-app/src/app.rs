@@ -1357,8 +1357,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 match result {
                     Ok(page) => {
                         cache_rendered_page(state, key, page);
-                        show_cached_paginated_spread(state);
+                        let spread_changed = show_cached_paginated_spread(state);
                         state.error = None;
+                        if spread_changed {
+                            return prefetch_next_paginated_spread(state);
+                        }
                     }
                     Err(error) => {
                         state.rendered_page = None;
@@ -2054,7 +2057,10 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     }));
                 }
             }
-            show_cached_paginated_spread(state);
+            let spread_changed = show_cached_paginated_spread(state);
+            if tasks.is_empty() && spread_changed {
+                tasks.push(prefetch_next_paginated_spread(state));
+            }
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
@@ -2095,7 +2101,10 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     }));
                 }
             }
-            show_cached_paginated_spread(state);
+            let spread_changed = show_cached_paginated_spread(state);
+            if tasks.is_empty() && spread_changed {
+                tasks.push(prefetch_next_paginated_spread(state));
+            }
             return Task::batch(tasks);
         }
         None => {}
@@ -2312,14 +2321,18 @@ fn available_reader_size(state: &State) -> Size {
 }
 
 fn paginated_raster_pages(state: &State) -> Vec<usize> {
+    paginated_raster_pages_at(state, state.current_page)
+}
+
+fn paginated_raster_pages_at(state: &State, page: usize) -> Vec<usize> {
     if state.total_pages == 0 {
         return Vec::new();
     }
     if uses_page_spreads(state) {
-        let start = spread_start(state.current_page);
+        let start = spread_start(page);
         (start..=(start + 1).min(state.total_pages - 1)).collect()
     } else {
-        vec![state.current_page.min(state.total_pages - 1)]
+        vec![page.min(state.total_pages - 1)]
     }
 }
 
@@ -2418,6 +2431,50 @@ fn render_page_task(
     )
 }
 
+fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
+    let Some(next_page) = next_page_location(state) else {
+        return Task::none();
+    };
+    let pages = paginated_raster_pages_at(state, next_page);
+    let scale = paginated_raster_scale(state, &pages);
+    let tab_id = state.active_tab_id.unwrap_or(0);
+    let generation = state.render_generation;
+    let mut tasks = Vec::new();
+
+    for page in pages {
+        let highlights = if matches!(state.document, Some(OpenDocument::Pdf(_))) {
+            search_highlights_for_page(state, page)
+        } else {
+            Vec::new()
+        };
+        let key = PageCacheKey {
+            page,
+            scale_bits: scale.to_bits(),
+            highlights: highlights.clone(),
+        };
+        if is_page_cached(state, &key) {
+            continue;
+        }
+        match &state.document {
+            Some(OpenDocument::Pdf(document)) => {
+                let document = Arc::clone(document);
+                tasks.push(render_page_task(tab_id, generation, key, move || {
+                    document.render_page_with_highlights(page, scale, &highlights)
+                }));
+            }
+            Some(OpenDocument::Cbz(document)) => {
+                let document = Arc::clone(document);
+                tasks.push(render_page_task(tab_id, generation, key, move || {
+                    document.render_page(page, scale)
+                }));
+            }
+            _ => return Task::none(),
+        }
+    }
+
+    Task::batch(tasks)
+}
+
 fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
     state
         .page_cache
@@ -2439,8 +2496,9 @@ fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage)
     }
 }
 
-fn show_cached_paginated_spread(state: &mut State) {
+fn show_cached_paginated_spread(state: &mut State) -> bool {
     let pages = paginated_raster_pages(state);
+    let target_pages = pages.clone();
     let scale = paginated_raster_scale(state, &pages);
     let rendered = pages
         .iter()
@@ -2463,8 +2521,17 @@ fn show_cached_paginated_spread(state: &mut State) {
         })
         .collect::<Option<Vec<_>>>();
     let Some(rendered) = rendered else {
-        return;
+        return false;
     };
+
+    let previous_pages = state.rendered_page_index.map(|page| {
+        let mut pages = vec![page];
+        if let Some((facing_page, _)) = state.rendered_facing_page.as_ref() {
+            pages.push(*facing_page);
+            pages.sort_unstable();
+        }
+        pages
+    });
 
     state.rendered_page = rendered
         .iter()
@@ -2474,6 +2541,7 @@ fn show_cached_paginated_spread(state: &mut State) {
     state.rendered_facing_page = rendered
         .into_iter()
         .find(|(page, _)| *page != state.current_page);
+    previous_pages.as_ref() != Some(&target_pages)
 }
 
 fn displayed_paginated_raster_pages(state: &State) -> Vec<usize> {
@@ -4418,6 +4486,37 @@ mod tests {
         assert_eq!(task.units(), 2);
         assert!(state.rendered_page.is_none());
         assert!(state.rendered_facing_page.is_none());
+    }
+
+    #[test]
+    fn completed_spread_prefetches_the_next_page_turn() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+        let scale = paginated_raster_scale(&state, &[0, 1]);
+        for page in [0, 1] {
+            cache_rendered_page(
+                &mut state,
+                PageCacheKey {
+                    page,
+                    scale_bits: scale.to_bits(),
+                    highlights: Vec::new(),
+                },
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+            );
+        }
+
+        assert!(show_cached_paginated_spread(&mut state));
+        assert_eq!(prefetch_next_paginated_spread(&state).units(), 1);
     }
 
     #[test]
