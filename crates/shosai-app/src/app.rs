@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,6 +38,18 @@ impl std::fmt::Debug for RasterImageHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_tuple("RasterImageHandle")
+            .field(&self.0.id())
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+struct EpubImageHandle(image::Handle);
+
+impl std::fmt::Debug for EpubImageHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("EpubImageHandle")
             .field(&self.0.id())
             .finish()
     }
@@ -265,6 +277,7 @@ struct ReaderTab {
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     chapter_content: Vec<ContentNode>,
+    epub_image_handles: HashMap<String, EpubImageHandle>,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -331,6 +344,7 @@ pub struct State {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     chapter_content: Vec<ContentNode>,
+    epub_image_handles: HashMap<String, EpubImageHandle>,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -604,6 +618,7 @@ pub fn boot() -> (State, Task<Message>) {
         page_cache: VecDeque::new(),
         render_generation: 0,
         chapter_content: Vec::new(),
+        epub_image_handles: HashMap::new(),
         continuous_pages: Vec::new(),
         continuous_pending: BTreeMap::new(),
         continuous_visible: BTreeSet::new(),
@@ -1618,6 +1633,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
         chapter_content: state.chapter_content.clone(),
+        epub_image_handles: state.epub_image_handles.clone(),
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
@@ -1657,6 +1673,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
     state.chapter_content = tab.chapter_content;
+    state.epub_image_handles = tab.epub_image_handles;
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
@@ -1744,6 +1761,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_page_handle = None;
         state.rendered_facing_page = None;
         state.rendered_facing_page_handle = None;
+        state.epub_image_handles.clear();
         state.continuous_pages.clear();
         state.continuous_chapters.clear();
         state.screen = Screen::Library;
@@ -1818,6 +1836,7 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
     state.chapter_content = Vec::new();
+    state.epub_image_handles.clear();
     state.continuous_pages.clear();
     state.continuous_pending.clear();
     state.continuous_visible.clear();
@@ -2044,6 +2063,11 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
                     })
                     .collect();
+                cache_epub_image_handles(
+                    &mut state.epub_image_handles,
+                    state.continuous_chapters.iter().flatten(),
+                    &doc.content.resources,
+                );
                 state.error = None;
                 return scroll_to_current_page(state);
             }
@@ -2112,6 +2136,11 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     .unwrap_or("");
                 state.chapter_content =
                     parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles);
+                cache_epub_image_handles(
+                    &mut state.epub_image_handles,
+                    &state.chapter_content,
+                    &doc.content.resources,
+                );
                 state.error = None;
             } else {
                 state.chapter_content = Vec::new();
@@ -2148,6 +2177,38 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     }
 
     Task::none()
+}
+
+fn cache_epub_image_handles<'a>(
+    handles: &mut HashMap<String, EpubImageHandle>,
+    nodes: impl IntoIterator<Item = &'a ContentNode>,
+    resources: &HashMap<String, Vec<u8>>,
+) {
+    for node in nodes {
+        match node {
+            ContentNode::Image { src, .. } => {
+                if handles.contains_key(src) {
+                    continue;
+                }
+                let Some(data) = resources.get(src) else {
+                    continue;
+                };
+                let Ok(image) = ::image::load_from_memory(data) else {
+                    continue;
+                };
+                let rgba = image.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                handles.insert(
+                    src.clone(),
+                    EpubImageHandle(image::Handle::from_rgba(width, height, rgba.into_raw())),
+                );
+            }
+            ContentNode::BlockQuote(children) => {
+                cache_epub_image_handles(handles, children, resources);
+            }
+            _ => {}
+        }
+    }
 }
 
 fn search_highlights_for_page(state: &State, page: usize) -> Vec<(usize, usize, bool)> {
@@ -3327,7 +3388,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                         node,
                         state.font_size,
                         state.theme.text_color(),
-                        &doc.content.resources,
+                        &state.epub_image_handles,
                         text_offset,
                         &highlights,
                     ));
@@ -3504,11 +3565,6 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
         content_col = content_col.push(text(title.clone()).size(font_size * 1.5).color(text_color));
     }
 
-    let resources = match &state.document {
-        Some(OpenDocument::Epub(doc)) => &doc.content.resources,
-        _ => &std::collections::HashMap::new(),
-    };
-
     let highlights = current_page_search_highlights(state);
     let mut text_offset = 0;
 
@@ -3517,7 +3573,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
             node,
             font_size,
             text_color,
-            resources,
+            &state.epub_image_handles,
             text_offset,
             &highlights,
         ));
@@ -3551,7 +3607,7 @@ fn render_content_node<'a>(
     node: &ContentNode,
     font_size: f32,
     text_color: iced::Color,
-    resources: &std::collections::HashMap<String, Vec<u8>>,
+    image_handles: &HashMap<String, EpubImageHandle>,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
@@ -3610,7 +3666,7 @@ fn render_content_node<'a>(
                     child,
                     font_size,
                     quote_color,
-                    resources,
+                    image_handles,
                     child_offset,
                     highlights,
                 ));
@@ -3696,7 +3752,7 @@ fn render_content_node<'a>(
             alt,
             font_size,
             text_color,
-            resources,
+            image_handles,
             text_offset,
             highlights,
         ),
@@ -3708,32 +3764,25 @@ fn render_content_node<'a>(
     }
 }
 
-/// Render an EPUB image from the resource map, falling back to alt text.
+/// Render a cached EPUB image, falling back to alt text.
 fn render_epub_image<'a>(
     src: &str,
     alt: &str,
     font_size: f32,
     text_color: iced::Color,
-    resources: &std::collections::HashMap<String, Vec<u8>>,
+    image_handles: &HashMap<String, EpubImageHandle>,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
-    if let Some(data) = resources.get(src) {
-        // Try to decode the image and display as RGBA via iced::widget::image.
-        if let Ok(img) = ::image::load_from_memory(data) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let handle = image::Handle::from_rgba(w, h, rgba.into_raw());
-
-            return container(
-                image(handle)
-                    .content_fit(iced::ContentFit::ScaleDown)
-                    .width(Length::Fill),
-            )
-            .width(Length::Fill)
-            .center_x(Length::Fill)
-            .into();
-        }
+    if let Some(handle) = image_handles.get(src) {
+        return container(
+            image(&handle.0)
+                .content_fit(iced::ContentFit::ScaleDown)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into();
     }
 
     // Fallback: show alt text placeholder.
@@ -5766,6 +5815,49 @@ mod tests {
         assert_eq!(task.units(), 0);
         assert!(!state.chapter_content.is_empty());
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn rebuilding_the_view_reuses_epub_image_handles() {
+        let mut image_bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            2,
+            3,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut image_bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+        let resources = HashMap::from([("image.png".to_string(), image_bytes)]);
+        let nodes = vec![ContentNode::Image {
+            src: "image.png".to_string(),
+            alt: String::new(),
+        }];
+        let mut handles = HashMap::new();
+
+        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        let first_id = handles.get("image.png").unwrap().0.id();
+        drop(render_content_node(
+            &nodes[0],
+            16.0,
+            iced::Color::BLACK,
+            &handles,
+            0,
+            &[],
+        ));
+        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        drop(render_content_node(
+            &nodes[0],
+            16.0,
+            iced::Color::BLACK,
+            &handles,
+            0,
+            &[],
+        ));
+
+        assert_eq!(handles.get("image.png").unwrap().0.id(), first_id);
     }
 
     #[test]
