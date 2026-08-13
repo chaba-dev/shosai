@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, image, rich_text, row, scrollable, span, text, text_input,
+    button, center, column, container, image, rich_text, row, scrollable, sensor, span, text,
+    text_input,
 };
 use iced::{Element, Font, Length, Subscription, Task};
 
@@ -12,7 +14,7 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::epub::render::{ContentNode, parse_chapter_xhtml};
-use shosai_core::library::{Book, Library};
+use shosai_core::library::{Book, BookPage, Library};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
@@ -73,10 +75,35 @@ enum Screen {
     Reader,
 }
 
+#[derive(Debug)]
+enum PendingOpen {
+    FileSelected(PathBuf),
+    LibraryBook(PathBuf),
+}
+
+impl PendingOpen {
+    fn into_message(self) -> Message {
+        match self {
+            Self::FileSelected(path) => Message::FileSelected(Some(path)),
+            Self::LibraryBook(path) => Message::OpenBook(path.to_string_lossy().into_owned()),
+        }
+    }
+}
+
 const LIBRARY_CARDS_PER_ROW_MIN: usize = 2;
 const LIBRARY_CARDS_PER_ROW_MAX: usize = 8;
 const LIBRARY_CARDS_PER_ROW_DEFAULT: usize = 5;
 const LIBRARY_CARDS_PER_ROW_KEY: &str = "library.cards_per_row";
+const LIBRARY_PAGE_SIZE: u32 = 40;
+const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
+const PAGE_CACHE_CAPACITY: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PageCacheKey {
+    page: usize,
+    scale_bits: u32,
+    highlights: Vec<(usize, usize, bool)>,
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -93,6 +120,7 @@ pub struct State {
     total_pages: usize,
     zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
+    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     chapter_content: Vec<ContentNode>,
     page_input: String,
@@ -128,6 +156,14 @@ pub struct State {
     library_search: String,
     library_filter: Option<shosai_core::library::BookFormat>,
     library_cards_per_row: usize,
+    library_has_more: bool,
+    library_loading: bool,
+    library_generation: u64,
+    library_book_ids: Arc<Vec<i64>>,
+    library_offset: usize,
+    storage_initializing: bool,
+    storage_error: Option<String>,
+    pending_open: Option<PendingOpen>,
 }
 
 /// Color theme for the EPUB reader.
@@ -179,6 +215,8 @@ impl ReaderTheme {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Initialized(Result<(ReadingStateStore, usize), String>),
+
     // File
     OpenFile,
     FileSelected(Option<PathBuf>),
@@ -206,7 +244,17 @@ pub enum Message {
     // Library
     ShowLibrary,
     RefreshLibrary,
-    LibraryLoaded(Vec<Book>),
+    LoadMoreLibrary,
+    LibraryIndexLoaded {
+        generation: u64,
+        ids: Vec<i64>,
+    },
+    LibraryLoaded {
+        generation: u64,
+        offset: usize,
+        next_offset: usize,
+        page: BookPage,
+    },
     ImportFile,
     ImportDirectory,
     OpenBook(String), // file_path
@@ -248,6 +296,7 @@ pub enum Message {
     // Background page rendering
     PageRendered {
         generation: u64,
+        key: PageCacheKey,
         result: Result<RenderedPage, String>,
     },
 
@@ -260,28 +309,6 @@ pub enum Message {
 // ---------------------------------------------------------------------------
 
 pub fn boot() -> (State, Task<Message>) {
-    let reading_state = match ReadingStateStore::open() {
-        Ok(store) => Some(store),
-        Err(e) => {
-            eprintln!("warning: failed to open reading state database: {e}");
-            None
-        }
-    };
-
-    let library = reading_state
-        .as_ref()
-        .map(|store| Library::new(store.pool().clone()));
-
-    // Load the last chosen layout density so the library feels consistent across launches.
-    let library_cards_per_row = reading_state
-        .as_ref()
-        .and_then(|store| store.get_pref_int(LIBRARY_CARDS_PER_ROW_KEY))
-        .and_then(|value| usize::try_from(value).ok())
-        .filter(|value| {
-            (*value >= LIBRARY_CARDS_PER_ROW_MIN) && (*value <= LIBRARY_CARDS_PER_ROW_MAX)
-        })
-        .unwrap_or(LIBRARY_CARDS_PER_ROW_DEFAULT);
-
     let state = State {
         screen: Screen::Library,
 
@@ -291,6 +318,7 @@ pub fn boot() -> (State, Task<Message>) {
         total_pages: 0,
         zoom: ZoomMode::default(),
         rendered_page: None,
+        page_cache: VecDeque::new(),
         render_generation: 0,
         chapter_content: Vec::new(),
         page_input: String::new(),
@@ -299,12 +327,10 @@ pub fn boot() -> (State, Task<Message>) {
         line_spacing: 1.6,
         theme: ReaderTheme::default(),
 
-        bookmark_store: reading_state
-            .as_ref()
-            .map(|s| BookmarkStore::new(s.pool().clone())),
+        bookmark_store: None,
 
-        reading_state,
-        library,
+        reading_state: None,
+        library: None,
 
         bookmarks: Vec::new(),
         show_bookmarks_panel: false,
@@ -324,9 +350,39 @@ pub fn boot() -> (State, Task<Message>) {
         library_books: Vec::new(),
         library_search: String::new(),
         library_filter: None,
-        library_cards_per_row,
+        library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
+        library_has_more: false,
+        library_loading: true,
+        library_generation: 0,
+        library_book_ids: Arc::new(Vec::new()),
+        library_offset: 0,
+        storage_initializing: true,
+        storage_error: None,
+        pending_open: None,
     };
-    (state, Task::done(Message::RefreshLibrary))
+    let initialize = Task::perform(
+        async {
+            let started = std::time::Instant::now();
+            let store = ReadingStateStore::open_async()
+                .await
+                .map_err(|error| error.to_string())?;
+            let cards_per_row = store
+                .get_pref_int_async(LIBRARY_CARDS_PER_ROW_KEY)
+                .await
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| {
+                    (*value >= LIBRARY_CARDS_PER_ROW_MIN) && (*value <= LIBRARY_CARDS_PER_ROW_MAX)
+                })
+                .unwrap_or(LIBRARY_CARDS_PER_ROW_DEFAULT);
+            eprintln!(
+                "startup: database and preferences initialized in {} ms",
+                started.elapsed().as_millis()
+            );
+            Ok((store, cards_per_row))
+        },
+        Message::Initialized,
+    );
+    (state, initialize)
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +391,29 @@ pub fn boot() -> (State, Task<Message>) {
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
+        Message::Initialized(Ok((store, cards_per_row))) => {
+            let pool = store.pool().clone();
+            state.library = Some(Library::new(pool.clone()));
+            state.bookmark_store = Some(BookmarkStore::new(pool));
+            state.reading_state = Some(store);
+            state.library_cards_per_row = cards_per_row;
+            state.storage_initializing = false;
+            if let Some(pending) = state.pending_open.take() {
+                return Task::done(pending.into_message());
+            }
+            return reset_library(state);
+        }
+
+        Message::Initialized(Err(error)) => {
+            eprintln!("warning: failed to open reading state database: {error}");
+            state.storage_initializing = false;
+            state.library_loading = false;
+            state.storage_error = Some(format!("Failed to initialize storage: {error}"));
+            if let Some(pending) = state.pending_open.take() {
+                return Task::done(pending.into_message());
+            }
+        }
+
         Message::OpenFile => {
             return Task::perform(
                 async {
@@ -354,6 +433,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FileSelected(Some(path)) => {
+            if state.storage_initializing {
+                state.pending_open = Some(PendingOpen::FileSelected(path));
+                return Task::none();
+            }
             return open_file(state, path);
         }
 
@@ -453,29 +536,51 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::RefreshLibrary => {
-            if let Some(lib) = state.library.clone() {
-                let search = state.library_search.clone();
-                let filter = state.library_filter;
-                return Task::perform(
-                    async move {
-                        if !search.is_empty() {
-                            lib.search(&search).await.unwrap_or_default()
-                        } else if let Some(fmt) = filter {
-                            lib.filter_by_format(fmt).await.unwrap_or_default()
-                        } else {
-                            lib.list_all().await.unwrap_or_default()
-                        }
-                    },
-                    Message::LibraryLoaded,
-                );
+            return reset_library(state);
+        }
+
+        Message::LoadMoreLibrary => {
+            if state.library_has_more && !state.library_loading {
+                return load_library_page(state, true);
             }
         }
 
-        Message::LibraryLoaded(books) => {
-            state.library_books = books;
+        Message::LibraryIndexLoaded { generation, ids } => {
+            if generation != state.library_generation {
+                return Task::none();
+            }
+            state.library_book_ids = Arc::new(ids);
+            state.library_offset = 0;
+            state.library_has_more = !state.library_book_ids.is_empty();
+            if state.library_has_more {
+                return load_library_page(state, false);
+            }
+            state.library_loading = false;
+        }
+
+        Message::LibraryLoaded {
+            generation,
+            offset,
+            next_offset,
+            page,
+        } => {
+            if generation != state.library_generation || offset != state.library_offset {
+                return Task::none();
+            }
+            if offset > 0 {
+                state.library_books.extend(page.books);
+            } else {
+                state.library_books = page.books;
+            }
+            state.library_offset = next_offset;
+            state.library_has_more = next_offset < state.library_book_ids.len();
+            state.library_loading = false;
         }
 
         Message::ImportFile => {
+            if state.library.is_none() {
+                return Task::none();
+            }
             return Task::perform(
                 async {
                     let file = rfd::AsyncFileDialog::new()
@@ -506,16 +611,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         if let Some(d) = dir {
                             let _ = lib.import_directory(d.path()).await;
                         }
-                        // Return the updated list.
-                        lib.list_all().await.unwrap_or_default()
                     },
-                    Message::LibraryLoaded,
+                    |_| Message::RefreshLibrary,
                 );
             }
         }
 
         Message::OpenBook(file_path) => {
             let path = PathBuf::from(&file_path);
+            if state.storage_initializing {
+                state.pending_open = Some(PendingOpen::LibraryBook(path));
+                return Task::none();
+            }
             // Import to library if not already there.
             if let Some(lib) = state.library.clone() {
                 let p = path.clone();
@@ -533,9 +640,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::perform(
                     async move {
                         let _ = lib.remove(id).await;
-                        lib.list_all().await.unwrap_or_default()
                     },
-                    Message::LibraryLoaded,
+                    |_| Message::RefreshLibrary,
                 );
             }
         }
@@ -763,10 +869,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             return refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
         }
 
-        Message::PageRendered { generation, result } => {
+        Message::PageRendered {
+            generation,
+            key,
+            result,
+        } => {
             if generation == state.render_generation {
                 match result {
                     Ok(page) => {
+                        cache_rendered_page(state, key, page.clone());
                         state.rendered_page = Some(page);
                         state.error = None;
                     }
@@ -786,12 +897,76 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
     Task::none()
 }
 
+fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
+    let Some(library) = state.library.clone() else {
+        state.library_loading = false;
+        return Task::none();
+    };
+    let offset = if append { state.library_offset } else { 0 };
+    let generation = state.library_generation;
+    let next_offset = (offset + LIBRARY_PAGE_SIZE as usize).min(state.library_book_ids.len());
+    let ids = Arc::clone(&state.library_book_ids);
+    state.library_loading = true;
+
+    Task::perform(
+        async move {
+            let books = library
+                .books_by_ids(&ids[offset..next_offset])
+                .await
+                .unwrap_or_default();
+            BookPage {
+                books,
+                has_more: next_offset < ids.len(),
+            }
+        },
+        move |page| Message::LibraryLoaded {
+            generation,
+            offset,
+            next_offset,
+            page,
+        },
+    )
+}
+
+fn reset_library(state: &mut State) -> Task<Message> {
+    state.library_generation = state.library_generation.wrapping_add(1);
+    state.library_books.clear();
+    state.library_book_ids = Arc::new(Vec::new());
+    state.library_offset = 0;
+    state.library_has_more = false;
+    let Some(library) = state.library.clone() else {
+        state.library_loading = false;
+        return Task::none();
+    };
+    let generation = state.library_generation;
+    let search = state.library_search.clone();
+    let filter = state.library_filter;
+    state.library_loading = true;
+
+    Task::perform(
+        async move {
+            library
+                .matching_ids(Some(&search), filter)
+                .await
+                .unwrap_or_default()
+        },
+        move |ids| Message::LibraryIndexLoaded { generation, ids },
+    )
+}
+
+fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
+    state
+        .library_has_more
+        .then_some((state.library_generation, state.library_offset))
+}
+
 fn open_file(state: &mut State, path: PathBuf) -> Task<Message> {
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.render_generation = state.render_generation.wrapping_add(1);
     state.error = None;
     state.rendered_page = None;
+    state.page_cache.clear();
     state.chapter_content = Vec::new();
     state.show_search_bar = false;
     state.search_query.clear();
@@ -1006,10 +1181,21 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let page = state.current_page;
             let scale = state.zoom.scale();
+            let key = PageCacheKey {
+                page,
+                scale_bits: scale.to_bits(),
+                highlights: pdf_highlights.clone(),
+            };
+            if let Some(cached) = cached_page(state, &key) {
+                state.rendered_page = Some(cached);
+                state.chapter_content.clear();
+                state.error = None;
+                return Task::none();
+            }
             state.rendered_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(generation, move || {
+            return render_page_task(generation, key, move || {
                 doc.render_page_with_highlights(page, scale, &pdf_highlights)
             });
         }
@@ -1033,10 +1219,21 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let page = state.current_page;
             let scale = state.zoom.scale();
+            let key = PageCacheKey {
+                page,
+                scale_bits: scale.to_bits(),
+                highlights: Vec::new(),
+            };
+            if let Some(cached) = cached_page(state, &key) {
+                state.rendered_page = Some(cached);
+                state.chapter_content.clear();
+                state.error = None;
+                return Task::none();
+            }
             state.rendered_page = None;
             state.chapter_content.clear();
             state.error = None;
-            return render_page_task(generation, move || doc.render_page(page, scale));
+            return render_page_task(generation, key, move || doc.render_page(page, scale));
         }
         None => {}
     }
@@ -1046,6 +1243,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
 
 fn render_page_task(
     generation: u64,
+    key: PageCacheKey,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
@@ -1055,8 +1253,37 @@ fn render_page_task(
                 .map_err(|error| error.to_string())
                 .and_then(|result| result.map_err(|error| error.to_string()))
         },
-        move |result| Message::PageRendered { generation, result },
+        move |result| Message::PageRendered {
+            generation,
+            key,
+            result,
+        },
     )
+}
+
+fn cached_page(state: &mut State, key: &PageCacheKey) -> Option<RenderedPage> {
+    let position = state
+        .page_cache
+        .iter()
+        .position(|(cached_key, _)| cached_key == key)?;
+    let entry = state.page_cache.remove(position)?;
+    let page = entry.1.clone();
+    state.page_cache.push_back(entry);
+    Some(page)
+}
+
+fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
+    if let Some(position) = state
+        .page_cache
+        .iter()
+        .position(|(cached_key, _)| cached_key == &key)
+    {
+        state.page_cache.remove(position);
+    }
+    state.page_cache.push_back((key, page));
+    while state.page_cache.len() > PAGE_CACHE_CAPACITY {
+        state.page_cache.pop_front();
+    }
 }
 
 fn refresh_bookmarks(state: &State) -> Task<Message> {
@@ -2195,8 +2422,16 @@ fn library_view(state: &State) -> Element<'_, Message> {
     let cbz_btn = button("CBZ").on_press(Message::LibraryFilterChanged(Some(
         shosai_core::library::BookFormat::Cbz,
     )));
-    let import_btn = button("Import File").on_press(Message::ImportFile);
-    let import_dir_btn = button("Import Folder").on_press(Message::ImportDirectory);
+    let import_btn = if state.library.is_none() {
+        button("Import File")
+    } else {
+        button("Import File").on_press(Message::ImportFile)
+    };
+    let import_dir_btn = if state.library.is_none() {
+        button("Import Folder")
+    } else {
+        button("Import Folder").on_press(Message::ImportDirectory)
+    };
 
     // Layout density controls: keeps the grid customizable without resizing cards.
     let mut per_row_down = button("-");
@@ -2228,10 +2463,25 @@ fn library_view(state: &State) -> Element<'_, Message> {
     let header = container(toolbar).padding(12).width(Length::Fill);
 
     if state.library_books.is_empty() {
-        let empty_msg = if state.library_search.is_empty() && state.library_filter.is_none() {
+        let empty_msg = if state.library_loading {
+            "Loading library..."
+        } else if let Some(error) = &state.storage_error {
+            error
+        } else if state.library_search.is_empty() && state.library_filter.is_none() {
             "No books in library. Import files to get started."
         } else {
             "No books match your search or filter."
+        };
+
+        let import_file = if state.library.is_some() {
+            button("Import File").on_press(Message::ImportFile)
+        } else {
+            button("Import File")
+        };
+        let import_folder = if state.library.is_some() {
+            button("Import Folder").on_press(Message::ImportDirectory)
+        } else {
+            button("Import Folder")
         };
 
         return column![
@@ -2240,8 +2490,8 @@ fn library_view(state: &State) -> Element<'_, Message> {
                 column![
                     text("Shosai (書斎)").size(32),
                     text(empty_msg).size(16),
-                    button("Import File").on_press(Message::ImportFile),
-                    button("Import Folder").on_press(Message::ImportDirectory),
+                    import_file,
+                    import_folder,
                 ]
                 .spacing(16)
                 .align_x(iced::Center),
@@ -2269,6 +2519,17 @@ fn library_view(state: &State) -> Element<'_, Message> {
     }
     if !current_row.is_empty() {
         grid = grid.push(row(current_row).spacing(12));
+    }
+    if state.library_loading {
+        grid = grid.push(center(text("Loading more...")).width(Length::Fill));
+    }
+    if let Some(key) = library_load_sensor_key(state) {
+        grid = grid.push(
+            sensor(container(text("")).width(Length::Fill).height(1))
+                .key(key)
+                .anticipate(LIBRARY_LOAD_AHEAD_PX)
+                .on_show(|_| Message::LoadMoreLibrary),
+        );
     }
 
     let content = scrollable(container(grid).padding(12).width(Length::Fill))
@@ -2380,6 +2641,15 @@ pub fn subscription(_state: &State) -> Subscription<Message> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn boot_defers_storage_initialization() {
+        let (state, task) = boot();
+
+        assert!(state.reading_state.is_none());
+        assert!(state.library_loading);
+        assert!(task.units() > 0);
+    }
+
     fn state_with_document(document: OpenDocument) -> State {
         State {
             screen: Screen::Reader,
@@ -2389,6 +2659,7 @@ mod tests {
             total_pages: 1,
             zoom: ZoomMode::default(),
             rendered_page: None,
+            page_cache: VecDeque::new(),
             render_generation: 0,
             chapter_content: Vec::new(),
             page_input: "1".to_string(),
@@ -2416,7 +2687,157 @@ mod tests {
             library_search: String::new(),
             library_filter: None,
             library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
+            library_has_more: false,
+            library_loading: false,
+            library_generation: 0,
+            library_book_ids: Arc::new(Vec::new()),
+            library_offset: 0,
+            storage_initializing: false,
+            storage_error: None,
+            pending_open: None,
         }
+    }
+
+    fn test_book(id: i64) -> Book {
+        Book {
+            id,
+            title: format!("Book {id}"),
+            author: None,
+            format: shosai_core::library::BookFormat::Epub,
+            file_path: format!("/book-{id}.epub"),
+            cover: None,
+            progress: 0.0,
+            date_added: "2026-01-01".to_string(),
+            last_read: None,
+        }
+    }
+
+    #[test]
+    fn stale_library_results_do_not_replace_a_newer_query() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.library_generation = 2;
+        state.library_loading = true;
+
+        let _ = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation: 1,
+                offset: 0,
+                next_offset: 1,
+                page: BookPage {
+                    books: vec![test_book(1)],
+                    has_more: false,
+                },
+            },
+        );
+
+        assert!(state.library_books.is_empty());
+        assert!(state.library_loading);
+    }
+
+    #[test]
+    fn library_append_requires_the_requested_offset() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.library_generation = 1;
+        state.library_books.push(test_book(1));
+        state.library_book_ids = Arc::new(vec![1, 2]);
+        state.library_offset = 1;
+        state.library_loading = true;
+
+        let _ = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation: 1,
+                offset: 0,
+                next_offset: 1,
+                page: BookPage {
+                    books: vec![test_book(2)],
+                    has_more: false,
+                },
+            },
+        );
+
+        assert_eq!(state.library_books.len(), 1);
+        assert_eq!(state.library_books[0].id, 1);
+        assert!(state.library_loading);
+    }
+
+    #[test]
+    fn infinite_scroll_sensor_exists_even_when_the_first_page_does_not_overflow() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.library_generation = 4;
+        state.library_books = (0..40).map(test_book).collect();
+        state.library_offset = 40;
+        state.library_has_more = true;
+
+        assert_eq!(library_load_sensor_key(&state), Some((4, 40)));
+    }
+
+    #[test]
+    fn opening_a_book_while_storage_initializes_is_queued() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.storage_initializing = true;
+
+        let task = update(&mut state, Message::OpenBook("queued.epub".to_string()));
+
+        assert_eq!(task.units(), 0);
+        assert!(matches!(
+            state.pending_open,
+            Some(PendingOpen::LibraryBook(ref path)) if path == &PathBuf::from("queued.epub")
+        ));
+        assert!(state.file_path.is_none());
+    }
+
+    #[test]
+    fn queued_file_selection_preserves_open_without_import_semantics() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.storage_initializing = true;
+
+        let _ = update(
+            &mut state,
+            Message::FileSelected(Some(PathBuf::from("selected.epub"))),
+        );
+
+        assert!(matches!(
+            state.pending_open,
+            Some(PendingOpen::FileSelected(ref path)) if path == &PathBuf::from("selected.epub")
+        ));
+    }
+
+    #[test]
+    fn failed_storage_keeps_import_actions_disabled() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.storage_error = Some("storage failed".to_string());
+
+        let task = update(&mut state, Message::ImportFile);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.library.is_none());
+        assert_eq!(state.storage_error.as_deref(), Some("storage failed"));
     }
 
     #[test]
@@ -2515,6 +2936,11 @@ mod tests {
             &mut state,
             Message::PageRendered {
                 generation: first_generation,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
                 result: Ok(stale_page),
             },
         );
@@ -2530,6 +2956,11 @@ mod tests {
             &mut state,
             Message::PageRendered {
                 generation: second_generation,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: 1.25_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
                 result: Ok(latest_page),
             },
         );
@@ -2566,6 +2997,11 @@ mod tests {
             &mut state,
             Message::PageRendered {
                 generation: old_generation,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
                 result: Ok(RenderedPage {
                     width: 10,
                     height: 10,
@@ -2611,6 +3047,65 @@ mod tests {
         assert!(task.units() > 0);
         assert!(state.rendered_page.is_none());
         assert_eq!(state.render_generation, 1);
+    }
+
+    #[test]
+    fn raster_page_refresh_reuses_a_cached_page() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let key = PageCacheKey {
+            page: 0,
+            scale_bits: 1.0_f32.to_bits(),
+            highlights: Vec::new(),
+        };
+        cache_rendered_page(
+            &mut state,
+            key,
+            RenderedPage {
+                width: 42,
+                height: 42,
+                pixels: bytes::Bytes::from(vec![0; 42 * 42 * 4]),
+            },
+        );
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(
+            state.rendered_page.as_ref().map(|page| page.width),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn page_cache_evicts_the_least_recently_used_page() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+
+        for page in 0..=PAGE_CACHE_CAPACITY {
+            cache_rendered_page(
+                &mut state,
+                PageCacheKey {
+                    page,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
+                RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                },
+            );
+        }
+
+        assert_eq!(state.page_cache.len(), PAGE_CACHE_CAPACITY);
+        assert!(state.page_cache.iter().all(|(key, _)| key.page != 0));
     }
 
     #[test]
