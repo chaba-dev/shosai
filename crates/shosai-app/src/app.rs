@@ -750,8 +750,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::FileSelected(None) => {}
 
         Message::NextPage => {
-            if state.document.is_some() && state.current_page + 1 < state.total_pages {
-                state.current_page += 1;
+            if let Some(page) = next_page_location(state) {
+                state.current_page = page;
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -759,8 +759,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::PrevPage => {
-            if state.document.is_some() && state.current_page > 0 {
-                state.current_page -= 1;
+            if let Some(page) = previous_page_location(state) {
+                state.current_page = page;
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -2249,6 +2249,39 @@ fn content_navigation_task(state: &mut State) -> Task<Message> {
     }
 }
 
+fn uses_page_spreads(state: &State) -> bool {
+    state.reading_mode == ReadingMode::Paginated
+        && matches!(
+            state.document,
+            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+        )
+}
+
+fn spread_start(page: usize) -> usize {
+    page - page % 2
+}
+
+fn next_page_location(state: &State) -> Option<usize> {
+    state.document.as_ref()?;
+    if uses_page_spreads(state) {
+        let next = spread_start(state.current_page).saturating_add(2);
+        (next < state.total_pages).then_some(next)
+    } else {
+        let next = state.current_page.saturating_add(1);
+        (next < state.total_pages).then_some(next)
+    }
+}
+
+fn previous_page_location(state: &State) -> Option<usize> {
+    state.document.as_ref()?;
+    if uses_page_spreads(state) {
+        let start = spread_start(state.current_page);
+        (start > 0).then_some(start.saturating_sub(2))
+    } else {
+        (state.current_page > 0).then_some(state.current_page - 1)
+    }
+}
+
 fn render_page_task(
     tab_id: u64,
     generation: u64,
@@ -2624,8 +2657,8 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
     );
     let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
-    let can_prev = has_doc && state.current_page > 0;
-    let can_next = has_doc && state.current_page + 1 < state.total_pages;
+    let can_prev = previous_page_location(state).is_some();
+    let can_next = next_page_location(state).is_some();
 
     let mut prev_btn = button("<");
     if can_prev {
@@ -4037,6 +4070,42 @@ mod tests {
         state.library_loading = false;
         state.storage_initializing = false;
         state
+    }
+
+    #[test]
+    fn paginated_raster_navigation_moves_between_two_page_spreads() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = 5;
+
+        assert_eq!(next_page_location(&state), Some(2));
+        assert_eq!(previous_page_location(&state), None);
+
+        state.current_page = 3;
+        assert_eq!(next_page_location(&state), Some(4));
+        assert_eq!(previous_page_location(&state), Some(0));
+
+        state.current_page = 4;
+        assert_eq!(next_page_location(&state), None);
+        assert_eq!(previous_page_location(&state), Some(2));
+    }
+
+    #[test]
+    fn continuous_raster_navigation_still_moves_one_page() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = 5;
+        state.current_page = 2;
+        state.reading_mode = ReadingMode::Continuous;
+
+        assert_eq!(next_page_location(&state), Some(3));
+        assert_eq!(previous_page_location(&state), Some(1));
     }
 
     fn test_book(id: i64) -> Book {
