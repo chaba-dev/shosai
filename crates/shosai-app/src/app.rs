@@ -1374,8 +1374,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
                     Ok(page) => {
+                        let is_visible = paginated_raster_pages(state).contains(&key.page);
                         cache_rendered_page(state, key, page);
-                        let spread_changed = show_cached_paginated_spread(state);
+                        let spread_changed = is_visible && show_cached_paginated_spread(state);
                         state.error = None;
                         if spread_changed {
                             return prefetch_next_paginated_spread(state);
@@ -4602,6 +4603,35 @@ mod tests {
 
         drop(view(&state));
         drop(view(&state));
+
+        assert_eq!(
+            state.rendered_page_handle.as_ref().unwrap().0.id(),
+            first_id
+        );
+        assert_eq!(
+            state.rendered_facing_page_handle.as_ref().unwrap().0.id(),
+            facing_id
+        );
+
+        let prefetch_scale = paginated_raster_scale(&state, &[2]);
+        let generation = state.render_generation;
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 1,
+                generation,
+                key: PageCacheKey {
+                    page: 2,
+                    scale_bits: prefetch_scale.to_bits(),
+                    highlights: Vec::new(),
+                },
+                result: Ok(RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                }),
+            },
+        );
 
         assert_eq!(
             state.rendered_page_handle.as_ref().unwrap().0.id(),
