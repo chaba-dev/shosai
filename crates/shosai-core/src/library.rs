@@ -2,9 +2,11 @@
 //!
 //! Uses the same SQLite database as the reading state store.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use sqlx::QueryBuilder;
 use sqlx::Row;
 use sqlx::sqlite::SqlitePool;
 
@@ -63,6 +65,13 @@ pub struct Book {
     pub last_read: Option<String>,
 }
 
+/// One bounded batch of books for incrementally populated library views.
+#[derive(Debug, Clone)]
+pub struct BookPage {
+    pub books: Vec<Book>,
+    pub has_more: bool,
+}
+
 /// Library backed by SQLite.
 #[derive(Debug, Clone)]
 pub struct Library {
@@ -97,7 +106,13 @@ impl Library {
         let format = BookFormat::from_extension(&ext)
             .with_context(|| format!("unsupported format: .{ext}"))?;
 
-        let (title, author, cover) = extract_metadata_and_cover(&path, format)?;
+        // Parsing documents, decoding images, and rendering PDF covers are CPU-heavy. Keep that
+        // work away from the async executor so imports do not stall the application UI.
+        let metadata_path = path.clone();
+        let (title, author, cover) =
+            tokio::task::spawn_blocking(move || extract_metadata_and_cover(&metadata_path, format))
+                .await
+                .context("metadata extraction task failed")??;
 
         sqlx::query(
             "INSERT INTO books (title, author, format, file_path, cover_blob)
@@ -205,6 +220,110 @@ impl Library {
         Ok(rows.iter().filter_map(row_to_book).collect())
     }
 
+    /// Fetch a bounded page of books, optionally combining search and format filters.
+    ///
+    /// One extra row is fetched to report whether another page is available without a separate
+    /// count query.
+    pub async fn page(
+        &self,
+        query: Option<&str>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<BookPage> {
+        let limit = limit.max(1);
+        let mut builder = QueryBuilder::new(
+            "SELECT id, title, author, format, file_path, cover_blob, progress, \
+             date_added, last_read FROM books",
+        );
+
+        let query = query.filter(|query| !query.is_empty());
+        if query.is_some() || format.is_some() {
+            builder.push(" WHERE ");
+        }
+        if let Some(query) = query {
+            let pattern = format!("%{query}%");
+            builder.push("(title LIKE ");
+            builder.push_bind(pattern.clone());
+            builder.push(" OR author LIKE ");
+            builder.push_bind(pattern);
+            builder.push(")");
+            if format.is_some() {
+                builder.push(" AND ");
+            }
+        }
+        if let Some(format) = format {
+            builder.push("format = ");
+            builder.push_bind(format.as_str());
+        }
+        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC LIMIT ");
+        builder.push_bind(i64::from(limit) + 1);
+        builder.push(" OFFSET ");
+        builder.push_bind(i64::from(offset));
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to load library page")?;
+        let mut books: Vec<_> = rows.iter().filter_map(row_to_book).collect();
+        let has_more = books.len() > limit as usize;
+        books.truncate(limit as usize);
+
+        Ok(BookPage { books, has_more })
+    }
+
+    /// Snapshot the matching library order without loading cover blobs.
+    pub async fn matching_ids(
+        &self,
+        query: Option<&str>,
+        format: Option<BookFormat>,
+    ) -> Result<Vec<i64>> {
+        let mut builder = QueryBuilder::new("SELECT id FROM books");
+        push_library_filters(&mut builder, query, format);
+        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC");
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to snapshot library order")?;
+        Ok(rows
+            .iter()
+            .filter_map(|row| row.try_get("id").ok())
+            .collect())
+    }
+
+    /// Load books from a previously captured ordered ID snapshot.
+    pub async fn books_by_ids(&self, ids: &[i64]) -> Result<Vec<Book>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut builder = QueryBuilder::new(
+            "SELECT id, title, author, format, file_path, cover_blob, progress, \
+             date_added, last_read FROM books WHERE id IN (",
+        );
+        let mut separated = builder.separated(", ");
+        for id in ids {
+            separated.push_bind(id);
+        }
+        separated.push_unseparated(")");
+
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to load books from library snapshot")?;
+        let mut books_by_id: HashMap<_, _> = rows
+            .iter()
+            .filter_map(row_to_book)
+            .map(|book| (book.id, book))
+            .collect();
+
+        Ok(ids.iter().filter_map(|id| books_by_id.remove(id)).collect())
+    }
+
     /// Update reading progress (0.0 to 1.0) and last_read timestamp.
     pub async fn update_progress(&self, book_id: i64, progress: f64) -> Result<()> {
         let progress = progress.clamp(0.0, 1.0);
@@ -257,6 +376,32 @@ impl Library {
         .context("failed to query book by path")?;
 
         Ok(row.as_ref().and_then(row_to_book))
+    }
+}
+
+fn push_library_filters<'a>(
+    builder: &mut QueryBuilder<'a, sqlx::Sqlite>,
+    query: Option<&str>,
+    format: Option<BookFormat>,
+) {
+    let query = query.filter(|query| !query.is_empty());
+    if query.is_some() || format.is_some() {
+        builder.push(" WHERE ");
+    }
+    if let Some(query) = query {
+        let pattern = format!("%{query}%");
+        builder.push("(title LIKE ");
+        builder.push_bind(pattern.clone());
+        builder.push(" OR author LIKE ");
+        builder.push_bind(pattern);
+        builder.push(")");
+        if format.is_some() {
+            builder.push(" AND ");
+        }
+    }
+    if let Some(format) = format {
+        builder.push("format = ");
+        builder.push_bind(format.as_str());
     }
 }
 

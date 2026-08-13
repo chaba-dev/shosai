@@ -98,6 +98,53 @@ async fn test_filter_by_format() {
 }
 
 #[tokio::test]
+async fn test_library_pages_are_bounded_and_combine_filters() {
+    let (lib, _, _dir) = temp_library().await;
+    lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
+    lib.import_file(&fixture_path("sample.epub")).await.unwrap();
+    lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
+
+    let first = lib.page(None, None, 2, 0).await.unwrap();
+    assert_eq!(first.books.len(), 2);
+    assert!(first.has_more);
+
+    let second = lib.page(None, None, 2, 2).await.unwrap();
+    assert_eq!(second.books.len(), 1);
+    assert!(!second.has_more);
+
+    let filtered = lib
+        .page(Some("Sample Book"), Some(BookFormat::Epub), 20, 0)
+        .await
+        .unwrap();
+    assert_eq!(filtered.books.len(), 1);
+    assert_eq!(filtered.books[0].format, BookFormat::Epub);
+}
+
+#[tokio::test]
+async fn test_library_id_snapshot_stays_stable_when_sort_order_changes() {
+    let (lib, _, _dir) = temp_library().await;
+    let pdf = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
+    let epub = lib.import_file(&fixture_path("sample.epub")).await.unwrap();
+    let cbz = lib.import_file(&fixture_path("sample.cbz")).await.unwrap();
+
+    let ids = lib.matching_ids(None, None).await.unwrap();
+    lib.update_progress(pdf.id, 0.5).await.unwrap();
+
+    let first = lib.books_by_ids(&ids[..2]).await.unwrap();
+    let second = lib.books_by_ids(&ids[2..]).await.unwrap();
+    let loaded_ids: Vec<_> = first
+        .into_iter()
+        .chain(second)
+        .map(|book| book.id)
+        .collect();
+
+    assert_eq!(loaded_ids, ids);
+    assert_eq!(loaded_ids.len(), 3);
+    assert!(loaded_ids.contains(&epub.id));
+    assert!(loaded_ids.contains(&cbz.id));
+}
+
+#[tokio::test]
 async fn test_update_progress() {
     let (lib, _, _dir) = temp_library().await;
     let book = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
