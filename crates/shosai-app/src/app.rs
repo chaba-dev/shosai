@@ -1351,11 +1351,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             result,
         } => {
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
-                let page_index = key.page;
                 match result {
                     Ok(page) => {
-                        cache_rendered_page(state, key, page.clone());
-                        set_paginated_rendered_page(state, page_index, page);
+                        cache_rendered_page(state, key, page);
+                        show_cached_paginated_spread(state);
                         state.error = None;
                     }
                     Err(error) => {
@@ -1804,16 +1803,10 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
         .and_then(|store| store.get(&path));
     if let Some(saved) = saved {
         state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
-        if matches!(
-            state.document,
-            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
-        ) {
-            state.zoom = ZoomMode::Manual(saved.zoom);
-        }
     } else {
         state.current_page = 0;
-        state.zoom = ZoomMode::FitPage;
     }
+    state.zoom = ZoomMode::FitPage;
 
     state.page_input = format!("{}", state.current_page + 1);
     state.file_path = Some(path);
@@ -2045,15 +2038,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     scale_bits: scale.to_bits(),
                     highlights: highlights.clone(),
                 };
-                if let Some(cached) = cached_page(state, &key) {
-                    set_paginated_rendered_page(state, page, cached);
-                } else {
+                if !is_page_cached(state, &key) {
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(tab_id, generation, key, move || {
                         doc.render_page_with_highlights(page, scale, &highlights)
                     }));
                 }
             }
+            show_cached_paginated_spread(state);
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
@@ -2088,15 +2080,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
                 };
-                if let Some(cached) = cached_page(state, &key) {
-                    set_paginated_rendered_page(state, page, cached);
-                } else {
+                if !is_page_cached(state, &key) {
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(tab_id, generation, key, move || {
                         doc.render_page(page, scale)
                     }));
                 }
             }
+            show_cached_paginated_spread(state);
             return Task::batch(tasks);
         }
         None => {}
@@ -2402,15 +2393,11 @@ fn render_page_task(
     )
 }
 
-fn cached_page(state: &mut State, key: &PageCacheKey) -> Option<RenderedPage> {
-    let position = state
+fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
+    state
         .page_cache
         .iter()
-        .position(|(cached_key, _)| cached_key == key)?;
-    let entry = state.page_cache.remove(position)?;
-    let page = entry.1.clone();
-    state.page_cache.push_back(entry);
-    Some(page)
+        .any(|(cached_key, _)| cached_key == key)
 }
 
 fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
@@ -2427,12 +2414,40 @@ fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage)
     }
 }
 
-fn set_paginated_rendered_page(state: &mut State, page_index: usize, page: RenderedPage) {
-    if page_index == state.current_page {
-        state.rendered_page = Some(page);
-    } else {
-        state.rendered_facing_page = Some((page_index, page));
-    }
+fn show_cached_paginated_spread(state: &mut State) {
+    let pages = paginated_raster_pages(state);
+    let scale = paginated_raster_scale(state, &pages);
+    let rendered = pages
+        .iter()
+        .map(|page| {
+            let highlights = if matches!(state.document, Some(OpenDocument::Pdf(_))) {
+                search_highlights_for_page(state, *page)
+            } else {
+                Vec::new()
+            };
+            let key = PageCacheKey {
+                page: *page,
+                scale_bits: scale.to_bits(),
+                highlights,
+            };
+            state
+                .page_cache
+                .iter()
+                .find(|(cached_key, _)| cached_key == &key)
+                .map(|(_, rendered)| (*page, rendered.clone()))
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some(rendered) = rendered else {
+        return;
+    };
+
+    state.rendered_page = rendered
+        .iter()
+        .find(|(page, _)| *page == state.current_page)
+        .map(|(_, rendered)| rendered.clone());
+    state.rendered_facing_page = rendered
+        .into_iter()
+        .find(|(page, _)| *page != state.current_page);
 }
 
 fn refresh_bookmarks(state: &State) -> Task<Message> {
@@ -4320,6 +4335,67 @@ mod tests {
         assert_eq!(task.units(), 2);
         assert!(state.rendered_page.is_none());
         assert!(state.rendered_facing_page.is_none());
+    }
+
+    #[test]
+    fn raster_spread_is_published_only_after_both_pages_finish() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+        let _ = refresh_content(&mut state);
+        let generation = state.render_generation;
+        let scale = paginated_raster_scale(&state, &[0, 1]);
+        let rendered = |width| RenderedPage {
+            width,
+            height: 20,
+            pixels: bytes::Bytes::from(vec![0; width as usize * 20 * 4]),
+        };
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 1,
+                generation,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: scale.to_bits(),
+                    highlights: Vec::new(),
+                },
+                result: Ok(rendered(10)),
+            },
+        );
+        assert!(state.rendered_page.is_none());
+        assert!(state.rendered_facing_page.is_none());
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 1,
+                generation,
+                key: PageCacheKey {
+                    page: 1,
+                    scale_bits: scale.to_bits(),
+                    highlights: Vec::new(),
+                },
+                result: Ok(rendered(20)),
+            },
+        );
+        assert_eq!(
+            state.rendered_page.as_ref().map(|page| page.width),
+            Some(10)
+        );
+        assert_eq!(
+            state
+                .rendered_facing_page
+                .as_ref()
+                .map(|(index, page)| (*index, page.width)),
+            Some((1, 20))
+        );
     }
 
     fn test_book(id: i64) -> Book {
