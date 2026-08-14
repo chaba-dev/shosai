@@ -25,6 +25,7 @@ use crate::epub::{
     Page as EpubPage, PageNode as EpubPageNode, content_node_text_len, paginate_epub_chapter,
     spans_text_len,
 };
+use crate::pdf::ZoomMode;
 
 // ---------------------------------------------------------------------------
 // Open document wrapper
@@ -58,36 +59,6 @@ impl std::fmt::Debug for EpubImageHandle {
             .debug_tuple("EpubImageHandle")
             .field(&self.0.id())
             .finish()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ZoomMode {
-    Manual(f32),
-    FitWidth,
-    FitPage,
-}
-
-impl ZoomMode {
-    fn scale(&self) -> f32 {
-        match self {
-            Self::Manual(scale) => *scale,
-            Self::FitWidth | Self::FitPage => 1.0,
-        }
-    }
-
-    fn label(&self) -> String {
-        match self {
-            Self::Manual(scale) => format!("{}%", (scale * 100.0) as u32),
-            Self::FitWidth => "Fit Width".to_string(),
-            Self::FitPage => "Fit Page".to_string(),
-        }
-    }
-}
-
-impl Default for ZoomMode {
-    fn default() -> Self {
-        Self::Manual(1.0)
     }
 }
 
@@ -2617,10 +2588,6 @@ fn uses_page_spreads(state: &State) -> bool {
         && state.total_pages > 1
 }
 
-fn spread_start(page: usize) -> usize {
-    page - page % 2
-}
-
 fn available_reader_size(state: &State) -> Size {
     let bookmarks_width = if state.show_bookmarks_panel {
         BOOKMARKS_PANEL_WIDTH
@@ -2639,15 +2606,7 @@ fn paginated_raster_pages(state: &State) -> Vec<usize> {
 }
 
 fn paginated_raster_pages_at(state: &State, page: usize) -> Vec<usize> {
-    if state.total_pages == 0 {
-        return Vec::new();
-    }
-    if uses_page_spreads(state) {
-        let start = spread_start(page);
-        (start..=(start + 1).min(state.total_pages - 1)).collect()
-    } else {
-        vec![page.min(state.total_pages - 1)]
-    }
+    crate::pdf::visible_pages(state.total_pages, page, uses_page_spreads(state))
 }
 
 fn raster_page_size(state: &State, page: usize) -> Option<(f32, f32)> {
@@ -2669,20 +2628,15 @@ fn paginated_raster_scale(state: &State, pages: &[usize]) -> f32 {
     if sizes.is_empty() {
         return 1.0;
     }
-    let available = available_reader_size(state);
-    let content_width = sizes.iter().map(|(width, _)| width).sum::<f32>();
-    let gutter_width = PAGE_GUTTER * sizes.len().saturating_sub(1) as f32;
-    let content_height = sizes
-        .iter()
-        .map(|(_, height)| *height)
-        .fold(0.0_f32, f32::max);
-    let width_scale = (available.width - gutter_width).max(1.0) / content_width.max(1.0);
     match state.zoom {
-        ZoomMode::FitWidth => width_scale,
-        ZoomMode::FitPage => width_scale.min(available.height / content_height.max(1.0)),
+        ZoomMode::FitWidth => {
+            crate::pdf::fit_scale(&sizes, available_reader_size(state), PAGE_GUTTER, false)
+        }
+        ZoomMode::FitPage => {
+            crate::pdf::fit_scale(&sizes, available_reader_size(state), PAGE_GUTTER, true)
+        }
         ZoomMode::Manual(_) => unreachable!(),
     }
-    .clamp(0.1, 5.0)
 }
 
 fn zoom_step_scale(state: &State, step: f32) -> f32 {
@@ -2696,31 +2650,26 @@ fn zoom_step_scale(state: &State, step: f32) -> f32 {
 }
 
 fn raster_page_slot_width(state: &State, page_count: usize, rendered_width: f32) -> f32 {
-    let gutter_width = PAGE_GUTTER * page_count.saturating_sub(1) as f32;
-    let available_width = (available_reader_size(state).width - gutter_width).max(1.0);
-    let stable_width = available_width / page_count.max(1) as f32;
-    stable_width.max(rendered_width)
+    crate::pdf::slot_width(
+        available_reader_size(state).width,
+        page_count,
+        PAGE_GUTTER,
+        rendered_width,
+    )
 }
 
 fn next_page_location(state: &State) -> Option<usize> {
     state.document.as_ref()?;
-    if uses_page_spreads(state) {
-        let next = spread_start(state.current_page).saturating_add(2);
-        (next < state.total_pages).then_some(next)
-    } else {
-        let next = state.current_page.saturating_add(1);
-        (next < state.total_pages).then_some(next)
-    }
+    crate::pdf::next_page(
+        state.total_pages,
+        state.current_page,
+        uses_page_spreads(state),
+    )
 }
 
 fn previous_page_location(state: &State) -> Option<usize> {
     state.document.as_ref()?;
-    if uses_page_spreads(state) {
-        let start = spread_start(state.current_page);
-        (start > 0).then_some(start.saturating_sub(2))
-    } else {
-        (state.current_page > 0).then_some(state.current_page - 1)
-    }
+    crate::pdf::previous_page(state.current_page, uses_page_spreads(state))
 }
 
 fn render_page_task(
