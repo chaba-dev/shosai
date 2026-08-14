@@ -2349,7 +2349,7 @@ fn cache_epub_image_handles<'a>(
                     EpubImageHandle(image::Handle::from_rgba(width, height, rgba.into_raw())),
                 );
             }
-            ContentNode::BlockQuote(children) => {
+            ContentNode::BlockQuote { children, .. } => {
                 cache_epub_image_handles(handles, children, resources);
             }
             _ => {}
@@ -2548,7 +2548,7 @@ fn estimated_epub_node_lines(
         ContentNode::Heading { text, level, .. } => {
             wrapped(text.chars().count()) * if *level <= 2 { 2 } else { 1 } + 1
         }
-        ContentNode::BlockQuote(children) => children
+        ContentNode::BlockQuote { children, .. } => children
             .iter()
             .map(|child| estimated_epub_node_lines(child, chars_per_line, lines_per_page))
             .sum::<usize>()
@@ -4128,41 +4128,28 @@ fn render_content_node<'a>(
             c.into()
         }
 
-        ContentNode::BlockQuote(children) => {
-            let quote_color = iced::Color {
-                a: 0.7,
-                ..text_color
-            };
-            let bar_color = iced::Color {
-                a: 0.3,
-                ..text_color
-            };
+        ContentNode::BlockQuote { children, style } => {
             let mut col = column![].spacing(8);
             let mut child_offset = text_offset;
             for child in children {
                 col = col.push(render_content_node(
                     child,
                     font_size,
-                    quote_color,
+                    text_color,
                     image_handles,
                     child_offset,
                     highlights,
                 ));
                 child_offset += content_node_text_len(child) + 1;
             }
-            row![
-                container(column![])
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(bar_color)),
-                        ..Default::default()
-                    }),
-                container(col).padding([4, 12]),
-            ]
-            .spacing(0)
-            .width(Length::Fill)
-            .into()
+            let margin = style.margin_left_em.unwrap_or(1.0) * font_size;
+            container(col)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: margin,
+                    ..iced::Padding::ZERO
+                })
+                .into()
         }
 
         ContentNode::UnorderedList(items) => {
@@ -4610,7 +4597,7 @@ fn content_node_text_len(node: &ContentNode) -> usize {
     match node {
         ContentNode::Heading { text, .. } => text.chars().count(),
         ContentNode::Paragraph(spans, _) => spans_text_len(spans),
-        ContentNode::BlockQuote(children) => children
+        ContentNode::BlockQuote { children, .. } => children
             .iter()
             .map(|child| content_node_text_len(child) + 1)
             .sum(),
@@ -6567,20 +6554,23 @@ mod tests {
 
     #[test]
     fn rendered_node_lengths_match_search_text_offsets() {
-        let nodes = vec![ContentNode::BlockQuote(vec![
-            ContentNode::Heading {
-                level: 2,
-                text: "A heading".to_string(),
-                style: Default::default(),
-            },
-            ContentNode::OrderedList(vec![vec![shosai_core::epub::render::TextSpan {
-                text: "list item".to_string(),
-                bold: true,
-                italic: false,
-                monospace: false,
-                link: None,
-            }]]),
-        ])];
+        let nodes = vec![ContentNode::BlockQuote {
+            children: vec![
+                ContentNode::Heading {
+                    level: 2,
+                    text: "A heading".to_string(),
+                    style: Default::default(),
+                },
+                ContentNode::OrderedList(vec![vec![shosai_core::epub::render::TextSpan {
+                    text: "list item".to_string(),
+                    bold: true,
+                    italic: false,
+                    monospace: false,
+                    link: None,
+                }]]),
+            ],
+            style: Default::default(),
+        }];
         let extracted = shosai_core::search::extract_text_from_nodes(&nodes);
         let rendered_length: usize = nodes
             .iter()

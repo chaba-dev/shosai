@@ -100,7 +100,7 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
     match node {
         ContentNode::Heading { text, .. } => out.push_str(text),
         ContentNode::Paragraph(spans, _) => extract_spans_text(spans, out),
-        ContentNode::BlockQuote(children) => {
+        ContentNode::BlockQuote { children, .. } => {
             for child in children {
                 extract_node_text(child, out);
                 out.push('\n');

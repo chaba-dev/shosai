@@ -38,7 +38,10 @@ pub enum ContentNode {
     /// A paragraph with mixed inline formatting.
     Paragraph(Vec<TextSpan>, NodeStyle),
     /// A block quote (contains paragraphs).
-    BlockQuote(Vec<ContentNode>),
+    BlockQuote {
+        children: Vec<ContentNode>,
+        style: NodeStyle,
+    },
     /// An unordered list.
     UnorderedList(Vec<Vec<TextSpan>>),
     /// An ordered list.
@@ -158,7 +161,10 @@ fn parse_block_children(
             "blockquote" => {
                 let inner = parse_block_children(child, base_path, styles);
                 if !inner.is_empty() {
-                    nodes.push(ContentNode::BlockQuote(inner));
+                    nodes.push(ContentNode::BlockQuote {
+                        children: inner,
+                        style: node_style,
+                    });
                 }
             }
 
@@ -268,7 +274,14 @@ fn css_to_node_style(css: &Option<super::style::EpubStyle>) -> NodeStyle {
         Some(s) => NodeStyle {
             text_align: s.text_align,
             font_size_multiplier: s.font_size_multiplier,
-            margin_left_em: s.margin_left_em,
+            // A negative text indent commonly cancels the containing margin on
+            // the first line to create a hanging indent. Native text widgets do
+            // not expose first-line indentation, so use the first-line origin
+            // rather than incorrectly shifting the entire paragraph inward.
+            margin_left_em: match (s.margin_left_em, s.text_indent_em) {
+                (Some(margin), Some(indent)) if indent < 0.0 => Some((margin + indent).max(0.0)),
+                (margin, _) => margin,
+            },
         },
         None => NodeStyle::default(),
     }
@@ -535,9 +548,35 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         assert_eq!(nodes.len(), 1);
         match &nodes[0] {
-            ContentNode::BlockQuote(inner) => {
+            ContentNode::BlockQuote {
+                children: inner, ..
+            } => {
                 assert_eq!(inner.len(), 1);
                 assert!(matches!(&inner[0], ContentNode::Paragraph(_, _)));
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_blockquote_style_and_hanging_indent() {
+        let xhtml = r#"<html><body>
+            <blockquote class="toc"><p class="entry">Chapter 1</p></blockquote>
+        </body></html>"#;
+        let styles = super::super::style::parse_epub_styles([(
+            "style.css",
+            ".toc { margin-left: 16px; } .entry { margin-left: 32px; text-indent: -32px; }",
+        )]);
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        match &nodes[0] {
+            ContentNode::BlockQuote { children, style } => {
+                assert_eq!(style.margin_left_em, Some(1.0));
+                assert!(matches!(
+                    &children[0],
+                    ContentNode::Paragraph(_, paragraph_style)
+                        if paragraph_style.margin_left_em == Some(0.0)
+                ));
             }
             other => panic!("expected BlockQuote, got {other:?}"),
         }
