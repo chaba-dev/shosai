@@ -3995,6 +3995,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                         state.font_size,
                         state.theme.text_color(),
                         &state.epub_image_handles,
+                        false,
                         text_offset,
                         &highlights,
                     ));
@@ -4183,6 +4184,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 font_size,
                 text_color,
                 &state.epub_image_handles,
+                true,
                 page_node.text_offset,
                 &highlights,
             ));
@@ -4235,6 +4237,7 @@ fn render_content_node<'a>(
     font_size: f32,
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
+    fill_images: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
@@ -4286,6 +4289,7 @@ fn render_content_node<'a>(
                     font_size,
                     text_color,
                     image_handles,
+                    fill_images,
                     child_offset,
                     highlights,
                 ));
@@ -4367,6 +4371,7 @@ fn render_content_node<'a>(
             font_size,
             text_color,
             image_handles,
+            fill_images,
             text_offset,
             highlights,
         ),
@@ -4379,26 +4384,31 @@ fn render_content_node<'a>(
 }
 
 /// Render a cached EPUB image, falling back to alt text.
+#[allow(clippy::too_many_arguments)]
 fn render_epub_image<'a>(
     src: &str,
     alt: &str,
     font_size: f32,
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
+    fill: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     if let Some(handle) = image_handles.get(src) {
-        return container(
-            image(&handle.0)
-                .content_fit(iced::ContentFit::ScaleDown)
-                .width(Length::Fill)
-                .height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .into();
+        let mut rendered = image(&handle.0)
+            .content_fit(iced::ContentFit::ScaleDown)
+            .width(Length::Fill);
+        if fill {
+            rendered = rendered.height(Length::Fill);
+        }
+        let mut image_container = container(rendered)
+            .width(Length::Fill)
+            .center_x(Length::Fill);
+        if fill {
+            image_container = image_container.height(Length::Fill);
+        }
+        return image_container.into();
     }
 
     // Fallback: show alt text placeholder.
@@ -6738,6 +6748,7 @@ mod tests {
             16.0,
             iced::Color::BLACK,
             &handles,
+            false,
             0,
             &[],
         ));
@@ -6747,6 +6758,7 @@ mod tests {
             16.0,
             iced::Color::BLACK,
             &handles,
+            false,
             0,
             &[],
         ));
