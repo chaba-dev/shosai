@@ -591,6 +591,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_preserves_inline_preformatted_whitespace() {
+        let xhtml = r#"<html><body><p>Run <code class="keep">  x
+    y</code> now.</p></body></html>"#;
+        let styles = super::super::style::parse_epub_styles([(
+            "style.css",
+            ".keep { font-family: monospace; white-space: pre; }",
+        )]);
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        match &nodes[0] {
+            ContentNode::Paragraph(spans, _) => {
+                let code = spans
+                    .iter()
+                    .find(|span| span.monospace)
+                    .expect("inline code span should be retained");
+                assert_eq!(code.text, "  x\n    y");
+            }
+            other => panic!("expected Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_parse_lists() {
         let xhtml = r#"<html><body>
             <ul><li>One</li><li>Two</li></ul>

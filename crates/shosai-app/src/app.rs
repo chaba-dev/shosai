@@ -6326,6 +6326,179 @@ mod tests {
     }
 
     #[test]
+    fn epub_paginator_splits_long_lists_without_losing_items() {
+        let items = (0..30)
+            .map(|index| {
+                vec![shosai_core::epub::render::TextSpan {
+                    text: format!("List item {index}"),
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    link: None,
+                }]
+            })
+            .collect::<Vec<_>>();
+        let pages = paginate_epub_chapter(
+            &[ContentNode::OrderedList(items.clone())],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert!(pages.len() > 1, "a long list must span multiple pages");
+        let paginated_items = pages
+            .iter()
+            .flatten()
+            .flat_map(|page_node| match &page_node.node {
+                ContentNode::OrderedList(items) => items.clone(),
+                node => panic!("expected ordered list, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paginated_items, items);
+    }
+
+    #[test]
+    fn epub_paginator_splits_long_blockquotes_without_losing_children() {
+        let children = (0..20)
+            .map(|index| {
+                ContentNode::Paragraph(
+                    vec![shosai_core::epub::render::TextSpan {
+                        text: format!("Quoted paragraph {index}"),
+                        bold: false,
+                        italic: false,
+                        monospace: false,
+                        link: None,
+                    }],
+                    Default::default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let pages = paginate_epub_chapter(
+            &[ContentNode::BlockQuote {
+                children: children.clone(),
+                style: Default::default(),
+            }],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert!(
+            pages.len() > 1,
+            "a long blockquote must span multiple pages"
+        );
+        let paginated_children = pages
+            .iter()
+            .flatten()
+            .flat_map(|page_node| match &page_node.node {
+                ContentNode::BlockQuote { children, .. } => children.clone(),
+                node => panic!("expected blockquote, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paginated_children, children);
+    }
+
+    #[test]
+    fn epub_paginator_places_images_on_their_own_page() {
+        let pages = paginate_epub_chapter(
+            &[
+                ContentNode::Paragraph(
+                    vec![shosai_core::epub::render::TextSpan {
+                        text: "Text before the image".to_string(),
+                        bold: false,
+                        italic: false,
+                        monospace: false,
+                        link: None,
+                    }],
+                    Default::default(),
+                ),
+                ContentNode::Image {
+                    src: "portrait.png".to_string(),
+                    alt: "Portrait".to_string(),
+                },
+            ],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert_eq!(pages.len(), 2);
+        assert!(matches!(
+            pages[1].as_slice(),
+            [EpubPageNode {
+                node: ContentNode::Image { .. },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn epub_location_boundary_selects_the_continuation_page() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let paragraph = |text: &str| {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text: text.to_string(),
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    link: None,
+                }],
+                Default::default(),
+            )
+        };
+        state.epub_pages = vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("first"),
+                    text_offset: 0,
+                }],
+            },
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("second"),
+                    text_offset: 5,
+                }],
+            },
+        ];
+
+        assert_eq!(epub_page_for_location(&state, 0, 5), 1);
+    }
+
+    #[test]
+    fn switching_from_continuous_epub_preserves_the_current_chapter() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let _ = refresh_content(&mut state);
+        assert!(state.epub_pages.iter().any(|page| page.chapter == 1));
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        state.current_page = 1;
+        state.epub_page = 0;
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+
+        assert_eq!(state.reading_mode, ReadingMode::Paginated);
+        assert_eq!(state.current_page, 1);
+        assert_eq!(state.epub_pages[state.epub_page].chapter, 1);
+    }
+
+    #[test]
     fn paginated_epub_navigation_moves_between_horizontal_spreads() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
