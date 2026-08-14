@@ -295,6 +295,7 @@ struct ReaderTab {
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Vec<EpubPage>,
     epub_page: usize,
+    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -364,6 +365,7 @@ pub struct State {
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Vec<EpubPage>,
     epub_page: usize,
+    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -565,7 +567,7 @@ pub enum Message {
         file_path: PathBuf,
         bookmarks: Vec<Bookmark>,
     },
-    GoToBookmark(usize), // page index
+    GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
     StartEditNote(i64, String),
     EditNoteChanged(String),
     SaveNote,
@@ -640,6 +642,7 @@ pub fn boot() -> (State, Task<Message>) {
         epub_image_handles: HashMap::new(),
         epub_pages: Vec::new(),
         epub_page: 0,
+        epub_offset: 0,
         continuous_pages: Vec::new(),
         continuous_pending: BTreeMap::new(),
         continuous_visible: BTreeSet::new(),
@@ -820,6 +823,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             if let Some(page) = next_page_location(state) {
                 state.current_page = page;
+                if matches!(state.document, Some(OpenDocument::Epub(_))) {
+                    state.epub_offset = 0;
+                }
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -832,6 +838,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             if let Some(page) = previous_page_location(state) {
                 state.current_page = page;
+                if matches!(state.document, Some(OpenDocument::Epub(_))) {
+                    state.epub_offset = 0;
+                }
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -859,6 +868,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 state.current_page = page_num - 1;
                 state.epub_page = 0;
+                state.epub_offset = 0;
                 save_reading_state(state);
                 state.page_input = format!("{}", state.current_page + 1);
                 return content_navigation_task(state);
@@ -880,6 +890,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.document.is_some() {
                 state.current_page = 0;
                 state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = "1".to_string();
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -896,6 +907,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.document.is_some() && state.total_pages > 0 {
                 state.current_page = state.total_pages - 1;
                 state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = state.total_pages.to_string();
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -957,6 +969,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 state.current_page = page;
                 state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = (page + 1).to_string();
                 save_reading_state(state);
                 update_bookmark_status(state);
@@ -1231,7 +1244,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::ToggleBookmark => {
             if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
                 let page_title = format!("Page {}", state.current_page + 1);
-                match store.toggle(path, state.current_page, Some(&page_title)) {
+                match store.toggle_at(
+                    path,
+                    state.current_page,
+                    current_epub_offset(state),
+                    Some(&page_title),
+                ) {
                     Ok(Some(_)) => state.current_page_bookmarked = true,
                     Ok(None) => state.current_page_bookmarked = false,
                     Err(e) => eprintln!("warning: failed to toggle bookmark: {e}"),
@@ -1262,19 +1280,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(path) = &state.file_path
                 && let Some(store) = &state.bookmark_store
             {
-                state.current_page_bookmarked = store.is_bookmarked(path, state.current_page);
+                state.current_page_bookmarked =
+                    store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
             }
         }
 
-        Message::GoToBookmark(page) => {
+        Message::GoToBookmark(page, location_offset) => {
             if uses_paginated_epub_layout(state) {
-                state.epub_page = epub_page_for_location(state, page, 0);
+                state.epub_page = epub_page_for_location(state, page, location_offset.unwrap_or(0));
                 sync_epub_location(state);
+                state.epub_offset = location_offset.unwrap_or(0);
                 save_reading_state(state);
                 return Task::none();
             }
             state.current_page = page;
             state.epub_page = 0;
+            state.epub_offset = location_offset.unwrap_or(0);
             state.page_input = format!("{}", page + 1);
             save_reading_state(state);
             update_bookmark_status(state);
@@ -1712,6 +1733,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         epub_image_handles: state.epub_image_handles.clone(),
         epub_pages: state.epub_pages.clone(),
         epub_page: state.epub_page,
+        epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
@@ -1754,6 +1776,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_pages = tab.epub_pages;
     state.epub_page = tab.epub_page;
+    state.epub_offset = tab.epub_offset;
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
@@ -1844,6 +1867,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.epub_image_handles.clear();
         state.epub_pages.clear();
         state.epub_page = 0;
+        state.epub_offset = 0;
         state.continuous_pages.clear();
         state.continuous_chapters.clear();
         state.screen = Screen::Library;
@@ -1921,6 +1945,7 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.epub_image_handles.clear();
     state.epub_pages.clear();
     state.epub_page = 0;
+    state.epub_offset = 0;
     state.continuous_pages.clear();
     state.continuous_pending.clear();
     state.continuous_visible.clear();
@@ -1946,8 +1971,10 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
         .and_then(|store| store.get(&path));
     if let Some(saved) = saved {
         state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
+        state.epub_offset = saved.location_offset.unwrap_or(0);
     } else {
         state.current_page = 0;
+        state.epub_offset = 0;
     }
     state.zoom = ZoomMode::FitPage;
 
@@ -2105,6 +2132,7 @@ fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
             }
             state.current_page = chapter_idx;
             state.epub_page = 0;
+            state.epub_offset = 0;
             state.page_input = format!("{}", state.current_page + 1);
             save_reading_state(state);
             return refresh_content(state);
@@ -2214,17 +2242,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
-            let requested_last_page = state.epub_page == usize::MAX;
-            let anchor = (!requested_last_page)
-                .then(|| state.epub_pages.get(state.epub_page))
-                .flatten()
-                .map(|page| {
-                    (
-                        page.chapter,
-                        page.nodes.first().map_or(0, |node| node.text_offset),
-                    )
-                })
-                .unwrap_or((state.current_page, 0));
+            let anchor = (state.current_page, state.epub_offset);
             let page_size = epub_page_size(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
@@ -2281,11 +2299,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 state.epub_page = 0;
                 state.error = Some("EPUB contains no readable content".to_string());
             } else {
-                let requested_page = if requested_last_page {
-                    state.epub_pages.len() - 1
-                } else {
-                    epub_page_for_location(state, anchor.0, anchor.1)
-                };
+                let requested_page = epub_page_for_location(state, anchor.0, anchor.1);
                 state.epub_page = requested_page.min(state.epub_pages.len() - 1);
                 state.current_page = state.epub_pages[state.epub_page].chapter;
                 state.chapter_content = parsed_chapters[state.current_page].clone();
@@ -2898,6 +2912,7 @@ fn can_turn_epub_page(state: &State, forward: bool) -> bool {
 fn sync_epub_location(state: &mut State) {
     if let Some(page) = state.epub_pages.get(state.epub_page) {
         state.current_page = page.chapter;
+        state.epub_offset = page.nodes.first().map_or(0, |node| node.text_offset);
         state.page_input = (state.epub_page + 1).to_string();
         update_bookmark_status(state);
     }
@@ -3197,7 +3212,8 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
 
 fn update_bookmark_status(state: &mut State) {
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-        state.current_page_bookmarked = store.is_bookmarked(path, state.current_page);
+        state.current_page_bookmarked =
+            store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
     } else {
         state.current_page_bookmarked = false;
     }
@@ -3207,6 +3223,7 @@ fn save_reading_state(state: &State) {
     if let (Some(path), Some(store)) = (&state.file_path, &state.reading_state) {
         let reading = FileReadingState {
             page: state.current_page,
+            location_offset: current_epub_offset(state),
             zoom: state.zoom.scale(),
         };
         if let Err(e) = store.set(path, &reading) {
@@ -3344,6 +3361,9 @@ fn navigate_to_current_search_result(
 ) -> Task<Message> {
     let target = if let Some(result) = state.search_results.get(state.search_current) {
         let target_page = result.page;
+        if matches!(state.document, Some(OpenDocument::Epub(_))) {
+            state.epub_offset = result.offset;
+        }
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
             state.epub_page = 0;
@@ -3358,6 +3378,8 @@ fn navigate_to_current_search_result(
         if let Some((chapter, offset)) = target {
             state.epub_page = epub_page_for_location(state, chapter, offset);
             sync_epub_location(state);
+            state.epub_offset = offset;
+            save_reading_state(state);
         }
         return Task::none();
     }
@@ -3378,12 +3400,16 @@ fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize
     state
         .epub_pages
         .iter()
-        .position(|page| {
+        .enumerate()
+        .filter(|(_, page)| {
             page.chapter == chapter
-                && page.nodes.last().is_some_and(|node| {
-                    node.text_offset + content_node_text_len(&node.node) >= offset
-                })
+                && page
+                    .nodes
+                    .first()
+                    .is_none_or(|node| node.text_offset <= offset)
         })
+        .map(|(index, _)| index)
+        .next_back()
         .or_else(|| {
             state
                 .epub_pages
@@ -3391,6 +3417,10 @@ fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize
                 .position(|page| page.chapter == chapter)
         })
         .unwrap_or(0)
+}
+
+fn current_epub_offset(state: &State) -> Option<usize> {
+    matches!(state.document, Some(OpenDocument::Epub(_))).then_some(state.epub_offset)
 }
 
 fn refresh_pdf_search_highlights_if_changed(
@@ -3726,7 +3756,7 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
             // Header row: title + page + delete button
             let header = row![
                 button(text(title).size(12))
-                    .on_press(Message::GoToBookmark(bm.page))
+                    .on_press(Message::GoToBookmark(bm.page, bm.location_offset))
                     .padding(2),
                 text(format!("p.{}", bm.page + 1)).size(10),
                 button(text("\u{2715}").size(10))
@@ -5408,7 +5438,14 @@ mod tests {
             .unwrap();
         let path = directory.path().join("book.cbz");
         runtime
-            .block_on(store.set_async(&path, &FileReadingState { page: 1, zoom: 2.5 }))
+            .block_on(store.set_async(
+                &path,
+                &FileReadingState {
+                    page: 1,
+                    location_offset: None,
+                    zoom: 2.5,
+                },
+            ))
             .unwrap();
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -5936,6 +5973,7 @@ mod tests {
                     id: 1,
                     file_path: "first.epub".to_string(),
                     page: 0,
+                    location_offset: None,
                     title: None,
                     note: None,
                     color: "yellow".to_string(),

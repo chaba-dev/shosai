@@ -399,6 +399,7 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
     spans.retain(|span| !span.text.is_empty());
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_inline_spans_recursive(
     node: &roxmltree::Node,
     bold: bool,

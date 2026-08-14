@@ -32,7 +32,14 @@ async fn test_set_then_get() {
     let path = PathBuf::from("/books/rust.pdf");
 
     store
-        .set_async(&path, &FileReadingState { page: 5, zoom: 1.5 })
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 5,
+                location_offset: None,
+                zoom: 1.5,
+            },
+        )
         .await
         .unwrap();
 
@@ -45,12 +52,41 @@ async fn test_set_then_get() {
 }
 
 #[tokio::test]
+async fn test_epub_character_offset_persists() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/example.epub");
+
+    store
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 4,
+                location_offset: Some(1_234),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+    let state = store.get_async(&path).await.unwrap();
+    assert_eq!(state.page, 4);
+    assert_eq!(state.location_offset, Some(1_234));
+}
+
+#[tokio::test]
 async fn test_upsert_overwrites() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/overwrite.pdf");
 
     store
-        .set_async(&path, &FileReadingState { page: 1, zoom: 1.0 })
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 1,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
         .await
         .unwrap();
     store
@@ -58,6 +94,7 @@ async fn test_upsert_overwrites() {
             &path,
             &FileReadingState {
                 page: 42,
+                location_offset: None,
                 zoom: 3.0,
             },
         )
@@ -76,7 +113,14 @@ async fn test_multiple_files_independent() {
     let b = PathBuf::from("/books/b.pdf");
 
     store
-        .set_async(&a, &FileReadingState { page: 1, zoom: 1.0 })
+        .set_async(
+            &a,
+            &FileReadingState {
+                page: 1,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
         .await
         .unwrap();
     store
@@ -84,6 +128,7 @@ async fn test_multiple_files_independent() {
             &b,
             &FileReadingState {
                 page: 99,
+                location_offset: None,
                 zoom: 2.5,
             },
         )
@@ -110,6 +155,7 @@ async fn test_updating_one_file_does_not_affect_another() {
             &a,
             &FileReadingState {
                 page: 10,
+                location_offset: None,
                 zoom: 1.0,
             },
         )
@@ -120,6 +166,7 @@ async fn test_updating_one_file_does_not_affect_another() {
             &b,
             &FileReadingState {
                 page: 20,
+                location_offset: None,
                 zoom: 2.0,
             },
         )
@@ -132,6 +179,7 @@ async fn test_updating_one_file_does_not_affect_another() {
             &b,
             &FileReadingState {
                 page: 50,
+                location_offset: None,
                 zoom: 4.0,
             },
         )
@@ -165,6 +213,7 @@ async fn test_data_persists_across_opens() {
                 &path,
                 &FileReadingState {
                     page: 42,
+                    location_offset: None,
                     zoom: 2.0,
                 },
             )
@@ -229,6 +278,7 @@ async fn test_migrations_are_idempotent() {
             &path,
             &FileReadingState {
                 page: 7,
+                location_offset: None,
                 zoom: 1.25,
             },
         )
@@ -256,7 +306,14 @@ async fn test_page_zero_and_default_zoom() {
     let path = PathBuf::from("/books/start.pdf");
 
     store
-        .set_async(&path, &FileReadingState { page: 0, zoom: 1.0 })
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 0,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
         .await
         .unwrap();
 
@@ -275,6 +332,7 @@ async fn test_large_page_number() {
             &path,
             &FileReadingState {
                 page: 999_999,
+                location_offset: None,
                 zoom: 5.0,
             },
         )
@@ -296,6 +354,7 @@ async fn test_small_zoom_value() {
             &path,
             &FileReadingState {
                 page: 0,
+                location_offset: None,
                 zoom: 0.25,
             },
         )
@@ -312,7 +371,14 @@ async fn test_path_with_spaces_and_unicode() {
     let path = PathBuf::from("/my books/日本語の本 (copy).pdf");
 
     store
-        .set_async(&path, &FileReadingState { page: 3, zoom: 1.5 })
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 3,
+                location_offset: None,
+                zoom: 1.5,
+            },
+        )
         .await
         .unwrap();
 
@@ -330,7 +396,11 @@ async fn test_open_creates_parent_directories() {
     store
         .set_async(
             &PathBuf::from("/test.pdf"),
-            &FileReadingState { page: 1, zoom: 1.0 },
+            &FileReadingState {
+                page: 1,
+                location_offset: None,
+                zoom: 1.0,
+            },
         )
         .await
         .unwrap();

@@ -21,6 +21,8 @@ const DB_FILE: &str = "shosai.db";
 pub struct FileReadingState {
     /// Last viewed page index (0-based).
     pub page: usize,
+    /// Character offset within an EPUB chapter. `None` for fixed-page formats.
+    pub location_offset: Option<usize>,
     /// Last zoom scale (1.0 = 100%).
     pub zoom: f32,
 }
@@ -110,7 +112,7 @@ impl ReadingStateStore {
     pub async fn get_async(&self, file_path: &Path) -> Option<FileReadingState> {
         let key = canonical_key(file_path);
 
-        sqlx::query("SELECT page, zoom FROM reading_state WHERE file_path = ?")
+        sqlx::query("SELECT page, location_offset, zoom FROM reading_state WHERE file_path = ?")
             .bind(&key)
             .fetch_optional(&self.pool)
             .await
@@ -118,6 +120,9 @@ impl ReadingStateStore {
             .flatten()
             .map(|row| FileReadingState {
                 page: row.get::<i64, _>("page") as usize,
+                location_offset: row
+                    .get::<Option<i64>, _>("location_offset")
+                    .map(|offset| offset as usize),
                 zoom: row.get::<f64, _>("zoom") as f32,
             })
     }
@@ -127,15 +132,17 @@ impl ReadingStateStore {
         let key = canonical_key(file_path);
 
         sqlx::query(
-            "INSERT INTO reading_state (file_path, page, zoom, updated_at)
-             VALUES (?, ?, ?, datetime('now'))
+            "INSERT INTO reading_state (file_path, page, location_offset, zoom, updated_at)
+             VALUES (?, ?, ?, ?, datetime('now'))
              ON CONFLICT(file_path) DO UPDATE SET
                 page = excluded.page,
+                location_offset = excluded.location_offset,
                 zoom = excluded.zoom,
                 updated_at = excluded.updated_at",
         )
         .bind(&key)
         .bind(state.page as i64)
+        .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
         .execute(&self.pool)
         .await
