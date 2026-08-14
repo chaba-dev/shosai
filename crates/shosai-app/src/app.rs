@@ -145,6 +145,7 @@ const PAGE_GUTTER: f32 = 20.0;
 const EPUB_BLOCKQUOTE_SPACING: f32 = 8.0;
 const EPUB_TEXT_LINE_HEIGHT: f32 = 1.2;
 const EPUB_AVERAGE_CHARACTER_WIDTH: f32 = 0.55;
+const EPUB_MAX_CHARACTERS_PER_LINE: usize = 72;
 const EPUB_PAGE_NUMBER_SIZE: f32 = 11.0;
 const BOOKMARKS_PANEL_WIDTH: f32 = 300.0;
 const WINDOW_WIDTH_KEY: &str = "window.width";
@@ -2384,12 +2385,14 @@ fn epub_uses_spread(state: &State) -> bool {
 fn epub_page_size(state: &State) -> Size {
     let available = available_reader_size(state);
     let page_count = if epub_uses_spread(state) { 2.0 } else { 1.0 };
-    let page_width =
+    let available_text_width =
         ((available.width - PAGE_GUTTER * (page_count - 1.0)) / page_count - 40.0).max(120.0);
+    let readable_text_width =
+        state.font_size * EPUB_AVERAGE_CHARACTER_WIDTH * EPUB_MAX_CHARACTERS_PER_LINE as f32;
     let footer_height =
         EPUB_PAGE_NUMBER_SIZE * EPUB_TEXT_LINE_HEIGHT + state.font_size * state.line_spacing;
     Size::new(
-        page_width,
+        available_text_width.min(readable_text_width),
         (available.height - 40.0 - footer_height).max(120.0),
     )
 }
@@ -4419,8 +4422,9 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     let bg = state.theme.background();
     let mut spread = row![].spacing(PAGE_GUTTER).height(Length::Fill);
     let visible_pages = epub_visible_pages(state);
+    let text_width = epub_page_size(state).width;
 
-    for page_index in &visible_pages {
+    for (visible_index, page_index) in visible_pages.iter().enumerate() {
         let epub_page = &state.epub_pages[*page_index];
         let highlights = search_highlight_models_for_page(state, epub_page.chapter);
         let image_only = matches!(
@@ -4456,11 +4460,25 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                     ..text_color
                 }),
         );
+        let mut page_content = container(page).width(Length::Fill).height(Length::Fill);
+        if !image_only {
+            page_content = page_content.max_width(text_width);
+        }
+        let content_alignment = if epub_uses_spread(state) {
+            if visible_index == 0 {
+                iced::Alignment::End
+            } else {
+                iced::Alignment::Start
+            }
+        } else {
+            iced::Alignment::Center
+        };
         spread = spread.push(
-            container(page)
+            container(page_content)
                 .padding(20)
                 .width(Length::FillPortion(1))
                 .height(Length::Fill)
+                .align_x(content_alignment)
                 .style(move |_| container::Style {
                     background: Some(iced::Background::Color(bg)),
                     ..Default::default()
@@ -7156,6 +7174,26 @@ mod tests {
         assert_eq!(state.epub_page, 2);
         assert_eq!(state.current_page, 2);
         assert_eq!(epub_visible_pages(&state), vec![2]);
+    }
+
+    #[test]
+    fn paginated_epub_caps_wide_pages_at_a_readable_line_length() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size.width = 3440.0;
+
+        let wide_page = epub_page_size(&state);
+        let estimated_characters =
+            wide_page.width / (state.font_size * EPUB_AVERAGE_CHARACTER_WIDTH);
+
+        assert!((estimated_characters - EPUB_MAX_CHARACTERS_PER_LINE as f32).abs() < 0.01);
+
+        state.window_size.width = 500.0;
+        let narrow_page = epub_page_size(&state);
+        assert!(narrow_page.width < wide_page.width);
     }
 
     #[test]
