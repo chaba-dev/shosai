@@ -100,13 +100,13 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
     match node {
         ContentNode::Heading { text, .. } => out.push_str(text),
         ContentNode::Paragraph(spans, _) => extract_spans_text(spans, out),
-        ContentNode::BlockQuote(children) => {
+        ContentNode::BlockQuote { children, .. } => {
             for child in children {
                 extract_node_text(child, out);
                 out.push('\n');
             }
         }
-        ContentNode::UnorderedList(items) | ContentNode::OrderedList(items) => {
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             for item_spans in items {
                 extract_spans_text(item_spans, out);
                 out.push('\n');
@@ -293,6 +293,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     },
                     TextSpan {
@@ -300,6 +301,7 @@ mod tests {
                         bold: true,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     },
                 ],

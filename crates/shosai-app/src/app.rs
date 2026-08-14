@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -41,6 +41,33 @@ impl std::fmt::Debug for RasterImageHandle {
             .field(&self.0.id())
             .finish()
     }
+}
+
+#[derive(Clone)]
+struct EpubImageHandle(image::Handle);
+
+impl std::fmt::Debug for EpubImageHandle {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("EpubImageHandle")
+            .field(&self.0.id())
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct EpubPageNode {
+    node: ContentNode,
+    text_offset: usize,
+}
+
+type EpubPageNodes = Vec<EpubPageNode>;
+
+#[derive(Debug, Clone)]
+struct EpubPage {
+    chapter: usize,
+    title: Option<String>,
+    nodes: EpubPageNodes,
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +292,10 @@ struct ReaderTab {
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     chapter_content: Vec<ContentNode>,
+    epub_image_handles: HashMap<String, EpubImageHandle>,
+    epub_pages: Vec<EpubPage>,
+    epub_page: usize,
+    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -331,6 +362,10 @@ pub struct State {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     chapter_content: Vec<ContentNode>,
+    epub_image_handles: HashMap<String, EpubImageHandle>,
+    epub_pages: Vec<EpubPage>,
+    epub_page: usize,
+    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -532,7 +567,7 @@ pub enum Message {
         file_path: PathBuf,
         bookmarks: Vec<Bookmark>,
     },
-    GoToBookmark(usize), // page index
+    GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
     StartEditNote(i64, String),
     EditNoteChanged(String),
     SaveNote,
@@ -604,6 +639,10 @@ pub fn boot() -> (State, Task<Message>) {
         page_cache: VecDeque::new(),
         render_generation: 0,
         chapter_content: Vec::new(),
+        epub_image_handles: HashMap::new(),
+        epub_pages: Vec::new(),
+        epub_page: 0,
+        epub_offset: 0,
         continuous_pages: Vec::new(),
         continuous_pending: BTreeMap::new(),
         continuous_visible: BTreeSet::new(),
@@ -779,8 +818,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::FileSelected(None) => {}
 
         Message::NextPage => {
+            if uses_paginated_epub_layout(state) {
+                return turn_epub_page(state, true);
+            }
             if let Some(page) = next_page_location(state) {
                 state.current_page = page;
+                if matches!(state.document, Some(OpenDocument::Epub(_))) {
+                    state.epub_offset = 0;
+                }
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -788,8 +833,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::PrevPage => {
+            if uses_paginated_epub_layout(state) {
+                return turn_epub_page(state, false);
+            }
             if let Some(page) = previous_page_location(state) {
                 state.current_page = page;
+                if matches!(state.document, Some(OpenDocument::Epub(_))) {
+                    state.epub_offset = 0;
+                }
                 state.page_input = format!("{}", state.current_page + 1);
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -803,19 +854,43 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::GoToPage => {
             if let Ok(page_num) = state.page_input.parse::<usize>()
                 && page_num >= 1
+                && uses_paginated_epub_layout(state)
+                && page_num <= state.epub_pages.len()
+            {
+                state.epub_page = page_num - 1;
+                sync_epub_location(state);
+                save_reading_state(state);
+                return Task::none();
+            }
+            if let Ok(page_num) = state.page_input.parse::<usize>()
+                && page_num >= 1
                 && page_num <= state.total_pages
             {
                 state.current_page = page_num - 1;
+                state.epub_page = 0;
+                state.epub_offset = 0;
                 save_reading_state(state);
                 state.page_input = format!("{}", state.current_page + 1);
                 return content_navigation_task(state);
             }
-            state.page_input = format!("{}", state.current_page + 1);
+            state.page_input = if uses_paginated_epub_layout(state) {
+                (state.epub_page + 1).to_string()
+            } else {
+                (state.current_page + 1).to_string()
+            };
         }
 
         Message::FirstPage => {
+            if uses_paginated_epub_layout(state) && !state.epub_pages.is_empty() {
+                state.epub_page = 0;
+                sync_epub_location(state);
+                save_reading_state(state);
+                return Task::none();
+            }
             if state.document.is_some() {
                 state.current_page = 0;
+                state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = "1".to_string();
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -823,8 +898,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LastPage => {
+            if uses_paginated_epub_layout(state) && !state.epub_pages.is_empty() {
+                state.epub_page = state.epub_pages.len() - 1;
+                sync_epub_location(state);
+                save_reading_state(state);
+                return Task::none();
+            }
             if state.document.is_some() && state.total_pages > 0 {
                 state.current_page = state.total_pages - 1;
+                state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = state.total_pages.to_string();
                 save_reading_state(state);
                 return content_navigation_task(state);
@@ -841,7 +924,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.continuous_visible.clear();
             state.continuous_chapters.clear();
             state.render_generation = state.render_generation.wrapping_add(1);
-            return refresh_content(state);
+            let task = refresh_content(state);
+            state.page_input = if uses_paginated_epub_layout(state) {
+                (state.epub_page + 1).to_string()
+            } else {
+                (state.current_page + 1).to_string()
+            };
+            return task;
         }
 
         Message::ContinuousScrolled {
@@ -879,6 +968,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && page != state.current_page
             {
                 state.current_page = page;
+                state.epub_page = 0;
+                state.epub_offset = 0;
                 state.page_input = (page + 1).to_string();
                 save_reading_state(state);
                 update_bookmark_status(state);
@@ -982,12 +1073,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::FontSizeUp => {
             state.font_size = (state.font_size + 2.0).min(48.0);
             invalidate_continuous_layout(state);
+            if uses_paginated_epub_layout(state) {
+                return refresh_content(state);
+            }
             return scroll_to_current_page(state);
         }
 
         Message::FontSizeDown => {
             state.font_size = (state.font_size - 2.0).max(8.0);
             invalidate_continuous_layout(state);
+            if uses_paginated_epub_layout(state) {
+                return refresh_content(state);
+            }
             return scroll_to_current_page(state);
         }
 
@@ -1147,7 +1244,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::ToggleBookmark => {
             if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
                 let page_title = format!("Page {}", state.current_page + 1);
-                match store.toggle(path, state.current_page, Some(&page_title)) {
+                match store.toggle_at(
+                    path,
+                    state.current_page,
+                    current_epub_offset(state),
+                    Some(&page_title),
+                ) {
                     Ok(Some(_)) => state.current_page_bookmarked = true,
                     Ok(None) => state.current_page_bookmarked = false,
                     Err(e) => eprintln!("warning: failed to toggle bookmark: {e}"),
@@ -1178,12 +1280,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(path) = &state.file_path
                 && let Some(store) = &state.bookmark_store
             {
-                state.current_page_bookmarked = store.is_bookmarked(path, state.current_page);
+                state.current_page_bookmarked =
+                    store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
             }
         }
 
-        Message::GoToBookmark(page) => {
+        Message::GoToBookmark(page, location_offset) => {
+            if uses_paginated_epub_layout(state) {
+                state.epub_page = epub_page_for_location(state, page, location_offset.unwrap_or(0));
+                sync_epub_location(state);
+                state.epub_offset = location_offset.unwrap_or(0);
+                save_reading_state(state);
+                return Task::none();
+            }
             state.current_page = page;
+            state.epub_page = 0;
+            state.epub_offset = location_offset.unwrap_or(0);
             state.page_input = format!("{}", page + 1);
             save_reading_state(state);
             update_bookmark_status(state);
@@ -1618,6 +1730,10 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
         chapter_content: state.chapter_content.clone(),
+        epub_image_handles: state.epub_image_handles.clone(),
+        epub_pages: state.epub_pages.clone(),
+        epub_page: state.epub_page,
+        epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
@@ -1657,6 +1773,10 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
     state.chapter_content = tab.chapter_content;
+    state.epub_image_handles = tab.epub_image_handles;
+    state.epub_pages = tab.epub_pages;
+    state.epub_page = tab.epub_page;
+    state.epub_offset = tab.epub_offset;
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
@@ -1744,6 +1864,10 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_page_handle = None;
         state.rendered_facing_page = None;
         state.rendered_facing_page_handle = None;
+        state.epub_image_handles.clear();
+        state.epub_pages.clear();
+        state.epub_page = 0;
+        state.epub_offset = 0;
         state.continuous_pages.clear();
         state.continuous_chapters.clear();
         state.screen = Screen::Library;
@@ -1818,6 +1942,10 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
     state.chapter_content = Vec::new();
+    state.epub_image_handles.clear();
+    state.epub_pages.clear();
+    state.epub_page = 0;
+    state.epub_offset = 0;
     state.continuous_pages.clear();
     state.continuous_pending.clear();
     state.continuous_visible.clear();
@@ -1843,8 +1971,10 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
         .and_then(|store| store.get(&path));
     if let Some(saved) = saved {
         state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
+        state.epub_offset = saved.location_offset.unwrap_or(0);
     } else {
         state.current_page = 0;
+        state.epub_offset = 0;
     }
     state.zoom = ZoomMode::FitPage;
 
@@ -1994,7 +2124,15 @@ fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
         if let Some(chapter_idx) = doc.content.chapters.iter().position(|ch| {
             ch.path == resolved || ch.path.ends_with(target_path) || ch.path.ends_with(&resolved)
         }) {
+            if uses_paginated_epub_layout(state) {
+                state.epub_page = epub_page_for_location(state, chapter_idx, 0);
+                sync_epub_location(state);
+                save_reading_state(state);
+                return Task::none();
+            }
             state.current_page = chapter_idx;
+            state.epub_page = 0;
+            state.epub_offset = 0;
             state.page_input = format!("{}", state.current_page + 1);
             save_reading_state(state);
             return refresh_content(state);
@@ -2044,6 +2182,11 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
                     })
                     .collect();
+                cache_epub_image_handles(
+                    &mut state.epub_image_handles,
+                    state.continuous_chapters.iter().flatten(),
+                    &doc.content.resources,
+                );
                 state.error = None;
                 return scroll_to_current_page(state);
             }
@@ -2099,23 +2242,69 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
+            let anchor = (state.current_page, state.epub_offset);
+            let page_size = epub_page_size(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
-            if let Some(chapter) = doc.chapter(state.current_page) {
-                let base_path = chapter
-                    .path
-                    .rsplit_once('/')
-                    .map(|(dir, _)| dir)
-                    .unwrap_or("");
-                state.chapter_content =
-                    parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles);
-                state.error = None;
+            let parsed_chapters = doc
+                .content
+                .chapters
+                .iter()
+                .map(|chapter| {
+                    let base_path = chapter
+                        .path
+                        .rsplit_once('/')
+                        .map(|(dir, _)| dir)
+                        .unwrap_or("");
+                    parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
+                })
+                .collect::<Vec<_>>();
+            cache_epub_image_handles(
+                &mut state.epub_image_handles,
+                parsed_chapters.iter().flatten(),
+                &doc.content.resources,
+            );
+            state.epub_pages = parsed_chapters
+                .iter()
+                .enumerate()
+                .flat_map(|(chapter_index, nodes)| {
+                    let chapter = &doc.content.chapters[chapter_index];
+                    let title = chapter
+                        .title
+                        .as_deref()
+                        .filter(|title| !content_starts_with_heading(nodes, title));
+                    paginate_epub_chapter(
+                        nodes,
+                        title,
+                        state.font_size,
+                        state.line_spacing,
+                        page_size,
+                    )
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(page_index, nodes)| EpubPage {
+                        chapter: chapter_index,
+                        title: (page_index == 0)
+                            .then(|| title.map(str::to_string))
+                            .flatten(),
+                        nodes,
+                    })
+                })
+                .collect();
+            if state.epub_pages.is_empty() {
+                state.chapter_content.clear();
+                state.epub_page = 0;
+                state.error = Some("EPUB contains no readable content".to_string());
             } else {
-                state.chapter_content = Vec::new();
-                state.error = Some(format!("Chapter {} not found", state.current_page));
+                let requested_page = epub_page_for_location(state, anchor.0, anchor.1);
+                state.epub_page = requested_page.min(state.epub_pages.len() - 1);
+                state.current_page = state.epub_pages[state.epub_page].chapter;
+                state.chapter_content = parsed_chapters[state.current_page].clone();
+                state.page_input = (state.epub_page + 1).to_string();
+                state.error = None;
             }
         }
         Some(OpenDocument::Cbz(doc)) => {
@@ -2148,6 +2337,359 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     }
 
     Task::none()
+}
+
+fn cache_epub_image_handles<'a>(
+    handles: &mut HashMap<String, EpubImageHandle>,
+    nodes: impl IntoIterator<Item = &'a ContentNode>,
+    resources: &HashMap<String, Vec<u8>>,
+) {
+    for node in nodes {
+        match node {
+            ContentNode::Image { src, .. } => {
+                if handles.contains_key(src) {
+                    continue;
+                }
+                let Some(data) = resources.get(src) else {
+                    continue;
+                };
+                let Ok(image) = ::image::load_from_memory(data) else {
+                    continue;
+                };
+                let rgba = image.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                handles.insert(
+                    src.clone(),
+                    EpubImageHandle(image::Handle::from_rgba(width, height, rgba.into_raw())),
+                );
+            }
+            ContentNode::BlockQuote { children, .. } => {
+                cache_epub_image_handles(handles, children, resources);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn epub_uses_spread(state: &State) -> bool {
+    state.reading_mode == ReadingMode::Paginated
+        && matches!(state.document, Some(OpenDocument::Epub(_)))
+        && available_reader_size(state).width >= MIN_TWO_PAGE_WIDTH
+}
+
+fn epub_page_size(state: &State) -> Size {
+    let available = available_reader_size(state);
+    let page_count = if epub_uses_spread(state) { 2.0 } else { 1.0 };
+    Size::new(
+        ((available.width - PAGE_GUTTER * (page_count - 1.0)) / page_count - 40.0).max(120.0),
+        (available.height - 40.0).max(120.0),
+    )
+}
+
+fn epub_spread_start(state: &State, page: usize) -> usize {
+    let last = state.epub_pages.len().saturating_sub(1);
+    let page = page.min(last);
+    if epub_uses_spread(state) {
+        spread_start(page)
+    } else {
+        page
+    }
+}
+
+fn epub_visible_pages(state: &State) -> Vec<usize> {
+    if state.epub_pages.is_empty() {
+        return Vec::new();
+    }
+    let start = epub_spread_start(state, state.epub_page);
+    let end = if epub_uses_spread(state) {
+        (start + 1).min(state.epub_pages.len() - 1)
+    } else {
+        start
+    };
+    (start..=end).collect()
+}
+
+fn paginate_epub_chapter(
+    nodes: &[ContentNode],
+    title: Option<&str>,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: Size,
+) -> Vec<EpubPageNodes> {
+    let chars_per_line = (page_size.width / (font_size * 0.55).max(1.0))
+        .floor()
+        .max(12.0) as usize;
+    let lines_per_page = (page_size.height / (font_size * line_spacing).max(1.0))
+        .floor()
+        .max(4.0) as usize;
+    let title_lines = title
+        .map(|title| title.chars().count().div_ceil(chars_per_line).max(1) * 2)
+        .unwrap_or(0)
+        .min(lines_per_page.saturating_sub(1));
+    let mut pages = vec![Vec::new()];
+    let mut remaining = lines_per_page.saturating_sub(title_lines);
+    let mut text_offset = 0;
+
+    for node in nodes {
+        let text_len = content_node_text_len(node);
+        match node {
+            ContentNode::Paragraph(spans, style) => {
+                let mut consumed = 0;
+                while consumed < text_len {
+                    if remaining <= 1 && !pages.last().unwrap().is_empty() {
+                        pages.push(Vec::new());
+                        remaining = lines_per_page;
+                    }
+                    let available_chars = chars_per_line * remaining.saturating_sub(1).max(1);
+                    let take = epub_span_split_length(spans, consumed, available_chars);
+                    let chunk = slice_epub_spans(spans, consumed, take);
+                    let lines = take.div_ceil(chars_per_line).max(1) + 1;
+                    pages.last_mut().unwrap().push(EpubPageNode {
+                        node: ContentNode::Paragraph(chunk, style.clone()),
+                        text_offset: text_offset + consumed,
+                    });
+                    remaining = remaining.saturating_sub(lines);
+                    consumed += take;
+                }
+            }
+            ContentNode::CodeBlock { code, language } => {
+                let mut consumed = 0;
+                while consumed < text_len {
+                    if remaining <= 1 && !pages.last().unwrap().is_empty() {
+                        pages.push(Vec::new());
+                        remaining = lines_per_page;
+                    }
+                    let chunk = code
+                        .chars()
+                        .skip(consumed)
+                        .collect::<String>()
+                        .split_inclusive('\n')
+                        .take(remaining.saturating_sub(1).max(1))
+                        .collect::<String>();
+                    let chunk_len = chunk.chars().count();
+                    let lines = chunk.lines().count().max(1) + 1;
+                    pages.last_mut().unwrap().push(EpubPageNode {
+                        node: ContentNode::CodeBlock {
+                            code: chunk,
+                            language: language.clone(),
+                        },
+                        text_offset: text_offset + consumed,
+                    });
+                    remaining = remaining.saturating_sub(lines);
+                    consumed += chunk_len;
+                }
+            }
+            ContentNode::UnorderedList(items) => paginate_epub_list(
+                items,
+                None,
+                text_offset,
+                chars_per_line,
+                lines_per_page,
+                &mut pages,
+                &mut remaining,
+            ),
+            ContentNode::OrderedList { items, start } => paginate_epub_list(
+                items,
+                Some(*start),
+                text_offset,
+                chars_per_line,
+                lines_per_page,
+                &mut pages,
+                &mut remaining,
+            ),
+            ContentNode::BlockQuote { children, style } => {
+                if !pages.last().unwrap().is_empty() {
+                    pages.push(Vec::new());
+                }
+                let child_pages =
+                    paginate_epub_chapter(children, None, font_size, line_spacing, page_size);
+                for (index, child_page) in child_pages.into_iter().enumerate() {
+                    if index > 0 {
+                        pages.push(Vec::new());
+                    }
+                    let child_offset = child_page.first().map_or(0, |node| node.text_offset);
+                    pages.last_mut().unwrap().push(EpubPageNode {
+                        node: ContentNode::BlockQuote {
+                            children: child_page.into_iter().map(|node| node.node).collect(),
+                            style: style.clone(),
+                        },
+                        text_offset: text_offset + child_offset,
+                    });
+                }
+                remaining = 0;
+            }
+            ContentNode::Image { .. } => {
+                if !pages.last().unwrap().is_empty() {
+                    pages.push(Vec::new());
+                }
+                pages.last_mut().unwrap().push(EpubPageNode {
+                    node: node.clone(),
+                    text_offset,
+                });
+                remaining = 0;
+            }
+            _ => {
+                let lines = estimated_epub_node_lines(node, chars_per_line, lines_per_page);
+                if lines > remaining && !pages.last().unwrap().is_empty() {
+                    pages.push(Vec::new());
+                    remaining = lines_per_page;
+                }
+                pages.last_mut().unwrap().push(EpubPageNode {
+                    node: node.clone(),
+                    text_offset,
+                });
+                remaining = remaining.saturating_sub(lines);
+            }
+        }
+        text_offset += text_len + 1;
+    }
+
+    if pages.len() > 1 && pages.last().is_some_and(Vec::is_empty) {
+        pages.pop();
+    }
+    pages
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paginate_epub_list(
+    items: &[Vec<shosai_core::epub::render::TextSpan>],
+    ordered_start: Option<usize>,
+    text_offset: usize,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    pages: &mut Vec<EpubPageNodes>,
+    remaining: &mut usize,
+) {
+    let mut consumed_items = 0;
+    let mut consumed_text = 0;
+
+    while consumed_items < items.len() {
+        if *remaining <= 1 && !pages.last().unwrap().is_empty() {
+            pages.push(Vec::new());
+            *remaining = lines_per_page;
+        }
+
+        let available = remaining.saturating_sub(1).max(1);
+        let mut chunk_lines = 0;
+        let mut take = 0;
+        for item in &items[consumed_items..] {
+            let item_lines = (spans_text_len(item) + 4).div_ceil(chars_per_line).max(1);
+            if take > 0 && chunk_lines + item_lines > available {
+                break;
+            }
+            if take == 0 && item_lines > available && !pages.last().unwrap().is_empty() {
+                break;
+            }
+            chunk_lines += item_lines;
+            take += 1;
+        }
+
+        if take == 0 {
+            pages.push(Vec::new());
+            *remaining = lines_per_page;
+            continue;
+        }
+
+        let chunk = items[consumed_items..consumed_items + take].to_vec();
+        let node = match ordered_start {
+            Some(start) => ContentNode::OrderedList {
+                items: chunk,
+                start: start + consumed_items,
+            },
+            None => ContentNode::UnorderedList(chunk),
+        };
+        pages.last_mut().unwrap().push(EpubPageNode {
+            node,
+            text_offset: text_offset + consumed_text,
+        });
+        *remaining = remaining.saturating_sub(chunk_lines + 1);
+        consumed_text += items[consumed_items..consumed_items + take]
+            .iter()
+            .map(|item| spans_text_len(item) + 1)
+            .sum::<usize>();
+        consumed_items += take;
+    }
+}
+
+fn epub_span_split_length(
+    spans: &[shosai_core::epub::render::TextSpan],
+    start: usize,
+    maximum: usize,
+) -> usize {
+    let remaining = spans_text_len(spans).saturating_sub(start);
+    if remaining <= maximum {
+        return remaining;
+    }
+    let window = spans
+        .iter()
+        .flat_map(|span| span.text.chars())
+        .skip(start)
+        .take(maximum)
+        .collect::<Vec<_>>();
+    window
+        .iter()
+        .rposition(|character| character.is_whitespace())
+        .map(|index| index + 1)
+        .filter(|length| *length >= maximum / 2)
+        .unwrap_or(maximum)
+}
+
+fn slice_epub_spans(
+    spans: &[shosai_core::epub::render::TextSpan],
+    start: usize,
+    length: usize,
+) -> Vec<shosai_core::epub::render::TextSpan> {
+    let end = start + length;
+    let mut offset = 0;
+    spans
+        .iter()
+        .filter_map(|span| {
+            let span_len = span.text.chars().count();
+            let local_start = start.saturating_sub(offset).min(span_len);
+            let local_end = end.saturating_sub(offset).min(span_len);
+            offset += span_len;
+            (local_start < local_end).then(|| {
+                let mut sliced = span.clone();
+                sliced.text = span
+                    .text
+                    .chars()
+                    .skip(local_start)
+                    .take(local_end - local_start)
+                    .collect();
+                sliced
+            })
+        })
+        .collect()
+}
+
+fn estimated_epub_node_lines(
+    node: &ContentNode,
+    chars_per_line: usize,
+    lines_per_page: usize,
+) -> usize {
+    let wrapped = |characters: usize| characters.div_ceil(chars_per_line).max(1);
+    match node {
+        ContentNode::Heading { text, level, .. } => {
+            wrapped(text.chars().count()) * if *level <= 2 { 2 } else { 1 } + 1
+        }
+        ContentNode::BlockQuote { children, .. } => children
+            .iter()
+            .map(|child| estimated_epub_node_lines(child, chars_per_line, lines_per_page))
+            .sum::<usize>()
+            .min(lines_per_page),
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
+            items
+                .iter()
+                .map(|item| wrapped(spans_text_len(item) + 4))
+                .sum::<usize>()
+                + 1
+        }
+        ContentNode::CodeBlock { code, .. } => code.lines().count().max(1).min(lines_per_page),
+        ContentNode::InlineCode(code) => wrapped(code.chars().count()) + 1,
+        ContentNode::Image { .. } => (lines_per_page / 2).max(4),
+        ContentNode::HorizontalRule => 2,
+        ContentNode::Paragraph(spans, _) => wrapped(spans_text_len(spans)) + 1,
+    }
 }
 
 fn search_highlights_for_page(state: &State, page: usize) -> Vec<(usize, usize, bool)> {
@@ -2326,11 +2868,53 @@ fn uses_paginated_raster_layout(state: &State) -> bool {
         )
 }
 
+fn uses_paginated_epub_layout(state: &State) -> bool {
+    state.reading_mode == ReadingMode::Paginated
+        && matches!(state.document, Some(OpenDocument::Epub(_)))
+}
+
 fn reader_layout_changed_task(state: &mut State) -> Task<Message> {
-    if uses_paginated_raster_layout(state) {
+    if uses_paginated_raster_layout(state) || uses_paginated_epub_layout(state) {
         refresh_content(state)
     } else {
         scroll_to_current_page(state)
+    }
+}
+
+fn turn_epub_page(state: &mut State, forward: bool) -> Task<Message> {
+    let step = if epub_uses_spread(state) { 2 } else { 1 };
+    let page = if forward {
+        let next = epub_spread_start(state, state.epub_page).saturating_add(step);
+        if next >= state.epub_pages.len() {
+            return Task::none();
+        }
+        next
+    } else if state.epub_page > 0 {
+        epub_spread_start(state, state.epub_page).saturating_sub(step)
+    } else {
+        return Task::none();
+    };
+    state.epub_page = page;
+    sync_epub_location(state);
+    save_reading_state(state);
+    Task::none()
+}
+
+fn can_turn_epub_page(state: &State, forward: bool) -> bool {
+    if forward {
+        let step = if epub_uses_spread(state) { 2 } else { 1 };
+        epub_spread_start(state, state.epub_page).saturating_add(step) < state.epub_pages.len()
+    } else {
+        state.epub_page > 0
+    }
+}
+
+fn sync_epub_location(state: &mut State) {
+    if let Some(page) = state.epub_pages.get(state.epub_page) {
+        state.current_page = page.chapter;
+        state.epub_offset = page.nodes.first().map_or(0, |node| node.text_offset);
+        state.page_input = (state.epub_page + 1).to_string();
+        update_bookmark_status(state);
     }
 }
 
@@ -2628,7 +3212,8 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
 
 fn update_bookmark_status(state: &mut State) {
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-        state.current_page_bookmarked = store.is_bookmarked(path, state.current_page);
+        state.current_page_bookmarked =
+            store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
     } else {
         state.current_page_bookmarked = false;
     }
@@ -2638,6 +3223,7 @@ fn save_reading_state(state: &State) {
     if let (Some(path), Some(store)) = (&state.file_path, &state.reading_state) {
         let reading = FileReadingState {
             page: state.current_page,
+            location_offset: current_epub_offset(state),
             zoom: state.zoom.scale(),
         };
         if let Err(e) = store.set(path, &reading) {
@@ -2773,13 +3359,29 @@ fn navigate_to_current_search_result(
     state: &mut State,
     previous_highlights: &[SearchHighlight],
 ) -> Task<Message> {
-    if let Some(result) = state.search_results.get(state.search_current) {
+    let target = if let Some(result) = state.search_results.get(state.search_current) {
         let target_page = result.page;
+        if matches!(state.document, Some(OpenDocument::Epub(_))) {
+            state.epub_offset = result.offset;
+        }
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
+            state.epub_page = 0;
             state.page_input = format!("{}", state.current_page + 1);
             save_reading_state(state);
         }
+        Some((target_page, result.offset))
+    } else {
+        None
+    };
+    if uses_paginated_epub_layout(state) {
+        if let Some((chapter, offset)) = target {
+            state.epub_page = epub_page_for_location(state, chapter, offset);
+            sync_epub_location(state);
+            state.epub_offset = offset;
+            save_reading_state(state);
+        }
+        return Task::none();
     }
     if matches!(state.document, Some(OpenDocument::Pdf(_)))
         && (state.reading_mode == ReadingMode::Continuous
@@ -2792,6 +3394,33 @@ fn navigate_to_current_search_result(
     } else {
         content_navigation_task(state)
     }
+}
+
+fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize {
+    state
+        .epub_pages
+        .iter()
+        .enumerate()
+        .filter(|(_, page)| {
+            page.chapter == chapter
+                && page
+                    .nodes
+                    .first()
+                    .is_none_or(|node| node.text_offset <= offset)
+        })
+        .map(|(index, _)| index)
+        .next_back()
+        .or_else(|| {
+            state
+                .epub_pages
+                .iter()
+                .position(|page| page.chapter == chapter)
+        })
+        .unwrap_or(0)
+}
+
+fn current_epub_offset(state: &State) -> Option<usize> {
+    matches!(state.document, Some(OpenDocument::Epub(_))).then_some(state.epub_offset)
 }
 
 fn refresh_pdf_search_highlights_if_changed(
@@ -2894,19 +3523,40 @@ fn status_bar(state: &State) -> Element<'_, Message> {
     } else {
         "Page"
     };
-    let percentage = reading_progress_percentage(state.current_page, state.total_pages);
+    let percentage = if uses_paginated_epub_layout(state) {
+        reading_progress_percentage(state.epub_page, state.epub_pages.len())
+    } else {
+        reading_progress_percentage(state.current_page, state.total_pages)
+    };
     let mode = match state.reading_mode {
         ReadingMode::Paginated => "Paginated",
         ReadingMode::Continuous => "Continuous",
     };
+    let location = if uses_paginated_epub_layout(state) && !state.epub_pages.is_empty() {
+        let visible = epub_visible_pages(state);
+        let first = visible.first().copied().unwrap_or(0) + 1;
+        let last = visible.last().copied().unwrap_or(0) + 1;
+        if first == last {
+            format!(
+                "Page {first} of {}  •  {percentage}%",
+                state.epub_pages.len()
+            )
+        } else {
+            format!(
+                "Pages {first}–{last} of {}  •  {percentage}%",
+                state.epub_pages.len()
+            )
+        }
+    } else {
+        format!(
+            "{kind} {} of {}  •  {percentage}%",
+            state.current_page.saturating_add(1),
+            state.total_pages
+        )
+    };
     container(
         row![
-            text(format!(
-                "{kind} {} of {}  •  {percentage}%",
-                state.current_page.saturating_add(1),
-                state.total_pages
-            ))
-            .size(12),
+            text(location).size(12),
             iced::widget::Space::new().width(Length::Fill),
             text(format!("{mode} mode")).size(12),
         ]
@@ -2934,8 +3584,16 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
     );
     let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
-    let can_prev = previous_page_location(state).is_some();
-    let can_next = next_page_location(state).is_some();
+    let can_prev = if uses_paginated_epub_layout(state) {
+        can_turn_epub_page(state, false)
+    } else {
+        previous_page_location(state).is_some()
+    };
+    let can_next = if uses_paginated_epub_layout(state) {
+        can_turn_epub_page(state, true)
+    } else {
+        next_page_location(state).is_some()
+    };
 
     let mut prev_btn = button("<");
     if can_prev {
@@ -2947,7 +3605,11 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         next_btn = next_btn.on_press(Message::NextPage);
     }
 
-    let nav_label = if is_epub { "Ch" } else { "Pg" };
+    let nav_label = if is_epub && state.reading_mode == ReadingMode::Continuous {
+        "Ch"
+    } else {
+        "Pg"
+    };
 
     let page_input = text_input(nav_label, &state.page_input)
         .on_input(Message::PageInputChanged)
@@ -2955,7 +3617,12 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         .width(60);
 
     let page_label = text(if has_doc {
-        format!("/ {}", state.total_pages)
+        let total = if uses_paginated_epub_layout(state) {
+            state.epub_pages.len()
+        } else {
+            state.total_pages
+        };
+        format!("/ {total}")
     } else {
         String::new()
     });
@@ -3089,7 +3756,7 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
             // Header row: title + page + delete button
             let header = row![
                 button(text(title).size(12))
-                    .on_press(Message::GoToBookmark(bm.page))
+                    .on_press(Message::GoToBookmark(bm.page, bm.location_offset))
                     .padding(2),
                 text(format!("p.{}", bm.page + 1)).size(10),
                 button(text("\u{2715}").size(10))
@@ -3327,7 +3994,8 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                         node,
                         state.font_size,
                         state.theme.text_color(),
-                        &doc.content.resources,
+                        &state.epub_image_handles,
+                        false,
                         text_offset,
                         &highlights,
                     ));
@@ -3492,46 +4160,63 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     let font_size = state.font_size;
     let text_color = state.theme.text_color();
     let line_gap = state.font_size * state.line_spacing;
-
-    let mut content_col = column![].spacing(line_gap).padding(20).width(Length::Fill);
-
-    // Chapter title from the TOC if available.
-    if let Some(OpenDocument::Epub(doc)) = &state.document
-        && let Some(chapter) = doc.chapter(state.current_page)
-        && let Some(title) = &chapter.title
-        && !content_starts_with_heading(&state.chapter_content, title)
-    {
-        content_col = content_col.push(text(title.clone()).size(font_size * 1.5).color(text_color));
-    }
-
-    let resources = match &state.document {
-        Some(OpenDocument::Epub(doc)) => &doc.content.resources,
-        _ => &std::collections::HashMap::new(),
-    };
-
-    let highlights = current_page_search_highlights(state);
-    let mut text_offset = 0;
-
-    for node in &state.chapter_content {
-        content_col = content_col.push(render_content_node(
-            node,
-            font_size,
-            text_color,
-            resources,
-            text_offset,
-            &highlights,
-        ));
-        text_offset += content_node_text_len(node) + 1;
-    }
-
-    let padded = container(content_col)
-        .max_width(800)
-        .width(Length::Fill)
-        .center_x(Length::Fill);
-
     let bg = state.theme.background();
+    let mut spread = row![].spacing(PAGE_GUTTER).height(Length::Fill);
+    let visible_pages = epub_visible_pages(state);
 
-    container(scrollable(padded).width(Length::Fill).height(Length::Fill))
+    for page_index in &visible_pages {
+        let epub_page = &state.epub_pages[*page_index];
+        let highlights = search_highlight_models_for_page(state, epub_page.chapter);
+        let image_only = matches!(
+            epub_page.nodes.as_slice(),
+            [EpubPageNode {
+                node: ContentNode::Image { .. },
+                ..
+            }]
+        );
+        let mut page = column![].spacing(line_gap).width(Length::Fill);
+        if let Some(title) = &epub_page.title {
+            page = page.push(text(title.clone()).size(font_size * 1.5).color(text_color));
+        }
+        for page_node in &epub_page.nodes {
+            page = page.push(render_content_node(
+                &page_node.node,
+                font_size,
+                text_color,
+                &state.epub_image_handles,
+                true,
+                page_node.text_offset,
+                &highlights,
+            ));
+        }
+        if !image_only {
+            page = page.push(iced::widget::Space::new().height(Length::Fill));
+        }
+        page = page.push(
+            text(format!("{}", page_index + 1))
+                .size(11)
+                .color(iced::Color {
+                    a: 0.55,
+                    ..text_color
+                }),
+        );
+        spread = spread.push(
+            container(page)
+                .padding(20)
+                .width(Length::FillPortion(1))
+                .height(Length::Fill)
+                .style(move |_| container::Style {
+                    background: Some(iced::Background::Color(bg)),
+                    ..Default::default()
+                }),
+        );
+    }
+    if epub_uses_spread(state) && visible_pages.len() == 1 {
+        spread = spread.push(container(iced::widget::Space::new()).width(Length::FillPortion(1)));
+    }
+
+    container(spread)
+        .padding(20)
         .style(move |_theme| container::Style {
             background: Some(iced::Background::Color(bg)),
             ..Default::default()
@@ -3551,7 +4236,8 @@ fn render_content_node<'a>(
     node: &ContentNode,
     font_size: f32,
     text_color: iced::Color,
-    resources: &std::collections::HashMap<String, Vec<u8>>,
+    image_handles: &HashMap<String, EpubImageHandle>,
+    fill_images: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
@@ -3594,41 +4280,29 @@ fn render_content_node<'a>(
             c.into()
         }
 
-        ContentNode::BlockQuote(children) => {
-            let quote_color = iced::Color {
-                a: 0.7,
-                ..text_color
-            };
-            let bar_color = iced::Color {
-                a: 0.3,
-                ..text_color
-            };
+        ContentNode::BlockQuote { children, style } => {
             let mut col = column![].spacing(8);
             let mut child_offset = text_offset;
             for child in children {
                 col = col.push(render_content_node(
                     child,
                     font_size,
-                    quote_color,
-                    resources,
+                    text_color,
+                    image_handles,
+                    fill_images,
                     child_offset,
                     highlights,
                 ));
                 child_offset += content_node_text_len(child) + 1;
             }
-            row![
-                container(column![])
-                    .width(Length::Fixed(3.0))
-                    .height(Length::Fill)
-                    .style(move |_theme| container::Style {
-                        background: Some(iced::Background::Color(bar_color)),
-                        ..Default::default()
-                    }),
-                container(col).padding([4, 12]),
-            ]
-            .spacing(0)
-            .width(Length::Fill)
-            .into()
+            let margin = style.margin_left_em.unwrap_or(1.0) * font_size;
+            container(col)
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: margin,
+                    ..iced::Padding::ZERO
+                })
+                .into()
         }
 
         ContentNode::UnorderedList(items) => {
@@ -3648,11 +4322,11 @@ fn render_content_node<'a>(
             col.into()
         }
 
-        ContentNode::OrderedList(items) => {
+        ContentNode::OrderedList { items, start } => {
             let mut col = column![].spacing(4);
             let mut item_offset = text_offset;
             for (i, item_spans) in items.iter().enumerate() {
-                let num_text = format!("  {}. ", i + 1);
+                let num_text = format!("  {}. ", start + i);
                 col = col.push(render_spans_with_prefix(
                     &num_text,
                     item_spans,
@@ -3696,7 +4370,8 @@ fn render_content_node<'a>(
             alt,
             font_size,
             text_color,
-            resources,
+            image_handles,
+            fill_images,
             text_offset,
             highlights,
         ),
@@ -3708,32 +4383,32 @@ fn render_content_node<'a>(
     }
 }
 
-/// Render an EPUB image from the resource map, falling back to alt text.
+/// Render a cached EPUB image, falling back to alt text.
+#[allow(clippy::too_many_arguments)]
 fn render_epub_image<'a>(
     src: &str,
     alt: &str,
     font_size: f32,
     text_color: iced::Color,
-    resources: &std::collections::HashMap<String, Vec<u8>>,
+    image_handles: &HashMap<String, EpubImageHandle>,
+    fill: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
-    if let Some(data) = resources.get(src) {
-        // Try to decode the image and display as RGBA via iced::widget::image.
-        if let Ok(img) = ::image::load_from_memory(data) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let handle = image::Handle::from_rgba(w, h, rgba.into_raw());
-
-            return container(
-                image(handle)
-                    .content_fit(iced::ContentFit::ScaleDown)
-                    .width(Length::Fill),
-            )
-            .width(Length::Fill)
-            .center_x(Length::Fill)
-            .into();
+    if let Some(handle) = image_handles.get(src) {
+        let mut rendered = image(&handle.0)
+            .content_fit(iced::ContentFit::ScaleDown)
+            .width(Length::Fill);
+        if fill {
+            rendered = rendered.height(Length::Fill);
         }
+        let mut image_container = container(rendered)
+            .width(Length::Fill)
+            .center_x(Length::Fill);
+        if fill {
+            image_container = image_container.height(Length::Fill);
+        }
+        return image_container.into();
     }
 
     // Fallback: show alt text placeholder.
@@ -4083,11 +4758,11 @@ fn content_node_text_len(node: &ContentNode) -> usize {
     match node {
         ContentNode::Heading { text, .. } => text.chars().count(),
         ContentNode::Paragraph(spans, _) => spans_text_len(spans),
-        ContentNode::BlockQuote(children) => children
+        ContentNode::BlockQuote { children, .. } => children
             .iter()
             .map(|child| content_node_text_len(child) + 1)
             .sum(),
-        ContentNode::UnorderedList(items) | ContentNode::OrderedList(items) => {
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items.iter().map(|spans| spans_text_len(spans) + 1).sum()
         }
         ContentNode::CodeBlock { code, .. } | ContentNode::InlineCode(code) => code.chars().count(),
@@ -4773,7 +5448,14 @@ mod tests {
             .unwrap();
         let path = directory.path().join("book.cbz");
         runtime
-            .block_on(store.set_async(&path, &FileReadingState { page: 1, zoom: 2.5 }))
+            .block_on(store.set_async(
+                &path,
+                &FileReadingState {
+                    page: 1,
+                    location_offset: None,
+                    zoom: 2.5,
+                },
+            ))
             .unwrap();
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -5301,6 +5983,7 @@ mod tests {
                     id: 1,
                     file_path: "first.epub".to_string(),
                     page: 0,
+                    location_offset: None,
                     title: None,
                     note: None,
                     color: "yellow".to_string(),
@@ -5765,7 +6448,322 @@ mod tests {
 
         assert_eq!(task.units(), 0);
         assert!(!state.chapter_content.is_empty());
+        assert!(!state.epub_pages.is_empty());
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn epub_paginator_splits_long_paragraphs_without_losing_formatting() {
+        let text = "This is a linked sentence that should wrap cleanly. ".repeat(30);
+        let spans = vec![shosai_core::epub::render::TextSpan {
+            text: text.clone(),
+            bold: true,
+            italic: false,
+            monospace: false,
+            preserve_whitespace: false,
+            link: Some("chapter-2.xhtml".to_string()),
+        }];
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(spans, Default::default())],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert!(pages.len() > 1);
+        let chunks = pages
+            .iter()
+            .flatten()
+            .map(|page_node| match &page_node.node {
+                ContentNode::Paragraph(spans, _) => &spans[0],
+                node => panic!("expected paragraph, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            chunks
+                .iter()
+                .flat_map(|span| span.text.chars())
+                .collect::<String>(),
+            text
+        );
+        assert!(chunks.iter().all(|span| span.bold));
+        assert!(
+            chunks
+                .iter()
+                .all(|span| span.link.as_deref() == Some("chapter-2.xhtml"))
+        );
+    }
+
+    #[test]
+    fn epub_paginator_splits_long_lists_without_losing_items() {
+        let items = (0..30)
+            .map(|index| {
+                vec![shosai_core::epub::render::TextSpan {
+                    text: format!("List item {index}"),
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    preserve_whitespace: false,
+                    link: None,
+                }]
+            })
+            .collect::<Vec<_>>();
+        let pages = paginate_epub_chapter(
+            &[ContentNode::OrderedList {
+                items: items.clone(),
+                start: 1,
+            }],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert!(pages.len() > 1, "a long list must span multiple pages");
+        let paginated_items = pages
+            .iter()
+            .flatten()
+            .flat_map(|page_node| match &page_node.node {
+                ContentNode::OrderedList { items, .. } => items.clone(),
+                node => panic!("expected ordered list, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paginated_items, items);
+        let starts = pages
+            .iter()
+            .flatten()
+            .filter_map(|page_node| match &page_node.node {
+                ContentNode::OrderedList { start, .. } => Some(*start),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(starts.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn epub_paginator_splits_long_blockquotes_without_losing_children() {
+        let children = (0..20)
+            .map(|index| {
+                ContentNode::Paragraph(
+                    vec![shosai_core::epub::render::TextSpan {
+                        text: format!("Quoted paragraph {index}"),
+                        bold: false,
+                        italic: false,
+                        monospace: false,
+                        preserve_whitespace: false,
+                        link: None,
+                    }],
+                    Default::default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let pages = paginate_epub_chapter(
+            &[ContentNode::BlockQuote {
+                children: children.clone(),
+                style: Default::default(),
+            }],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert!(
+            pages.len() > 1,
+            "a long blockquote must span multiple pages"
+        );
+        let paginated_children = pages
+            .iter()
+            .flatten()
+            .flat_map(|page_node| match &page_node.node {
+                ContentNode::BlockQuote { children, .. } => children.clone(),
+                node => panic!("expected blockquote, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paginated_children, children);
+    }
+
+    #[test]
+    fn epub_paginator_places_images_on_their_own_page() {
+        let pages = paginate_epub_chapter(
+            &[
+                ContentNode::Paragraph(
+                    vec![shosai_core::epub::render::TextSpan {
+                        text: "Text before the image".to_string(),
+                        bold: false,
+                        italic: false,
+                        monospace: false,
+                        preserve_whitespace: false,
+                        link: None,
+                    }],
+                    Default::default(),
+                ),
+                ContentNode::Image {
+                    src: "portrait.png".to_string(),
+                    alt: "Portrait".to_string(),
+                },
+            ],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert_eq!(pages.len(), 2);
+        assert!(matches!(
+            pages[1].as_slice(),
+            [EpubPageNode {
+                node: ContentNode::Image { .. },
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn epub_location_boundary_selects_the_continuation_page() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let paragraph = |text: &str| {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text: text.to_string(),
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                Default::default(),
+            )
+        };
+        state.epub_pages = vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("first"),
+                    text_offset: 0,
+                }],
+            },
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("second"),
+                    text_offset: 5,
+                }],
+            },
+        ];
+
+        assert_eq!(epub_page_for_location(&state, 0, 5), 1);
+    }
+
+    #[test]
+    fn switching_from_continuous_epub_preserves_the_current_chapter() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let _ = refresh_content(&mut state);
+        assert!(state.epub_pages.iter().any(|page| page.chapter == 1));
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        state.current_page = 1;
+        state.epub_page = 0;
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+
+        assert_eq!(state.reading_mode, ReadingMode::Paginated);
+        assert_eq!(state.current_page, 1);
+        assert_eq!(state.epub_pages[state.epub_page].chapter, 1);
+    }
+
+    #[test]
+    fn paginated_epub_navigation_moves_between_horizontal_spreads() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size.width = 900.0;
+        state.epub_pages = vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: Vec::new(),
+            },
+            EpubPage {
+                chapter: 1,
+                title: None,
+                nodes: Vec::new(),
+            },
+            EpubPage {
+                chapter: 2,
+                title: None,
+                nodes: Vec::new(),
+            },
+        ];
+
+        assert_eq!(epub_visible_pages(&state), vec![0, 1]);
+        assert!(can_turn_epub_page(&state, true));
+
+        let task = turn_epub_page(&mut state, true);
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.epub_page, 2);
+        assert_eq!(state.current_page, 2);
+        assert_eq!(epub_visible_pages(&state), vec![2]);
+    }
+
+    #[test]
+    fn rebuilding_the_view_reuses_epub_image_handles() {
+        let mut image_bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            2,
+            3,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut image_bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+        let resources = HashMap::from([("image.png".to_string(), image_bytes)]);
+        let nodes = vec![ContentNode::Image {
+            src: "image.png".to_string(),
+            alt: String::new(),
+        }];
+        let mut handles = HashMap::new();
+
+        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        let first_id = handles.get("image.png").unwrap().0.id();
+        drop(render_content_node(
+            &nodes[0],
+            16.0,
+            iced::Color::BLACK,
+            &handles,
+            false,
+            0,
+            &[],
+        ));
+        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        drop(render_content_node(
+            &nodes[0],
+            16.0,
+            iced::Color::BLACK,
+            &handles,
+            false,
+            0,
+            &[],
+        ));
+
+        assert_eq!(handles.get("image.png").unwrap().0.id(), first_id);
     }
 
     #[test]
@@ -5917,20 +6915,27 @@ mod tests {
 
     #[test]
     fn rendered_node_lengths_match_search_text_offsets() {
-        let nodes = vec![ContentNode::BlockQuote(vec![
-            ContentNode::Heading {
-                level: 2,
-                text: "A heading".to_string(),
-                style: Default::default(),
-            },
-            ContentNode::OrderedList(vec![vec![shosai_core::epub::render::TextSpan {
-                text: "list item".to_string(),
-                bold: true,
-                italic: false,
-                monospace: false,
-                link: None,
-            }]]),
-        ])];
+        let nodes = vec![ContentNode::BlockQuote {
+            children: vec![
+                ContentNode::Heading {
+                    level: 2,
+                    text: "A heading".to_string(),
+                    style: Default::default(),
+                },
+                ContentNode::OrderedList {
+                    items: vec![vec![shosai_core::epub::render::TextSpan {
+                        text: "list item".to_string(),
+                        bold: true,
+                        italic: false,
+                        monospace: false,
+                        preserve_whitespace: false,
+                        link: None,
+                    }]],
+                    start: 1,
+                },
+            ],
+            style: Default::default(),
+        }];
         let extracted = shosai_core::search::extract_text_from_nodes(&nodes);
         let rendered_length: usize = nodes
             .iter()

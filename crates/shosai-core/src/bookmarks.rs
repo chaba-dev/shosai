@@ -15,6 +15,7 @@ pub struct Bookmark {
     pub id: i64,
     pub file_path: String,
     pub page: usize,
+    pub location_offset: Option<usize>,
     pub title: Option<String>,
     pub note: Option<String>,
     pub color: String,
@@ -44,18 +45,30 @@ impl BookmarkStore {
         note: Option<&str>,
         color: &str,
     ) -> Result<Bookmark> {
+        self.add_at_async(file_path, page, None, title, note, color)
+            .await
+    }
+
+    /// Add a bookmark at a page/chapter and optional character offset.
+    pub async fn add_at_async(
+        &self,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+        title: Option<&str>,
+        note: Option<&str>,
+        color: &str,
+    ) -> Result<Bookmark> {
         let key = canonical_key(file_path);
 
         let id = sqlx::query(
-            "INSERT INTO bookmarks (file_path, page, title, note, color)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(file_path, page, note) DO UPDATE SET
-                title = excluded.title,
-                color = excluded.color
+            "INSERT INTO bookmarks (file_path, page, location_offset, title, note, color)
+             VALUES (?, ?, ?, ?, ?, ?)
              RETURNING id",
         )
         .bind(&key)
         .bind(page as i64)
+        .bind(location_offset.map(|offset| offset as i64))
         .bind(title)
         .bind(note)
         .bind(color)
@@ -77,15 +90,28 @@ impl BookmarkStore {
         page: usize,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
+        self.toggle_at_async(file_path, page, None, title).await
+    }
+
+    /// Toggle a bookmark at a page/chapter and optional character offset.
+    pub async fn toggle_at_async(
+        &self,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+        title: Option<&str>,
+    ) -> Result<Option<Bookmark>> {
         let key = canonical_key(file_path);
 
         // Check for an existing bookmark on this page without a note.
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
-             WHERE file_path = ? AND page = ? AND note IS NULL",
+             WHERE file_path = ? AND page = ?
+               AND location_offset IS ? AND note IS NULL",
         )
         .bind(&key)
         .bind(page as i64)
+        .bind(location_offset.map(|offset| offset as i64))
         .fetch_optional(&self.pool)
         .await
         .context("failed to check existing bookmark")?;
@@ -96,7 +122,7 @@ impl BookmarkStore {
             Ok(None)
         } else {
             let bm = self
-                .add_async(file_path, page, title, None, "yellow")
+                .add_at_async(file_path, page, location_offset, title, None, "yellow")
                 .await?;
             Ok(Some(bm))
         }
@@ -107,10 +133,10 @@ impl BookmarkStore {
         let key = canonical_key(file_path);
 
         let rows = sqlx::query(
-            "SELECT id, file_path, page, title, note, color, created_at
+            "SELECT id, file_path, page, location_offset, title, note, color, created_at
              FROM bookmarks
              WHERE file_path = ?
-             ORDER BY page ASC, created_at ASC",
+             ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC",
         )
         .bind(&key)
         .fetch_all(&self.pool)
@@ -122,15 +148,27 @@ impl BookmarkStore {
 
     /// Check if a specific page is bookmarked (has a no-note bookmark).
     pub async fn is_bookmarked_async(&self, file_path: &Path, page: usize) -> bool {
+        self.is_bookmarked_at_async(file_path, page, None).await
+    }
+
+    /// Check whether a page/chapter and optional character offset is bookmarked.
+    pub async fn is_bookmarked_at_async(
+        &self,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+    ) -> bool {
         let key = canonical_key(file_path);
 
         sqlx::query(
             "SELECT 1 FROM bookmarks
-             WHERE file_path = ? AND page = ? AND note IS NULL
+             WHERE file_path = ? AND page = ?
+               AND location_offset IS ? AND note IS NULL
              LIMIT 1",
         )
         .bind(&key)
         .bind(page as i64)
+        .bind(location_offset.map(|offset| offset as i64))
         .fetch_optional(&self.pool)
         .await
         .ok()
@@ -184,7 +222,7 @@ impl BookmarkStore {
     /// Get a single bookmark by ID.
     async fn get_by_id_async(&self, id: i64) -> Result<Option<Bookmark>> {
         let row = sqlx::query(
-            "SELECT id, file_path, page, title, note, color, created_at
+            "SELECT id, file_path, page, location_offset, title, note, color, created_at
              FROM bookmarks WHERE id = ?",
         )
         .bind(id)
@@ -246,6 +284,17 @@ impl BookmarkStore {
         rt.block_on(self.toggle_async(file_path, page, title))
     }
 
+    pub fn toggle_at(
+        &self,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+        title: Option<&str>,
+    ) -> Result<Option<Bookmark>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.toggle_at_async(file_path, page, location_offset, title))
+    }
+
     pub fn list_for_file(&self, file_path: &Path) -> Result<Vec<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.list_for_file_async(file_path))
@@ -254,6 +303,16 @@ impl BookmarkStore {
     pub fn is_bookmarked(&self, file_path: &Path, page: usize) -> bool {
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.is_bookmarked_async(file_path, page))
+    }
+
+    pub fn is_bookmarked_at(
+        &self,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+    ) -> bool {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.is_bookmarked_at_async(file_path, page, location_offset))
     }
 
     pub fn export_markdown(&self, file_path: &Path) -> Result<String> {
@@ -274,6 +333,10 @@ fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Option<Bookmark> {
         id: row.try_get("id").ok()?,
         file_path: row.try_get("file_path").ok()?,
         page: row.try_get::<i64, _>("page").ok()? as usize,
+        location_offset: row
+            .try_get::<Option<i64>, _>("location_offset")
+            .ok()?
+            .map(|offset| offset as usize),
         title: row.try_get("title").ok()?,
         note: row.try_get("note").ok()?,
         color: row.try_get("color").ok()?,

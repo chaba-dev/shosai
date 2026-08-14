@@ -220,6 +220,26 @@ async fn test_multiple_bookmarks_on_same_page() {
 }
 
 #[tokio::test]
+async fn test_epub_bookmarks_can_share_a_chapter_at_distinct_offsets() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/test.epub");
+
+    store
+        .toggle_at_async(&path, 5, Some(100), Some("First location"))
+        .await
+        .unwrap();
+    store
+        .toggle_at_async(&path, 5, Some(500), Some("Second location"))
+        .await
+        .unwrap();
+
+    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    assert_eq!(bookmarks.len(), 2);
+    assert_eq!(bookmarks[0].location_offset, Some(100));
+    assert_eq!(bookmarks[1].location_offset, Some(500));
+}
+
+#[tokio::test]
 async fn test_export_markdown() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/test.pdf");

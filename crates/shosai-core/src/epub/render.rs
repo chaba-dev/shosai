@@ -11,6 +11,8 @@ pub struct TextSpan {
     pub bold: bool,
     pub italic: bool,
     pub monospace: bool,
+    /// Preserve source whitespace instead of applying normal HTML collapsing.
+    pub preserve_whitespace: bool,
     /// If set, this span is a link to the given URL/href.
     pub link: Option<String>,
 }
@@ -38,11 +40,17 @@ pub enum ContentNode {
     /// A paragraph with mixed inline formatting.
     Paragraph(Vec<TextSpan>, NodeStyle),
     /// A block quote (contains paragraphs).
-    BlockQuote(Vec<ContentNode>),
+    BlockQuote {
+        children: Vec<ContentNode>,
+        style: NodeStyle,
+    },
     /// An unordered list.
     UnorderedList(Vec<Vec<TextSpan>>),
     /// An ordered list.
-    OrderedList(Vec<Vec<TextSpan>>),
+    OrderedList {
+        items: Vec<Vec<TextSpan>>,
+        start: usize,
+    },
     /// An image reference.
     Image {
         /// Path to the image within the EPUB archive.
@@ -105,6 +113,7 @@ fn parse_block_children(
                             bold: false,
                             italic: false,
                             monospace: false,
+                            preserve_whitespace: false,
                             link: None,
                         }],
                         NodeStyle::default(),
@@ -158,7 +167,10 @@ fn parse_block_children(
             "blockquote" => {
                 let inner = parse_block_children(child, base_path, styles);
                 if !inner.is_empty() {
-                    nodes.push(ContentNode::BlockQuote(inner));
+                    nodes.push(ContentNode::BlockQuote {
+                        children: inner,
+                        style: node_style,
+                    });
                 }
             }
 
@@ -172,7 +184,11 @@ fn parse_block_children(
             "ol" => {
                 let items = parse_list_items(&child, styles);
                 if !items.is_empty() {
-                    nodes.push(ContentNode::OrderedList(items));
+                    let start = child
+                        .attribute("start")
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(1);
+                    nodes.push(ContentNode::OrderedList { items, start });
                 }
             }
 
@@ -268,7 +284,14 @@ fn css_to_node_style(css: &Option<super::style::EpubStyle>) -> NodeStyle {
         Some(s) => NodeStyle {
             text_align: s.text_align,
             font_size_multiplier: s.font_size_multiplier,
-            margin_left_em: s.margin_left_em,
+            // A negative text indent commonly cancels the containing margin on
+            // the first line to create a hanging indent. Native text widgets do
+            // not expose first-line indentation, so use the first-line origin
+            // rather than incorrectly shifting the entire paragraph inward.
+            margin_left_em: match (s.margin_left_em, s.text_indent_em) {
+                (Some(margin), Some(indent)) if indent < 0.0 => Some((margin + indent).max(0.0)),
+                (margin, _) => margin,
+            },
         },
         None => NodeStyle::default(),
     }
@@ -316,18 +339,73 @@ fn collect_inline_spans(
     let bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
     let italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
     let mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
-    collect_inline_spans_recursive(element, bold, italic, mono, None, styles, &mut spans);
+    let preserve_whitespace = css
+        .as_ref()
+        .is_some_and(|s| s.preserve_whitespace == Some(true));
+    collect_inline_spans_recursive(
+        element,
+        bold,
+        italic,
+        mono,
+        preserve_whitespace,
+        None,
+        styles,
+        &mut spans,
+    );
+
+    // XHTML follows HTML whitespace rules for normal inline content: source
+    // line breaks and indentation collapse to a single space. Preserve raw
+    // whitespace only in code blocks, which do not use this collector.
+    collapse_inline_whitespace(&mut spans);
 
     // Merge adjacent spans with the same formatting.
     merge_spans(&mut spans);
     spans
 }
 
+fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
+    let mut at_start_or_whitespace = true;
+    for span in spans.iter_mut() {
+        if span.preserve_whitespace {
+            at_start_or_whitespace = span
+                .text
+                .chars()
+                .last()
+                .is_none_or(|character| character.is_ascii_whitespace());
+            continue;
+        }
+        let mut normalized = String::with_capacity(span.text.len());
+        for character in span.text.chars() {
+            if character.is_ascii_whitespace() {
+                if !at_start_or_whitespace {
+                    normalized.push(' ');
+                    at_start_or_whitespace = true;
+                }
+            } else {
+                normalized.push(character);
+                at_start_or_whitespace = false;
+            }
+        }
+        span.text = normalized;
+    }
+
+    if let Some(last) = spans
+        .iter_mut()
+        .rfind(|span| !span.text.is_empty() && !span.preserve_whitespace)
+        && last.text.ends_with(' ')
+    {
+        last.text.pop();
+    }
+    spans.retain(|span| !span.text.is_empty());
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_inline_spans_recursive(
     node: &roxmltree::Node,
     bold: bool,
     italic: bool,
     monospace: bool,
+    preserve_whitespace: bool,
     link: Option<&str>,
     styles: &super::style::StyleMap,
     spans: &mut Vec<TextSpan>,
@@ -341,6 +419,7 @@ fn collect_inline_spans_recursive(
                     bold,
                     italic,
                     monospace,
+                    preserve_whitespace,
                     link: link.map(|s| s.to_string()),
                 });
             }
@@ -350,6 +429,9 @@ fn collect_inline_spans_recursive(
             let css_bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
             let css_italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
             let css_mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
+            let css_preserve_whitespace = css
+                .as_ref()
+                .is_some_and(|s| s.preserve_whitespace == Some(true));
 
             match child.tag_name().name() {
                 "a" => {
@@ -359,6 +441,7 @@ fn collect_inline_spans_recursive(
                         bold || css_bold,
                         italic || css_italic,
                         monospace || css_mono,
+                        preserve_whitespace || css_preserve_whitespace,
                         href,
                         styles,
                         spans,
@@ -377,6 +460,7 @@ fn collect_inline_spans_recursive(
                         b || css_bold,
                         i || css_italic,
                         m || css_mono,
+                        preserve_whitespace || css_preserve_whitespace,
                         link,
                         styles,
                         spans,
@@ -394,6 +478,7 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
         if spans[i].bold == spans[i + 1].bold
             && spans[i].italic == spans[i + 1].italic
             && spans[i].monospace == spans[i + 1].monospace
+            && spans[i].preserve_whitespace == spans[i + 1].preserve_whitespace
             && spans[i].link == spans[i + 1].link
         {
             let next_text = spans[i + 1].text.clone();
@@ -518,6 +603,57 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_collapses_xhtml_source_indentation() {
+        let xhtml = r#"<html><body><p>Ordinary prose wraps in the source
+            but source indentation must <em>not</em> indent rendered lines.
+        </p></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        match &nodes[0] {
+            ContentNode::Paragraph(spans, _) => {
+                let text = spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>();
+                assert_eq!(
+                    text,
+                    "Ordinary prose wraps in the source but source indentation must not indent rendered lines."
+                );
+                assert_eq!(
+                    spans
+                        .iter()
+                        .find(|span| span.italic)
+                        .map(|span| span.text.as_str()),
+                    Some("not")
+                );
+            }
+            other => panic!("expected Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_preserves_inline_preformatted_whitespace() {
+        let xhtml = r#"<html><body><p>Run <code class="keep">  x
+    y</code> now.</p></body></html>"#;
+        let styles = super::super::style::parse_epub_styles([(
+            "style.css",
+            ".keep { font-family: monospace; white-space: pre; }",
+        )]);
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        match &nodes[0] {
+            ContentNode::Paragraph(spans, _) => {
+                let code = spans
+                    .iter()
+                    .find(|span| span.monospace)
+                    .expect("inline code span should be retained");
+                assert_eq!(code.text, "  x\n    y");
+            }
+            other => panic!("expected Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_parse_lists() {
         let xhtml = r#"<html><body>
             <ul><li>One</li><li>Two</li></ul>
@@ -526,7 +662,10 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         assert_eq!(nodes.len(), 2);
         assert!(matches!(&nodes[0], ContentNode::UnorderedList(items) if items.len() == 2));
-        assert!(matches!(&nodes[1], ContentNode::OrderedList(items) if items.len() == 2));
+        assert!(matches!(
+            &nodes[1],
+            ContentNode::OrderedList { items, start: 1 } if items.len() == 2
+        ));
     }
 
     #[test]
@@ -535,9 +674,35 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         assert_eq!(nodes.len(), 1);
         match &nodes[0] {
-            ContentNode::BlockQuote(inner) => {
+            ContentNode::BlockQuote {
+                children: inner, ..
+            } => {
                 assert_eq!(inner.len(), 1);
                 assert!(matches!(&inner[0], ContentNode::Paragraph(_, _)));
+            }
+            other => panic!("expected BlockQuote, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_blockquote_style_and_hanging_indent() {
+        let xhtml = r#"<html><body>
+            <blockquote class="toc"><p class="entry">Chapter 1</p></blockquote>
+        </body></html>"#;
+        let styles = super::super::style::parse_epub_styles([(
+            "style.css",
+            ".toc { margin-left: 16px; } .entry { margin-left: 32px; text-indent: -32px; }",
+        )]);
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        match &nodes[0] {
+            ContentNode::BlockQuote { children, style } => {
+                assert_eq!(style.margin_left_em, Some(1.0));
+                assert!(matches!(
+                    &children[0],
+                    ContentNode::Paragraph(_, paragraph_style)
+                        if paragraph_style.margin_left_em == Some(0.0)
+                ));
             }
             other => panic!("expected BlockQuote, got {other:?}"),
         }
