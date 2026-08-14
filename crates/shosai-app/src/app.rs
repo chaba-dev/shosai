@@ -6291,6 +6291,7 @@ mod tests {
             bold: true,
             italic: false,
             monospace: false,
+            preserve_whitespace: false,
             link: Some("chapter-2.xhtml".to_string()),
         }];
         let pages = paginate_epub_chapter(
@@ -6334,6 +6335,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    preserve_whitespace: false,
                     link: None,
                 }]
             })
@@ -6368,6 +6370,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     }],
                     Default::default(),
@@ -6410,6 +6413,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     }],
                     Default::default(),
@@ -6449,6 +6453,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    preserve_whitespace: false,
                     link: None,
                 }],
                 Default::default(),
@@ -6739,6 +6744,7 @@ mod tests {
                     bold: true,
                     italic: false,
                     monospace: false,
+                    preserve_whitespace: false,
                     link: None,
                 }]]),
             ],

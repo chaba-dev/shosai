@@ -293,6 +293,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     },
                     TextSpan {
@@ -300,6 +301,7 @@ mod tests {
                         bold: true,
                         italic: false,
                         monospace: false,
+                        preserve_whitespace: false,
                         link: None,
                     },
                 ],

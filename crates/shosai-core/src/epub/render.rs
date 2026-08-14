@@ -11,6 +11,8 @@ pub struct TextSpan {
     pub bold: bool,
     pub italic: bool,
     pub monospace: bool,
+    /// Preserve source whitespace instead of applying normal HTML collapsing.
+    pub preserve_whitespace: bool,
     /// If set, this span is a link to the given URL/href.
     pub link: Option<String>,
 }
@@ -108,6 +110,7 @@ fn parse_block_children(
                             bold: false,
                             italic: false,
                             monospace: false,
+                            preserve_whitespace: false,
                             link: None,
                         }],
                         NodeStyle::default(),
@@ -329,7 +332,19 @@ fn collect_inline_spans(
     let bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
     let italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
     let mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
-    collect_inline_spans_recursive(element, bold, italic, mono, None, styles, &mut spans);
+    let preserve_whitespace = css
+        .as_ref()
+        .is_some_and(|s| s.preserve_whitespace == Some(true));
+    collect_inline_spans_recursive(
+        element,
+        bold,
+        italic,
+        mono,
+        preserve_whitespace,
+        None,
+        styles,
+        &mut spans,
+    );
 
     // XHTML follows HTML whitespace rules for normal inline content: source
     // line breaks and indentation collapse to a single space. Preserve raw
@@ -344,6 +359,14 @@ fn collect_inline_spans(
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
     let mut at_start_or_whitespace = true;
     for span in spans.iter_mut() {
+        if span.preserve_whitespace {
+            at_start_or_whitespace = span
+                .text
+                .chars()
+                .last()
+                .is_none_or(|character| character.is_ascii_whitespace());
+            continue;
+        }
         let mut normalized = String::with_capacity(span.text.len());
         for character in span.text.chars() {
             if character.is_ascii_whitespace() {
@@ -359,7 +382,9 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
         span.text = normalized;
     }
 
-    if let Some(last) = spans.iter_mut().rfind(|span| !span.text.is_empty())
+    if let Some(last) = spans
+        .iter_mut()
+        .rfind(|span| !span.text.is_empty() && !span.preserve_whitespace)
         && last.text.ends_with(' ')
     {
         last.text.pop();
@@ -372,6 +397,7 @@ fn collect_inline_spans_recursive(
     bold: bool,
     italic: bool,
     monospace: bool,
+    preserve_whitespace: bool,
     link: Option<&str>,
     styles: &super::style::StyleMap,
     spans: &mut Vec<TextSpan>,
@@ -385,6 +411,7 @@ fn collect_inline_spans_recursive(
                     bold,
                     italic,
                     monospace,
+                    preserve_whitespace,
                     link: link.map(|s| s.to_string()),
                 });
             }
@@ -394,6 +421,9 @@ fn collect_inline_spans_recursive(
             let css_bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
             let css_italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
             let css_mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
+            let css_preserve_whitespace = css
+                .as_ref()
+                .is_some_and(|s| s.preserve_whitespace == Some(true));
 
             match child.tag_name().name() {
                 "a" => {
@@ -403,6 +433,7 @@ fn collect_inline_spans_recursive(
                         bold || css_bold,
                         italic || css_italic,
                         monospace || css_mono,
+                        preserve_whitespace || css_preserve_whitespace,
                         href,
                         styles,
                         spans,
@@ -421,6 +452,7 @@ fn collect_inline_spans_recursive(
                         b || css_bold,
                         i || css_italic,
                         m || css_mono,
+                        preserve_whitespace || css_preserve_whitespace,
                         link,
                         styles,
                         spans,
@@ -438,6 +470,7 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
         if spans[i].bold == spans[i + 1].bold
             && spans[i].italic == spans[i + 1].italic
             && spans[i].monospace == spans[i + 1].monospace
+            && spans[i].preserve_whitespace == spans[i + 1].preserve_whitespace
             && spans[i].link == spans[i + 1].link
         {
             let next_text = spans[i + 1].text.clone();
