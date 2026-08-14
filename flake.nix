@@ -36,6 +36,13 @@
           ];
         };
 
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+
+        workspacePackage = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
+
         # Common dependencies across all platforms
         commonDeps = with pkgs; [
           rustToolchain
@@ -97,8 +104,108 @@
             # iced uses DirectX/DXGI which are built into Windows
             # No additional dependencies needed for native Windows builds
           ];
+
+        packageRuntimeDeps =
+          with pkgs;
+          [ pdfium-binaries ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            libglvnd
+            libxkbcommon
+            mesa
+            wayland
+            libx11
+            libxcursor
+            libxrandr
+            libxi
+            vulkan-loader
+          ];
+
+        shosai = rustPlatform.buildRustPackage (
+          {
+            pname = "shosai";
+            inherit (workspacePackage) version;
+            src = pkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = pkgs.lib.fileset.unions [
+                ./Cargo.lock
+                ./Cargo.toml
+                ./crates
+                ./packaging/linux/shosai.desktop
+              ];
+            };
+
+            cargoLock.lockFile = ./Cargo.lock;
+            cargoBuildFlags = [
+              "--package"
+              "shosai-app"
+              "--bin"
+              "shosai"
+            ];
+
+            nativeBuildInputs = with pkgs; [
+              clang
+              cmake
+              makeWrapper
+              pkg-config
+            ];
+
+            buildInputs = (with pkgs; [ openssl ]) ++ packageRuntimeDeps ++ macosDeps;
+
+            postInstall =
+              pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+                wrapProgram "$out/bin/shosai" \
+                  --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath packageRuntimeDeps} \
+                  --set-default __EGL_VENDOR_LIBRARY_FILENAMES \
+                    "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json" \
+                  --set-default LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri"
+
+                install -Dm644 packaging/linux/shosai.desktop \
+                  "$out/share/applications/shosai.desktop"
+                substituteInPlace "$out/share/applications/shosai.desktop" \
+                  --replace-fail '@SHOSAI_EXEC@' "$out/bin/shosai"
+              ''
+              + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+                wrapProgram "$out/bin/shosai" \
+                  --prefix DYLD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath packageRuntimeDeps}
+              '';
+
+            meta = {
+              description = "Native desktop ebook reader for PDF, EPUB, and CBZ files";
+              homepage = workspacePackage.repository;
+              license = pkgs.lib.licenses.asl20;
+              mainProgram = "shosai";
+              platforms = pkgs.pdfium-binaries.meta.platforms;
+            };
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packageRuntimeDeps;
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            DYLD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packageRuntimeDeps;
+          }
+        );
       in
       {
+        packages = {
+          inherit shosai;
+          default = shosai;
+        };
+
+        apps =
+          let
+            app = {
+              type = "app";
+              program = "${shosai}/bin/shosai";
+              meta.description = "Run the Shosai ebook reader";
+            };
+          in
+          {
+            shosai = app;
+            default = app;
+          };
+
+        checks.shosai = shosai;
+
         devShells.default = pkgs.mkShell (
           {
             nativeBuildInputs = commonDeps ++ linuxDeps ++ macosDeps ++ windowsDeps;

@@ -282,7 +282,7 @@ Plan: [[file:distribution-packaging.org][Distribution and Packaging Plan]]
 - [X] CI/CD pipeline for automated builds and releases
 - [X] Portable Linux archives (x86_64 and aarch64)
 - [X] macOS ~.app~ bundles (x86_64 and aarch64, ad-hoc signed)
-- [ ] Nix package (leverage existing flake infrastructure)
+- [X] Nix package (install with ~nix profile install .#shosai~)
 - [ ] AppImage for Linux
 - [ ] Flatpak for Linux
 - [ ] Windows installer (NSIS or WiX)
@@ -293,8 +293,8 @@ shared library). Development uses ~pdfium-binaries~ from the Nix dev shell.
 The existing portable Linux archives and macOS bundles already ship PDFium;
 each remaining distribution format must provide and verify its own runtime
 layout:
-- *Nix package*: Add ~pdfium-binaries~ as a runtime dependency and patch
-  ~RPATH~ / wrap with ~LD_LIBRARY_PATH~.
+- *Nix package* (implemented): Keep ~pdfium-binaries~ in the package closure and
+  wrap the executable with the required runtime library paths.
 - *Portable Linux archives* (implemented): Bundle ~libpdfium.so~ under ~lib/~
   beside the packaged ~bin/~ directory.
 - *AppImage / Flatpak*: Bundle ~libpdfium.so~ alongside the binary inside

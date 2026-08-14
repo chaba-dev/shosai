@@ -31,10 +31,20 @@ all-or-nothing rollout.
 - [X] CI tests Windows x86_64 with a downloaded ~pdfium.dll~, but does not
   package or publish Windows.
 
+** DONE Nix package
+
+- [X] ~flake.nix~ exports installable ~packages.default~ / ~packages.shosai~ and
+  runnable ~apps.default~ / ~apps.shosai~ outputs.
+- [X] The package uses the locked Rust toolchain and Cargo dependencies, keeps
+  PDFium plus a Mesa/EGL fallback in its closure, wraps runtime library paths,
+  and installs desktop data without claiming unsupported file associations.
+- [X] ~checks.shosai~ builds the package and runs the workspace test suite.
+- [X] Package metadata is restricted to the four Linux/macOS architectures
+  supported by the pinned ~pdfium-binaries~ package.  x86_64 Linux is validated;
+  the other three outputs still require native build and launch coverage.
+
 ** TODO Distribution gaps
 
-- [ ] ~flake.nix~ exports only ~devShells.default~; it has no package or app
-  output.
 - [ ] No AppImage, Flatpak, Windows installer, Windows release artifact,
   Developer ID signature, or Apple notarization exists.
 - [ ] ~packaging/linux/shosai.desktop~ has no icon key, and there is no shared
@@ -58,7 +68,7 @@ all-or-nothing rollout.
 
 * Work Package: Nix Package
 :PROPERTIES:
-:STATUS: TODO
+:STATUS: DONE
 :DELIVERABLE: nix build .#shosai
 :END:
 
@@ -72,16 +82,15 @@ all-or-nothing rollout.
 
 ** Actionable changes and likely files
 
-- [ ] Add ~packages.default~ and ~packages.shosai~ in ~flake.nix~, using
+- [X] Add ~packages.default~ and ~packages.shosai~ in ~flake.nix~, using
   ~rustPlatform.buildRustPackage~, ~Cargo.lock~, required native build inputs,
   desktop integration, and wrapping/fixup appropriate to Linux.
-- [ ] Add ~apps.default~ so ~nix run .#shosai~ invokes the packaged executable.
-- [ ] Install the desktop file, icon (when available), and metainfo into standard
-  ~$out/share~ paths.  Metadata absence may be handled in this package first and
-  later replaced by the shared metadata work package.
-- [ ] Add a flake check or CI job in ~.github/workflows/ci.yml~ for
-  ~nix flake check~ and ~nix build .#shosai~ on x86_64-linux.  Add aarch64 only
-  when a native/binary-cache runner is available.
+- [X] Add ~apps.default~ so ~nix run .#shosai~ invokes the packaged executable.
+- [X] Install the desktop file into the standard ~$out/share~ path.  Install the
+  icon and metainfo when the shared metadata work package provides them.
+- [X] Add ~checks.shosai~ so ~nix flake check~ builds the package and runs its
+  tests on the current system.  Cross-system builds remain dependent on suitable
+  native or binary-cache runners.
 
 ** PDFium and artifact handling
 
@@ -99,10 +108,13 @@ not a new GitHub tarball; publishing to a binary cache is a later decision.
 
 ** Acceptance criteria
 
-- [ ] ~nix build .#shosai~ succeeds from a clean checkout on x86_64-linux.
-- [ ] ~nix run .#shosai~ launches without ~LD_LIBRARY_PATH~ supplied by the user.
-- [ ] A PDF opens, proving the closure supplies a compatible PDFium.
-- [ ] License, desktop, icon/metadata files present at their conventional paths.
+- [X] ~nix build .#shosai~ succeeds from a clean checkout on x86_64-linux.
+- [X] ~nix run .#shosai~ launches without ~LD_LIBRARY_PATH~ supplied by the user.
+- [X] The packaged Mesa/EGL software renderer starts under Xvfb when no host
+  Vulkan implementation is available.
+- [X] PDF integration tests pass using PDFium from the package closure.
+- [X] Nix license metadata and the desktop file are present; icon/AppStream
+  metadata remain owned by the shared metadata work package.
 
 ** Secrets and security
 
@@ -366,8 +378,8 @@ rotation over Apple ID passwords.  Never upload signing artifacts from forks.
 
 - Approve an original or properly licensed master icon and record its source and
   license.  Confirm canonical display name “Shosai”, reverse-DNS ID
-  ~io.github.chaba2.shosai~, summary, categories, supported MIME types, project
-  URL, and screenshot policy.
+  ~io.github.chaba2.shosai~, summary, categories, project URL, and screenshot
+  policy.  Keep MIME registration deferred until startup file handling exists.
 
 ** Actionable changes and likely files
 
@@ -375,8 +387,9 @@ rotation over Apple ID passwords.  Never upload signing artifacts from forks.
   ~packaging/assets/~ (or platform-standard subdirectories), plus a reproducible
   generation/check script if raster assets are committed.
 - [ ] Add ~packaging/linux/io.github.chaba2.shosai.metainfo.xml~ and make
-  ~packaging/linux/shosai.desktop~ use the canonical ID/icon while retaining the
-  existing PDF, EPUB, and CBZ MIME types.
+  ~packaging/linux/shosai.desktop~ use the canonical ID/icon.  Add PDF, EPUB, and
+  CBZ MIME types only after the executable accepts startup paths and ~Exec~ uses
+  the appropriate desktop-entry field code such as ~%F~.
 - [ ] Generate/assemble macOS ~AppIcon.icns~ and Windows ~.ico~ from the same
   source, then teach package scripts to install them when present.
 - [ ] Document which fields are canonical versus platform-specific to prevent
@@ -405,7 +418,8 @@ PDFium notices in target packages rather than duplicating them into icon assets.
 - [ ] Canonical icon source has explicit redistribution rights and produces
   Linux, macOS, and Windows representations.
 - [ ] Desktop and AppStream metadata validate and consistently use the application
-  ID, MIME types, summary, and project URL.
+  ID, summary, and project URL.  Any MIME declarations have tested startup-path
+  handling and a matching ~Exec~ field code.
 - [ ] Existing Linux tarball and macOS app can consume the assets without changing
   executable or PDFium layout.
 
