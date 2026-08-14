@@ -47,7 +47,10 @@ pub enum ContentNode {
     /// An unordered list.
     UnorderedList(Vec<Vec<TextSpan>>),
     /// An ordered list.
-    OrderedList(Vec<Vec<TextSpan>>),
+    OrderedList {
+        items: Vec<Vec<TextSpan>>,
+        start: usize,
+    },
     /// An image reference.
     Image {
         /// Path to the image within the EPUB archive.
@@ -181,7 +184,11 @@ fn parse_block_children(
             "ol" => {
                 let items = parse_list_items(&child, styles);
                 if !items.is_empty() {
-                    nodes.push(ContentNode::OrderedList(items));
+                    let start = child
+                        .attribute("start")
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(1);
+                    nodes.push(ContentNode::OrderedList { items, start });
                 }
             }
 
@@ -654,7 +661,10 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         assert_eq!(nodes.len(), 2);
         assert!(matches!(&nodes[0], ContentNode::UnorderedList(items) if items.len() == 2));
-        assert!(matches!(&nodes[1], ContentNode::OrderedList(items) if items.len() == 2));
+        assert!(matches!(
+            &nodes[1],
+            ContentNode::OrderedList { items, start: 1 } if items.len() == 2
+        ));
     }
 
     #[test]
