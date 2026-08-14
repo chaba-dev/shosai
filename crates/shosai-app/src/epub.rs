@@ -240,9 +240,9 @@ pub(crate) fn paginate_epub_chapter(
                     remaining = (remaining - node_height).max(0.0);
                 } else {
                     let available_height = (remaining - block_spacing).max(0.0);
-                    let (prefix, remaining_children, prefix_height) =
+                    let (prefix, remaining_children, prefix_height, prefix_text_len) =
                         if pages.last().unwrap().is_empty() {
-                            (Vec::new(), children.to_vec(), 0.0)
+                            (Vec::new(), children.to_vec(), 0.0, 0)
                         } else {
                             split_epub_blockquote_prefix(
                                 children,
@@ -252,10 +252,6 @@ pub(crate) fn paginate_epub_chapter(
                                 font_size,
                             )
                         };
-                    let prefix_text_len = prefix
-                        .iter()
-                        .map(|child| content_node_text_len(child) + 1)
-                        .sum::<usize>();
                     if !prefix.is_empty() {
                         pages.last_mut().unwrap().push(PageNode {
                             node: ContentNode::BlockQuote {
@@ -487,9 +483,10 @@ fn split_epub_blockquote_prefix(
     chars_per_line: usize,
     lines_per_page: usize,
     font_size: f32,
-) -> (Vec<ContentNode>, Vec<ContentNode>, f32) {
+) -> (Vec<ContentNode>, Vec<ContentNode>, f32, usize) {
     let mut prefix = Vec::new();
     let mut prefix_height = 0.0;
+    let mut consumed_text = 0;
     for (index, child) in children.iter().enumerate() {
         let spacing = if prefix.is_empty() {
             0.0
@@ -501,6 +498,7 @@ fn split_epub_blockquote_prefix(
         if prefix_height + spacing + child_height <= available_height {
             prefix.push(child.clone());
             prefix_height += spacing + child_height;
+            consumed_text += content_node_text_len(child) + 1;
             continue;
         }
 
@@ -511,13 +509,14 @@ fn split_epub_blockquote_prefix(
         {
             let nested_available = available_height - prefix_height - spacing;
             if nested_available > 0.0 {
-                let (nested_prefix, nested_remaining, nested_height) = split_epub_blockquote_prefix(
-                    nested_children,
-                    nested_available,
-                    chars_per_line,
-                    lines_per_page,
-                    font_size,
-                );
+                let (nested_prefix, nested_remaining, nested_height, nested_consumed_text) =
+                    split_epub_blockquote_prefix(
+                        nested_children,
+                        nested_available,
+                        chars_per_line,
+                        lines_per_page,
+                        font_size,
+                    );
                 if !nested_prefix.is_empty() {
                     prefix.push(ContentNode::BlockQuote {
                         children: nested_prefix,
@@ -532,15 +531,45 @@ fn split_epub_blockquote_prefix(
                         });
                     }
                     remaining.extend_from_slice(&children[index + 1..]);
-                    return (prefix, remaining, prefix_height);
+                    return (
+                        prefix,
+                        remaining,
+                        prefix_height,
+                        consumed_text + nested_consumed_text,
+                    );
                 }
             }
         }
 
-        return (prefix, children[index..].to_vec(), prefix_height);
+        if let ContentNode::Paragraph(spans, style) = child {
+            let paragraph_available = available_height - prefix_height - spacing;
+            let style_scale = style.font_size_multiplier.unwrap_or(1.0);
+            let line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
+            let available_lines = (paragraph_available / line_height).floor().max(0.0) as usize;
+            let maximum = chars_per_line * available_lines;
+            let text_len = spans_text_len(spans);
+            let take = epub_span_split_length(spans, 0, maximum);
+            if take > 0 && take < text_len {
+                let prefix_spans = slice_epub_spans(spans, 0, take);
+                let remaining_spans = slice_epub_spans(spans, take, text_len - take);
+                prefix.push(ContentNode::Paragraph(prefix_spans, style.clone()));
+                let paragraph_height = take.div_ceil(chars_per_line).max(1) as f32 * line_height;
+                prefix_height += spacing + paragraph_height;
+                let mut remaining = vec![ContentNode::Paragraph(remaining_spans, style.clone())];
+                remaining.extend_from_slice(&children[index + 1..]);
+                return (prefix, remaining, prefix_height, consumed_text + take);
+            }
+        }
+
+        return (
+            prefix,
+            children[index..].to_vec(),
+            prefix_height,
+            consumed_text,
+        );
     }
 
-    (prefix, Vec::new(), prefix_height)
+    (prefix, Vec::new(), prefix_height, consumed_text)
 }
 
 fn estimated_epub_compact_node_height(
@@ -927,6 +956,110 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(paginated_children, children);
+    }
+
+    #[test]
+    fn epub_paginator_preserves_offsets_across_nested_blockquote_splits() {
+        fn paragraph(text: String) -> ContentNode {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                Default::default(),
+            )
+        }
+
+        fn first_text(node: &ContentNode) -> &str {
+            match node {
+                ContentNode::Heading { text, .. } => text,
+                ContentNode::Paragraph(spans, _) => &spans[0].text,
+                ContentNode::BlockQuote { children, .. } => first_text(&children[0]),
+                node => panic!("expected text content, got {node:?}"),
+            }
+        }
+
+        let nested = ContentNode::BlockQuote {
+            children: (0..12)
+                .map(|index| paragraph(format!("Unique nested entry {index:02}")))
+                .collect(),
+            style: Default::default(),
+        };
+        let nodes = vec![
+            paragraph("Introductory text before the nested quote".to_string()),
+            ContentNode::BlockQuote {
+                children: vec![nested],
+                style: Default::default(),
+            },
+        ];
+        let chapter_text = shosai_core::search::extract_text_from_nodes(&nodes);
+
+        let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 180.0));
+
+        assert!(pages.len() > 1, "the nested quote must be split");
+        for page_node in pages.iter().flatten() {
+            let text = first_text(&page_node.node);
+            let expected = chapter_text
+                .find(text)
+                .expect("paginated text must exist in the source chapter");
+            assert_eq!(
+                page_node.text_offset, expected,
+                "the page containing {text:?} must retain its source offset"
+            );
+        }
+    }
+
+    #[test]
+    fn epub_paginator_keeps_a_linked_label_with_a_splittable_first_entry() {
+        let paragraph = |text: String, link: Option<&str>| {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    preserve_whitespace: false,
+                    link: link.map(str::to_string),
+                }],
+                Default::default(),
+            )
+        };
+        let label = "Chapter 13";
+        let first_entry = "Long first entry ".repeat(30);
+        let nodes = vec![
+            paragraph("Previous page content ".repeat(8), None),
+            paragraph(label.to_string(), Some("chapter-13.xhtml")),
+            ContentNode::BlockQuote {
+                children: vec![paragraph(
+                    first_entry.clone(),
+                    Some("chapter-13.xhtml#first"),
+                )],
+                style: Default::default(),
+            },
+        ];
+
+        let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 180.0));
+        let page_text = pages
+            .iter()
+            .map(|page| {
+                shosai_core::search::extract_text_from_nodes(
+                    &page
+                        .iter()
+                        .map(|page_node| page_node.node.clone())
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .find(|text| text.contains(label))
+            .expect("the linked label must be paginated");
+
+        assert!(
+            page_text.contains("Long first entry"),
+            "the linked label must not be left on a page by itself"
+        );
     }
 
     #[test]
