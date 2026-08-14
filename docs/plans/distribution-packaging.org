@@ -1,0 +1,436 @@
+#+TITLE: Shōsai Distribution and Packaging Plan
+#+AUTHOR: darwin
+#+DATE: 2026-08-14
+#+STARTUP: showall
+
+* Purpose
+
+This document plans distribution work beyond the existing release archives.  Each
+work package below is independently deliverable: it may be implemented, reviewed,
+and released without waiting for any other package.  Shared artwork and metadata
+should be reused when available, but must not turn the targets into an
+all-or-nothing rollout.
+
+* Current Repository State
+
+** DONE Existing release pipeline
+
+- [X] ~.github/workflows/publish-release.yml~ builds four release variants:
+  Linux x86_64/aarch64 and macOS x86_64/aarch64.
+- [X] Linux outputs versioned ~.tar.gz~ archives made by
+  ~scripts/package-linux.sh~.  Each archive contains the executable, desktop
+  entry, installer, licenses, and ~lib/libpdfium.so~.
+- [X] macOS outputs zipped ~Shosai.app~ bundles made by
+  ~scripts/package-macos.sh~.  Each bundle contains PDFium in
+  ~Contents/Frameworks~, application/PDFium licenses, and an ~Info.plist~.
+- [X] Release PDFium is downloaded from the pinned
+  ~bblanchon/pdfium-binaries~ Chromium 7999 release.  Every current platform and
+  architecture has an explicit SHA-256 in the release matrix.
+- [X] Built artifacts are collected into one GitHub release with ~SHA256SUMS~.
+- [X] macOS bundles are ad-hoc signed and verified before zipping.
+- [X] CI tests Windows x86_64 with a downloaded ~pdfium.dll~, but does not
+  package or publish Windows.
+
+** TODO Distribution gaps
+
+- [ ] ~flake.nix~ exports only ~devShells.default~; it has no package or app
+  output.
+- [ ] No AppImage, Flatpak, Windows installer, Windows release artifact,
+  Developer ID signature, or Apple notarization exists.
+- [ ] ~packaging/linux/shosai.desktop~ has no icon key, and there is no shared
+  icon set, AppStream metainfo, or reusable MIME/application metadata source.
+- [ ] The application explicitly recognizes bundled PDFium at
+  ~../lib/libpdfium.so~ on non-macOS and in an app bundle on macOS, then falls
+  back to the system loader.  Windows needs an explicit, tested DLL layout.
+
+* Delivery Rules
+
+- Preserve the current tarball and ~.app.zip~ outputs while adding targets.
+- Add a target to the release matrix only after its own pull-request validation
+  is reliable.  Failure or deferral of one target must not block work on another.
+- Keep PDFium versions and checksums explicit.  Do not download unpinned
+  ~latest~ assets in packaging or release jobs.
+- Include Apache-2.0 and PDFium notices in every redistributable artifact.
+- Prefer unprivileged smoke tests: inspect contents, launch in a clean/headless
+  environment where practical, and open a small PDF to prove PDFium loading.
+- Build untrusted pull requests without release credentials.  Signing,
+  notarization, and publishing run only for protected release refs/environments.
+
+* Work Package: Nix Package
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: nix build .#shosai
+:END:
+
+** Prerequisites
+
+- Decide whether the flake follows its locked nixpkgs ~pdfium-binaries~ or pins a
+  separate PDFium derivation.  The initial package should use the locked nixpkgs
+  dependency and record that provenance in its closure.
+- Confirm all Iced/wgpu Linux runtime libraries through ~nix why-depends~ and an
+  actual launch; do not copy the dev shell dependency list blindly.
+
+** Actionable changes and likely files
+
+- [ ] Add ~packages.default~ and ~packages.shosai~ in ~flake.nix~, using
+  ~rustPlatform.buildRustPackage~, ~Cargo.lock~, required native build inputs,
+  desktop integration, and wrapping/fixup appropriate to Linux.
+- [ ] Add ~apps.default~ so ~nix run .#shosai~ invokes the packaged executable.
+- [ ] Install the desktop file, icon (when available), and metainfo into standard
+  ~$out/share~ paths.  Metadata absence may be handled in this package first and
+  later replaced by the shared metadata work package.
+- [ ] Add a flake check or CI job in ~.github/workflows/ci.yml~ for
+  ~nix flake check~ and ~nix build .#shosai~ on x86_64-linux.  Add aarch64 only
+  when a native/binary-cache runner is available.
+
+** PDFium and artifact handling
+
+Use Nix's ~pdfium-binaries~ as a store dependency, not a copied GitHub asset.
+Wrap Shosai with the PDFium library directory in its runtime loader path so the
+existing system-library fallback succeeds.  The result is a Nix store closure,
+not a new GitHub tarball; publishing to a binary cache is a later decision.
+
+** CI validation
+
+- Build with the committed lock file and evaluate on every default flake system.
+- Run ~nix-store --query --references~ (or ~nix path-info -r~) to verify PDFium
+  is in the closure, then launch under Xvfb and open a PDF fixture.
+- Run desktop/AppStream validators when those files are installed.
+
+** Acceptance criteria
+
+- [ ] ~nix build .#shosai~ succeeds from a clean checkout on x86_64-linux.
+- [ ] ~nix run .#shosai~ launches without ~LD_LIBRARY_PATH~ supplied by the user.
+- [ ] A PDF opens, proving the closure supplies a compatible PDFium.
+- [ ] License, desktop, icon/metadata files present at their conventional paths.
+
+** Secrets and security
+
+No secret is required.  Keep flake inputs locked and Cargo vendoring hashes
+reviewable; CI must not use an impure network fetch during the derivation build.
+
+** Non-goals
+
+- Submission to nixpkgs, Cachix/Attic setup, NixOS modules, Home Manager modules,
+  and replacing the existing development shell.
+
+* Work Package: AppImage
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: Shosai-<version>-<arch>.AppImage
+:END:
+
+** Prerequisites
+
+- Select and pin an AppImage construction tool and its checksum/version.
+- Establish a compatibility baseline (initially the same Ubuntu 22.04/glibc
+  baseline as the Linux tarballs) and identify libraries that must remain host
+  provided rather than bundled.
+
+** Actionable changes and likely files
+
+- [ ] Add ~packaging/appimage/AppRun~ and an AppDir assembly recipe or script,
+  preferably ~scripts/package-appimage.sh~.
+- [ ] Populate ~usr/bin~, ~usr/lib~, desktop file, icon, metainfo, and licenses;
+  patch the desktop entry for AppImage paths without changing tarball behavior.
+- [ ] Add independent x86_64 and aarch64 jobs/includes to
+  ~.github/workflows/publish-release.yml~ only after PR smoke tests pass.
+
+** PDFium and artifact handling
+
+Download the same pinned Chromium 7999 PDFium architecture asset and verify its
+SHA-256.  Bundle ~libpdfium.so~ in the AppDir and have ~AppRun~ prepend its
+directory to the loader path.  Also preserve the current executable-relative
+~../lib/libpdfium.so~ layout where possible.  Include ~PDFIUM-LICENSE~.
+
+** CI validation
+
+- Inspect the AppDir and final image, run ~desktop-file-validate~ and
+  ~appstreamcli validate~, and assert the expected architecture.
+- Launch the extracted image under Xvfb, open a PDF fixture, and check that it
+  resolves bundled PDFium rather than a runner-installed copy.
+- On a release build, upload each architecture as its own artifact and include it
+  in generated checksums.
+
+** Acceptance criteria
+
+- [ ] The AppImage runs without installation on the documented Linux baseline.
+- [ ] It launches and opens PDF/EPUB/CBZ files with no host PDFium installed.
+- [ ] Desktop icon/metadata and both licenses are embedded.
+- [ ] x86_64 and aarch64 filenames cannot overwrite one another.
+
+** Secrets and security
+
+No signing secret is required initially.  Pin build-tool downloads and PDFium;
+do not run downloaded AppImages with elevated privileges.  Optional AppImage
+signing is a separate, protected-environment follow-up.
+
+** Non-goals
+
+- Auto-update integration, delta updates, universal multi-architecture images,
+  distro package-manager integration, and replacing Linux tarballs.
+
+* Work Package: Flatpak
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: io.github.chaba2.shosai Flatpak bundle/manifest
+:END:
+
+** Prerequisites
+
+- Choose a maintained Freedesktop runtime/SDK version and verify Iced works with
+  its Wayland/X11 and GPU interfaces.
+- Generate locked Cargo source entries (for example with ~flatpak-cargo-generator~)
+  so the sandbox build is network-free.
+- Review the application ID ~io.github.chaba2.shosai~ for long-term ownership;
+  it already matches the macOS bundle identifier.
+
+** Actionable changes and likely files
+
+- [ ] Add ~packaging/flatpak/io.github.chaba2.shosai.yml~ (or JSON), generated
+  Cargo source manifest, metainfo, desktop file, and icon installation rules.
+- [ ] Declare the minimum filesystem/file-picker, display, GPU, and audio (only
+  if actually required) permissions.  Use portals and avoid broad ~host~ access.
+- [ ] Add an isolated CI build/export/smoke-test job.  Release publication may
+  attach a ~.flatpak~ bundle without waiting for Flathub submission.
+
+** PDFium and artifact handling
+
+Build a pinned PDFium module inside the Flatpak build or use a reviewed runtime
+component at a fixed version.  Do not copy a host library into the sandbox.
+Install it under ~app/lib~, ensure Shosai resolves it there, and install its
+license.  Record source URL and checksum in the manifest.
+
+** CI validation
+
+- Run ~flatpak-builder --disable-rofiles-fuse --force-clean~ with downloads
+  separated from the network-disabled build phase.
+- Validate metainfo/desktop data, inspect permissions with ~flatpak info
+  --show-permissions~, install into a temporary user repo, and launch under a
+  disposable session/Xvfb.  Open a PDF fixture from an explicitly granted path.
+
+** Acceptance criteria
+
+- [ ] A clean, offline build from previously downloaded locked sources succeeds.
+- [ ] The temporary-repo install launches and renders PDF/EPUB/CBZ files.
+- [ ] PDFium and notices are inside the Flatpak runtime closure.
+- [ ] Permissions are documented and no unrestricted host filesystem access is
+  requested.
+
+** Secrets and security
+
+PR builds need no secret.  A future repository/Flathub token belongs in a
+protected environment and must not be available to fork builds.  Treat Cargo and
+PDFium source hashes as supply-chain controls.
+
+** Non-goals
+
+- Flathub acceptance, maintaining a custom Flatpak runtime, proprietary codecs,
+  and making Flatpak completion a condition for other releases.
+
+* Work Package: Windows Installer and Release Matrix
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: Shosai-<version>-windows-x86_64 installer
+:END:
+
+** Prerequisites
+
+- Select one installer technology (WiX/MSI is preferred for standard uninstall
+  semantics; document another choice if runner support is better).
+- Choose the supported Windows baseline and initially scope release to x86_64.
+  Add arm64 only after native build/runtime validation and a pinned PDFium arm64
+  asset are available.
+- Decide per-user versus machine-wide installation; prefer per-user initially to
+  avoid requiring elevation.
+
+** Actionable changes and likely files
+
+- [ ] Fix/test ~crates/shosai-core/src/pdf.rs~ so Windows explicitly checks an
+  adjacent ~pdfium.dll~ (or a documented installer-relative location) rather
+  than constructing the non-macOS ~../lib/libpdfium.so~ path.
+- [ ] Add ~scripts/package-windows.ps1~ and installer sources under
+  ~packaging/windows/~, including file associations, Start menu entry, upgrade
+  code, uninstall behavior, icon, and licenses.
+- [ ] Replace the current Windows CI use of the unpinned ~latest~ PDFium URL with
+  the release pipeline's pinned version and SHA-256 validation.
+- [ ] Add a Windows x86_64 entry/job to ~publish-release.yml~ that produces a
+  uniquely named installer.  Keep architecture fields explicit so arm64 can be
+  added independently later.
+
+** PDFium and artifact handling
+
+Bundle the pinned x64 ~pdfium.dll~ beside ~shosai.exe~ and include the upstream
+license.  Test the exact installed layout.  Do not rely on the CI workspace being
+on ~PATH~, and do not install PDFium globally or into ~System32~.
+
+** CI validation
+
+- Build with ~cargo build --release --locked~ and verify installer contents and
+  Authenticode status (unsigned is expected initially).
+- Perform a silent per-user install in a disposable Windows runner, launch/open a
+  PDF, verify file associations/shortcuts, then silently uninstall and assert
+  installed files are removed.
+- Continue the existing Windows unit tests independently of installer tests.
+
+** Acceptance criteria
+
+- [ ] GitHub Releases contain a versioned x86_64 Windows installer and checksum.
+- [ ] Install, launch with bundled PDFium, file-open, upgrade, and uninstall paths
+  work without manually editing ~PATH~.
+- [ ] Installer includes application and PDFium licenses and reports the Cargo
+  workspace version.
+- [ ] Failure of a future Windows arm64 build cannot suppress x86_64 artifacts.
+
+** Secrets and security
+
+Unsigned installers require no secret but must be clearly identified.  If code
+signing is added, use a protected environment and short-lived cloud/HSM signing
+identity where possible; never commit a PFX or expose its password to PR jobs.
+Verify all downloaded installer tools and PDFium inputs by digest.
+
+** Non-goals
+
+- Microsoft Store/MSIX publication, Windows arm64 in the first delivery,
+  system-wide PDFium, auto-update, and making Authenticode a prerequisite for an
+  initially usable installer.
+
+* Work Package: macOS Developer ID Signing and Notarization
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: notarized/stapled existing macOS app zips
+:END:
+
+** Prerequisites
+
+- Apple Developer Program membership, a Developer ID Application certificate,
+  and an App Store Connect issuer/key ID/API key (or approved notarytool profile).
+- Confirm hardened-runtime entitlements by testing both architectures, PDFium,
+  file dialogs, and GPU rendering.  Keep ~LSMinimumSystemVersion=12.0~ unless
+  compatibility testing changes it.
+
+** Actionable changes and likely files
+
+- [ ] Add minimal entitlements under ~packaging/macos/~ if required.
+- [ ] Update ~scripts/package-macos.sh~ to support an explicit release-signing
+  mode while retaining ad-hoc signing for PR/dry-run builds.
+- [ ] Sign nested ~libpdfium.dylib~ first, then the application with hardened
+  runtime and timestamp; verify before packaging.
+- [ ] In the protected release job, submit with ~xcrun notarytool~, wait for
+  success, staple the ticket to ~Shosai.app~, validate with ~stapler~ and
+  ~spctl~, then create the existing architecture-specific zip.
+
+** PDFium and artifact handling
+
+Keep the pinned PDFium dylib in ~Contents/Frameworks~ and its license in
+~Contents/Resources~.  It must be signed by the release identity as nested code
+before the outer bundle.  Do not alter the already verified PDFium bytes except
+for the code signature.
+
+** CI validation
+
+- PR/dry runs exercise ad-hoc signing and the full bundle assembly without
+  secrets.
+- Protected release runs verify ~codesign --deep --strict --verbose=2~,
+  notarization response, stapled ticket, and ~spctl --assess --type execute~ for
+  both x86_64 and aarch64 bundles.  Preserve notary logs on failure without
+  exposing credentials.
+
+** Acceptance criteria
+
+- [ ] Both current macOS architecture zips contain a Developer ID-signed,
+  hardened-runtime app with all nested code valid.
+- [ ] Apple accepts each app, the ticket is stapled before zipping, and Gatekeeper
+  assessment succeeds without network dependence on ticket lookup.
+- [ ] Secretless PR builds still complete using ad-hoc signatures.
+
+** Secrets and security
+
+Store certificate material/API credentials only in the protected ~RELEASE~
+environment, restrict release refs/approvers, mask outputs, and delete temporary
+keychains after use.  Prefer App Store Connect API keys with least privilege and
+rotation over Apple ID passwords.  Never upload signing artifacts from forks.
+
+** Non-goals
+
+- Mac App Store distribution, sandboxing solely for App Store policy, universal
+  binaries, DMG creation, or changing the current minimum macOS version.
+
+* Work Package: Shared Icons and Metadata
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: canonical reusable distribution assets
+:END:
+
+** Prerequisites
+
+- Approve an original or properly licensed master icon and record its source and
+  license.  Confirm canonical display name “Shosai”, reverse-DNS ID
+  ~io.github.chaba2.shosai~, summary, categories, supported MIME types, project
+  URL, and screenshot policy.
+
+** Actionable changes and likely files
+
+- [ ] Add a canonical vector icon and generated PNG sizes under
+  ~packaging/assets/~ (or platform-standard subdirectories), plus a reproducible
+  generation/check script if raster assets are committed.
+- [ ] Add ~packaging/linux/io.github.chaba2.shosai.metainfo.xml~ and make
+  ~packaging/linux/shosai.desktop~ use the canonical ID/icon while retaining the
+  existing PDF, EPUB, and CBZ MIME types.
+- [ ] Generate/assemble macOS ~AppIcon.icns~ and Windows ~.ico~ from the same
+  source, then teach package scripts to install them when present.
+- [ ] Document which fields are canonical versus platform-specific to prevent
+  manifests from drifting.
+
+This package is independently useful: it may land before any new format.  Each
+target may also ship interim target-local metadata, then consume these shared
+assets later; no target is blocked on this work package.
+
+** PDFium and artifact handling
+
+No PDFium binary changes.  Metadata should state PDF support but must not claim a
+system PDFium requirement because current portable artifacts bundle it.  Keep
+PDFium notices in target packages rather than duplicating them into icon assets.
+
+** CI validation
+
+- Run ~desktop-file-validate~ and strict AppStream validation.
+- Verify required PNG dimensions/transparency, parse ~.icns~ and ~.ico~, and
+  compare generated files with the canonical source in a reproducibility check.
+- Add package-content assertions for desktop/AppImage/Flatpak/macOS/Windows only
+  as each consumer exists; absent targets must not fail this package's CI.
+
+** Acceptance criteria
+
+- [ ] Canonical icon source has explicit redistribution rights and produces
+  Linux, macOS, and Windows representations.
+- [ ] Desktop and AppStream metadata validate and consistently use the application
+  ID, MIME types, summary, and project URL.
+- [ ] Existing Linux tarball and macOS app can consume the assets without changing
+  executable or PDFium layout.
+
+** Secrets and security
+
+No secret is required.  Treat artwork provenance as a licensing/supply-chain
+requirement; do not fetch mutable remote images during builds.  Strip unnecessary
+metadata from generated images and avoid embedding private authoring paths.
+
+** Non-goals
+
+- Product rebranding, marketing-site work, screenshot translation, redesigning
+  the application UI, and requiring every distribution target to adopt the
+  assets in the same release.
+
+* Suggested Independent Delivery Order
+
+This is sequencing guidance, not a dependency chain.
+
+1. Shared icons/metadata gives all later artifacts consistent assets, but any
+   target may proceed with target-local validated assets.
+2. Nix package and AppImage can proceed in parallel because they use different
+   dependency models (store closure versus portable bundle).
+3. Flatpak can proceed independently once its runtime and permissions are chosen.
+4. Windows x86_64 can proceed independently after the DLL lookup/layout fix;
+   Windows arm64 is a separate matrix expansion.
+5. macOS signing/notarization upgrades the existing app artifacts without waiting
+   for any Linux or Windows package.
