@@ -1,0 +1,204 @@
+#+TITLE: Enhanced EPUB Rendering Plan
+#+AUTHOR: Shōsai contributors
+#+DATE: 2026-08-14
+#+STARTUP: showall
+
+* Objective
+
+Improve EPUB fidelity without weakening Shōsai's native reading experience or
+mistaking text shaping for a complete HTML/CSS implementation.  The first gate
+is an ADR-backed technical spike comparing an embedded ~wry~ webview with an
+expanded native renderer.  No production renderer work starts until that gate
+has selected an approach and recorded its security, packaging, accessibility,
+and maintenance consequences.
+
+* Current Baseline
+
+- ~crates/shosai-core/src/epub/parser.rs~ reads container/OPF, spine, TOC,
+  XHTML, and manifest resources.  Non-XHTML resources are held eagerly in
+  ~EpubContent.resources~.
+- ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but reduces CSS to
+  a class-name ~StyleMap~ and a small set of properties.  It does not implement
+  selector matching, the cascade, inheritance, layout, or ~@font-face~.
+- ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
+  ~NodeStyle~.  Tables and MathML have no fidelity-preserving model.
+- ~crates/shosai-app/src/app.rs~ reparses chapters, resolves images, performs
+  heuristic pagination, and directly creates Iced widgets for continuous and
+  paginated modes.  Internal-link fragments are currently ignored.
+- ~cosmic-text~ can shape and lay out text runs; it is not a CSS cascade,
+  block/table layout engine, DOM, MathML renderer, or font-loading policy.
+
+* Scope and Success Measures
+
+In scope are EPUB reflowable content, tables, embedded fonts and CSS
+~@font-face~, MathML, resource resolution, and regressions in existing reading
+features.  Success means representative fixtures render predictably in both
+reader modes, navigation/search/progress still work, and malformed or hostile
+books fail safely without network access.
+
+* Gate 0 — Renderer ADR and Technical Spike
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Prerequisites
+
+- [ ] Capture baseline screenshots, load time, chapter-switch latency, and
+  memory use for ~crates/shosai-core/tests/fixtures/sample.epub~ and at least
+  one large EPUB.
+- [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
+  ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
+  malformed CSS/XHTML, and missing resources.
+- [ ] Confirm target platforms and distribution constraints from Nix and
+  packaging jobs before evaluating native webview availability.
+
+** Spike A — ~wry~
+
+- [ ] Render one chapter from bytes through a custom, non-network resource
+  protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.
+- [ ] Disable scripts, remote navigation, downloads, popups, and external
+  resource fetching by default; prove blocked requests in a test/harness.
+- [ ] Prototype theme/font-size injection, internal fragment links, reading
+  position capture/restore, search highlighting, and continuous/paginated
+  behavior.
+- [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
+  packaging requirements, binary impact, accessibility behavior, process
+  isolation, and ~wry~/platform license notices.
+
+** Spike B — Native renderer
+
+- [ ] Prototype a real computed-style boundary: parsed DOM, selector matching,
+  specificity/source order, inheritance, UA defaults, and resolved lengths.
+- [ ] Use ~cosmic-text~ only behind text measurement/shaping interfaces; list
+  separately the required block, inline, table, image, pagination, font-face,
+  and MathML components.
+- [ ] Render the same table/font/MathML/mixed-script fixtures and identify
+  whether maintained permissive dependencies can fill each missing component.
+- [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
+  subset, including accessibility and selection.
+
+** Decision and Exit Criteria
+
+- [ ] Add an ADR under ~docs/~ recording scores for fidelity, sandbox/security,
+  accessibility, portability/packaging, performance, offline resource control,
+  reader-feature integration, dependency licenses, and maintenance cost.
+- [ ] Select ~wry~, native, or explicitly defer.  Include rejected alternatives
+  and a rollback strategy; do not choose merely from visual screenshots.
+- [ ] Gate passes only when all spike fixtures have recorded results, dependency
+  licenses are compatible with Apache-2.0 distribution, and CI/package owners
+  accept the platform requirements.
+
+* Shared Foundation (After Gate 0)
+
+- [ ] Introduce canonical archive-path and URI resolution in
+  ~crates/shosai-core/src/epub/parser.rs~ (percent decoding, fragments,
+  traversal rejection, MIME lookup); reuse it for CSS, images, fonts, and links.
+- [ ] Replace unrestricted resource access with a read-only EPUB resource API
+  carrying bytes, media type, and canonical path.  Add configurable per-entry
+  and aggregate size limits to resist decompression/resource bombs.
+- [ ] Separate chapter parsing/computed presentation from
+  ~crates/shosai-app/src/app.rs~ so search, pagination, and both view modes use
+  one chapter representation and stable locations.
+- [ ] Define fallback behavior for unsupported CSS, fonts, and MathML, with
+  diagnostics that identify the chapter/resource but do not abort the book.
+
+* Implementation Milestones
+
+** M1 — CSS and Resource Correctness
+
+- [ ] For the native route, replace class-only ~StyleMap~ with selector matching,
+  cascade, inheritance, inline style, relevant at-rules, and computed values in
+  ~epub/style.rs~; add explicit supported-property documentation.
+- [ ] For the webview route, preserve author CSS while injecting a narrowly
+  scoped reader stylesheet; serve all book assets only through the custom
+  protocol and retain the core resource-policy tests.
+- [ ] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
+  with cycle, depth, origin, and size limits.
+
+** M2 — Embedded Fonts and ~@font-face~
+
+- [ ] Parse family, source list, style, weight, and supported format descriptors;
+  resolve only in-archive sources and reject remote/data sources unless the ADR
+  explicitly permits bounded data URLs.
+- [ ] Validate font signatures and resource limits.  Register fonts per book,
+  apply fallback deterministically, and release registrations when a book closes.
+- [ ] Add tests for WOFF/WOFF2/TTF/OTF as supported by the selected backend,
+  missing/corrupt fonts, synthetic bold/italic policy, and same-family clashes
+  across two open books.
+
+** M3 — Tables
+
+- [ ] Preserve ~table~, caption, row groups, rows, cells, headers, ~colspan~, and
+  ~rowspan~ in the core/native model, or verify equivalent webview semantics.
+- [ ] Define overflow behavior for tables wider than the viewport and ensure
+  cells are not split into unusable fragments in paginated mode.
+- [ ] Verify theme contrast, nested content, links/images in cells, and screen
+  reader/header semantics where the selected backend exposes them.
+
+** M4 — MathML
+
+- [ ] Decide in the ADR follow-up whether MathML is native, backend-provided, or
+  rendered by a bundled permissively licensed engine; JavaScript/CDN fetching
+  is not an acceptable implicit dependency.
+- [ ] Support inline versus display math, fallback text for unsupported markup,
+  scaling with reader font size, theme contrast, and pagination boundaries.
+- [ ] Test common operators, fractions, roots, scripts, matrices, annotations,
+  malformed MathML, and books that declare MathML manifest properties.
+
+** M5 — Reader Integration and Release
+
+- [ ] Preserve chapter/fragment navigation, TOC, search and highlighting,
+  bookmarks, progress restoration, themes, font sizing, continuous/paginated
+  modes, multiple documents, and keyboard controls in ~shosai-app/src/app.rs~.
+- [ ] Move backend-specific rendering into focused modules under
+  ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
+  parsing/resource policy in ~shosai-core/src/epub/~.
+- [ ] Add feature/build configuration and packaging changes only for the ADR's
+  selected backend; document runtime prerequisites and attribution.
+- [ ] Run the full workspace test suite and platform packaging smoke tests.
+
+* Tests and Fixtures
+
+- Extend ~crates/shosai-core/tests/epub_tests.rs~ and unit tests in
+  ~epub/render.rs~ / ~epub/style.rs~ for parsing, resolution, cascade, and limits.
+- Add generated, redistribution-safe EPUB fixtures under
+  ~crates/shosai-core/tests/fixtures/~ with source/build scripts or clear
+  provenance.  Keep each feature isolated plus one combined conformance book.
+- Add app tests near the existing EPUB tests in ~crates/shosai-app/src/app.rs~
+  for stable locations, pagination, links, image/font caches, and fallback.
+- Add screenshot/golden tests only with controlled fonts/backend versions;
+  otherwise use semantic layout assertions to avoid platform-noisy snapshots.
+
+* Acceptance Criteria
+
+- [ ] The renderer ADR is approved before M1 and its security/license gates pass.
+- [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
+  semantic and visual expectations on every supported platform.
+- [ ] No book content triggers network access or script execution by default.
+- [ ] Corrupt/oversized resources degrade safely with actionable errors.
+- [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
+  reading modes pass regression tests.
+- [ ] Performance budgets recorded at Gate 0 are met or an accepted variance is
+  documented; repeated chapter changes do not leak per-book resources.
+
+* Risks and Mitigations
+
+- Webviews add platform runtimes and a large attack surface: use a deny-by-default
+  protocol/navigation policy and platform package smoke tests.
+- A native CSS/layout engine can become an unbounded browser project: commit to a
+  documented EPUB subset and stop if spike estimates exceed the ADR threshold.
+- Fonts are untrusted parsable binaries: validate, bound, isolate per book, and
+  track backend security updates.
+- Pagination can invalidate saved positions: persist logical chapter/fragment or
+  text anchors rather than backend pixel offsets, with migration/fallback.
+- Math rendering and accessibility vary by backend: test semantics as well as
+  appearance and provide readable fallback text.
+
+* Explicit Non-Goals
+
+- General-purpose web browsing, JavaScript execution, remote fonts/assets, or
+  arbitrary external navigation inside the reader.
+- Full browser-level HTML/CSS compatibility, scripting-heavy EPUBs, EPUB fixed
+  layout, media overlays, audio/video, or DRM-protected EPUB.
+- Replacing Iced for non-EPUB application UI.
+- Treating ~cosmic-text~ alone as a CSS, table, pagination, or MathML engine.

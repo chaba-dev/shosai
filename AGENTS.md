@@ -7,6 +7,7 @@
 # Commit messages
 
 - Use Conventional Commit titles: `<type>(optional-scope): <description>`.
-- Allowed types are `feat`, `fix`, `doc`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`, `style`, and `security`.
+- Allowed types are `feat`, `fix`, `doc`, `docs`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`, `style`, and `security`.
+- Use `docs(plan): ...` for planning-only changes; these are excluded from changelogs and version inference.
 - Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
 - Pull request titles are validated because squash merges use the title as the commit message. Keep this list aligned with `.github/workflows/commits.yml` and `cliff.toml`.

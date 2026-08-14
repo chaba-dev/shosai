@@ -18,6 +18,7 @@ The automatic flow is retry-safe: an existing tag is accepted only when it point
 - `fix` produces a patch bump.
 - A `!` or `BREAKING CHANGE:` footer produces a major bump.
 - Other allowed types produce a patch bump and are included in their configured changelog group.
+- `docs(plan): ...` is reserved for planning-only changes and is excluded from changelogs and version inference.
 - The first release is `v0.1.0`.
 
 Run `make next-version` to inspect the inferred version and `make changelog` to regenerate the changelog locally. Both commands use `cliff.toml`.

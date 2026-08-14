@@ -1,0 +1,268 @@
+#+TITLE: Shōsai Cloud Sync Plan
+#+DATE: 2026-08-14
+#+STARTUP: showall
+
+* Purpose
+
+Add optional, dependable synchronization of reading progress and bookmarks
+without making local reading depend on a network service.  This plan extends the
+SQLite-backed APIs in ~crates/shosai-core~ and exposes configuration and status
+through the desktop Iced application.
+
+** Goals
+
+- Give every logical book and syncable record a stable, portable identifier.
+- Synchronize reading state and bookmarks across installations.
+- Preserve offline-first operation, with retries that are safe and observable.
+- Define deterministic conflict and deletion behavior before adding transport.
+- Deliver one replaceable first transport, with WebDAV as the initial candidate.
+- Keep credentials out of SQLite, logs, exported diagnostics, and sync payloads.
+
+** Constraints and non-goals
+
+- Today ~books~, ~reading_state~, and ~bookmarks~ identify content with a local,
+  best-effort canonical ~file_path~.  Such paths are neither portable nor stable
+  after a move and cannot be the sync identity.
+- Existing SQLite databases must migrate in place; local reading, imports, and
+  bookmark APIs must continue to work while sync is disabled.
+- Book files and cover blobs are out of scope for the first release.  The first
+  payload contains portable metadata, reading state, bookmarks/notes, and
+  deletions only.
+- Collaboration, shared libraries, a hosted Shōsai account service, and live
+  multi-user editing are non-goals.
+- Do not select WebDAV, a custom server, or a vendor protocol as the permanent
+  backend without an ADR covering portability, authentication, locking/ETags,
+  atomic writes, failure modes, and maintenance cost.
+- SQLite remains the local source used by the application.  Sync is not placed
+  on the critical path for opening or reading a book.
+
+* Repository Baseline
+
+- ~crates/shosai-core/src/reading_state.rs~ opens the SQLx SQLite pool, runs
+  migrations, and persists page/chapter position, EPUB offset, zoom, and
+  preferences.
+- ~crates/shosai-core/src/library.rs~ imports books and deduplicates them by a
+  canonical local path; ~Book.id~ is a database-local integer.
+- ~crates/shosai-core/src/bookmarks.rs~ provides bookmark CRUD keyed by canonical
+  path plus page/chapter and optional EPUB character offset.
+- ~crates/shosai-core/migrations/001_reading_state.sql~ through
+  ~005_epub_locations.sql~ define current storage.
+- ~crates/shosai-app/src/app.rs~ currently contains the desktop Iced state,
+  settings UI, persistence wiring, and ~rfd~ file/folder dialogs.  Sync UI work
+  must follow that implementation rather than assuming separate view modules.
+
+* Architecture Decisions Required
+
+** ADR: portable content and book identity
+
+Decide and document:
+- Whether ~content_id~ is a versioned full-file digest, a format-aware digest,
+  or another immutable fingerprint, including algorithm/version encoding and
+  collision handling.
+- Whether ~book_id~ represents a particular byte stream or the user's logical
+  book, and how replacements/editions and duplicate local paths are related.
+- When hashing occurs, how large files avoid blocking the Iced event loop, and
+  what happens when a file is unavailable or changes in place.
+- How imported legacy rows receive IDs and how another device associates a
+  synced book with a newly imported local file.
+
+IDs must not derive from paths, titles, or database-local integer IDs.  Store
+the local path as a device-local locator only.
+
+** ADR: sync record and protocol model
+
+Specify a versioned wire envelope, record IDs, schema version, device ID,
+logical timestamp/revision, and idempotency rules.  Decide between an append-only
+change log and record snapshots plus a durable outbox; define compaction and
+recovery from a full rescan.  Payload serialization must be canonical enough for
+repeatable tests and forward-compatible readers must ignore known-safe fields.
+
+** ADR: conflict and deletion semantics
+
+Define semantics per record type before implementing a transport:
+- Reading position: choose an explicit rule (for example last accepted update
+  by a deterministic hybrid timestamp), including tie-breaking by device ID.
+  Do not silently use the numerically furthest position: users reread books.
+- Bookmarks: immutable stable bookmark IDs; edits resolve deterministically per
+  whole record unless field-level merge is deliberately specified.
+- Deletes: tombstones win over older updates, carry deletion revision/time, and
+  remain until all relevant replicas have passed a documented retention or
+  acknowledgement threshold.  A stale device must not resurrect deleted data.
+- Clock skew, same-device restore, concurrent delete/edit, and duplicate replay
+  require named outcomes independent of arrival order.
+
+** ADR: transport boundary and first transport
+
+Define a transport trait around fetch/push, conditional writes, remote revision,
+authentication errors, and retry classification.  Evaluate WebDAV as the first
+adapter because it is self-hostable, but verify ETag/conditional request and
+atomic replacement behavior against supported servers.  Keep merge logic,
+SQLite transactions, and payload format independent of WebDAV paths and HTTP.
+
+** ADR: secrets and payload privacy
+
+Choose OS credential storage (or a narrowly justified encrypted alternative),
+credential lifecycle, redaction policy, and whether end-to-end payload
+encryption is required before release.  State clearly that TLS protects transit
+but does not hide bookmark notes or reading habits from the storage provider.
+
+* Staged Milestones
+
+** TODO M0 — Decisions and test vectors
+
+- [ ] Write and approve the four ADR areas above; backend selection is a result,
+  not an assumption.
+- [ ] Define versioned examples for a book, reading state, bookmark, tombstone,
+  concurrent edits, and an unknown future field.
+- [ ] Establish invariants for stable IDs, idempotent replay, deterministic merge,
+  and crash recovery.
+- [ ] Benchmark content fingerprinting on representative PDF, EPUB, and CBZ files.
+
+*Exit*: protocol vectors produce one unambiguous final state in every replay
+order, and the identity ADR explains moves, copies, changed bytes, and editions.
+
+** TODO M1 — Stable identity and compatible migration
+
+- [ ] Add migrations for portable text IDs and identity version while preserving
+  existing integer primary keys and path columns during rollout.
+- [ ] Backfill IDs transactionally and lazily fingerprint content when a readable
+  file is available; track pending/failed identity work without inventing an ID
+  from the path.
+- [ ] Add ID-based library lookup and mutation APIs; retain path adapters for the
+  desktop reader during conversion.
+- [ ] Detect local moves/reimports and associate them safely by content identity.
+- [ ] Cover duplicate bytes, inaccessible files, changed-in-place files, rollback,
+  and migration restart in integration tests.
+
+*Exit*: moving a file does not change its portable identity, two installations
+derive the same content ID, and a pre-sync database still opens with all state.
+
+** TODO M2 — Sync-ready local records
+
+- [ ] Re-key or relate reading state and bookmarks to stable IDs; assign stable
+  record IDs to bookmarks.
+- [ ] Add revision metadata, device identity, dirty/outbox state, and tombstones.
+- [ ] Route every create/update/delete through transactional APIs that update the
+  user record and change tracking atomically.
+- [ ] Implement deterministic merge as pure core logic, then apply batches in one
+  SQLite transaction with replay protection.
+- [ ] Add tombstone retention/compaction only after the ADR's safety condition can
+  be measured.
+
+*Exit*: randomized replay order and repeated batches converge, crashes cannot
+leave a changed record absent from the outbox, and deletes do not resurrect.
+
+** TODO M3 — Transport seam and first adapter
+
+- [ ] Implement the transport trait and an in-memory/fault-injection adapter first.
+- [ ] After the transport ADR, implement the selected first adapter (candidate:
+  WebDAV) with conditional writes, bounded timeouts, cancellation, backoff with
+  jitter, and explicit authentication/conflict/unavailable errors.
+- [ ] Persist non-secret remote cursor/revision data and recover from invalid or
+  missing remote state via a full deterministic merge.
+- [ ] Test against at least two materially different WebDAV servers if WebDAV is
+  selected; document unsupported behavior rather than weakening consistency.
+
+*Exit*: interrupted push/pull and duplicate requests converge without data loss,
+and no transport-specific type enters merge or storage APIs.
+
+** TODO M4 — Credentials, settings, and status UI
+
+- [ ] Add opt-in account/endpoint configuration to the existing settings flow in
+  ~crates/shosai-app/src/app.rs~.
+- [ ] Store secrets through the approved credential provider; expose disconnect
+  and erase-local-sync-metadata actions separately.
+- [ ] Show disabled/idle/syncing/offline/error states, last successful sync,
+  actionable authentication errors, manual retry, and pending-change count.
+- [ ] Schedule sync outside the UI thread and cancel cleanly at shutdown.
+- [ ] Redact URLs containing user info, authorization headers, tokens, and notes
+  from logs and diagnostics.
+
+*Exit*: sync remains visibly optional, failures never prevent local reading, and
+credential removal and status behavior pass platform smoke tests.
+
+** TODO M5 — Hardening and release
+
+- [ ] Run multi-device scenario tests for offline edits, clock skew, edit/delete,
+  stale replicas, endpoint reset, corrupt payload, migration upgrade, and restore.
+- [ ] Add property tests for convergence, idempotence, and deterministic tie-breaks.
+- [ ] Add compatibility fixtures for every supported wire/schema version.
+- [ ] Document backup, reset, recovery, privacy expectations, and backend setup.
+- [ ] Gate rollout behind an explicit experimental opt-in until telemetry-free
+  diagnostics and recovery procedures are proven.
+
+*Exit*: all acceptance criteria below pass on each supported desktop platform.
+
+* Likely Files and Modules
+
+- Extend ~crates/shosai-core/migrations/~ with ordered migrations; never rewrite
+  released migration files ~001~–~005~.
+- Update ~crates/shosai-core/src/library.rs~, ~reading_state.rs~,
+  ~bookmarks.rs~, and exports in ~lib.rs~.
+- Add focused core modules such as ~identity.rs~, ~sync/model.rs~,
+  ~sync/merge.rs~, ~sync/store.rs~, and ~sync/transport.rs~; place a WebDAV
+  adapter under ~sync/~ only after its ADR.
+- Add core integration tests beside ~crates/shosai-core/tests/library_tests.rs~,
+  ~reading_state_tests.rs~, and ~bookmark_tests.rs~.
+- Integrate desktop commands, settings, status, and tests in
+  ~crates/shosai-app/src/app.rs~ initially; split modules only as a deliberate
+  refactor, not as a prerequisite hidden in this plan.
+
+* Migration and Compatibility Strategy
+
+- Use additive migrations first: nullable stable IDs, backfill status, new sync
+  tables/indexes, and dual-read/dual-write adapters while legacy paths remain.
+- Back up or use SQLite transactions around destructive table rebuilds; make
+  startup migration failures actionable and leave the old database recoverable.
+- Do not upload a row until it has a valid portable identity.  Surface pending
+  identity work instead of dropping it.
+- Version both database-derived payloads and the remote manifest.  Reject a
+  newer incompatible protocol without mutating local or remote state.
+- After at least one compatibility window, remove path-keyed writes only when all
+  desktop call sites and tests use stable identity.  Keep local paths as locators.
+- Disabling sync does not delete local books, progress, or bookmarks.  Remote
+  reset and local unlink are explicit, separately confirmed operations.
+
+* Verification and Acceptance Criteria
+
+- A database created by migrations 001–005 upgrades with identical visible
+  books, progress, EPUB offsets, zoom, bookmarks, notes, and preferences.
+- File rename/move, duplicate import, and import on a second device have the
+  identity outcomes specified by the ADR.
+- Two or more replicas converge byte-for-byte in logical records after all
+  messages are delivered, regardless of order or duplication.
+- Concurrent progress updates, bookmark edits, and edit/delete conflicts match
+  published test vectors; a stale replica cannot revive a collected tombstone.
+- Network loss, 401/403, timeout, conditional-write failure, malformed remote
+  data, and process termination preserve local data and produce actionable state.
+- No credential or bookmark note appears in logs; secrets are absent from SQLite
+  and serialized payload fixtures unless payload encryption explicitly protects
+  them.
+- Core unit/integration tests and desktop tests pass; selected-backend tests run
+  against documented server versions in CI or a reproducible integration job.
+
+* Security and Privacy Risks
+
+| Risk | Required mitigation |
+|------|---------------------|
+| Provider learns titles, progress, or notes | Minimize payload, document exposure, decide E2EE in ADR |
+| Credential theft or log leakage | OS credential store, least privilege, TLS, strict redaction |
+| Malicious/corrupt remote payload | Size limits, schema validation, bounded parsing, transactional apply |
+| Rollback/replay or stale-device resurrection | Monotonic revisions, replay protection, durable tombstones |
+| Endpoint spoofing or insecure HTTP | HTTPS by default; explicit, warned development override only |
+| Remote deletion propagates widely | Tested semantics, backups, separate reset/unlink confirmation |
+| Fingerprints expose known-file membership | Threat-model unsalted content hashes before upload; avoid uploading raw digest if a derived identifier suffices |
+
+* Open Questions
+
+- What exact distinction should users see between content, edition, and logical
+  book, and can they manually merge or split mistaken associations?
+- Are covers, titles, and authors needed remotely for a useful companion client,
+  or can the first payload be limited further?
+- Is end-to-end encryption a release requirement, and how are keys recovered or
+  shared with a new device without a Shōsai account service?
+- What server capabilities and minimum WebDAV implementations can be supported?
+- How long may a device remain offline before tombstone collection is unsafe?
+- Should reading position conflict resolution expose history or a user choice?
+- How should device IDs behave after OS backup/restore or cloned profiles?
+- What is the downgrade policy once a database contains sync migrations?

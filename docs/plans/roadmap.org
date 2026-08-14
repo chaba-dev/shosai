@@ -245,12 +245,16 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 *Goal*: Extended format support, mobile, and distribution.
 
 ** TODO Enhanced EPUB rendering
+Plan: [[file:enhanced-epub-rendering.org][Enhanced EPUB Rendering Plan]]
+
 - [ ] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
 - [ ] Or build custom text layout engine using ~cosmic-text~
 - [ ] Support complex EPUB layouts (tables, embedded fonts, MathML)
 - [ ] CSS ~@font-face~ support with embedded fonts
 
 ** TODO Additional ebook formats
+Plan: [[file:additional-formats.org][Additional Ebook Formats Plan]]
+
 - [ ] MOBI / AZW3 (Amazon Kindle) — evaluate legal feasibility
 - [ ] FB2 (FictionBook)
 - [ ] DjVu
@@ -258,34 +262,45 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 - [ ] CBR (RAR-based comic archives) — note: ~unrar~ has restrictive license
 
 ** TODO Cloud sync (optional)
+Plan: [[file:cloud-sync.org][Cloud Sync Plan]]
+
 - [ ] Design sync protocol for reading progress + bookmarks
 - [ ] Evaluate backends (self-hosted, WebDAV, etc.)
 - [ ] Conflict resolution for concurrent reading on multiple devices
 - [ ] Start with local storage, architecture should support sync later
 
 ** TODO Mobile support
+Plan: [[file:mobile-support.org][Mobile Support Plan]]
+
 - [ ] Evaluate Iced's future mobile story
 - [ ] Consider companion app approach
 - [ ] Sync reading progress across desktop and mobile
 
 ** TODO Distribution & packaging
-- [ ] Nix package (leverage existing flake infrastructure)
+Plan: [[file:distribution-packaging.org][Distribution and Packaging Plan]]
+
+- [X] CI/CD pipeline for automated builds and releases
+- [X] Portable Linux archives (x86_64 and aarch64)
+- [X] macOS ~.app~ bundles (x86_64 and aarch64, ad-hoc signed)
+- [X] Nix package (install with ~nix profile install .#shosai~)
 - [ ] AppImage for Linux
 - [ ] Flatpak for Linux
-- [ ] macOS ~.app~ bundle
 - [ ] Windows installer (NSIS or WiX)
-- [ ] CI/CD pipeline for automated builds and releases
+- [ ] macOS Developer ID signing and notarization
 
 *Note — PDFium bundling*: The app depends on ~libpdfium~ at runtime (a C
-shared library). For development this is handled by the Nix dev shell
-(~pdfium-binaries~ in ~flake.nix~), but every distribution format must
-solve this independently:
-- *Nix package*: Add ~pdfium-binaries~ as a runtime dependency and patch
-  ~RPATH~ / wrap with ~LD_LIBRARY_PATH~.
+shared library). Development uses ~pdfium-binaries~ from the Nix dev shell.
+The existing portable Linux archives and macOS bundles already ship PDFium;
+each remaining distribution format must provide and verify its own runtime
+layout:
+- *Nix package* (implemented): Keep ~pdfium-binaries~ in the package closure and
+  wrap the executable with the required runtime library paths.
+- *Portable Linux archives* (implemented): Bundle ~libpdfium.so~ under ~lib/~
+  beside the packaged ~bin/~ directory.
 - *AppImage / Flatpak*: Bundle ~libpdfium.so~ alongside the binary inside
   the container.
-- *macOS .app*: Embed ~libpdfium.dylib~ in the bundle's ~Frameworks/~
-  directory and set ~@rpath~ accordingly.
+- *macOS .app* (implemented): Embed ~libpdfium.dylib~ in the bundle's
+  ~Frameworks/~ directory; Developer ID signing and notarization remain.
 - *Windows*: Ship ~pdfium.dll~ next to the ~.exe~ (DLL search order finds it
   automatically).
 - Alternatively, investigate ~pdfium-render~'s ~static~ feature or building

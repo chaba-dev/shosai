@@ -1,0 +1,300 @@
+#+TITLE: Additional Ebook Formats Plan
+#+AUTHOR: Shōsai contributors
+#+DATE: 2026-08-14
+#+STARTUP: showall
+
+* Objective
+
+Add plain text/Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and CBR through a
+small format-extensibility seam.  Each format is an independently shippable work
+package with dependency/license approval, bounded parsing, fixtures, reader and
+library integration, and explicit acceptance criteria.  DRM circumvention is
+outside the project.
+
+* Current Baseline and Prerequisites
+
+- ~BookFormat~, extension recognition, database strings, metadata/cover dispatch,
+  and directory import are hard-coded in ~crates/shosai-core/src/library.rs~.
+- ~OpenDocument~, file-dialog filters, extension dispatch, page counts, reader
+  behavior, and several per-format branches are hard-coded in
+  ~crates/shosai-app/src/app.rs~.
+- ~crates/shosai-core/src/document.rs~ is raster-page-oriented.  EPUB instead
+  exposes chapters and ~ContentNode~; CBZ exposes archive images.  A single
+  forced ~Document~ implementation is therefore not the prerequisite.
+- New work requires representative, legally redistributable fixtures and a
+  dependency review recording crate/library license, transitive/native code,
+  maintenance status, security history, target support, and packaging impact.
+
+* Gate 0 — Minimum Format Extensibility Seam
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+Build only the seam needed to remove duplicated recognition/import/open logic;
+do not design a plugin ABI.
+
+** Core Registry
+
+- [ ] Move format identity and capabilities to a focused module such as
+  ~crates/shosai-core/src/format.rs~: stable database key, extensions, display
+  name, media kind (~raster_pages~, ~reflowable~, ~archive_images~), and support
+  status.  Preserve existing ~pdf~/~epub~/~cbz~ database values.
+- [ ] Centralize case-insensitive path detection and supported-extension lists.
+  Where extensions overlap or containers are ambiguous, allow bounded signature
+  probing and return a typed unsupported/corrupt error.
+- [ ] Define an import adapter returning normalized title, author, optional cover,
+  and format; route ~Library::import_file~ and directory scans through it instead
+  of ~extract_metadata_and_cover~'s match.
+- [ ] Keep format implementations as explicit Rust modules in ~shosai-core~.
+  Avoid dynamic loading, object hierarchies that erase useful format behavior,
+  and a premature universal document model.
+
+** App Factory
+
+- [ ] Add one document-opening factory that returns reader state by media kind;
+  derive file-dialog filters from the core registry and replace extension matches
+  in ~crates/shosai-app/src/app.rs~.
+- [ ] Extract shared reflowable presentation (EPUB/FB2/text/Markdown/MOBI) and
+  archive-image presentation (CBZ/CBR) behind focused app modules while retaining
+  format-specific parsing and location types.
+- [ ] Define stable locations for progress/bookmarks/search: page index for
+  raster/archive formats and source/chapter plus text offset for reflowable ones.
+  Confirm existing SQLite rows need no migration; add one only if unavoidable.
+- [ ] Registry tests must prove each descriptor drives detection, import, dialog
+  filters, opening, and library filter labels without another extension table.
+
+** Gate 0 Acceptance
+
+- [ ] PDF, EPUB, and CBZ behavior and database values are unchanged.
+- [ ] Adding a test-only format requires one descriptor/adapter and one app
+  opener, not edits to multiple extension matches.
+- [ ] Unsupported files produce a user-facing error and never enter the library.
+- [ ] Full existing core/app tests pass before any new format lands.
+
+* Common Dependency and Fixture Gate
+
+This gate applies separately to every work package; approval of one dependency
+does not approve another.
+
+- [ ] Record candidate versions, direct/transitive licenses, native library or
+  executable requirements, source availability, target architectures, and Nix /
+  distribution changes.  Reject GPL/AGPL or otherwise incompatible/restrictive
+  choices unless project licensing policy is deliberately changed first.
+- [ ] Confirm parser/decoder maintenance and fuzz/security posture.  Define input,
+  decompression, image-dimension, allocation, nesting, and page-count limits.
+- [ ] Create minimal, feature-rich, malformed, truncated, and oversized-limit
+  fixtures under ~crates/shosai-core/tests/fixtures/~.  Generate fixtures in-tree
+  where practical; otherwise record provenance and redistribution permission.
+- [ ] Keep parsing/decoding off the UI executor and use cancellation/bounded caches
+  for expensive page/image work.
+
+* Work Package A — Plain Text and Markdown
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Implementation
+
+- [ ] Add ~txt~ and an agreed Markdown extension set (~md~, ~markdown~) to the
+  registry.  Detect BOM/UTF-8; reject undecodable input with a clear error rather
+  than silently corrupting text.
+- [ ] Add ~crates/shosai-core/src/text.rs~ with bounded reads, newline
+  normalization, title fallback from filename, paragraph/heading segmentation,
+  search text, and stable source offsets.
+- [ ] Evaluate a permissively licensed CommonMark parser (including transitive
+  licenses) before adding it.  Map headings, paragraphs, emphasis, strong text,
+  lists, quotes, code, rules, links, and local images into the shared reflowable
+  model; sanitize/ignore raw HTML and block remote resources.
+- [ ] Derive Markdown title from first level-one heading when present; define
+  deterministic chapter splitting for navigation and progress.
+- [ ] Add metadata/import, no-cover fallback, library filter, reader/search,
+  bookmarks, themes, font-size, and both reading modes.
+
+** Tests and Acceptance
+
+- Fixtures: UTF-8/BOM, CRLF, no trailing newline, large file, invalid encoding,
+  CommonMark constructs, raw HTML, traversal image path, and remote image/link.
+- [ ] Text and Markdown preserve readable whitespace/code and stable locations;
+  large files respect limits and do not freeze the UI.
+- [ ] Raw HTML cannot execute or escape resource policy; remote images are not
+  fetched.  Existing EPUB reflowable rendering remains unchanged.
+
+* Work Package B — DjVu
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Dependency/Architecture Gate
+
+- [ ] Compare maintained Rust decoders and DjVuLibre bindings for rendering,
+  metadata, text layer, threading, target support, and licenses.  Validate both
+  binding and linked-library license obligations; reject the package if they are
+  incompatible with Shōsai distribution.
+- [ ] Prototype opening/rendering one bundled and one indirect/multi-page file in
+  a background task.  Record native runtime, Nix, CI, and packaging changes.
+
+** Implementation
+
+- [ ] Add ~crates/shosai-core/src/djvu.rs~ implementing bounded page count/size,
+  metadata, raster rendering, optional text extraction, and clear decoder errors.
+- [ ] Reuse raster-page app navigation, zoom, continuous mode, render cache, and
+  first-page cover extraction; add ~djvu~ and ~djv~ registry entries.
+- [ ] Enable search only when a text layer is available; distinguish "no text"
+  from decode failure.
+
+** Tests and Acceptance
+
+- Fixtures: single/multi-page, bundled/indirect where safely self-contained,
+  text/no-text, malformed/truncated, and extreme declared dimensions.
+- [ ] Pages render at multiple scales, cancellation/cache bounds hold, covers and
+  metadata import, and missing native runtime produces an actionable error.
+- [ ] All supported targets pass package smoke tests before enabling the format.
+
+* Work Package C — FB2
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Implementation
+
+- [ ] Add ~crates/shosai-core/src/fb2.rs~ using a reviewed XML parser; support
+  plain ~.fb2~ first and decide explicitly whether ~.fb2.zip~ belongs in scope.
+- [ ] Parse description metadata, body/sections/titles, paragraphs, emphasis,
+  strong text, poems, epigraphs, notes/links, and base64 binary images into the
+  shared reflowable model.  Preserve section IDs as stable navigation anchors.
+- [ ] Disable external entities/DTDs and remote resources; bound XML depth, text,
+  base64 expansion, image dimensions, and total decoded bytes.
+- [ ] Extract coverpage/title-info metadata, flatten unsupported elements
+  readably, and integrate import, TOC, search, progress, bookmarks, and themes.
+
+** Tests and Acceptance
+
+- Fixtures: nested sections, notes/backlinks, poem, embedded cover/images,
+  multiple bodies, namespaces, malformed XML, entity attack, and oversized
+  base64.  Include Cyrillic and mixed-script content.
+- [ ] Metadata/cover/TOC and internal links are correct, unsupported tags retain
+  readable text, and hostile XML is rejected within configured limits.
+
+* Work Package D — Unencrypted MOBI and AZW3
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Legal and Technical Gate
+
+- [ ] Document the container/content variants actually supported (for example
+  PalmDOC/MOBI and KF8) and evaluate maintained parsers plus all transitive
+  licenses.  Test with files created by tools whose output can be redistributed.
+- [ ] Confirm the implementation detects encryption/DRM flags and returns a
+  dedicated "encrypted/DRM-protected books are unsupported" error before content
+  processing.  Do not research, implement, invoke, or document circumvention.
+- [ ] Spike metadata, spine/flow reconstruction, compression decoding, images,
+  links, and first-cover extraction.  Approve only if bounds and format variants
+  can be tested without proprietary runtime dependencies.
+
+** Implementation
+
+- [ ] Add ~crates/shosai-core/src/mobi.rs~ for bounded Palm database record
+  parsing, supported decompression, EXTH metadata, resource extraction, and KF8
+  flow reconstruction for the approved subset.
+- [ ] Convert supported HTML/CSS to the shared reflowable model, canonicalize
+  internal links/resources, block remote resources, and provide readable fallback
+  for unsupported Kindle-specific markup.
+- [ ] Register ~mobi~, ~azw~, and ~azw3~ only to the extent proven by fixtures;
+  expose precise unsupported-version/compression/encryption errors.
+- [ ] Integrate cover/metadata, TOC, search, stable progress/bookmarks, themes,
+  font sizing, and continuous/paginated reading.
+
+** Tests and Acceptance
+
+- Fixtures: approved MOBI/KF8 variants, compression modes, EXTH metadata, cover,
+  links/images, malformed record tables, oversized offsets, unsupported variant,
+  and an encrypted-header fixture containing no protected content.
+- [ ] Supported unencrypted books render in reading order and round-trip stable
+  locations; corrupt files never panic or allocate beyond limits.
+- [ ] Encrypted files are rejected clearly and no dependency/tool used by Shōsai
+  provides a circumvention path in this feature.
+
+* Work Package E — CBR
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+** Dependency/License Gate
+
+- [ ] Evaluate pure-Rust RAR readers and system libraries for RAR versions,
+  compressed-entry support, encryption detection, multipart archives, target
+  coverage, maintenance, and licenses.  Review source and transitive licenses;
+  the restrictive ~unrar~ license is not presumed acceptable.
+- [ ] Prefer a maintained permissive implementation.  If no compatible decoder
+  covers ordinary CBR files, defer CBR rather than shelling out to an executable
+  or accepting incompatible terms.
+
+** Implementation
+
+- [ ] Extract an archive-image interface from ~crates/shosai-core/src/cbz.rs~;
+  share image filtering, natural filename ordering, metadata-file skipping,
+  decode limits, page rendering, and cover selection without forcing ZIP/RAR
+  details into one parser.
+- [ ] Add ~crates/shosai-core/src/cbr.rs~ with bounded archive enumeration and
+  extraction, duplicate/path traversal handling, encrypted/multipart/unsupported
+  method errors, and ~cbr~ registry metadata.
+- [ ] Reuse CBZ app reader, zoom, cache, progress/bookmarks, and library cover.
+
+** Tests and Acceptance
+
+- Fixtures: supported RAR versions/methods, natural-sort names, nested folders,
+  hidden metadata, mixed/non-image entries, corrupt/truncated archive, traversal,
+  oversized image, encrypted header, and unsupported multipart archive.
+- [ ] Supported archives display exactly the valid images in natural order;
+  malformed/encrypted/oversized entries fail safely and no extraction writes to
+  disk outside controlled temporary storage (prefer in-memory reads).
+- [ ] License review and package smoke tests pass on every supported target.
+
+* Cross-Cutting Files Likely Touched
+
+- Core: ~crates/shosai-core/src/lib.rs~, new ~format.rs~ and format modules,
+  ~library.rs~, ~document.rs~ only where raster reuse requires it, shared
+  reflowable/archive-image modules, ~search.rs~, and ~crates/shosai-core/Cargo.toml~.
+- App: ~crates/shosai-app/src/app.rs~, new reader/opening modules under
+  ~crates/shosai-app/src/~, and ~crates/shosai-app/Cargo.toml~ only when needed.
+- Tests: new per-format integration tests beside existing
+  ~crates/shosai-core/tests/*_tests.rs~, fixtures under ~tests/fixtures~, and app
+  unit tests for factory/reader/location behavior.
+- Packaging: ~flake.nix~, ~flake.lock~, and files under ~packaging/~ only after a
+  dependency gate proves native/runtime changes are necessary.
+
+* Release Acceptance Criteria
+
+- [ ] Gate 0 is merged and existing formats have no regression.
+- [ ] Each enabled format independently passes its dependency/license, fixture,
+  security-limit, import, open, cover, reader, progress, and search criteria.
+- [ ] Supported extensions and library filters come from one registry; format
+  errors identify unsupported, corrupt, encrypted, or missing-runtime cases.
+- [ ] Full workspace tests, Nix build, and supported-platform package smoke tests
+  pass; notices and user-facing supported-subset documentation are updated.
+
+* Risks and Mitigations
+
+- Parser/decoder vulnerabilities: use maintained libraries, strict bounds,
+  background work, fuzz targets where practical, and malformed fixtures.
+- Native dependencies reduce portability: make platform/package validation a
+  pre-implementation gate and defer formats without supportable binaries.
+- A universal abstraction can erase format semantics: share detection, import,
+  locations, and presentation by capability while retaining format-specific APIs.
+- Extension-only detection can misclassify files: use bounded signatures where
+  reliable and report ambiguity rather than trying every expensive parser.
+- Saved locations may drift after parser changes: store logical anchors/offsets,
+  version location payloads if introduced, and test restoration across reopen.
+
+* Explicit Non-Goals
+
+- DRM removal, key discovery, decryption, bypass instructions, or integration
+  with circumvention tools for MOBI/AZW/AZW3 or any other format.
+- Dynamic third-party plugins, a stable plugin ABI, or out-of-process converters.
+- Writing/converting/exporting these formats, cloud acquisition, or catalog
+  download support.
+- RAR creation, multipart repair, password prompts, or accepting restrictive
+  ~unrar~ licensing merely to claim CBR support.
+- Full HTML/browser behavior in Markdown, FB2, or Kindle content; remote resources
+  and active content remain blocked.
