@@ -331,9 +331,40 @@ fn collect_inline_spans(
     let mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
     collect_inline_spans_recursive(element, bold, italic, mono, None, styles, &mut spans);
 
+    // XHTML follows HTML whitespace rules for normal inline content: source
+    // line breaks and indentation collapse to a single space. Preserve raw
+    // whitespace only in code blocks, which do not use this collector.
+    collapse_inline_whitespace(&mut spans);
+
     // Merge adjacent spans with the same formatting.
     merge_spans(&mut spans);
     spans
+}
+
+fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
+    let mut at_start_or_whitespace = true;
+    for span in spans.iter_mut() {
+        let mut normalized = String::with_capacity(span.text.len());
+        for character in span.text.chars() {
+            if character.is_ascii_whitespace() {
+                if !at_start_or_whitespace {
+                    normalized.push(' ');
+                    at_start_or_whitespace = true;
+                }
+            } else {
+                normalized.push(character);
+                at_start_or_whitespace = false;
+            }
+        }
+        span.text = normalized;
+    }
+
+    if let Some(last) = spans.iter_mut().rfind(|span| !span.text.is_empty())
+        && last.text.ends_with(' ')
+    {
+        last.text.pop();
+    }
+    spans.retain(|span| !span.text.is_empty());
 }
 
 fn collect_inline_spans_recursive(
@@ -525,6 +556,35 @@ mod tests {
                 let italic_span = spans.iter().find(|s| s.italic);
                 assert!(italic_span.is_some(), "should have an italic span");
                 assert_eq!(italic_span.unwrap().text, "italic");
+            }
+            other => panic!("expected Paragraph, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_collapses_xhtml_source_indentation() {
+        let xhtml = r#"<html><body><p>Ordinary prose wraps in the source
+            but source indentation must <em>not</em> indent rendered lines.
+        </p></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        match &nodes[0] {
+            ContentNode::Paragraph(spans, _) => {
+                let text = spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>();
+                assert_eq!(
+                    text,
+                    "Ordinary prose wraps in the source but source indentation must not indent rendered lines."
+                );
+                assert_eq!(
+                    spans
+                        .iter()
+                        .find(|span| span.italic)
+                        .map(|span| span.text.as_str()),
+                    Some("not")
+                );
             }
             other => panic!("expected Paragraph, got {other:?}"),
         }
