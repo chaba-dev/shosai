@@ -27,6 +27,10 @@ use crate::epub::{
 };
 use crate::pdf::ZoomMode;
 
+mod message;
+
+pub use message::Message;
+
 // ---------------------------------------------------------------------------
 // Open document wrapper
 // ---------------------------------------------------------------------------
@@ -428,151 +432,6 @@ impl ReaderTheme {
             ReaderTheme::Sepia => ReaderTheme::Light,
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Messages
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    Initialized(Result<InitializedState, String>),
-
-    // File
-    OpenFile,
-    FileSelected(Option<PathBuf>),
-
-    // Navigation
-    NextPage,
-    PrevPage,
-    PageInputChanged(String),
-    GoToPage,
-    FirstPage,
-    LastPage,
-    ToggleReadingMode,
-    ContinuousScrolled {
-        tab_id: u64,
-        activation: u64,
-        offset: f32,
-    },
-    ContinuousItemResolved {
-        tab_id: u64,
-        activation: u64,
-        page: usize,
-    },
-    ContinuousItemVisibility {
-        tab_id: u64,
-        activation: u64,
-        page: usize,
-        visible: bool,
-    },
-    ContinuousNavigationMeasured {
-        tab_id: u64,
-        activation: u64,
-        offset: f32,
-        tail_extent: f32,
-    },
-
-    // Document tabs
-    SelectTab(usize),
-    CloseTab(usize),
-    NextTab,
-
-    // Zoom (PDF)
-    ZoomIn,
-    ZoomOut,
-    SetZoomFitWidth,
-    SetZoomFitPage,
-
-    // EPUB reading controls
-    FontSizeUp,
-    FontSizeDown,
-    CycleTheme,
-
-    // Links
-    LinkClicked(String),
-
-    // Library
-    ShowLibrary,
-    RefreshLibrary,
-    LoadMoreLibrary,
-    LibraryIndexLoaded {
-        generation: u64,
-        ids: Vec<i64>,
-    },
-    LibraryLoaded {
-        generation: u64,
-        offset: usize,
-        next_offset: usize,
-        page: BookPage,
-    },
-    ImportFile,
-    ImportDirectory,
-    OpenBook(String), // file_path
-    #[allow(dead_code)]
-    RemoveBook(i64),
-    LibrarySearchChanged(String),
-    LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
-    LibraryCardsPerRowIncrement,
-    LibraryCardsPerRowDecrement,
-
-    // Bookmarks
-    ToggleBookmark,
-    ToggleBookmarksPanel,
-    BookmarksLoaded {
-        tab_id: u64,
-        file_path: PathBuf,
-        bookmarks: Vec<Bookmark>,
-    },
-    GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
-    StartEditNote(i64, String),
-    EditNoteChanged(String),
-    SaveNote,
-    CancelEditNote,
-    DeleteBookmark(i64),
-    ExportBookmarks,
-
-    // In-document search
-    ToggleSearchBar,
-    SearchQueryChanged(String),
-    SearchTextExtracted {
-        tab_id: u64,
-        document_generation: u64,
-        text: Arc<Vec<String>>,
-    },
-    SearchPerformed {
-        tab_id: u64,
-        document_generation: u64,
-        query_generation: u64,
-        results: Vec<SearchMatch>,
-    },
-    SearchNext,
-    SearchPrev,
-    CloseSearch,
-
-    // Background page rendering
-    PageRendered {
-        tab_id: u64,
-        generation: u64,
-        key: PageCacheKey,
-        result: Result<RenderedPage, String>,
-    },
-    ContinuousPageRendered {
-        tab_id: u64,
-        request: ContinuousRequest,
-        page: usize,
-        result: Result<RenderedPage, String>,
-    },
-    RenderContinuousPage {
-        tab_id: u64,
-        page: usize,
-    },
-
-    // Keyboard
-    KeyPressed(keyboard::Event),
-    WindowEvent(window::Id, window::Event),
-    PersistWindowGeometry(u64),
-    WindowGeometryPersisted,
 }
 
 // ---------------------------------------------------------------------------
