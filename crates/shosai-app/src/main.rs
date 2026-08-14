@@ -1,10 +1,13 @@
 mod app;
 mod epub;
 mod pdf;
+mod theme;
+mod widgets;
 
 fn main() -> iced::Result {
     iced::application(app::boot, app::update, app::view)
         .title(app::title)
+        .theme(theme::application())
         .subscription(app::subscription)
         .exit_on_close_request(false)
         .centered()
