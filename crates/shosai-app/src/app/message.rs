@@ -88,8 +88,7 @@ pub enum Message {
     RemoveBook(i64),
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
-    LibraryCardsPerRowIncrement,
-    LibraryCardsPerRowDecrement,
+    LibraryActivityTick,
 
     // Bookmarks
     ToggleBookmark,

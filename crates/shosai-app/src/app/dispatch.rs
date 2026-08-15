@@ -5,14 +5,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::Initialized(Ok(initialized)) => {
             let InitializedState {
                 store,
-                cards_per_row,
                 window_geometry: geometry,
             } = initialized;
             let pool = store.pool().clone();
             state.library = Some(Library::new(pool.clone()));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state = Some(store);
-            state.library_cards_per_row = cards_per_row;
             state.storage_initializing = false;
             state.saved_window_geometry = geometry;
             let geometry_task =
@@ -373,6 +371,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.library_has_more {
                 return load_library_page(state, false);
             }
+            state.library_books.clear();
             state.library_loading = false;
         }
 
@@ -466,27 +465,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::LibrarySearchChanged(query) => {
             state.library_search = query;
-            return Task::done(Message::RefreshLibrary);
+            return reset_library(state);
         }
 
         Message::LibraryFilterChanged(filter) => {
             state.library_filter = filter;
-            return Task::done(Message::RefreshLibrary);
+            return reset_library(state);
         }
 
-        Message::LibraryCardsPerRowIncrement => {
-            // Clamp within bounds to keep the grid readable on small windows.
-            if state.library_cards_per_row < LIBRARY_CARDS_PER_ROW_MAX {
-                state.library_cards_per_row += 1;
-                save_library_cards_per_row(state);
-            }
-        }
-
-        Message::LibraryCardsPerRowDecrement => {
-            // Clamp within bounds to keep the grid readable on small windows.
-            if state.library_cards_per_row > LIBRARY_CARDS_PER_ROW_MIN {
-                state.library_cards_per_row -= 1;
-                save_library_cards_per_row(state);
+        Message::LibraryActivityTick => {
+            if state.library_loading {
+                state.library_activity_progress =
+                    (state.library_activity_progress + LIBRARY_ACTIVITY_STEP) % 1.0;
             }
         }
 

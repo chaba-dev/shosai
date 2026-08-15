@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, image, rich_text, row, scrollable, sensor, span, text,
-    text_input,
+    button, center, column, container, grid, image, responsive, rich_text, row, scrollable, sensor,
+    span, text, text_input,
 };
 use iced::{Element, Font, Length, Point, Size, Subscription, Task, window};
 
@@ -26,6 +26,7 @@ use crate::epub::{
     spans_text_len,
 };
 use crate::pdf::ZoomMode;
+use crate::{theme as app_theme, widgets};
 
 mod dispatch;
 mod message;
@@ -93,12 +94,11 @@ impl PendingOpen {
     }
 }
 
-const LIBRARY_CARDS_PER_ROW_MIN: usize = 2;
-const LIBRARY_CARDS_PER_ROW_MAX: usize = 8;
-const LIBRARY_CARDS_PER_ROW_DEFAULT: usize = 5;
-const LIBRARY_CARDS_PER_ROW_KEY: &str = "library.cards_per_row";
 const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
+const LIBRARY_REFRESH_MIN_DURATION: std::time::Duration = std::time::Duration::from_millis(300);
+const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
+const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 500.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
@@ -292,7 +292,6 @@ pub struct ContinuousRequest {
 #[derive(Debug, Clone)]
 pub struct InitializedState {
     store: ReadingStateStore,
-    cards_per_row: usize,
     window_geometry: Option<(Size, Point)>,
 }
 
@@ -374,9 +373,9 @@ pub struct State {
     library_books: Vec<Book>,
     library_search: String,
     library_filter: Option<shosai_core::library::BookFormat>,
-    library_cards_per_row: usize,
     library_has_more: bool,
     library_loading: bool,
+    library_activity_progress: f32,
     library_generation: u64,
     library_book_ids: Arc<Vec<i64>>,
     library_offset: usize,
@@ -503,9 +502,9 @@ pub fn boot() -> (State, Task<Message>) {
         library_books: Vec::new(),
         library_search: String::new(),
         library_filter: None,
-        library_cards_per_row: LIBRARY_CARDS_PER_ROW_DEFAULT,
         library_has_more: false,
         library_loading: true,
+        library_activity_progress: 0.0,
         library_generation: 0,
         library_book_ids: Arc::new(Vec::new()),
         library_offset: 0,
@@ -527,14 +526,6 @@ pub fn boot() -> (State, Task<Message>) {
             let store = ReadingStateStore::open_async()
                 .await
                 .map_err(|error| error.to_string())?;
-            let cards_per_row = store
-                .get_pref_int_async(LIBRARY_CARDS_PER_ROW_KEY)
-                .await
-                .and_then(|value| usize::try_from(value).ok())
-                .filter(|value| {
-                    (*value >= LIBRARY_CARDS_PER_ROW_MIN) && (*value <= LIBRARY_CARDS_PER_ROW_MAX)
-                })
-                .unwrap_or(LIBRARY_CARDS_PER_ROW_DEFAULT);
             let geometry = match (
                 store.get_pref_int_async(WINDOW_WIDTH_KEY).await,
                 store.get_pref_int_async(WINDOW_HEIGHT_KEY).await,
@@ -555,7 +546,6 @@ pub fn boot() -> (State, Task<Message>) {
             );
             Ok(InitializedState {
                 store,
-                cards_per_row,
                 window_geometry: geometry,
             })
         },
@@ -601,7 +591,6 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
 
 fn reset_library(state: &mut State) -> Task<Message> {
     state.library_generation = state.library_generation.wrapping_add(1);
-    state.library_books.clear();
     state.library_book_ids = Arc::new(Vec::new());
     state.library_offset = 0;
     state.library_has_more = false;
@@ -613,13 +602,19 @@ fn reset_library(state: &mut State) -> Task<Message> {
     let search = state.library_search.clone();
     let filter = state.library_filter;
     state.library_loading = true;
+    state.library_activity_progress = 0.0;
 
     Task::perform(
         async move {
-            library
+            let started = std::time::Instant::now();
+            let ids = library
                 .matching_ids(Some(&search), filter)
                 .await
-                .unwrap_or_default()
+                .unwrap_or_default();
+            if let Some(remaining) = LIBRARY_REFRESH_MIN_DURATION.checked_sub(started.elapsed()) {
+                tokio::time::sleep(remaining).await;
+            }
+            ids
         },
         move |ids| Message::LibraryIndexLoaded { generation, ids },
     )
@@ -1842,18 +1837,6 @@ fn save_reading_state(state: &State) {
         tokio::task::spawn(async move {
             let _ = lib.update_progress_by_path(&path, progress).await;
         });
-    }
-}
-
-fn save_library_cards_per_row(state: &State) {
-    // Persist the layout choice alongside reading state for quick reloads.
-    if let Some(store) = &state.reading_state
-        && let Err(e) = store.set_pref_int(
-            LIBRARY_CARDS_PER_ROW_KEY,
-            state.library_cards_per_row as i64,
-        )
-    {
-        eprintln!("warning: failed to save library layout: {e}");
     }
 }
 
@@ -3367,62 +3350,184 @@ fn highlighted_fragments(
 }
 
 fn library_view(state: &State) -> Element<'_, Message> {
+    container(responsive(move |size| library_layout(state, size.width)))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(app_theme::app_background)
+        .into()
+}
+
+fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
+    let compact = available_width < 760.0;
+    let header = library_header(state, compact);
+    let collection = library_collection(state);
+
+    if compact {
+        column![header, mobile_library_filters(state), collection]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        column![
+            header,
+            row![library_sidebar(state), collection]
+                .width(Length::Fill)
+                .height(Length::Fill),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+}
+
+fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
     let search_input = text_input("Search by title or author...", &state.library_search)
         .id(library_search_input_id())
         .on_input(Message::LibrarySearchChanged)
-        .width(300);
-
-    let all_btn = button("All").on_press(Message::LibraryFilterChanged(None));
-    let pdf_btn = button("PDF").on_press(Message::LibraryFilterChanged(Some(
-        shosai_core::library::BookFormat::Pdf,
-    )));
-    let epub_btn = button("EPUB").on_press(Message::LibraryFilterChanged(Some(
-        shosai_core::library::BookFormat::Epub,
-    )));
-    let cbz_btn = button("CBZ").on_press(Message::LibraryFilterChanged(Some(
-        shosai_core::library::BookFormat::Cbz,
-    )));
-    let import_btn = if state.library.is_none() {
-        button("Import File")
-    } else {
-        button("Import File").on_press(Message::ImportFile)
-    };
-    let import_dir_btn = if state.library.is_none() {
-        button("Import Folder")
-    } else {
-        button("Import Folder").on_press(Message::ImportDirectory)
-    };
-
-    // Layout density controls: keeps the grid customizable without resizing cards.
-    let mut per_row_down = button("-");
-    if state.library_cards_per_row > LIBRARY_CARDS_PER_ROW_MIN {
-        per_row_down = per_row_down.on_press(Message::LibraryCardsPerRowDecrement);
-    }
-    let mut per_row_up = button("+");
-    if state.library_cards_per_row < LIBRARY_CARDS_PER_ROW_MAX {
-        per_row_up = per_row_up.on_press(Message::LibraryCardsPerRowIncrement);
-    }
-    let per_row_label = text(format!("Per row: {}", state.library_cards_per_row)).size(14);
-
-    let toolbar = row![
-        text("Library").size(24),
-        search_input,
-        all_btn,
-        pdf_btn,
-        epub_btn,
-        cbz_btn,
-        per_row_down,
-        per_row_label,
-        per_row_up,
-        import_btn,
-        import_dir_btn,
+        .padding([10, 12])
+        .width(Length::Fill);
+    let search = container(search_input).width(Length::Fill).max_width(380);
+    let import_message = state.library.is_some().then_some(Message::ImportFile);
+    let folder_message = state.library.is_some().then_some(Message::ImportDirectory);
+    let actions = row![
+        widgets::secondary_button("Scan folder", folder_message),
+        widgets::primary_button("＋ Add book", import_message),
     ]
     .spacing(8)
     .align_y(iced::Alignment::Center);
 
-    let header = container(toolbar).padding(12).width(Length::Fill);
+    let content: Element<'_, Message> = if compact {
+        column![
+            row![
+                column![
+                    text("Library").size(26),
+                    text("Your private reading room")
+                        .size(12)
+                        .color(app_theme::TEXT_MUTED),
+                ]
+                .spacing(2),
+                iced::widget::Space::new().width(Length::Fill),
+                actions,
+            ]
+            .align_y(iced::Alignment::Center),
+            search,
+        ]
+        .spacing(12)
+        .into()
+    } else {
+        row![
+            column![
+                text("Library").size(26),
+                text("Your private reading room")
+                    .size(12)
+                    .color(app_theme::TEXT_MUTED),
+            ]
+            .spacing(2),
+            iced::widget::Space::new().width(Length::Fill),
+            search,
+            actions,
+        ]
+        .spacing(16)
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
+
+    let header = column![
+        container(content).padding([16, 20]).width(Length::Fill),
+        widgets::activity_bar(state.library_loading, state.library_activity_progress),
+    ];
+
+    container(header)
+        .width(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(iced::Background::Color(app_theme::SURFACE)),
+            border: iced::Border {
+                color: app_theme::BORDER,
+                width: 0.0,
+                radius: 0.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: iced::Color::from_rgba8(0x21, 0x20, 0x1E, 0.08),
+                offset: iced::Vector::new(0.0, 1.0),
+                blur_radius: 6.0,
+            },
+            ..container::Style::default()
+        })
+        .into()
+}
+
+fn library_sidebar(state: &State) -> Element<'_, Message> {
+    let content = column![
+        text("COLLECTION").size(11).color(app_theme::TEXT_MUTED),
+        widgets::navigation_button(
+            "All books",
+            state.library_filter.is_none(),
+            Message::LibraryFilterChanged(None),
+        ),
+        widgets::navigation_button(
+            "EPUB",
+            state.library_filter == Some(shosai_core::library::BookFormat::Epub),
+            Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Epub)),
+        ),
+        widgets::navigation_button(
+            "PDF",
+            state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
+            Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
+        ),
+        widgets::navigation_button(
+            "Comics",
+            state.library_filter == Some(shosai_core::library::BookFormat::Cbz),
+            Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Cbz)),
+        ),
+    ]
+    .spacing(6)
+    .padding([22, 14]);
+
+    container(content)
+        .width(184)
+        .height(Length::Fill)
+        .style(app_theme::sidebar)
+        .into()
+}
+
+fn mobile_library_filters(state: &State) -> Element<'_, Message> {
+    container(
+        row![
+            widgets::navigation_button(
+                "All",
+                state.library_filter.is_none(),
+                Message::LibraryFilterChanged(None),
+            ),
+            widgets::navigation_button(
+                "EPUB",
+                state.library_filter == Some(shosai_core::library::BookFormat::Epub),
+                Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Epub)),
+            ),
+            widgets::navigation_button(
+                "PDF",
+                state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
+                Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
+            ),
+            widgets::navigation_button(
+                "Comics",
+                state.library_filter == Some(shosai_core::library::BookFormat::Cbz),
+                Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Cbz)),
+            ),
+        ]
+        .spacing(4),
+    )
+    .padding([8, 12])
+    .width(Length::Fill)
+    .into()
+}
+
+fn library_collection(state: &State) -> Element<'_, Message> {
+    if state.library_loading && state.library_offset == 0 {
+        return library_refresh_placeholder(state);
+    }
 
     if state.library_books.is_empty() {
+        let constrained = !state.library_search.is_empty() || state.library_filter.is_some();
         let empty_msg = if state.library_loading {
             "Loading library..."
         } else if let Some(error) = &state.storage_error {
@@ -3433,58 +3538,75 @@ fn library_view(state: &State) -> Element<'_, Message> {
             "No books match your search or filter."
         };
 
-        let import_file = if state.library.is_some() {
-            button("Import File").on_press(Message::ImportFile)
+        let heading = if state.library_loading {
+            "Loading your library"
+        } else if constrained {
+            "No matching books"
         } else {
-            button("Import File")
+            "A quiet place for every book"
         };
-        let import_folder = if state.library.is_some() {
-            button("Import Folder").on_press(Message::ImportDirectory)
-        } else {
-            button("Import Folder")
-        };
-
-        return column![
-            header,
-            center(
-                column![
-                    text("Shosai (書斎)").size(32),
-                    text(empty_msg).size(16),
-                    import_file,
-                    import_folder,
-                ]
-                .spacing(16)
-                .align_x(iced::Center),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill),
+        let mut empty = column![
+            text(heading).size(24),
+            text(empty_msg).size(14).color(app_theme::TEXT_MUTED),
         ]
-        .into();
-    }
-
-    // Grid of book covers (wrap flow).
-    let cover_width = 150.0_f32;
-    let cover_height = 200.0_f32;
-
-    // Build grid as rows of cards.
-    let cards_per_row = state.library_cards_per_row;
-    let mut grid = column![].spacing(12);
-    let mut current_row: Vec<Element<'_, Message>> = Vec::new();
-
-    for book in &state.library_books {
-        current_row.push(render_book_card(book, cover_width, cover_height));
-        if current_row.len() >= cards_per_row {
-            grid = grid.push(row(std::mem::take(&mut current_row)).spacing(12));
+        .spacing(14)
+        .align_x(iced::Center);
+        if !state.library_loading && !constrained && state.storage_error.is_none() {
+            empty = empty.push(
+                row![
+                    widgets::primary_button(
+                        "＋ Add your first book",
+                        state.library.is_some().then_some(Message::ImportFile),
+                    ),
+                    widgets::secondary_button(
+                        "Scan a folder",
+                        state.library.is_some().then_some(Message::ImportDirectory),
+                    ),
+                ]
+                .spacing(8),
+            );
         }
+
+        return center(empty)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
     }
-    if !current_row.is_empty() {
-        grid = grid.push(row(current_row).spacing(12));
+
+    let cards = state
+        .library_books
+        .iter()
+        .map(render_book_card)
+        .collect::<Vec<_>>();
+    let book_grid = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
+    let mut sections = column![].spacing(16).width(Length::Fill);
+
+    if state.library_search.is_empty()
+        && state.library_filter.is_none()
+        && let Some(book) = state
+            .library_books
+            .iter()
+            .find(|book| book.last_read.is_some() && book.progress < 1.0)
+    {
+        sections = sections
+            .push(text("Continue reading").size(18))
+            .push(render_continue_card(book))
+            .push(iced::widget::Space::new().height(4));
     }
-    if state.library_loading {
-        grid = grid.push(center(text("Loading more...")).width(Length::Fill));
+
+    let section_title = if state.library_search.is_empty() {
+        "All books"
+    } else {
+        "Search results"
+    };
+    sections = sections.push(text(section_title).size(18)).push(book_grid);
+
+    if state.library_loading && state.library_offset > 0 {
+        sections = sections
+            .push(center(text("Loading more…").color(app_theme::TEXT_MUTED)).width(Length::Fill));
     }
     if let Some(key) = library_load_sensor_key(state) {
-        grid = grid.push(
+        sections = sections.push(
             sensor(container(text("")).width(Length::Fill).height(1))
                 .key(key)
                 .anticipate(LIBRARY_LOAD_AHEAD_PX)
@@ -3492,62 +3614,169 @@ fn library_view(state: &State) -> Element<'_, Message> {
         );
     }
 
-    let content = scrollable(container(grid).padding(12).width(Length::Fill))
+    scrollable(container(sections).padding([22, 24]).width(Length::Fill))
         .width(Length::Fill)
-        .height(Length::Fill);
+        .height(Length::Fill)
+        .into()
+}
 
-    column![header, content].into()
+fn library_refresh_placeholder(state: &State) -> Element<'_, Message> {
+    let placeholder_count = if state.library_books.is_empty() {
+        8
+    } else {
+        state.library_books.len().min(LIBRARY_PAGE_SIZE as usize)
+    };
+    let cards = (0..placeholder_count)
+        .map(|_| render_loading_book_card())
+        .collect::<Vec<_>>();
+    let placeholders = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
+    let section_title = if state.library_search.is_empty() {
+        "All books"
+    } else {
+        "Search results"
+    };
+
+    scrollable(
+        container(column![text(section_title).size(18), placeholders].spacing(16))
+            .padding([22, 24])
+            .width(Length::Fill),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn render_loading_book_card() -> Element<'static, Message> {
+    container(
+        column![
+            container(iced::widget::Space::new())
+                .width(Length::Fill)
+                .height(210)
+                .style(app_theme::skeleton),
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(126.0))
+                .height(12)
+                .style(app_theme::skeleton_subtle),
+            container(iced::widget::Space::new())
+                .width(Length::Fixed(82.0))
+                .height(9)
+                .style(app_theme::skeleton_subtle),
+            iced::widget::Space::new().height(Length::Fill),
+            container(iced::widget::Space::new())
+                .width(Length::Fill)
+                .height(4)
+                .style(app_theme::skeleton_subtle),
+        ]
+        .spacing(7)
+        .height(Length::Fill),
+    )
+    .padding(8)
+    .width(Length::Fill)
+    .height(310)
+    .into()
 }
 
 fn library_search_input_id() -> iced::widget::Id {
     iced::widget::Id::new("library-search-query")
 }
 
-fn render_book_card<'a>(book: &Book, width: f32, height: f32) -> Element<'a, Message> {
+fn render_book_card(book: &Book) -> Element<'_, Message> {
     let file_path = book.file_path.clone();
-
-    // Cover image or placeholder.
-    let cover: Element<'_, Message> = if let Some(ref cover_data) = book.cover {
-        if let Ok(img) = ::image::load_from_memory(cover_data) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let handle = image::Handle::from_rgba(w, h, rgba.into_raw());
-            image(handle)
-                .width(Length::Fixed(width))
-                .height(Length::Fixed(height))
-                .content_fit(iced::ContentFit::Cover)
-                .into()
-        } else {
-            cover_placeholder(width, height, &book.title)
-        }
-    } else {
-        cover_placeholder(width, height, &book.title)
-    };
-
+    let cover = render_book_cover(book, Length::Fill, 210.0);
     let title_text = text(book.title.clone())
-        .size(12)
+        .size(13)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph);
+    let author = text(book.author.as_deref().unwrap_or("Unknown author"))
+        .size(11)
+        .color(app_theme::TEXT_MUTED);
+    let format_label = text(book.format.as_str().to_uppercase())
+        .size(10)
+        .color(app_theme::TEXT_MUTED);
+    let percentage = (book.progress.clamp(0.0, 1.0) * 100.0).round() as u32;
+    let progress_label = text(if percentage == 0 {
+        "Not started".to_string()
+    } else {
+        format!("{percentage}%")
+    })
+    .size(10)
+    .color(app_theme::TEXT_MUTED);
 
-    let format_label = text(book.format.as_str().to_uppercase()).size(10);
+    let card = column![
+        container(cover).style(app_theme::book_cover),
+        title_text,
+        author,
+        iced::widget::Space::new().height(Length::Fill),
+        row![
+            format_label,
+            iced::widget::Space::new().width(Length::Fill),
+            progress_label,
+        ],
+        widgets::reading_progress(book.progress),
+    ]
+    .spacing(5)
+    .height(Length::Fill)
+    .width(Length::Fill);
 
-    let card = column![cover, title_text, format_label]
-        .spacing(4)
-        .width(Length::Fixed(width));
-
-    button(card)
-        .on_press(Message::OpenBook(file_path))
-        .padding(4)
-        .width(Length::Fixed(width + 8.0))
+    widgets::book_button(card, Message::OpenBook(file_path))
+        .height(310)
         .into()
 }
 
-fn cover_placeholder<'a>(width: f32, height: f32, title: &str) -> Element<'a, Message> {
+fn render_continue_card(book: &Book) -> Element<'_, Message> {
+    let file_path = book.file_path.clone();
+    let percentage = (book.progress.clamp(0.0, 1.0) * 100.0).round() as u32;
+    let details = column![
+        text(book.title.clone()).size(16),
+        text(book.author.as_deref().unwrap_or("Unknown author"))
+            .size(12)
+            .color(app_theme::TEXT_MUTED),
+        iced::widget::Space::new().height(Length::Fill),
+        text(format!("{percentage}% complete"))
+            .size(11)
+            .color(app_theme::TEXT_MUTED),
+        widgets::reading_progress(book.progress),
+    ]
+    .spacing(6)
+    .height(100)
+    .width(Length::Fill);
+    let content = row![
+        render_book_cover(book, Length::Fixed(72.0), 100.0),
+        details,
+        text("Continue  ›").size(13).color(app_theme::ACCENT),
+    ]
+    .spacing(14)
+    .align_y(iced::Alignment::Center);
+
+    container(widgets::book_button(content, Message::OpenBook(file_path)))
+        .width(Length::Fill)
+        .max_width(620)
+        .style(app_theme::surface)
+        .into()
+}
+
+fn render_book_cover(book: &Book, width: Length, height: f32) -> Element<'_, Message> {
+    if let Some(ref cover_data) = book.cover
+        && let Ok(img) = ::image::load_from_memory(cover_data)
+    {
+        let rgba = img.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let handle = image::Handle::from_rgba(w, h, rgba.into_raw());
+        return image(handle)
+            .width(width)
+            .height(Length::Fixed(height))
+            .content_fit(iced::ContentFit::Cover)
+            .into();
+    }
+    cover_placeholder(width, height, &book.title)
+}
+
+fn cover_placeholder(width: Length, height: f32, title: &str) -> Element<'_, Message> {
     let label = text(title.chars().take(20).collect::<String>())
         .size(14)
         .color(iced::Color::WHITE);
 
     container(center(label))
-        .width(Length::Fixed(width))
+        .width(width)
         .height(Length::Fixed(height))
         .style(|_theme| container::Style {
             background: Some(iced::Background::Color(iced::Color::from_rgb(
@@ -3597,10 +3826,15 @@ pub fn title(state: &State) -> String {
 // Subscription
 // ---------------------------------------------------------------------------
 
-pub fn subscription(_state: &State) -> Subscription<Message> {
+pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([
         keyboard::listen().map(Message::KeyPressed),
         window::events().map(|(id, event)| Message::WindowEvent(id, event)),
+        if state.library_loading {
+            iced::time::every(LIBRARY_ACTIVITY_TICK).map(|_| Message::LibraryActivityTick)
+        } else {
+            Subscription::none()
+        },
     ])
 }
 
@@ -4712,6 +4946,80 @@ mod tests {
 
         assert!(state.library_books.is_empty());
         assert!(state.library_loading);
+    }
+
+    #[tokio::test]
+    async fn library_refresh_keeps_visible_books_until_the_replacement_is_ready() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(store.pool().clone()));
+        state.library_books.push(test_book(1));
+        state.library_loading = false;
+
+        let task = reset_library(&mut state);
+
+        assert!(task.units() > 0);
+        assert_eq!(state.library_books.len(), 1);
+        assert!(state.library_loading);
+        assert!(!state.library_has_more);
+    }
+
+    #[tokio::test]
+    async fn changing_library_filter_starts_loading_in_the_same_update() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(store.pool().clone()));
+        state.library_books.push(test_book(1));
+        state.library_loading = false;
+        let generation = state.library_generation;
+
+        let task = update(
+            &mut state,
+            Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
+        );
+
+        assert!(task.units() > 0);
+        assert!(state.library_loading);
+        assert_eq!(state.library_generation, generation.wrapping_add(1));
+        assert_eq!(state.library_books.len(), 1);
+    }
+
+    #[test]
+    fn library_activity_advances_only_while_loading() {
+        let (mut state, _) = boot();
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+        assert!(state.library_activity_progress > 0.0);
+
+        state.library_loading = false;
+        let progress = state.library_activity_progress;
+        let _ = update(&mut state, Message::LibraryActivityTick);
+        assert_eq!(state.library_activity_progress, progress);
+    }
+
+    #[test]
+    fn empty_library_index_clears_books_from_the_previous_filter() {
+        let (mut state, _) = boot();
+        state.library_generation = 2;
+        state.library_books.push(test_book(1));
+        state.library_loading = true;
+
+        let _ = update(
+            &mut state,
+            Message::LibraryIndexLoaded {
+                generation: 2,
+                ids: Vec::new(),
+            },
+        );
+
+        assert!(state.library_books.is_empty());
+        assert!(!state.library_loading);
     }
 
     #[test]
