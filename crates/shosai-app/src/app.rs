@@ -3895,7 +3895,7 @@ fn render_loading_book_card() -> Element<'static, Message> {
     )
     .padding(8)
     .width(Length::Fill)
-    .height(310)
+    .height(330)
     .into()
 }
 
@@ -3926,8 +3926,8 @@ fn render_book_card(book: &Book) -> Element<'_, Message> {
 
     let card = column![
         container(cover).style(app_theme::book_cover),
-        title_text,
-        author,
+        container(title_text).height(32),
+        container(author).height(28),
         iced::widget::Space::new().height(Length::Fill),
         row![
             format_label,
@@ -3936,12 +3936,12 @@ fn render_book_card(book: &Book) -> Element<'_, Message> {
         ],
         widgets::reading_progress(book.progress),
     ]
-    .spacing(5)
+    .spacing(4)
     .height(Length::Fill)
     .width(Length::Fill);
 
     widgets::book_button(card, Message::OpenBook(file_path))
-        .height(310)
+        .height(330)
         .into()
 }
 
