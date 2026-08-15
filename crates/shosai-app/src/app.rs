@@ -102,8 +102,8 @@ const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
-const READER_HORIZONTAL_PADDING: f32 = 48.0;
-const READER_VERTICAL_CHROME: f32 = 130.0;
+const READER_HORIZONTAL_PADDING: f32 = 112.0;
+const READER_VERTICAL_CHROME: f32 = 148.0;
 const PAGE_GUTTER: f32 = 20.0;
 const BOOKMARKS_PANEL_WIDTH: f32 = 300.0;
 const WINDOW_WIDTH_KEY: &str = "window.width";
@@ -346,6 +346,8 @@ pub struct State {
     active_tab_id: Option<u64>,
     next_tab_id: u64,
     open_error: Option<String>,
+    show_reader_settings: bool,
+    show_reader_more: bool,
 
     // -- Shared --
     reading_state: Option<ReadingStateStore>,
@@ -478,6 +480,8 @@ pub fn boot() -> (State, Task<Message>) {
         active_tab_id: None,
         next_tab_id: 1,
         open_error: None,
+        show_reader_settings: false,
+        show_reader_more: false,
 
         bookmark_store: None,
 
@@ -1552,10 +1556,21 @@ fn available_reader_size(state: &State) -> Size {
     } else {
         0.0
     };
-    let search_height = if state.show_search_bar { 44.0 } else { 0.0 };
+    let search_height = if state.show_search_bar { 52.0 } else { 0.0 };
+    let settings_height = if state.show_reader_settings {
+        62.0
+    } else {
+        0.0
+    };
+    let more_height = if state.show_reader_more { 58.0 } else { 0.0 };
     Size::new(
         (state.window_size.width - bookmarks_width - READER_HORIZONTAL_PADDING).max(1.0),
-        (state.window_size.height - READER_VERTICAL_CHROME - search_height).max(1.0),
+        (state.window_size.height
+            - READER_VERTICAL_CHROME
+            - search_height
+            - settings_height
+            - more_height)
+            .max(1.0),
     )
 }
 
@@ -2034,144 +2049,87 @@ fn refresh_pdf_search_highlights_if_changed(
 pub fn view(state: &State) -> Element<'_, Message> {
     match state.screen {
         Screen::Library => library_view(state),
-        Screen::Reader => {
-            let main_content = content_view(state);
-
-            let body: Element<'_, Message> = if state.show_bookmarks_panel {
-                row![
-                    container(main_content)
-                        .width(Length::Fill)
-                        .height(Length::Fill),
-                    bookmarks_panel(state),
-                ]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-            } else {
-                main_content
-            };
-
-            let mut layout = column![tabs_view(state), toolbar(state)].spacing(0);
-
-            if state.show_search_bar {
-                layout = layout.push(search_bar(state));
-            }
-
-            if let Some(error) = &state.open_error {
-                layout = layout.push(
-                    container(
-                        text(error)
-                            .size(13)
-                            .color(iced::Color::from_rgb(0.75, 0.1, 0.1)),
-                    )
-                    .padding([4, 10])
-                    .width(Length::Fill),
-                );
-            }
-
-            layout = layout.push(body).push(status_bar(state));
-
-            layout.width(Length::Fill).height(Length::Fill).into()
-        }
+        Screen::Reader => reader_view(state),
     }
 }
 
-fn tabs_view(state: &State) -> Element<'_, Message> {
-    let mut tabs = row![].spacing(4).padding([4, 8]);
-    for (index, tab) in state.tabs.iter().enumerate() {
-        let name = tab
-            .file_path
-            .file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_default();
-        let label = if state.active_tab == Some(index) {
-            format!("● {name}")
+const COMPACT_READER_WIDTH: f32 = 860.0;
+
+fn reader_view(state: &State) -> Element<'_, Message> {
+    container(responsive(move |size| {
+        reader_layout(state, uses_compact_reader_layout(size.width))
+    }))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .style(app_theme::app_background)
+    .into()
+}
+
+fn uses_compact_reader_layout(width: f32) -> bool {
+    width < COMPACT_READER_WIDTH
+}
+
+fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
+    let main_content = reader_surface(state, compact);
+    let body: Element<'_, Message> = if state.show_bookmarks_panel {
+        if compact {
+            bookmarks_panel(state, Length::Fill)
         } else {
-            name.into_owned()
-        };
-        tabs = tabs.push(button(text(label).size(12)).on_press(Message::SelectTab(index)));
-        tabs = tabs.push(
-            button(text("×").size(12))
-                .padding([4, 6])
-                .on_press(Message::CloseTab(index)),
+            row![
+                container(main_content)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                bookmarks_panel(state, Length::Fixed(300.0)),
+            ]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        }
+    } else {
+        main_content
+    };
+
+    let mut layout = column![tabs_view(state), reader_header(state, compact)].spacing(0);
+
+    if state.show_reader_settings {
+        layout = layout.push(reader_settings(state, compact));
+    }
+
+    if state.show_reader_more {
+        layout = layout.push(reader_more_panel(state, compact));
+    }
+
+    if state.show_search_bar {
+        layout = layout.push(search_bar(state, compact));
+    }
+
+    if let Some(error) = &state.open_error {
+        layout = layout.push(
+            container(
+                text(error)
+                    .size(13)
+                    .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
+            )
+            .padding([7, 14])
+            .width(Length::Fill)
+            .style(app_theme::reader_alert),
         );
     }
-    container(
-        scrollable(tabs).direction(scrollable::Direction::Horizontal(
-            scrollable::Scrollbar::default(),
-        )),
-    )
-    .width(Length::Fill)
-    .into()
+
+    layout = layout.push(body).push(status_bar(state));
+
+    layout.width(Length::Fill).height(Length::Fill).into()
 }
 
-fn status_bar(state: &State) -> Element<'_, Message> {
-    let kind = if matches!(state.document, Some(OpenDocument::Epub(_))) {
-        "Chapter"
-    } else {
-        "Page"
-    };
-    let percentage = if uses_paginated_epub_layout(state) {
-        reading_progress_percentage(state.epub_page, state.epub_pages.len())
-    } else {
-        reading_progress_percentage(state.current_page, state.total_pages)
-    };
-    let mode = match state.reading_mode {
-        ReadingMode::Paginated => "Paginated",
-        ReadingMode::Continuous => "Continuous",
-    };
-    let location = if uses_paginated_epub_layout(state) && !state.epub_pages.is_empty() {
-        let visible = epub_visible_pages(state);
-        let first = visible.first().copied().unwrap_or(0) + 1;
-        let last = visible.last().copied().unwrap_or(0) + 1;
-        if first == last {
-            format!(
-                "Page {first} of {}  •  {percentage}%",
-                state.epub_pages.len()
-            )
-        } else {
-            format!(
-                "Pages {first}–{last} of {}  •  {percentage}%",
-                state.epub_pages.len()
-            )
-        }
-    } else {
-        format!(
-            "{kind} {} of {}  •  {percentage}%",
-            state.current_page.saturating_add(1),
-            state.total_pages
-        )
-    };
-    container(
-        row![
-            text(location).size(12),
-            iced::widget::Space::new().width(Length::Fill),
-            text(format!("{mode} mode")).size(12),
-        ]
-        .align_y(iced::Alignment::Center),
-    )
-    .padding([5, 10])
-    .width(Length::Fill)
-    .into()
-}
+fn reader_surface(state: &State, compact: bool) -> Element<'_, Message> {
+    let content = container(content_view(state))
+        .width(Length::Fill)
+        .height(Length::Fill);
 
-fn reading_progress_percentage(current_page: usize, total_pages: usize) -> u32 {
-    if total_pages == 0 {
-        0
-    } else {
-        (((current_page + 1) as f32 / total_pages as f32) * 100.0).round() as u32
+    if state.document.is_none() || state.reading_mode == ReadingMode::Continuous {
+        return content.into();
     }
-}
 
-fn toolbar(state: &State) -> Element<'_, Message> {
-    let open_btn = button("Open").on_press(Message::OpenFile);
-
-    let has_doc = state.document.is_some();
-    let is_pdf_or_cbz = matches!(
-        state.document,
-        Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
-    );
-    let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
     let can_prev = if uses_paginated_epub_layout(state) {
         can_turn_epub_page(state, false)
     } else {
@@ -2183,153 +2141,407 @@ fn toolbar(state: &State) -> Element<'_, Message> {
         next_page_location(state).is_some()
     };
 
-    let mut prev_btn = button("<");
-    if can_prev {
-        prev_btn = prev_btn.on_press(Message::PrevPage);
+    row![
+        reader_edge_button("‹", can_prev.then_some(Message::PrevPage), compact),
+        content,
+        reader_edge_button("›", can_next.then_some(Message::NextPage), compact),
+    ]
+    .align_y(iced::Alignment::Center)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
+
+fn reader_edge_button(
+    label: &'static str,
+    message: Option<Message>,
+    compact: bool,
+) -> iced::widget::Button<'static, Message> {
+    button(text(label).size(if compact { 28 } else { 36 }))
+        .on_press_maybe(message)
+        .padding([12, if compact { 8 } else { 16 }])
+        .height(Length::Fill)
+        .style(app_theme::reader_edge_button)
+}
+
+fn tabs_view(state: &State) -> Element<'_, Message> {
+    let mut tabs = row![].spacing(3).padding([5, 10]);
+    for (index, tab) in state.tabs.iter().enumerate() {
+        let name = tab
+            .file_path
+            .file_name()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_default();
+        let selected = state.active_tab == Some(index);
+        tabs = tabs.push(
+            container(
+                row![
+                    button(text(truncate_reader_label(&name, 34)).size(12))
+                        .on_press(Message::SelectTab(index))
+                        .padding(iced::Padding {
+                            top: 6.0,
+                            right: 4.0,
+                            bottom: 6.0,
+                            left: 10.0,
+                        })
+                        .style(app_theme::reader_tab_label(selected)),
+                    button(text("×").size(12))
+                        .padding(iced::Padding {
+                            top: 6.0,
+                            right: 8.0,
+                            bottom: 6.0,
+                            left: 4.0,
+                        })
+                        .on_press(Message::CloseTab(index))
+                        .style(app_theme::reader_tab_close),
+                ]
+                .spacing(0)
+                .align_y(iced::Alignment::Center),
+            )
+            .style(app_theme::reader_tab(selected)),
+        );
+    }
+    container(
+        scrollable(tabs).direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::hidden(),
+        )),
+    )
+    .width(Length::Fill)
+    .style(app_theme::reader_tab_strip)
+    .into()
+}
+
+fn truncate_reader_label(label: &str, max_chars: usize) -> String {
+    if label.chars().count() <= max_chars {
+        return label.to_string();
     }
 
-    let mut next_btn = button(">");
-    if can_next {
-        next_btn = next_btn.on_press(Message::NextPage);
-    }
+    let mut shortened = label
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    shortened.push('…');
+    shortened
+}
 
-    let nav_label = if is_epub && state.reading_mode == ReadingMode::Continuous {
-        "Ch"
+fn status_bar(state: &State) -> Element<'_, Message> {
+    let percentage = if uses_paginated_epub_layout(state) {
+        reading_progress_percentage(state.epub_page, state.epub_pages.len())
     } else {
-        "Pg"
+        reading_progress_percentage(state.current_page, state.total_pages)
+    };
+    let location = if uses_paginated_epub_layout(state) {
+        let visible = epub_visible_pages(state);
+        let first = visible.first().copied().unwrap_or(0) + 1;
+        let last = visible.last().copied().unwrap_or(0) + 1;
+        if first == last {
+            format!("Page {first} · {percentage}%")
+        } else {
+            format!("Pages {first}–{last} · {percentage}%")
+        }
+    } else if state.document.is_some() {
+        format!(
+            "Page {} · {percentage}%",
+            state.current_page.saturating_add(1)
+        )
+    } else {
+        "No book open".to_string()
     };
 
-    let page_input = text_input(nav_label, &state.page_input)
-        .on_input(Message::PageInputChanged)
-        .on_submit(Message::GoToPage)
-        .width(60);
+    container(
+        column![
+            container(widgets::reading_progress(f64::from(percentage) / 100.0))
+                .width(Length::Fixed(280.0)),
+            text(location).size(11).color(app_theme::TEXT_MUTED),
+        ]
+        .align_x(iced::Alignment::Center)
+        .spacing(5),
+    )
+    .padding([7, 12])
+    .width(Length::Fill)
+    .center_x(Length::Fill)
+    .style(app_theme::reader_status)
+    .into()
+}
 
-    let page_label = text(if has_doc {
-        let total = if uses_paginated_epub_layout(state) {
-            state.epub_pages.len()
-        } else {
-            state.total_pages
-        };
-        format!("/ {total}")
+fn reading_progress_percentage(current_page: usize, total_pages: usize) -> u32 {
+    if total_pages == 0 {
+        0
     } else {
-        String::new()
-    });
+        (((current_page + 1) as f32 / total_pages as f32) * 100.0).round() as u32
+    }
+}
 
-    let library_btn = button("Library").on_press(Message::ShowLibrary);
+fn reader_header(state: &State, compact: bool) -> Element<'_, Message> {
+    let title = state
+        .document
+        .as_ref()
+        .and_then(|document| match document {
+            OpenDocument::Pdf(document) => document.metadata().title,
+            OpenDocument::Epub(document) => document.metadata().title,
+            OpenDocument::Cbz(document) => document.metadata().title,
+        })
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| {
+            state
+                .file_path
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "Reader".to_string());
+    let title = truncate_reader_label(&title, if compact { 24 } else { 58 });
+    let actions = row![
+        reader_control_button(
+            "Contents",
+            state
+                .document
+                .as_ref()
+                .map(|_| Message::ToggleBookmarksPanel),
+            state.show_bookmarks_panel,
+        ),
+        reader_control_button(
+            "Aa",
+            state
+                .document
+                .as_ref()
+                .map(|_| Message::ToggleReaderSettings),
+            state.show_reader_settings,
+        ),
+        reader_control_button("⋯", Some(Message::ToggleReaderMore), state.show_reader_more),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center);
 
-    let mut toolbar_items: Vec<Element<'_, Message>> = vec![
-        library_btn.into(),
-        open_btn.into(),
-        prev_btn.into(),
-        page_input.into(),
-        page_label.into(),
-        next_btn.into(),
-    ];
+    container(
+        row![
+            widgets::secondary_button("‹ Library", Some(Message::ShowLibrary),),
+            container(text(title).size(if compact { 15 } else { 17 }))
+                .width(Length::Fill)
+                .center_x(Length::Fill),
+            actions,
+        ]
+        .spacing(if compact { 6 } else { 14 })
+        .align_y(iced::Alignment::Center),
+    )
+    .padding([8, 14])
+    .width(Length::Fill)
+    .style(app_theme::reader_header)
+    .into()
+}
 
-    if has_doc {
-        let mode_label = match state.reading_mode {
-            ReadingMode::Paginated => "Mode: Paginated",
-            ReadingMode::Continuous => "Mode: Continuous",
-        };
-        toolbar_items.push(
-            button(mode_label)
-                .on_press(Message::ToggleReadingMode)
-                .into(),
-        );
+fn reader_control_button(
+    label: impl Into<String>,
+    message: Option<Message>,
+    selected: bool,
+) -> iced::widget::Button<'static, Message> {
+    button(text(label.into()).size(13))
+        .on_press_maybe(message)
+        .padding([7, 10])
+        .style(app_theme::reader_control_button(selected))
+}
+
+fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
+    let is_pdf_or_cbz = matches!(
+        state.document,
+        Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+    );
+    let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+    let mut reading = row![].spacing(5).align_y(iced::Alignment::Center);
+    let mode_label = match state.reading_mode {
+        ReadingMode::Paginated => "Paginated",
+        ReadingMode::Continuous => "Continuous",
+    };
+    reading = reading.push(reader_control_button(
+        mode_label,
+        Some(Message::ToggleReadingMode),
+        true,
+    ));
+
+    if is_pdf_or_cbz {
+        reading = reading
+            .push(reader_control_button("−", Some(Message::ZoomOut), false))
+            .push(
+                text(state.zoom.label())
+                    .size(12)
+                    .width(70)
+                    .color(app_theme::TEXT_MUTED),
+            )
+            .push(reader_control_button("+", Some(Message::ZoomIn), false))
+            .push(reader_control_button(
+                if compact { "Width" } else { "Fit width" },
+                Some(Message::SetZoomFitWidth),
+                state.zoom == ZoomMode::FitWidth,
+            ))
+            .push(reader_control_button(
+                if compact { "Page" } else { "Fit page" },
+                Some(Message::SetZoomFitPage),
+                state.zoom == ZoomMode::FitPage,
+            ));
     }
 
-    // PDF: zoom controls
-    if is_pdf_or_cbz || !has_doc {
-        let zoom_out_btn = if is_pdf_or_cbz {
-            button("-").on_press(Message::ZoomOut)
-        } else {
-            button("-")
-        };
-        let zoom_label = text(state.zoom.label()).width(70);
-        let zoom_in_btn = if is_pdf_or_cbz {
-            button("+").on_press(Message::ZoomIn)
-        } else {
-            button("+")
-        };
-        let mut fit_w = button("Fit Width");
-        let mut fit_p = button("Fit Page");
-        if is_pdf_or_cbz {
-            fit_w = fit_w.on_press(Message::SetZoomFitWidth);
-            fit_p = fit_p.on_press(Message::SetZoomFitPage);
-        }
-
-        toolbar_items.push(zoom_out_btn.into());
-        toolbar_items.push(zoom_label.into());
-        toolbar_items.push(zoom_in_btn.into());
-        toolbar_items.push(fit_w.into());
-        toolbar_items.push(fit_p.into());
-    }
-
-    // EPUB: font size + theme controls
     if is_epub {
-        let size_label = text(format!("{}px", state.font_size as u32)).width(50);
-        toolbar_items.push(button("A-").on_press(Message::FontSizeDown).into());
-        toolbar_items.push(size_label.into());
-        toolbar_items.push(button("A+").on_press(Message::FontSizeUp).into());
-        toolbar_items.push(
-            button(state.theme.label())
-                .on_press(Message::CycleTheme)
-                .into(),
-        );
+        reading = reading
+            .push(reader_control_button(
+                "A−",
+                Some(Message::FontSizeDown),
+                false,
+            ))
+            .push(
+                text(format!("{}px", state.font_size as u32))
+                    .size(12)
+                    .color(app_theme::TEXT_MUTED),
+            )
+            .push(reader_control_button(
+                "A+",
+                Some(Message::FontSizeUp),
+                false,
+            ))
+            .push(reader_control_button(
+                state.theme.label(),
+                Some(Message::CycleTheme),
+                false,
+            ));
     }
 
-    // Bookmark controls (for all formats when a doc is open)
-    if has_doc {
-        let bookmark_label = if state.current_page_bookmarked {
-            "\u{2605}" // filled star
-        } else {
-            "\u{2606}" // empty star
-        };
-        toolbar_items.push(
-            button(bookmark_label)
-                .on_press(Message::ToggleBookmark)
-                .into(),
-        );
-        let panel_label = if state.show_bookmarks_panel {
-            "Hide BM"
-        } else {
-            "Show BM"
-        };
-        toolbar_items.push(
-            button(panel_label)
-                .on_press(Message::ToggleBookmarksPanel)
-                .into(),
-        );
-        // Search button (PDF and EPUB only, not CBZ)
-        if !matches!(state.document, Some(OpenDocument::Cbz(_))) {
-            let search_label = if state.show_search_bar {
-                "Hide Search"
+    container(
+        scrollable(
+            row![
+                text(if compact {
+                    "Reading"
+                } else {
+                    "Reading appearance"
+                })
+                .size(12)
+                .color(app_theme::TEXT_MUTED),
+                container(reading)
+                    .padding(4)
+                    .style(app_theme::reader_control_group),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center),
+        )
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::hidden(),
+        )),
+    )
+    .padding([7, 12])
+    .width(Length::Fill)
+    .style(app_theme::reader_controls)
+    .into()
+}
+
+fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
+    let total = if uses_paginated_epub_layout(state) {
+        state.epub_pages.len()
+    } else {
+        state.total_pages
+    };
+    let location = row![
+        text_input("Page", &state.page_input)
+            .on_input(Message::PageInputChanged)
+            .on_submit(Message::GoToPage)
+            .padding([7, 8])
+            .width(64),
+        text(format!("of {total}"))
+            .size(12)
+            .color(app_theme::TEXT_MUTED),
+    ]
+    .spacing(6)
+    .align_y(iced::Alignment::Center);
+
+    let mut actions = row![
+        reader_control_button(
+            if state.current_page_bookmarked {
+                "★ Saved"
             } else {
-                "Search"
-            };
-            toolbar_items.push(
-                button(search_label)
-                    .on_press(Message::ToggleSearchBar)
-                    .into(),
+                "☆ Bookmark"
+            },
+            state.document.as_ref().map(|_| Message::ToggleBookmark),
+            state.current_page_bookmarked,
+        ),
+        reader_control_button("Open book", Some(Message::OpenFile), false),
+    ]
+    .spacing(5)
+    .align_y(iced::Alignment::Center);
+    if state.document.is_some() && !matches!(state.document, Some(OpenDocument::Cbz(_))) {
+        actions = actions.push(reader_control_button(
+            "Search",
+            Some(Message::ToggleSearchBar),
+            state.show_search_bar,
+        ));
+    }
+
+    let controls: Element<'_, Message> = if compact {
+        column![location, actions].spacing(7).into()
+    } else {
+        row![
+            location,
+            iced::widget::Space::new().width(Length::Fill),
+            actions
+        ]
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
+    container(controls)
+        .padding([7, 12])
+        .width(Length::Fill)
+        .style(app_theme::reader_controls)
+        .into()
+}
+
+fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
+    let heading = row![
+        column![
+            text("Contents").size(18),
+            text("Chapters and saved places")
+                .size(11)
+                .color(app_theme::TEXT_MUTED),
+        ]
+        .spacing(2),
+        iced::widget::Space::new().width(Length::Fill),
+        reader_control_button("×", Some(Message::ToggleBookmarksPanel), false),
+    ]
+    .align_y(iced::Alignment::Center);
+    let mut panel = column![heading].spacing(10).padding(14).width(Length::Fill);
+
+    if let Some(OpenDocument::Epub(document)) = &state.document {
+        panel = panel.push(text("Chapters").size(12).color(app_theme::TEXT_MUTED));
+        for (index, chapter) in document.content.chapters.iter().enumerate() {
+            let title = chapter
+                .title
+                .clone()
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| format!("Chapter {}", index + 1));
+            panel = panel.push(
+                button(text(truncate_reader_label(&title, 38)).size(12))
+                    .on_press(Message::GoToBookmark(index, None))
+                    .padding([6, 8])
+                    .width(Length::Fill)
+                    .style(app_theme::bookmark_link),
             );
         }
     }
 
-    let toolbar_row = row(toolbar_items)
-        .spacing(8)
-        .align_y(iced::Alignment::Center);
-
-    container(toolbar_row).padding(8).width(Length::Fill).into()
-}
-
-fn bookmarks_panel(state: &State) -> Element<'_, Message> {
-    let mut panel = column![text("Bookmarks").size(16)]
-        .spacing(8)
-        .padding(8)
-        .width(Length::Fixed(280.0));
+    panel = panel.push(
+        text(format!("Bookmarks · {}", state.bookmarks.len()))
+            .size(12)
+            .color(app_theme::TEXT_MUTED),
+    );
 
     if state.bookmarks.is_empty() {
-        panel = panel.push(text("No bookmarks yet").size(12));
+        panel = panel.push(
+            container(
+                column![
+                    text("No bookmarks yet").size(15),
+                    text("Save a page to keep it close at hand.")
+                        .size(12)
+                        .color(app_theme::TEXT_MUTED),
+                ]
+                .spacing(5),
+            )
+            .padding([18, 4]),
+        );
     } else {
         for bm in &state.bookmarks {
             let title = bm
@@ -2345,13 +2557,18 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
             let header = row![
                 button(text(title).size(12))
                     .on_press(Message::GoToBookmark(bm.page, bm.location_offset))
-                    .padding(2),
-                text(format!("p.{}", bm.page + 1)).size(10),
+                    .padding([4, 6])
+                    .style(app_theme::bookmark_link),
+                iced::widget::Space::new().width(Length::Fill),
+                text(format!("p.{}", bm.page + 1))
+                    .size(10)
+                    .color(app_theme::TEXT_MUTED),
                 button(text("\u{2715}").size(10))
                     .on_press(Message::DeleteBookmark(bm.id))
-                    .padding(2),
+                    .padding([4, 6])
+                    .style(app_theme::reader_tab_close),
             ]
-            .spacing(4)
+            .spacing(6)
             .align_y(iced::Alignment::Center);
 
             entry_col = entry_col.push(header);
@@ -2362,19 +2579,20 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
                     .on_input(Message::EditNoteChanged)
                     .on_submit(Message::SaveNote)
                     .size(12)
+                    .padding(8)
                     .width(Length::Fill);
-                let cancel_btn = button(text("Cancel").size(10))
-                    .on_press(Message::CancelEditNote)
-                    .padding(2);
-                let save_btn = button(text("Save").size(10))
-                    .on_press(Message::SaveNote)
-                    .padding(2);
                 entry_col = entry_col.push(input);
-                entry_col = entry_col.push(row![save_btn, cancel_btn].spacing(4));
+                entry_col = entry_col.push(
+                    row![
+                        reader_control_button("Save", Some(Message::SaveNote), true),
+                        reader_control_button("Cancel", Some(Message::CancelEditNote), false),
+                    ]
+                    .spacing(5),
+                );
             } else {
-                // Display note or "Add note" button
                 if let Some(note) = &bm.note {
-                    entry_col = entry_col.push(text(note.clone()).size(11));
+                    entry_col =
+                        entry_col.push(text(note.clone()).size(11).color(app_theme::TEXT_MUTED));
                 }
                 let edit_label = if bm.note.is_some() {
                     "Edit note"
@@ -2385,41 +2603,41 @@ fn bookmarks_panel(state: &State) -> Element<'_, Message> {
                 entry_col = entry_col.push(
                     button(text(edit_label).size(10))
                         .on_press(Message::StartEditNote(bm.id, existing_note))
-                        .padding(2),
+                        .padding([4, 6])
+                        .style(app_theme::bookmark_link),
                 );
             }
 
-            panel = panel.push(container(entry_col).padding(4).width(Length::Fill));
+            panel = panel.push(
+                container(entry_col)
+                    .padding(10)
+                    .width(Length::Fill)
+                    .style(app_theme::bookmark_entry),
+            );
         }
     }
 
-    // Export button at the bottom
     if !state.bookmarks.is_empty() {
-        panel = panel.push(
-            button(text("Export as Markdown").size(11))
-                .on_press(Message::ExportBookmarks)
-                .padding(4),
-        );
+        panel = panel.push(widgets::secondary_button(
+            "Export as Markdown",
+            Some(Message::ExportBookmarks),
+        ));
     }
 
     container(scrollable(panel).height(Length::Fill))
-        .width(Length::Fixed(280.0))
+        .width(width)
         .height(Length::Fill)
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgb(
-                0.95, 0.95, 0.95,
-            ))),
-            ..Default::default()
-        })
+        .style(app_theme::bookmarks_panel)
         .into()
 }
 
-fn search_bar(state: &State) -> Element<'_, Message> {
+fn search_bar(state: &State, compact: bool) -> Element<'_, Message> {
     let input = text_input("Search in document...", &state.search_query)
         .id(search_input_id())
         .on_input(Message::SearchQueryChanged)
         .on_submit(Message::SearchNext)
-        .width(300);
+        .padding([8, 10])
+        .width(Length::Fill);
 
     let result_info = if state.search_results.is_empty() {
         if state.search_query.is_empty() {
@@ -2437,37 +2655,31 @@ fn search_bar(state: &State) -> Element<'_, Message> {
 
     let has_results = !state.search_results.is_empty();
 
-    let mut prev_btn = button("<");
-    if has_results {
-        prev_btn = prev_btn.on_press(Message::SearchPrev);
-    }
-
-    let mut next_btn = button(">");
-    if has_results {
-        next_btn = next_btn.on_press(Message::SearchNext);
-    }
-
-    let close_btn = button("\u{2715}").on_press(Message::CloseSearch);
-
-    let bar = row![
-        input,
-        text(result_info).size(14),
-        prev_btn,
-        next_btn,
-        close_btn,
+    let actions = row![
+        text(result_info).size(12).color(app_theme::TEXT_MUTED),
+        reader_control_button("‹", has_results.then_some(Message::SearchPrev), false),
+        reader_control_button("›", has_results.then_some(Message::SearchNext), false),
+        reader_control_button("×", Some(Message::CloseSearch), false),
     ]
-    .spacing(8)
+    .spacing(5)
     .align_y(iced::Alignment::Center);
+    let bar: Element<'_, Message> = if compact {
+        column![input, actions].spacing(7).into()
+    } else {
+        row![
+            container(input).width(Length::Fill).max_width(420),
+            iced::widget::Space::new().width(Length::Fill),
+            actions,
+        ]
+        .spacing(10)
+        .align_y(iced::Alignment::Center)
+        .into()
+    };
 
     container(bar)
-        .padding(8)
+        .padding([8, 12])
         .width(Length::Fill)
-        .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgb(
-                0.93, 0.93, 0.93,
-            ))),
-            ..Default::default()
-        })
+        .style(app_theme::reader_search)
         .into()
 }
 
@@ -3869,6 +4081,56 @@ mod tests {
         assert_eq!(reading_progress_percentage(0, 4), 25);
         assert_eq!(reading_progress_percentage(2, 4), 75);
         assert_eq!(reading_progress_percentage(3, 4), 100);
+    }
+
+    #[test]
+    fn reader_layout_compacts_below_its_toolbar_breakpoint() {
+        assert!(uses_compact_reader_layout(COMPACT_READER_WIDTH - 1.0));
+        assert!(!uses_compact_reader_layout(COMPACT_READER_WIDTH));
+    }
+
+    #[test]
+    fn reader_labels_truncate_without_splitting_unicode() {
+        assert_eq!(truncate_reader_label("短い題名", 8), "短い題名");
+        assert_eq!(truncate_reader_label("長い日本語の書名", 5), "長い日本…");
+    }
+
+    #[test]
+    fn reader_chrome_builds_for_wide_and_compact_bookmark_layouts() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("長い日本語の書名.epub"));
+
+        let _ = reader_layout(&state, false);
+        state.show_bookmarks_panel = true;
+        let _ = reader_layout(&state, true);
+    }
+
+    #[test]
+    fn reader_header_panels_are_mutually_exclusive() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let _ = update(&mut state, Message::ToggleReaderSettings);
+        assert!(state.show_reader_settings);
+        assert!(!state.show_reader_more);
+        assert!(!state.show_bookmarks_panel);
+
+        let _ = update(&mut state, Message::ToggleReaderMore);
+        assert!(!state.show_reader_settings);
+        assert!(state.show_reader_more);
+        assert!(!state.show_bookmarks_panel);
+
+        let _ = update(&mut state, Message::ToggleBookmarksPanel);
+        assert!(!state.show_reader_settings);
+        assert!(!state.show_reader_more);
+        assert!(state.show_bookmarks_panel);
     }
 
     #[test]

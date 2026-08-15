@@ -340,6 +340,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.theme = state.theme.next();
         }
 
+        Message::ToggleReaderSettings => {
+            invalidate_continuous_layout(state);
+            state.show_reader_settings = !state.show_reader_settings;
+            state.show_reader_more = false;
+            state.show_bookmarks_panel = false;
+            return reader_layout_changed_task(state);
+        }
+
+        Message::ToggleReaderMore => {
+            invalidate_continuous_layout(state);
+            state.show_reader_more = !state.show_reader_more;
+            state.show_reader_settings = false;
+            state.show_bookmarks_panel = false;
+            return reader_layout_changed_task(state);
+        }
+
         Message::LinkClicked(href) => {
             return handle_link_click(state, &href);
         }
@@ -348,6 +364,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::ShowLibrary => {
             invalidate_continuous_layout(state);
             state.screen = Screen::Library;
+            state.show_reader_settings = false;
+            state.show_reader_more = false;
             return Task::done(Message::RefreshLibrary);
         }
 
@@ -501,6 +519,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::ToggleBookmarksPanel => {
             invalidate_continuous_layout(state);
             state.show_bookmarks_panel = !state.show_bookmarks_panel;
+            state.show_reader_settings = false;
+            state.show_reader_more = false;
             if state.show_bookmarks_panel {
                 return Task::batch([refresh_bookmarks(state), reader_layout_changed_task(state)]);
             }
