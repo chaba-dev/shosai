@@ -3,5 +3,6 @@ Type=Application
 Name=Shosai
 Comment=Read PDF, EPUB, and CBZ books
 Exec=@SHOSAI_EXEC@
+Icon=shosai
 Terminal=false
 Categories=Office;Viewer;
