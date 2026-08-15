@@ -3691,11 +3691,6 @@ fn library_sidebar(state: &State) -> Element<'_, Message> {
             state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
             Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
         ),
-        widgets::navigation_button(
-            "Comics",
-            state.library_filter == Some(shosai_core::library::BookFormat::Cbz),
-            Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Cbz)),
-        ),
     ]
     .spacing(6)
     .padding([22, 14]);
@@ -3724,11 +3719,6 @@ fn mobile_library_filters(state: &State) -> Element<'_, Message> {
                 "PDF",
                 state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
                 Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
-            ),
-            widgets::navigation_button(
-                "Comics",
-                state.library_filter == Some(shosai_core::library::BookFormat::Cbz),
-                Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Cbz)),
             ),
         ]
         .spacing(4),
