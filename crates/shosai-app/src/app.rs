@@ -3977,7 +3977,7 @@ fn render_book_cover(book: &Book, width: Length, height: f32) -> Element<'_, Mes
         return image(handle)
             .width(width)
             .height(Length::Fixed(height))
-            .content_fit(iced::ContentFit::Cover)
+            .content_fit(iced::ContentFit::Contain)
             .into();
     }
     cover_placeholder(width, height, &book.title)
