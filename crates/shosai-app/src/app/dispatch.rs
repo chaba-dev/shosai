@@ -855,12 +855,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::WindowEvent(id, event) => {
             state.window_id = Some(id);
+            let mut application_icon = Task::none();
             match event {
                 window::Event::Opened { position, size } => {
                     state.window_size = size;
                     state.window_position = position;
+                    application_icon = crate::application_icon_task(id);
                     if let Some((saved_size, saved_position)) = state.saved_window_geometry {
                         return Task::batch([
+                            application_icon,
                             window::resize(id, saved_size),
                             window::move_to(id, saved_position),
                         ]);
@@ -888,7 +891,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 move |_| Message::PersistWindowGeometry(generation),
             );
             let content = reader_layout_changed_task(state);
-            return Task::batch([persist, content]);
+            return Task::batch([application_icon, persist, content]);
         }
 
         Message::PersistWindowGeometry(generation) => {

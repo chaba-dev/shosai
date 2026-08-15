@@ -2,7 +2,7 @@
 
 ## Run the application in debug mode
 dev:
-	cargo run -p shosai-app
+	SHOSAI_DEV_BUILD=1 cargo run -p shosai-app
 
 ## Run clippy lints on the workspace
 lint:

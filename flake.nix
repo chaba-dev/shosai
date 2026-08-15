@@ -129,6 +129,7 @@
               fileset = pkgs.lib.fileset.unions [
                 ./Cargo.lock
                 ./Cargo.toml
+                ./assets/shosai-dev-icon.png
                 ./assets/shosai-icon.png
                 ./crates
                 ./packaging/linux/shosai.desktop
