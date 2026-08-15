@@ -626,6 +626,10 @@ fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
         .then_some((state.library_generation, state.library_offset))
 }
 
+fn library_activity_active(state: &State) -> bool {
+    state.screen == Screen::Library && state.library_loading && state.library_offset == 0
+}
+
 fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
     Some(ReaderTab {
         id: state.active_tab_id?,
@@ -3432,9 +3436,10 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         .into()
     };
 
+    let activity_active = library_activity_active(state);
     let header = column![
         container(content).padding([16, 20]).width(Length::Fill),
-        widgets::activity_bar(state.library_loading, state.library_activity_progress),
+        widgets::activity_bar(activity_active, state.library_activity_progress),
     ];
 
     container(header)
@@ -3581,13 +3586,7 @@ fn library_collection(state: &State) -> Element<'_, Message> {
     let book_grid = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
     let mut sections = column![].spacing(16).width(Length::Fill);
 
-    if state.library_search.is_empty()
-        && state.library_filter.is_none()
-        && let Some(book) = state
-            .library_books
-            .iter()
-            .find(|book| book.last_read.is_some() && book.progress < 1.0)
-    {
+    if let Some(book) = continue_reading_book(state) {
         sections = sections
             .push(text("Continue reading").size(18))
             .push(render_continue_card(book))
@@ -3618,6 +3617,18 @@ fn library_collection(state: &State) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+fn continue_reading_book(state: &State) -> Option<&Book> {
+    if !state.library_search.is_empty() || state.library_filter.is_some() {
+        return None;
+    }
+
+    state
+        .library_books
+        .iter()
+        .take(LIBRARY_PAGE_SIZE as usize)
+        .find(|book| book.last_read.is_some() && book.progress < 1.0)
 }
 
 fn library_refresh_placeholder(state: &State) -> Element<'_, Message> {
@@ -3830,7 +3841,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([
         keyboard::listen().map(Message::KeyPressed),
         window::events().map(|(id, event)| Message::WindowEvent(id, event)),
-        if state.library_loading {
+        if library_activity_active(state) {
             iced::time::every(LIBRARY_ACTIVITY_TICK).map(|_| Message::LibraryActivityTick)
         } else {
             Subscription::none()
@@ -5001,6 +5012,45 @@ mod tests {
         let progress = state.library_activity_progress;
         let _ = update(&mut state, Message::LibraryActivityTick);
         assert_eq!(state.library_activity_progress, progress);
+    }
+
+    #[test]
+    fn library_activity_does_not_advance_during_pagination() {
+        let (mut state, _) = boot();
+        state.library_offset = LIBRARY_PAGE_SIZE as usize;
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+
+        assert_eq!(state.library_activity_progress, 0.0);
+    }
+
+    #[test]
+    fn library_activity_stops_at_the_right_edge() {
+        let (mut state, _) = boot();
+        state.library_activity_progress = 0.99;
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+
+        assert_eq!(state.library_activity_progress, 1.0);
+    }
+
+    #[test]
+    fn later_library_pages_do_not_introduce_continue_reading() {
+        let (mut state, _) = boot();
+        state.library_books = (0..LIBRARY_PAGE_SIZE)
+            .map(|id| {
+                let mut book = test_book(i64::from(id));
+                book.progress = 1.0;
+                book.last_read = Some("2026-01-01".to_string());
+                book
+            })
+            .collect();
+        let mut later_book = test_book(i64::from(LIBRARY_PAGE_SIZE));
+        later_book.progress = 0.5;
+        later_book.last_read = Some("2026-01-02".to_string());
+        state.library_books.push(later_book);
+
+        assert!(continue_reading_book(&state).is_none());
     }
 
     #[test]

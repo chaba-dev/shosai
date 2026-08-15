@@ -474,9 +474,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibraryActivityTick => {
-            if state.library_loading {
+            if library_activity_active(state) {
                 state.library_activity_progress =
-                    (state.library_activity_progress + LIBRARY_ACTIVITY_STEP) % 1.0;
+                    (state.library_activity_progress + LIBRARY_ACTIVITY_STEP).min(1.0);
             }
         }
 
