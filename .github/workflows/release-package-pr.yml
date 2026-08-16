@@ -1,0 +1,32 @@
+name: Release Package Dry Run
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-inputs:
+    name: Read release inputs
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read workspace version
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          test -n "$version"
+          echo "release_tag=v${version}" >> "$GITHUB_OUTPUT"
+
+  dry-run-release:
+    name: Build release packages
+    needs: release-inputs
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      release_tag: ${{ needs.release-inputs.outputs.release_tag }}
+      checkout_ref: ${{ github.sha }}
+      publish: false
