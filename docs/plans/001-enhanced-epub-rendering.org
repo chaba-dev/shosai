@@ -17,17 +17,22 @@ and maintenance consequences.
 
 - ~crates/shosai-core/src/epub/parser.rs~ reads container/OPF, spine, TOC,
   XHTML, and manifest resources.  Non-XHTML resources are held eagerly in
-  ~EpubContent.resources~.
-- ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but reduces CSS to
-  a class-name ~StyleMap~ and a small set of properties.  It does not implement
-  selector matching, the cascade, inheritance, layout, or ~@font-face~.
+  ~EpubContent.resources~ without archive-entry, count, compression-ratio, or
+  aggregate-byte limits.  Relative paths are joined as strings rather than
+  canonicalized, scheme-aware EPUB URIs.
+- ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but extracts class
+  tokens from serialized selectors into a small-property ~StyleMap~.  It does
+  not implement selector matching, the cascade, inheritance, layout, or
+  ~@font-face~.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Tables and MathML have no fidelity-preserving model.
-- ~crates/shosai-app/src/app.rs~ reparses chapters, resolves images, performs
-  heuristic pagination, and directly creates Iced widgets for continuous and
-  paginated modes.  Internal-link fragments are currently ignored.
-- ~cosmic-text~ can shape and lay out text runs; it is not a CSS cascade,
-  block/table layout engine, DOM, MathML renderer, or font-loading policy.
+- ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
+  ~app.rs~ reparses all chapters, decodes images without pixel limits, and
+  directly creates Iced widgets for both reader modes.  Internal-link fragments
+  are ignored; user-activated HTTP(S) and mail links open in the system handler.
+- A native route may use a text shaper such as ~cosmic-text~, but text shaping is
+  not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
+  font-loading policy.
 
 * Scope and Success Measures
 
@@ -35,7 +40,8 @@ In scope are EPUB reflowable content, tables, embedded fonts and CSS
 ~@font-face~, MathML, resource resolution, and regressions in existing reading
 features.  Success means representative fixtures render predictably in both
 reader modes, navigation/search/progress still work, and malformed or hostile
-books fail safely without network access.
+books fail safely without book-initiated network access.  User-activated
+external links follow an explicit confirmation/allow policy.
 
 * Gate 0 — Renderer ADR and Technical Spike
 :PROPERTIES:
@@ -49,9 +55,12 @@ books fail safely without network access.
   one large EPUB.
 - [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
-  malformed CSS/XHTML, and missing resources.
-- [ ] Confirm target platforms and distribution constraints from Nix and
-  packaging jobs before evaluating native webview availability.
+  malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,
+  oversized archives/images, and internal/external links.
+- [ ] Confirm tested versus released targets and distribution constraints from
+  Nix and packaging jobs before evaluating native webview availability.  In
+  particular, Windows is CI-tested but has no release artifact today; decide
+  whether the selected renderer must merely build there or be shipped there.
 
 ** Spike A — ~wry~
 
@@ -62,6 +71,10 @@ books fail safely without network access.
 - [ ] Prototype theme/font-size injection, internal fragment links, reading
   position capture/restore, search highlighting, and continuous/paginated
   behavior.
+- [ ] Prove that a child webview can be embedded and resized inside the Iced
+  reader on each target, with defined focus/input/event routing, tab lifecycle,
+  accessibility-tree behavior, and teardown.  Map browser positions back to
+  stable logical EPUB locations rather than pixel/scroll offsets.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
@@ -70,9 +83,9 @@ books fail safely without network access.
 
 - [ ] Prototype a real computed-style boundary: parsed DOM, selector matching,
   specificity/source order, inheritance, UA defaults, and resolved lengths.
-- [ ] Use ~cosmic-text~ only behind text measurement/shaping interfaces; list
-  separately the required block, inline, table, image, pagination, font-face,
-  and MathML components.
+- [ ] Evaluate a maintained text shaper behind measurement/shaping interfaces;
+  list separately the required block, inline, table, image, pagination,
+  font-face, selection/accessibility, and MathML components.
 - [ ] Render the same table/font/MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
@@ -93,13 +106,16 @@ books fail safely without network access.
 
 - [ ] Introduce canonical archive-path and URI resolution in
   ~crates/shosai-core/src/epub/parser.rs~ (percent decoding, fragments,
-  traversal rejection, MIME lookup); reuse it for CSS, images, fonts, and links.
+  scheme/origin checks, traversal rejection, normalized-entry uniqueness, MIME
+  lookup); reuse it for CSS, images, fonts, and links.
 - [ ] Replace unrestricted resource access with a read-only EPUB resource API
   carrying bytes, media type, and canonical path.  Add configurable per-entry
-  and aggregate size limits to resist decompression/resource bombs.
+  input/archive, entry-count, compression-ratio, per-entry, and aggregate limits
+  to resist decompression/resource bombs.  Also bound XML depth/text and decoded
+  image dimensions/bytes before backend allocation.
 - [ ] Separate chapter parsing/computed presentation from
   ~crates/shosai-app/src/app.rs~ so search, pagination, and both view modes use
-  one chapter representation and stable locations.
+  one cached chapter representation and stable locations.
 - [ ] Define fallback behavior for unsupported CSS, fonts, and MathML, with
   diagnostics that identify the chapter/resource but do not abort the book.
 
@@ -151,6 +167,9 @@ books fail safely without network access.
 - [ ] Preserve chapter/fragment navigation, TOC, search and highlighting,
   bookmarks, progress restoration, themes, font sizing, continuous/paginated
   modes, multiple documents, and keyboard controls in ~shosai-app/src/app.rs~.
+- [ ] Establish the shared parsed-chapter/layout cache and stable-location model
+  before backend adapters so chapter switches and preference changes do not
+  repeatedly parse every chapter.
 - [ ] Move backend-specific rendering into focused modules under
   ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
   parsing/resource policy in ~shosai-core/src/epub/~.
@@ -175,7 +194,8 @@ books fail safely without network access.
 - [ ] The renderer ADR is approved before M1 and its security/license gates pass.
 - [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
   semantic and visual expectations on every supported platform.
-- [ ] No book content triggers network access or script execution by default.
+- [ ] No book content triggers network access or script execution by default;
+  user-activated external links obey the documented confirmation/allow policy.
 - [ ] Corrupt/oversized resources degrade safely with actionable errors.
 - [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
   reading modes pass regression tests.
