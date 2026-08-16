@@ -1,4 +1,5 @@
 #+TITLE: Shōsai Mobile Support Plan
+#+STATUS: Draft
 #+DATE: 2026-08-14
 #+STARTUP: showall
 
