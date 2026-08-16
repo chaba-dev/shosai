@@ -27,9 +27,11 @@ and maintenance consequences.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Tables and MathML have no fidelity-preserving model.
 - ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
-  ~app.rs~ reparses all chapters, decodes images without pixel limits, and
-  directly creates Iced widgets for both reader modes.  Internal-link fragments
-  are ignored; user-activated HTTP(S) and mail links open in the system handler.
+  ~app.rs~ reparses all chapters on layout refresh, decodes images without pixel
+  limits, and directly creates Iced widgets for both reader modes.  Ordinary
+  paginated turns reuse ~epub_pages~, but synchronously query bookmark state and
+  write reading state before the next frame.  Internal-link fragments are
+  ignored; user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
   font-loading policy.
@@ -50,9 +52,11 @@ external links follow an explicit confirmation/allow policy.
 
 ** Prerequisites
 
-- [ ] Capture baseline screenshots, load time, chapter-switch latency, and
-  memory use for ~crates/shosai-core/tests/fixtures/sample.epub~ and at least
-  one large EPUB.
+- [ ] Capture baseline screenshots, load time, memory use, and input-to-present
+  p50/p95 latency for warm page turns, chapter transitions, and layout-changing
+  operations using ~crates/shosai-core/tests/fixtures/sample.epub~ and at least
+  one large EPUB.  Measure text-heavy and image-heavy pages in single-page and
+  spread modes, and define target budgets before selecting a backend.
 - [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
   malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,
@@ -170,6 +174,10 @@ external links follow an explicit confirmation/allow policy.
 - [ ] Establish the shared parsed-chapter/layout cache and stable-location model
   before backend adapters so chapter switches and preference changes do not
   repeatedly parse every chapter.
+- [ ] Keep warm page turns free of parsing, repagination, image/font decoding,
+  and synchronous storage.  Debounce or asynchronously persist reading state,
+  resolve bookmark status off the turn path, and precompute/prefetch adjacent
+  presentation where the selected backend needs it.
 - [ ] Move backend-specific rendering into focused modules under
   ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
   parsing/resource policy in ~shosai-core/src/epub/~.
@@ -186,6 +194,9 @@ external links follow an explicit confirmation/allow policy.
   provenance.  Keep each feature isolated plus one combined conformance book.
 - Add app tests near the existing EPUB tests in ~crates/shosai-app/src/app.rs~
   for stable locations, pagination, links, image/font caches, and fallback.
+- Add an instrumented page-turn benchmark or performance harness that separates
+  input handling, state/persistence, widget/backend layout, and presentation;
+  run controlled latency smoke tests on release builds and reference hardware.
 - Add screenshot/golden tests only with controlled fonts/backend versions;
   otherwise use semantic layout assertions to avoid platform-noisy snapshots.
 
@@ -199,8 +210,10 @@ external links follow an explicit confirmation/allow policy.
 - [ ] Corrupt/oversized resources degrade safely with actionable errors.
 - [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
   reading modes pass regression tests.
-- [ ] Performance budgets recorded at Gate 0 are met or an accepted variance is
-  documented; repeated chapter changes do not leak per-book resources.
+- [ ] Gate 0 page-turn, chapter-transition, and relayout p50/p95 budgets are met
+  on reference hardware or an accepted variance is documented.  Warm page turns
+  perform no synchronous storage or avoidable resource/layout recomputation;
+  repeated chapter changes do not leak per-book resources.
 
 * Risks and Mitigations
 
