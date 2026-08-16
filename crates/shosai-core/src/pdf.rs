@@ -230,11 +230,12 @@ impl PdfDoc {
             .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
 
         let (pt_w, pt_h) = self.page_sizes[index];
-        let pixel_w = (pt_w * scale) as i32;
-        let pixel_h = (pt_h * scale) as i32;
+        let pixel_w = (pt_w * scale).ceil() as i32;
+        let pixel_h = (pt_h * scale).ceil() as i32;
         let config = PdfRenderConfig::new()
             .set_target_width(pixel_w)
-            .set_maximum_height(pixel_h);
+            .set_maximum_height(pixel_h)
+            .use_lcd_text_rendering(true);
         let bitmap = page
             .render_with_config(&config)
             .map_err(|e| anyhow::anyhow!("failed to render page {index}: {e}"))?;
