@@ -39,6 +39,12 @@ done < <(tar -tzf "$archive")
 tar -xzf "$archive" -C "$work_dir"
 package_dir="$work_dir/$package"
 
+invalid_entries=$(find "$package_dir" ! -type f ! -type d -print)
+if [[ -n "$invalid_entries" ]]; then
+  printf 'unsupported package entry type:\n%s\n' "$invalid_entries" >&2
+  exit 1
+fi
+
 expected_files=$(cat <<EOF
 LICENSE
 PDFIUM-LICENSE
@@ -50,7 +56,7 @@ shosai.desktop
 EOF
 )
 actual_files=$(
-  find "$package_dir" \( -type f -o -type l \) -print |
+  find "$package_dir" -type f -print |
     sed "s|^$package_dir/||" |
     LC_ALL=C sort
 )

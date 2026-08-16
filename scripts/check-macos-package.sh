@@ -37,6 +37,12 @@ done < <(unzip -Z1 "$archive")
 
 ditto -x -k "$archive" "$work_dir"
 app="$work_dir/Shosai.app"
+invalid_entries=$(find "$app" ! -type f ! -type d -print)
+if [[ -n "$invalid_entries" ]]; then
+  printf 'unsupported package entry type:\n%s\n' "$invalid_entries" >&2
+  exit 1
+fi
+
 contents="$app/Contents"
 binary="$contents/MacOS/Shosai"
 pdfium="$contents/Frameworks/libpdfium.dylib"
