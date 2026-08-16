@@ -51,4 +51,8 @@ The workflows rely on these GitHub settings:
 
 Only mutation jobs enter the `RELEASE` environment and receive its credentials. Release package builds, including dry runs, remain credential-free. Mutation jobs exchange the credentials for short-lived, repository-scoped `chaba2-bot` installation tokens: release commits and branch pushes, release pull-request creation and updates, dry-run statuses, tags, and GitHub releases. The built-in `GITHUB_TOKEN` is read-only. App-authored branch and tag events are not suppressed by GitHub's recursive-workflow protection, so the normal PR checks and tag workflow can run.
 
-The release does not publish the workspace crates to crates.io. Windows packaging, macOS Developer ID signing and notarization, Linux AppImage/Flatpak packages, and application icons remain separate distribution work.
+The release does not publish the workspace crates to crates.io. Release builds use
+`assets/shosai-icon.png`: macOS bundles the generated `.icns` file in the app
+resources, while Linux installs the PNG in the hicolor icon directory. Windows
+packaging, macOS Developer ID signing and notarization, and Linux AppImage/Flatpak
+packages remain separate distribution work.
