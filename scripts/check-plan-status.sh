@@ -152,10 +152,6 @@ shopt -s nullglob
 plans=("${plans_dir}"/*.org "${plans_dir}"/*.md)
 shopt -u nullglob
 
-if [[ "${#plans[@]}" -gt 0 ]]; then
-    mapfile -t plans < <(printf '%s\n' "${plans[@]}" | sort -V)
-fi
-
 for plan in "${plans[@]}"; do
     found=1
 
