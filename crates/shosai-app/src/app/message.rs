@@ -63,6 +63,8 @@ pub enum Message {
     FontSizeUp,
     FontSizeDown,
     CycleTheme,
+    ToggleReaderSettings,
+    ToggleReaderMore,
 
     // Links
     LinkClicked(String),

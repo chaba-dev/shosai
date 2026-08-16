@@ -129,6 +129,8 @@
               fileset = pkgs.lib.fileset.unions [
                 ./Cargo.lock
                 ./Cargo.toml
+                ./assets/shosai-dev-icon.png
+                ./assets/shosai-icon.png
                 ./crates
                 ./packaging/linux/shosai.desktop
               ];
@@ -161,6 +163,8 @@
 
                 install -Dm644 packaging/linux/shosai.desktop \
                   "$out/share/applications/shosai.desktop"
+                install -Dm644 assets/shosai-icon.png \
+                  "$out/share/icons/hicolor/1024x1024/apps/shosai.png"
                 substituteInPlace "$out/share/applications/shosai.desktop" \
                   --replace-fail '@SHOSAI_EXEC@' "$out/bin/shosai"
               ''

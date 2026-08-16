@@ -5,9 +5,16 @@ package_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 prefix=${SHOSAI_INSTALL_PREFIX:-"$HOME/.local"}
 install_dir="$prefix/opt/shosai"
 
-mkdir -p "$install_dir/bin" "$install_dir/lib" "$prefix/bin" "$prefix/share/applications"
+mkdir -p \
+  "$install_dir/bin" \
+  "$install_dir/lib" \
+  "$prefix/bin" \
+  "$prefix/share/applications" \
+  "$prefix/share/icons/hicolor/1024x1024/apps"
 install -m 755 "$package_dir/bin/shosai" "$install_dir/bin/shosai"
 install -m 644 "$package_dir/lib/libpdfium.so" "$install_dir/lib/libpdfium.so"
+install -m 644 "$package_dir/share/icons/hicolor/1024x1024/apps/shosai.png" \
+  "$prefix/share/icons/hicolor/1024x1024/apps/shosai.png"
 install -m 644 "$package_dir/PDFIUM-LICENSE" "$install_dir/PDFIUM-LICENSE"
 install -m 644 "$package_dir/LICENSE" "$install_dir/LICENSE"
 ln -sfn "$install_dir/bin/shosai" "$prefix/bin/shosai"

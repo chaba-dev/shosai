@@ -36,12 +36,6 @@ jobs:
             pdfium_asset: pdfium-linux-arm64.tgz
             pdfium_sha256: a19862a36e2b2da3c3fb43f0deef45fbbc331f58cd47943782ae4bd9db4c66d9
             package_script: scripts/package-linux.sh
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            artifact_name: macos-x86_64
-            pdfium_asset: pdfium-mac-x64.tgz
-            pdfium_sha256: 4b924d948d2ec4863435d375a94541b4003c59f8adc28cc5e4236b0ab81a355d
-            package_script: scripts/package-macos.sh
           - runner: macos-15
             target: aarch64-apple-darwin
             artifact_name: macos-aarch64

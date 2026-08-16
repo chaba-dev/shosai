@@ -20,6 +20,19 @@ install -m 755 "$pdfium_dir/lib/libpdfium.dylib" "$app/Contents/Frameworks/libpd
 install -m 644 "$pdfium_dir/LICENSE" "$app/Contents/Resources/PDFIUM-LICENSE"
 install -m 644 LICENSE "$app/Contents/Resources/LICENSE"
 
+iconset="$output_dir/Shosai.iconset"
+rm -rf "$iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  double_size=$((size * 2))
+  sips -z "$size" "$size" assets/shosai-icon.png \
+    --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  sips -z "$double_size" "$double_size" assets/shosai-icon.png \
+    --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/Shosai.icns"
+rm -rf "$iconset"
+
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,6 +43,7 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>Shosai</string>
   <key>CFBundleIdentifier</key><string>io.github.chaba2.shosai</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleIconFile</key><string>Shosai</string>
   <key>CFBundleName</key><string>Shosai</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>

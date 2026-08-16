@@ -56,6 +56,183 @@ pub fn sidebar(_theme: &Theme) -> container::Style {
         })
 }
 
+pub fn reader_header(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(SURFACE)
+        .color(TEXT)
+        .border(Border {
+            color: BORDER,
+            width: 0.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn reader_controls(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(Color::from_rgb8(0xEE, 0xEB, 0xE4))
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn reader_control_group(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(SURFACE)
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: RADIUS_MEDIUM.into(),
+        })
+}
+
+pub fn reader_control_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let background = if selected {
+            Some(Background::Color(ACCENT_SOFT))
+        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            Some(Background::Color(SURFACE_MUTED))
+        } else {
+            None
+        };
+        let disabled = status == button::Status::Disabled;
+
+        button::Style {
+            background,
+            text_color: if disabled {
+                TEXT_MUTED.scale_alpha(0.55)
+            } else if selected {
+                ACCENT
+            } else {
+                TEXT
+            },
+            border: Border {
+                radius: RADIUS_SMALL.into(),
+                ..Border::default()
+            },
+            ..button::Style::default()
+        }
+    }
+}
+
+pub fn reader_edge_button(_theme: &Theme, status: button::Status) -> button::Style {
+    let disabled = status == button::Status::Disabled;
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(SURFACE_MUTED.scale_alpha(0.7))),
+        text_color: if disabled {
+            TEXT_MUTED.scale_alpha(0.25)
+        } else {
+            TEXT_MUTED.scale_alpha(0.75)
+        },
+        ..button::Style::default()
+    }
+}
+
+pub fn reader_tab_strip(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(Color::from_rgb8(0xE7, 0xE3, 0xDA))
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn reader_tab(selected: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| {
+        container::Style::default()
+            .background(if selected {
+                SURFACE
+            } else {
+                Color::TRANSPARENT
+            })
+            .border(Border {
+                color: if selected { BORDER } else { Color::TRANSPARENT },
+                width: if selected { 1.0 } else { 0.0 },
+                radius: RADIUS_SMALL.into(),
+            })
+    }
+}
+
+pub fn reader_tab_label(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, _status| button::Style {
+        text_color: if selected { ACCENT } else { TEXT_MUTED },
+        ..button::Style::default()
+    }
+}
+
+pub fn reader_tab_close(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(SURFACE_MUTED)),
+        text_color: TEXT_MUTED,
+        border: Border {
+            radius: RADIUS_SMALL.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
+pub fn reader_status(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(SURFACE)
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn reader_search(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(SURFACE)
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn reader_alert(_theme: &Theme) -> container::Style {
+    container::Style::default().background(Color::from_rgb8(0xF6, 0xE5, 0xE2))
+}
+
+pub fn bookmarks_panel(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(Color::from_rgb8(0xEE, 0xEB, 0xE4))
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: 0.0.into(),
+        })
+}
+
+pub fn bookmark_entry(_theme: &Theme) -> container::Style {
+    container::Style::default()
+        .background(SURFACE)
+        .border(Border {
+            color: BORDER,
+            width: 1.0,
+            radius: RADIUS_MEDIUM.into(),
+        })
+}
+
+pub fn bookmark_link(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(ACCENT_SOFT)),
+        text_color: ACCENT,
+        border: Border {
+            radius: RADIUS_SMALL.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
 pub fn activity_bar(active: bool) -> impl Fn(&Theme) -> container::Style {
     move |_theme| {
         container::Style::default().background(if active { ACCENT } else { Color::TRANSPARENT })
