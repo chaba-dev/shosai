@@ -1,4 +1,5 @@
 #+TITLE: Shōsai Cloud Sync Plan
+#+STATUS: Draft
 #+DATE: 2026-08-14
 #+STARTUP: showall
 

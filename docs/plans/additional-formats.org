@@ -1,4 +1,5 @@
 #+TITLE: Additional Ebook Formats Plan
+#+STATUS: Draft
 #+AUTHOR: Shōsai contributors
 #+DATE: 2026-08-14
 #+STARTUP: showall

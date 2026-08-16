@@ -54,7 +54,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            clang cmake libssl-dev libvulkan-dev libwayland-dev \
+            clang cmake desktop-file-utils file libssl-dev libvulkan-dev libwayland-dev \
             libx11-dev libx11-xcb-dev libxkbcommon-dev libxcursor-dev \
             libxi-dev libxrandr-dev pkg-config
 
@@ -114,6 +114,28 @@ jobs:
             "${architecture}" \
             "target/${{ matrix.target }}/release/shosai" \
             pdfium
+
+      - name: Validate Linux package
+        if: runner.os == 'Linux'
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          scripts/check-linux-package.sh \
+            "$version" \
+            "${{ matrix.target }}" \
+            "dist/shosai-${version}-${{ matrix.target }}.tar.gz"
+
+      - name: Validate macOS package
+        if: runner.os == 'macOS'
+        run: |
+          version="${{ inputs.release_tag }}"
+          version="${version#v}"
+          architecture="${{ matrix.target }}"
+          architecture="${architecture%%-*}"
+          scripts/check-macos-package.sh \
+            "$version" \
+            "$architecture" \
+            "dist/Shosai-${version}-macos-${architecture}.zip"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
