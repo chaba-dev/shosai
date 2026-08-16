@@ -104,6 +104,10 @@ const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
 const READER_VERTICAL_CHROME: f32 = 148.0;
+const READER_SEARCH_HEIGHT: f32 = 52.0;
+const COMPACT_READER_SEARCH_HEIGHT: f32 = 88.0;
+const READER_MORE_HEIGHT: f32 = 58.0;
+const COMPACT_READER_MORE_HEIGHT: f32 = 84.0;
 const PAGE_GUTTER: f32 = 20.0;
 const BOOKMARKS_PANEL_WIDTH: f32 = 300.0;
 const WINDOW_WIDTH_KEY: &str = "window.width";
@@ -273,6 +277,8 @@ struct ReaderTab {
     reading_mode: ReadingMode,
     bookmarks: Vec<Bookmark>,
     show_bookmarks_panel: bool,
+    show_reader_settings: bool,
+    show_reader_more: bool,
     current_page_bookmarked: bool,
     editing_note_id: Option<i64>,
     editing_note_text: String,
@@ -667,6 +673,8 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         reading_mode: state.reading_mode,
         bookmarks: state.bookmarks.clone(),
         show_bookmarks_panel: state.show_bookmarks_panel,
+        show_reader_settings: state.show_reader_settings,
+        show_reader_more: state.show_reader_more,
         current_page_bookmarked: state.current_page_bookmarked,
         editing_note_id: state.editing_note_id,
         editing_note_text: state.editing_note_text.clone(),
@@ -709,6 +717,8 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.reading_mode = tab.reading_mode;
     state.bookmarks = tab.bookmarks;
     state.show_bookmarks_panel = tab.show_bookmarks_panel;
+    state.show_reader_settings = tab.show_reader_settings;
+    state.show_reader_more = tab.show_reader_more;
     state.current_page_bookmarked = tab.current_page_bookmarked;
     state.editing_note_id = tab.editing_note_id;
     state.editing_note_text = tab.editing_note_text;
@@ -870,6 +880,8 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.continuous_visible.clear();
     state.continuous_chapters.clear();
     state.continuous_tail_extent = 0.0;
+    state.show_reader_settings = false;
+    state.show_reader_more = false;
     state.show_search_bar = false;
     state.search_query.clear();
     state.search_results.clear();
@@ -1551,18 +1563,27 @@ fn uses_page_spreads(state: &State) -> bool {
 }
 
 fn available_reader_size(state: &State) -> Size {
+    let compact = uses_compact_reader_layout(state.window_size.width);
     let bookmarks_width = if state.show_bookmarks_panel {
         BOOKMARKS_PANEL_WIDTH
     } else {
         0.0
     };
-    let search_height = if state.show_search_bar { 52.0 } else { 0.0 };
+    let search_height = if state.show_search_bar {
+        reader_search_height(compact)
+    } else {
+        0.0
+    };
     let settings_height = if state.show_reader_settings {
         62.0
     } else {
         0.0
     };
-    let more_height = if state.show_reader_more { 58.0 } else { 0.0 };
+    let more_height = if state.show_reader_more {
+        reader_more_height(compact)
+    } else {
+        0.0
+    };
     Size::new(
         (state.window_size.width - bookmarks_width - READER_HORIZONTAL_PADDING).max(1.0),
         (state.window_size.height
@@ -1572,6 +1593,22 @@ fn available_reader_size(state: &State) -> Size {
             - more_height)
             .max(1.0),
     )
+}
+
+fn reader_search_height(compact: bool) -> f32 {
+    if compact {
+        COMPACT_READER_SEARCH_HEIGHT
+    } else {
+        READER_SEARCH_HEIGHT
+    }
+}
+
+fn reader_more_height(compact: bool) -> f32 {
+    if compact {
+        COMPACT_READER_MORE_HEIGHT
+    } else {
+        READER_MORE_HEIGHT
+    }
 }
 
 fn paginated_raster_pages(state: &State) -> Vec<usize> {
@@ -2486,6 +2523,7 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     container(controls)
         .padding([7, 12])
         .width(Length::Fill)
+        .height(reader_more_height(compact))
         .style(app_theme::reader_controls)
         .into()
 }
@@ -2679,6 +2717,7 @@ fn search_bar(state: &State, compact: bool) -> Element<'_, Message> {
     container(bar)
         .padding([8, 12])
         .width(Length::Fill)
+        .height(reader_search_height(compact))
         .style(app_theme::reader_search)
         .into()
 }
@@ -4080,6 +4119,20 @@ mod tests {
     }
 
     #[test]
+    fn compact_reader_panels_reserve_their_stacked_height() {
+        let (mut state, _) = boot();
+        state.window_size = Size::new(COMPACT_READER_WIDTH - 1.0, 700.0);
+        let baseline = available_reader_size(&state).height;
+
+        state.show_search_bar = true;
+        assert_eq!(baseline - available_reader_size(&state).height, 88.0);
+
+        state.show_search_bar = false;
+        state.show_reader_more = true;
+        assert_eq!(baseline - available_reader_size(&state).height, 84.0);
+    }
+
+    #[test]
     fn reader_labels_truncate_without_splitting_unicode() {
         assert_eq!(truncate_reader_label("短い題名", 8), "短い題名");
         assert_eq!(truncate_reader_label("長い日本語の書名", 5), "長い日本…");
@@ -4121,6 +4174,64 @@ mod tests {
         assert!(!state.show_reader_settings);
         assert!(!state.show_reader_more);
         assert!(state.show_bookmarks_panel);
+    }
+
+    #[test]
+    fn switching_tabs_restores_exclusive_reader_panels() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        state.file_path = Some(PathBuf::from("contents.epub"));
+        state.show_bookmarks_panel = true;
+        let contents = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("settings.epub"));
+        state.show_bookmarks_panel = false;
+        state.show_reader_settings = true;
+        let settings = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(3);
+        state.file_path = Some(PathBuf::from("more.epub"));
+        state.show_reader_settings = false;
+        state.show_reader_more = true;
+        let more = capture_reader_tab(&state).unwrap();
+
+        state.tabs = vec![contents, settings, more];
+        state.active_tab = Some(2);
+
+        let _ = update(&mut state, Message::SelectTab(0));
+        assert_eq!(
+            (
+                state.show_reader_settings,
+                state.show_reader_more,
+                state.show_bookmarks_panel,
+            ),
+            (false, false, true)
+        );
+
+        let _ = update(&mut state, Message::SelectTab(1));
+        assert_eq!(
+            (
+                state.show_reader_settings,
+                state.show_reader_more,
+                state.show_bookmarks_panel,
+            ),
+            (true, false, false)
+        );
+
+        let _ = update(&mut state, Message::SelectTab(2));
+        assert_eq!(
+            (
+                state.show_reader_settings,
+                state.show_reader_more,
+                state.show_bookmarks_panel,
+            ),
+            (false, true, false)
+        );
     }
 
     #[test]
