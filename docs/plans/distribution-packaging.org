@@ -29,6 +29,8 @@ all-or-nothing rollout.
   architecture has an explicit SHA-256 in the release matrix.
 - [X] Built artifacts are collected into one GitHub release with ~SHA256SUMS~.
 - [X] macOS bundles are ad-hoc signed and verified before zipping.
+- [X] Release jobs validate archive contents, architecture, Linux installation,
+  macOS bundle metadata, and signatures before uploading artifacts.
 - [X] CI tests Windows x86_64 with a downloaded ~pdfium.dll~, but does not
   package or publish Windows.
 
