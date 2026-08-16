@@ -168,6 +168,19 @@ fn test_render_page_scaled() {
 }
 
 #[test]
+fn test_render_page_rounds_fractional_dimensions_up() {
+    let doc = PdfDoc::from_bytes(generated_pdf(
+        "",
+        "BT /F1 24 Tf 30 100 Td (Fractional dimensions) Tj ET",
+    ))
+    .unwrap();
+
+    let page = doc.render_page(0, 1.001).unwrap();
+
+    assert_eq!((page.width, page.height), (301, 201));
+}
+
+#[test]
 fn test_render_page_with_search_highlights() {
     let doc = PdfDoc::open(fixture_path("sample.pdf")).unwrap();
     let plain = doc.render_page(0, 1.0).unwrap();

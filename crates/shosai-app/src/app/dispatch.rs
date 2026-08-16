@@ -830,7 +830,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(request) = state.continuous_pending.get(&page).copied() else {
                 return Task::none();
             };
-            let scale = state.zoom.scale();
+            let scale = raster_render_scale(state, state.zoom.scale());
             match &state.document {
                 Some(OpenDocument::Pdf(doc)) => {
                     let doc = Arc::clone(doc);
@@ -860,7 +860,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::Opened { position, size } => {
                     state.window_size = size;
                     state.window_position = position;
-                    application_icon = crate::application_icon_task(id);
+                    let generation = state.window_scale_generation;
+                    application_icon = Task::batch([
+                        crate::application_icon_task(id),
+                        window::scale_factor(id).map(move |scale_factor| {
+                            Message::WindowScaleFactorLoaded {
+                                generation,
+                                scale_factor,
+                            }
+                        }),
+                    ]);
                     if let Some((saved_size, saved_position)) = state.saved_window_geometry {
                         return Task::batch([
                             application_icon,
@@ -872,6 +881,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::Resized(size) => {
                     state.window_size = size;
                     invalidate_continuous_layout(state);
+                }
+                window::Event::Rescaled(scale_factor) => {
+                    state.window_scale_generation = state.window_scale_generation.wrapping_add(1);
+                    return update_window_scale_factor(state, scale_factor);
                 }
                 window::Event::Moved(position) => state.window_position = Some(position),
                 window::Event::CloseRequested => {
@@ -893,6 +906,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let content = reader_layout_changed_task(state);
             return Task::batch([application_icon, persist, content]);
         }
+
+        Message::WindowScaleFactorLoaded {
+            generation,
+            scale_factor,
+        } if generation == state.window_scale_generation => {
+            return update_window_scale_factor(state, scale_factor);
+        }
+
+        Message::WindowScaleFactorLoaded { .. } => {}
 
         Message::PersistWindowGeometry(generation) => {
             if generation != state.window_geometry_generation {

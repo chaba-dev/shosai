@@ -101,6 +101,7 @@ const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_mil
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
+const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
 const READER_VERTICAL_CHROME: f32 = 148.0;
@@ -392,6 +393,8 @@ pub struct State {
     pending_open: Option<PendingOpen>,
     window_id: Option<window::Id>,
     window_size: Size,
+    window_scale_factor: f32,
+    window_scale_generation: u64,
     window_position: Option<Point>,
     saved_window_geometry: Option<(Size, Point)>,
     window_geometry_generation: u64,
@@ -523,6 +526,8 @@ pub fn boot() -> (State, Task<Message>) {
         pending_open: None,
         window_id: None,
         window_size: Size::new(900.0, 700.0),
+        window_scale_factor: 1.0,
+        window_scale_generation: 0,
         window_position: None,
         saved_window_geometry: None,
         window_geometry_generation: 0,
@@ -761,7 +766,17 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
         Task::none()
     };
     let content_task = if state.reading_mode == ReadingMode::Continuous {
-        scroll_to_current_page(state)
+        let pdf_needs_render = matches!(state.document, Some(OpenDocument::Pdf(_)))
+            && state
+                .continuous_pages
+                .get(state.current_page)
+                .and_then(Option::as_ref)
+                .is_none();
+        if pdf_needs_render {
+            refresh_content(state)
+        } else {
+            scroll_to_current_page(state)
+        }
     } else if state.rendered_page.is_some() || matches!(state.document, Some(OpenDocument::Epub(_)))
     {
         Task::none()
@@ -1148,7 +1163,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         Some(OpenDocument::Pdf(doc)) => {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
-            let scale = paginated_raster_scale(state, &pages);
+            let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
             state.chapter_content.clear();
             state.error = None;
             let mut tasks = Vec::new();
@@ -1483,6 +1498,44 @@ fn invalidate_continuous_rasters(state: &mut State) {
     state.render_generation = state.render_generation.wrapping_add(1);
 }
 
+fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Message> {
+    if !scale_factor.is_finite()
+        || scale_factor <= 0.0
+        || (state.window_scale_factor - scale_factor).abs() <= f32::EPSILON
+    {
+        return Task::none();
+    }
+    state.window_scale_factor = scale_factor;
+
+    for tab in &mut state.tabs {
+        if matches!(tab.document, OpenDocument::Pdf(_)) {
+            tab.rendered_page = None;
+            tab.rendered_page_index = None;
+            tab.rendered_page_handle = None;
+            tab.rendered_facing_page = None;
+            tab.rendered_facing_page_handle = None;
+            tab.page_cache.clear();
+            tab.continuous_pages.fill(None);
+            tab.continuous_pending.clear();
+            tab.render_generation = tab.render_generation.wrapping_add(1);
+        }
+    }
+
+    if !matches!(state.document, Some(OpenDocument::Pdf(_))) {
+        return Task::none();
+    }
+    state.rendered_page = None;
+    state.rendered_page_index = None;
+    state.rendered_page_handle = None;
+    state.rendered_facing_page = None;
+    state.rendered_facing_page_handle = None;
+    state.page_cache.clear();
+    state.continuous_pages.fill(None);
+    state.continuous_pending.clear();
+    state.render_generation = state.render_generation.wrapping_add(1);
+    refresh_content(state)
+}
+
 fn invalidate_continuous_layout(state: &mut State) {
     state.continuous_tail_extent = 0.0;
     state.continuous_activation = state.continuous_activation.wrapping_add(1);
@@ -1649,6 +1702,36 @@ fn paginated_raster_scale(state: &State, pages: &[usize]) -> f32 {
     }
 }
 
+fn raster_render_scale(state: &State, layout_scale: f32) -> f32 {
+    if matches!(state.document, Some(OpenDocument::Pdf(_))) {
+        layout_scale * pdf_raster_density(state)
+    } else {
+        layout_scale
+    }
+}
+
+fn raster_logical_size(
+    state: &State,
+    page: usize,
+    rendered: &RenderedPage,
+    layout_scale: f32,
+) -> Size {
+    if matches!(state.document, Some(OpenDocument::Pdf(_)))
+        && let Some((width, height)) = raster_page_size(state, page)
+    {
+        return Size::new(width * layout_scale, height * layout_scale);
+    }
+    Size::new(rendered.width as f32, rendered.height as f32)
+}
+
+fn uses_exact_paginated_raster_size(state: &State) -> bool {
+    matches!(state.document, Some(OpenDocument::Pdf(_))) || state.zoom != ZoomMode::FitPage
+}
+
+fn pdf_raster_density(state: &State) -> f32 {
+    state.window_scale_factor.max(PDF_MIN_RASTER_DENSITY)
+}
+
 fn zoom_step_scale(state: &State, step: f32) -> f32 {
     let current = if uses_paginated_raster_layout(state) {
         let pages = paginated_raster_pages(state);
@@ -1709,7 +1792,7 @@ fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
         return Task::none();
     };
     let pages = paginated_raster_pages_at(state, next_page);
-    let scale = paginated_raster_scale(state, &pages);
+    let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.render_generation;
     let mut tasks = Vec::new();
@@ -1780,7 +1863,7 @@ fn raster_image_handle(rendered: &RenderedPage) -> RasterImageHandle {
 fn show_cached_paginated_spread(state: &mut State) -> bool {
     let pages = paginated_raster_pages(state);
     let target_pages = pages.clone();
-    let scale = paginated_raster_scale(state, &pages);
+    let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
     let rendered = pages
         .iter()
         .map(|page| {
@@ -2194,11 +2277,15 @@ fn reader_edge_button(
     message: Option<Message>,
     compact: bool,
 ) -> iced::widget::Button<'static, Message> {
-    button(text(label).size(if compact { 28 } else { 36 }))
-        .on_press_maybe(message)
-        .padding([12, if compact { 8 } else { 16 }])
-        .height(Length::Fill)
-        .style(app_theme::reader_edge_button)
+    button(
+        container(text(label).size(if compact { 28 } else { 36 }))
+            .height(Length::Fill)
+            .center_y(Length::Fill),
+    )
+    .on_press_maybe(message)
+    .padding([12, if compact { 8 } else { 16 }])
+    .height(Length::Fill)
+    .style(app_theme::reader_edge_button)
 }
 
 fn tabs_view(state: &State) -> Element<'_, Message> {
@@ -2758,9 +2845,11 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                         rendered.height,
                         rendered.pixels.clone(),
                     );
+                    let logical_size =
+                        raster_logical_size(state, index, rendered, state.zoom.scale());
                     image(handle)
-                        .width(Length::Fixed(rendered.width as f32))
-                        .height(Length::Fixed(rendered.height as f32))
+                        .width(Length::Fixed(logical_size.width))
+                        .height(Length::Fixed(logical_size.height))
                         .into()
                 } else {
                     let page_height = match &state.document {
@@ -2917,21 +3006,26 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
     };
 
     let page_count = pages.len();
+    let layout_scale = paginated_raster_scale(state, &pages);
     let mut spread = row![].spacing(PAGE_GUTTER).padding(20);
     for page in pages {
         let rendered = rendered_for(page);
-        let rendered_width = rendered.map_or(0.0, |(rendered, _)| rendered.width as f32);
+        let rendered_width = rendered.map_or(0.0, |(rendered, _)| {
+            raster_logical_size(state, page, rendered, layout_scale).width
+        });
         let content: Element<'_, Message> = if let Some((rendered, handle)) = rendered {
-            match state.zoom {
-                ZoomMode::Manual(_) | ZoomMode::FitWidth => image(&handle.0)
-                    .width(Length::Fixed(rendered.width as f32))
-                    .height(Length::Fixed(rendered.height as f32))
-                    .into(),
-                ZoomMode::FitPage => image(&handle.0)
+            if uses_exact_paginated_raster_size(state) {
+                let logical_size = raster_logical_size(state, page, rendered, layout_scale);
+                image(&handle.0)
+                    .width(Length::Fixed(logical_size.width))
+                    .height(Length::Fixed(logical_size.height))
+                    .into()
+            } else {
+                image(&handle.0)
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .content_fit(iced::ContentFit::Contain)
-                    .into(),
+                    .into()
             }
         } else {
             center(text(format!("Rendering page {}...", page + 1))).into()
@@ -4331,6 +4425,215 @@ mod tests {
 
         assert_eq!(paginated_raster_pages(&state), vec![0]);
         assert_eq!(next_page_location(&state), Some(1));
+    }
+
+    #[test]
+    fn pdf_rasters_use_physical_pixels_but_keep_logical_layout_size() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.window_scale_factor = 2.0;
+        let rendered = RenderedPage {
+            width: 1_200,
+            height: 1_600,
+            pixels: bytes::Bytes::new(),
+        };
+
+        assert_eq!(raster_render_scale(&state, 1.25), 2.5);
+        let (page_width, page_height) = raster_page_size(&state, 0).unwrap();
+        assert_eq!(
+            raster_logical_size(&state, 0, &rendered, 1.25),
+            Size::new(page_width * 1.25, page_height * 1.25)
+        );
+    }
+
+    #[test]
+    fn pdf_rasters_use_two_x_supersampling_on_low_density_displays() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        let rendered = RenderedPage {
+            width: 1_200,
+            height: 1_600,
+            pixels: bytes::Bytes::new(),
+        };
+
+        assert_eq!(state.window_scale_factor, 1.0);
+        for (window_scale, expected_density) in [(1.0, 2.0), (1.5, 2.0), (2.0, 2.0), (2.5, 2.5)] {
+            state.window_scale_factor = window_scale;
+            assert_eq!(pdf_raster_density(&state), expected_density);
+        }
+        state.window_scale_factor = 1.0;
+        let (page_width, page_height) = raster_page_size(&state, 0).unwrap();
+        assert_eq!(
+            raster_logical_size(&state, 0, &rendered, 1.25),
+            Size::new(page_width * 1.25, page_height * 1.25)
+        );
+    }
+
+    #[test]
+    fn rounded_pdf_rasters_keep_the_same_logical_size_across_display_densities() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        let two_x_render = RenderedPage {
+            width: 601,
+            height: 801,
+            pixels: bytes::Bytes::new(),
+        };
+        let two_and_a_half_x_render = RenderedPage {
+            width: 751,
+            height: 1_001,
+            pixels: bytes::Bytes::new(),
+        };
+
+        state.window_scale_factor = 2.0;
+        let two_x_size = raster_logical_size(&state, 0, &two_x_render, 1.001);
+        state.window_scale_factor = 2.5;
+        let two_and_a_half_x_size = raster_logical_size(&state, 0, &two_and_a_half_x_render, 1.001);
+
+        assert_eq!(two_x_size, two_and_a_half_x_size);
+    }
+
+    #[test]
+    fn cbz_fit_page_keeps_contain_presentation() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.zoom = ZoomMode::FitPage;
+
+        assert!(!uses_exact_paginated_raster_size(&state));
+    }
+
+    #[test]
+    fn display_scale_change_invalidates_pdf_rasters_and_schedules_a_rerender() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.window_scale_factor = 2.0;
+        state.file_path = Some(PathBuf::from("sample.pdf"));
+        let page = RenderedPage {
+            width: 10,
+            height: 10,
+            pixels: bytes::Bytes::from(vec![0; 400]),
+        };
+        state.rendered_page = Some(page.clone());
+        state.rendered_page_index = Some(0);
+        cache_rendered_page(
+            &mut state,
+            PageCacheKey {
+                page: 0,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+            page,
+        );
+        state.tabs.push(capture_reader_tab(&state).unwrap());
+        let generation = state.window_scale_generation;
+
+        let task = update(
+            &mut state,
+            Message::WindowScaleFactorLoaded {
+                generation,
+                scale_factor: 2.5,
+            },
+        );
+
+        assert_eq!(state.window_scale_factor, 2.5);
+        assert_eq!(pdf_raster_density(&state), 2.5);
+        assert!(state.rendered_page.is_none());
+        assert!(state.page_cache.is_empty());
+        assert!(state.tabs[0].rendered_page.is_none());
+        assert!(state.tabs[0].page_cache.is_empty());
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn selecting_an_invalidated_continuous_pdf_restarts_its_render() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let document = OpenDocument::Pdf(Arc::new(pdf));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.pdf"));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.error = Some("stale render error".to_string());
+        let stale_request = ContinuousRequest {
+            id: 1,
+            generation: state.render_generation,
+        };
+        state.continuous_pending.insert(0, stale_request);
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.pdf"));
+        state.error = None;
+        state.continuous_pending.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(window::Id::unique(), window::Event::Rescaled(2.0)),
+        );
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request: stale_request,
+                page: 0,
+                result: Ok(RenderedPage {
+                    width: 10,
+                    height: 10,
+                    pixels: bytes::Bytes::from(vec![0; 400]),
+                }),
+            },
+        );
+        assert!(state.tabs[0].continuous_pages[0].is_none());
+
+        let task = update(&mut state, Message::SelectTab(0));
+
+        assert!(state.error.is_none());
+        assert!(state.continuous_pending.contains_key(&0));
+        assert_ne!(
+            state.continuous_pending.get(&0).copied(),
+            Some(stale_request)
+        );
+        assert!(task.units() > 0);
+    }
+
+    #[test]
+    fn stale_initial_scale_query_does_not_override_a_rescale_event() {
+        let (mut state, _) = boot();
+        let id = window::Id::unique();
+        let initial_generation = state.window_scale_generation;
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::Rescaled(2.0)),
+        );
+        let _ = update(
+            &mut state,
+            Message::WindowScaleFactorLoaded {
+                generation: initial_generation,
+                scale_factor: 1.0,
+            },
+        );
+
+        assert_eq!(state.window_scale_factor, 2.0);
     }
 
     #[test]

@@ -147,6 +147,10 @@ pub enum Message {
     // Keyboard
     KeyPressed(keyboard::Event),
     WindowEvent(window::Id, window::Event),
+    WindowScaleFactorLoaded {
+        generation: u64,
+        scale_factor: f32,
+    },
     PersistWindowGeometry(u64),
     WindowGeometryPersisted,
 }
