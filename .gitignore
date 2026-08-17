@@ -25,3 +25,7 @@ rust-project.json
 # End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer
 
 /.direnv/
+
+# Hugo build output
+/website/public/
+/website/.hugo_build.lock

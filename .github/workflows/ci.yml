@@ -3,8 +3,30 @@ name: CI
 on:
   push:
     branches: [main]
+    paths:
+      - "crates/**"
+      - "assets/**"
+      - "packaging/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Makefile"
+      - "flake.nix"
+      - "flake.lock"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [main]
+    paths:
+      - "crates/**"
+      - "assets/**"
+      - "packaging/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Makefile"
+      - "flake.nix"
+      - "flake.lock"
+      - ".github/workflows/ci.yml"
 
 jobs:
   fmt:
