@@ -4931,6 +4931,7 @@ dependencies = [
  "lightningcss",
  "natord",
  "pdfium-render",
+ "percent-encoding",
  "roxmltree 0.21.1",
  "sqlx",
  "syntect",

@@ -34,8 +34,9 @@ It currently proves on macOS arm64 that:
 - an in-memory `shosai:` custom protocol can render a chapter containing CSS,
   a table with `rowspan`, and presentation MathML;
 - the same protocol now opens the checked-in `sample.epub` from bytes and serves
-  its spine XHTML, stylesheet, and image using manifest media types; every
-  protocol request is recorded by the harness;
+  every available manifest resource, including spine and navigation XHTML,
+  stylesheet, and image bytes, using manifest media types; every protocol
+  request is recorded by the harness;
 - the child can be resized with its Iced parent and explicitly focused;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
@@ -43,10 +44,11 @@ It currently proves on macOS arm64 that:
 
 The successful macOS run was visually checked. The security callbacks and CSP
 are configured and unit-tested, but the required proof that no remote subresource
-request reaches the network is still outstanding. The harness serves the XHTML
-bytes as `text/html`; serving the same valid XML as `application/xhtml+xml`
-produced a WebKit XML error and needs investigation before the spike can claim
-EPUB MIME-equivalent behavior.
+request reaches the network is still outstanding. Checked-in book resources are
+served with their exact manifest media types, including
+`application/xhtml+xml`; the generated conformance page remains explicitly
+declared as `text/html` because it is harness-owned rather than an EPUB manifest
+resource.
 
 ## Integration findings
 
@@ -84,8 +86,10 @@ The current support boundary is now explicit:
 - release artifacts ship for Linux x86_64, Linux arm64, and macOS arm64;
 - CI runs the workspace tests on Linux, macOS, and Windows, but no Windows
   artifact is published;
-- Linux packages include Iced's X11 and Wayland runtime dependencies, but no
-  WebKitGTK runtime;
+- the Nix package closes over Iced's X11 and Wayland runtime libraries, but the
+  published Linux tarballs are a separate format: they bundle PDFium and rely
+  on compatible host X11/Wayland graphics libraries. Neither distribution path
+  currently includes WebKitGTK;
 - the selected production renderer must therefore work in the shipped macOS
   and Linux artifacts, including both X11 and Wayland sessions. It must compile
   and retain backend-independent core tests on Windows; shipping a Windows
@@ -150,12 +154,12 @@ copying its content.
 
 ## Native performance baseline
 
-The app contains an opt-in release harness in `app/perf.rs`. It starts timing
-when Iced delivers a navigation or font-size action to the application and
-finishes when the subscription result for the resulting Iced redraw is
-processed. In Iced 0.14's Winit runner, that redraw event is broadcast after
-draw and directly before `compositor.present`; its subscription message is
-processed after the current event-loop callback. The metric therefore covers
+The app contains an opt-in synthetic release harness in `app/perf.rs`. It
+starts timing when Iced delivers a navigation or font-size action to the
+application and finishes when the subscription result for the resulting Iced
+redraw is processed. In Iced 0.14's Winit runner, that redraw event is broadcast
+after draw and directly before `compositor.present`; its subscription message
+is processed after the current event-loop callback. The metric therefore covers
 application input dispatch, state/pagination work, Iced layout/draw, and
 compositor presentation. It does not include the OS input event before Iced
 dispatch, physical display scan-out, or panel response time.
@@ -171,7 +175,9 @@ image EPUBs under `target/`, fixes the benchmark viewport at 700×700 (588 px
 reader, single page) and 1000×700 (888 px reader, spread), waits 60 frames for
 window stabilization, discards five operation warmups, then records 50 samples.
 The generated books contain 16 chapters so the same run can select stable
-within-chapter and chapter-boundary pairs. Initial budgets are:
+within-chapter and chapter-boundary pairs. Generated archives are byte-stable,
+and the script fails if a run reports an error, never produces pages, omits one
+of the 16 summaries, or records a different sample count. Initial budgets are:
 
 | Operation | p50 budget | p95 budget |
 |---|---:|---:|
@@ -209,10 +215,9 @@ under representative power/display conditions.
 
 ## Next spike steps
 
-1. Move the spike's exact manifest lookup behind the canonical resolver planned
-   for core, then prove remote requests are blocked with a network monitor or
-   controlled proxy. `sample.epub` chapter/CSS/image serving and request
-   recording are now wired.
+1. Prove remote requests are blocked with a network monitor or controlled
+   proxy. The shared canonical resolver now protects `sample.epub`
+   chapter/CSS/image serving and request recording.
 2. Replace fixed child bounds with an identified Iced placeholder and test
    resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
 3. Run the same child spike on Windows and Linux/X11. Decide whether lack of a

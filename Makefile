@@ -1,4 +1,4 @@
-.PHONY: dev lint fmt test changelog next-version
+.PHONY: dev lint fmt test test-scripts changelog next-version
 
 ## Run the application in debug mode
 dev:
@@ -15,6 +15,11 @@ fmt:
 ## Run all tests
 test:
 	cargo test --workspace --no-fail-fast
+	$(MAKE) test-scripts
+
+## Run tests for repository scripts
+test-scripts:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
 
 ## Regenerate CHANGELOG.md from conventional commits
 changelog:

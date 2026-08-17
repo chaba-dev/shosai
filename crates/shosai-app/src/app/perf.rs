@@ -60,6 +60,14 @@ struct Runner {
     action_scheduled: bool,
     warmup_frames: usize,
     warmup_samples: usize,
+    readiness_frames: usize,
+}
+
+impl Runner {
+    fn pages_timed_out(&mut self) -> bool {
+        self.readiness_frames = self.readiness_frames.saturating_sub(1);
+        self.readiness_frames == 0
+    }
 }
 
 #[derive(Debug)]
@@ -104,6 +112,7 @@ impl Performance {
             action_scheduled: false,
             warmup_frames: 60,
             warmup_samples: 5,
+            readiness_frames: 600,
         });
 
         if enabled {
@@ -157,6 +166,7 @@ pub(super) fn window_resized(state: &mut State, size: Size) {
         runner.positioned = false;
         runner.action_scheduled = false;
         runner.warmup_frames = 60;
+        runner.readiness_frames = 600;
     }
 }
 
@@ -260,10 +270,20 @@ pub(super) fn frame_presented(state: &mut State) -> Task<Message> {
         return state
             .window_id
             .map(|id| flush_reading_state_before_close(state, id))
-            .unwrap_or_else(Task::none);
+            .unwrap_or_else(iced::exit);
     }
-    if runner.action_scheduled || state.performance.pending.is_some() || state.epub_pages.is_empty()
-    {
+    if runner.action_scheduled || state.performance.pending.is_some() {
+        return Task::none();
+    }
+    if state.epub_pages.is_empty() {
+        if state
+            .performance
+            .runner
+            .as_mut()
+            .is_some_and(Runner::pages_timed_out)
+        {
+            return fail(state, "pages did not become ready");
+        }
         return Task::none();
     }
 
@@ -279,15 +299,7 @@ pub(super) fn frame_presented(state: &mut State) -> Task<Message> {
             AutomatedAction::Relayout => Some((state.epub_page, state.epub_page)),
         };
         let Some((start, _)) = pair else {
-            eprintln!(
-                "perf-error fixture={} action has no matching page pair",
-                state.performance.fixture
-            );
-            state.performance.runner = None;
-            return state
-                .window_id
-                .map(|id| flush_reading_state_before_close(state, id))
-                .unwrap_or_else(Task::none);
+            return fail(state, "action has no matching page pair");
         };
         state.epub_page = start;
         sync_epub_location(state);
@@ -318,6 +330,20 @@ pub(super) fn frame_presented(state: &mut State) -> Task<Message> {
         async move { tokio::time::sleep(Duration::from_millis(40)).await },
         move |_| message.clone(),
     )
+}
+
+pub(super) fn fail(state: &mut State, reason: &str) -> Task<Message> {
+    if state.performance.runner.take().is_none() {
+        return Task::none();
+    }
+    eprintln!(
+        "perf-error fixture={} reason={reason}",
+        state.performance.fixture
+    );
+    state
+        .window_id
+        .map(|id| flush_reading_state_before_close(state, id))
+        .unwrap_or_else(iced::exit)
 }
 
 fn find_page_pair(state: &State, same_chapter: bool) -> Option<(usize, usize)> {
@@ -385,5 +411,22 @@ mod tests {
         let values = (1..=20).map(f64::from).collect::<Vec<_>>();
         assert_eq!(nearest_rank(&values, 0.50), 10.0);
         assert_eq!(nearest_rank(&values, 0.95), 19.0);
+    }
+
+    #[test]
+    fn automated_runner_bounds_waiting_for_pages() {
+        let mut runner = Runner {
+            action: AutomatedAction::WarmPageTurn,
+            remaining: 1,
+            forward: true,
+            positioned: false,
+            action_scheduled: false,
+            warmup_frames: 0,
+            warmup_samples: 0,
+            readiness_frames: 2,
+        };
+
+        assert!(!runner.pages_timed_out());
+        assert!(runner.pages_timed_out());
     }
 }

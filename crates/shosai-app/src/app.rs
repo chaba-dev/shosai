@@ -854,8 +854,9 @@ fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
     let document = match load_document(&path) {
         Ok(document) => document,
         Err(error) => {
+            let performance_task = perf::fail(state, &format!("document failed to open: {error}"));
             state.open_error = Some(error);
-            return Task::none();
+            return performance_task;
         }
     };
     save_active_tab(state);

@@ -16,10 +16,10 @@ and maintenance consequences.
 * Current Baseline
 
 - ~crates/shosai-core/src/epub/parser.rs~ reads container/OPF, spine, TOC,
-  XHTML, and manifest resources.  Non-XHTML resources are held eagerly in
-  ~EpubContent.resources~ without archive-entry, count, compression-ratio, or
-  aggregate-byte limits.  Relative paths are joined as strings rather than
-  canonicalized, scheme-aware EPUB URIs.
+  XHTML, and manifest resources.  Manifest resources are held eagerly in
+  ~EpubContent.resources~ without entry-count, compression-ratio, or
+  aggregate-byte limits.  A shared canonical resolver now validates archive
+  names and same-book paths before parser or custom-protocol lookup.
 - ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but extracts class
   tokens from serialized selectors into a small-property ~StyleMap~.  It does
   not implement selector matching, the cascade, inheritance, layout, or
@@ -57,7 +57,8 @@ external links follow an explicit confirmation/allow policy.
 
 - [ ] Capture baseline screenshots, load time, and memory use using
   ~crates/shosai-core/tests/fixtures/sample.epub~ and at least one large EPUB.
-- [X] Capture host input-to-compositor-present p50/p95 latency for warm page
+- [X] Capture synthetic app-action-to-compositor-present p50/p95 latency for
+  warm page
   turns, chapter transitions, and font-size relayout using ~sample.epub~ plus
   generated large text/image workloads in single-page and spread modes.  The
   reproducible release harness, protocol, budgets, and 2026-08-17 M4 Max
@@ -75,7 +76,7 @@ external links follow an explicit confirmation/allow policy.
   published; the production renderer must ship on macOS arm64 and Linux
   x86_64/arm64 under both X11 and Wayland.  ADR 001 records why a Wry-only route
   does not yet meet that boundary.
-- [ ] Introduce the minimal backend-neutral canonical archive-path and EPUB-URI
+- [X] Introduce the minimal backend-neutral canonical archive-path and EPUB-URI
   resolver needed by both spikes (percent decoding, fragments, scheme/origin
   checks, traversal rejection, normalized-entry uniqueness, and MIME lookup).
   Do this before candidate-specific resource adapters so Gate 0 tests one
@@ -85,7 +86,7 @@ external links follow an explicit confirmation/allow policy.
 
 Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
-- [ ] Render one chapter from bytes through a custom, non-network resource
+- [X] Render one chapter from bytes through a custom, non-network resource
   protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.
 - [ ] Disable scripts, remote navigation, downloads, popups, and external
   resource fetching by default; prove blocked requests in a test/harness.

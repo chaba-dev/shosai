@@ -7,12 +7,26 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 LOREM = (
     "Shōsai keeps a stable logical reading position while the renderer lays out "
     "this deliberately repetitive paragraph. Mixed punctuation, emphasized words, "
     "and enough text to wrap across several lines make the fixture useful for "
     "repeatable pagination measurements without importing copyrighted material. "
 )
+
+
+def write_entry(
+    archive: zipfile.ZipFile,
+    name: str,
+    content: str | bytes,
+    compression: int = zipfile.ZIP_STORED,
+) -> None:
+    info = zipfile.ZipInfo(name, ZIP_TIMESTAMP)
+    info.compress_type = compression
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    archive.writestr(info, content)
 
 
 def write_epub(path: Path, workload: str) -> None:
@@ -88,15 +102,19 @@ def write_epub(path: Path, workload: str) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
-        archive.writestr("META-INF/container.xml", container)
-        archive.writestr("OEBPS/content.opf", package)
-        archive.writestr("OEBPS/nav.xhtml", nav)
-        archive.writestr("OEBPS/style.css", css)
+        write_entry(archive, "mimetype", "application/epub+zip")
+        write_entry(archive, "META-INF/container.xml", container)
+        write_entry(archive, "OEBPS/content.opf", package)
+        write_entry(archive, "OEBPS/nav.xhtml", nav)
+        write_entry(archive, "OEBPS/style.css", css)
         for chapter_path, content in chapters:
-            archive.writestr(f"OEBPS/{chapter_path}", content)
+            write_entry(archive, f"OEBPS/{chapter_path}", content)
         if workload == "image":
-            archive.write(ROOT / "assets" / "shosai-icon.png", "OEBPS/images/page.png")
+            write_entry(
+                archive,
+                "OEBPS/images/page.png",
+                (ROOT / "assets" / "shosai-icon.png").read_bytes(),
+            )
 
 
 def main() -> None:

@@ -46,5 +46,6 @@ for width in 700 1000; do
   done
 done
 
+python3 "$root/scripts/validate_epub_perf_results.py" "$log" "$samples"
 printf '\nSummaries written to %s\n' "$log"
-rg '^perf-(config|summary|error)' "$log" || true
+rg '^perf-(config|summary)' "$log"

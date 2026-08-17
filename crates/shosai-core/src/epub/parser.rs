@@ -1,12 +1,13 @@
 //! EPUB parsing: ZIP extraction, container.xml, OPF, and content loading.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use zip::ZipArchive;
 
+use super::CanonicalEpubPath;
 use super::types::*;
 use crate::document::DocumentMetadata;
 
@@ -27,17 +28,18 @@ impl EpubDoc {
 
     /// Open an EPUB from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+        let declared_entries = declared_archive_entry_count(&data)?;
         let cursor = Cursor::new(data);
         let mut archive = ZipArchive::new(cursor).context("failed to open EPUB as ZIP archive")?;
+        validate_archive_entries(&mut archive, declared_entries)?;
 
         // 1. Parse container.xml to find the OPF path.
         let opf_path = parse_container(&mut archive)?;
 
         // The OPF directory is used as a base for resolving relative paths.
-        let opf_dir = PathBuf::from(&opf_path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let opf_dir = opf_path
+            .rsplit_once('/')
+            .map_or_else(String::new, |(directory, _)| directory.to_string());
 
         // 2. Parse the OPF file.
         let opf_xml = read_archive_entry(&mut archive, &opf_path)
@@ -138,6 +140,92 @@ fn read_archive_bytes(archive: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> 
     Ok(buf)
 }
 
+fn validate_archive_entries(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    declared_entries: usize,
+) -> Result<()> {
+    if archive.len() != declared_entries {
+        anyhow::bail!("duplicate EPUB archive entry");
+    }
+    let mut paths = HashSet::new();
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .context("failed to inspect EPUB archive entry")?;
+        if file.is_dir() {
+            continue;
+        }
+        let path = CanonicalEpubPath::new(file.name())
+            .with_context(|| format!("unsafe EPUB archive entry: {}", file.name()))?;
+        if !paths.insert(path) {
+            anyhow::bail!("duplicate EPUB archive entry: {}", file.name());
+        }
+    }
+    Ok(())
+}
+
+fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
+    const EOCD_SIGNATURE: &[u8] = b"PK\x05\x06";
+    const ZIP64_LOCATOR_SIGNATURE: &[u8] = b"PK\x06\x07";
+    const ZIP64_EOCD_SIGNATURE: &[u8] = b"PK\x06\x06";
+
+    let search_start = data.len().saturating_sub(65_557);
+    let eocd_offset = (search_start..data.len().saturating_sub(21))
+        .rev()
+        .find(|&offset| {
+            get_bytes(data, offset, 4) == Some(EOCD_SIGNATURE)
+                && offset
+                    .checked_add(20)
+                    .and_then(|comment_offset| read_u16(data, comment_offset))
+                    .and_then(|length| offset.checked_add(22 + usize::from(length)))
+                    .is_some_and(|end| end == data.len())
+        })
+        .context("EPUB ZIP end-of-central-directory record is missing")?;
+    let entries_offset = eocd_offset
+        .checked_add(10)
+        .context("invalid EPUB ZIP footer")?;
+    let entries = read_u16(data, entries_offset).context("invalid EPUB ZIP footer")?;
+    if entries != u16::MAX {
+        return Ok(usize::from(entries));
+    }
+
+    let locator_offset = eocd_offset
+        .checked_sub(20)
+        .filter(|&offset| get_bytes(data, offset, 4) == Some(ZIP64_LOCATOR_SIGNATURE))
+        .context("EPUB ZIP64 locator is missing")?;
+    let zip64_pointer_offset = locator_offset
+        .checked_add(8)
+        .context("invalid EPUB ZIP64 locator")?;
+    let zip64_offset = usize::try_from(
+        read_u64(data, zip64_pointer_offset).context("invalid EPUB ZIP64 locator")?,
+    )
+    .context("EPUB ZIP64 directory offset is too large")?;
+    if get_bytes(data, zip64_offset, 4) != Some(ZIP64_EOCD_SIGNATURE) {
+        anyhow::bail!("EPUB ZIP64 end-of-central-directory record is missing");
+    }
+    let entry_count_offset = zip64_offset
+        .checked_add(32)
+        .context("invalid EPUB ZIP64 footer")?;
+    usize::try_from(read_u64(data, entry_count_offset).context("invalid EPUB ZIP64 footer")?)
+        .context("EPUB ZIP64 entry count is too large")
+}
+
+fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
+    get_bytes(data, offset, 2)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+}
+
+fn read_u64(data: &[u8], offset: usize) -> Option<u64> {
+    get_bytes(data, offset, 8)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u64::from_le_bytes)
+}
+
+fn get_bytes(data: &[u8], offset: usize, length: usize) -> Option<&[u8]> {
+    data.get(offset..offset.checked_add(length)?)
+}
+
 /// Parse META-INF/container.xml to find the OPF file path.
 fn parse_container(archive: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<String> {
     let xml = read_archive_entry(archive, "META-INF/container.xml")
@@ -155,7 +243,10 @@ fn parse_container(archive: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<String> 
         .attribute("full-path")
         .context("rootfile missing full-path attribute")?;
 
-    Ok(full_path.to_string())
+    Ok(CanonicalEpubPath::resolve("", full_path)?
+        .path
+        .as_str()
+        .to_string())
 }
 
 /// Parse the OPF file, returning metadata, manifest items, and spine item IDs.
@@ -209,6 +300,7 @@ fn parse_opf(
 
     // -- Manifest --
     let mut manifest = HashMap::new();
+    let mut manifest_paths = HashMap::new();
 
     for node in doc.descendants() {
         if node.is_element()
@@ -219,7 +311,12 @@ fn parse_opf(
                 node.attribute("media-type"),
             )
         {
-            let full_href = resolve_path(opf_dir, href);
+            let full_href = resolve_manifest_path(opf_dir, href)?;
+            if let Some(existing_id) = manifest_paths.insert(full_href.clone(), id.to_string()) {
+                anyhow::bail!(
+                    "manifest items {existing_id} and {id} resolve to the same EPUB path: {full_href}"
+                );
+            }
             manifest.insert(
                 id.to_string(),
                 ManifestItem {
@@ -282,7 +379,7 @@ fn parse_toc(
 fn parse_ncx_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
     let doc = roxmltree::Document::parse(xml).context("failed to parse NCX")?;
 
-    fn parse_navpoints(parent: roxmltree::Node, opf_dir: &str) -> Vec<TocEntry> {
+    fn parse_navpoints(parent: roxmltree::Node, opf_dir: &str) -> Result<Vec<TocEntry>> {
         let mut entries = Vec::new();
         for child in parent.children() {
             if child.is_element() && child.tag_name().name() == "navPoint" {
@@ -298,10 +395,11 @@ fn parse_ncx_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
                     .descendants()
                     .find(|n| n.tag_name().name() == "content")
                     .and_then(|n| n.attribute("src"))
-                    .map(|s| resolve_path(opf_dir, s))
+                    .map(|source| resolve_path(opf_dir, source))
+                    .transpose()?
                     .unwrap_or_default();
 
-                let children = parse_navpoints(child, opf_dir);
+                let children = parse_navpoints(child, opf_dir)?;
 
                 entries.push(TocEntry {
                     title,
@@ -310,7 +408,7 @@ fn parse_ncx_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
                 });
             }
         }
-        entries
+        Ok(entries)
     }
 
     // Find <navMap>
@@ -319,7 +417,7 @@ fn parse_ncx_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
         .find(|n| n.tag_name().name() == "navMap")
         .context("NCX missing <navMap>")?;
 
-    Ok(parse_navpoints(nav_map, opf_dir))
+    parse_navpoints(nav_map, opf_dir)
 }
 
 /// Parse an EPUB 3 nav document table of contents.
@@ -338,10 +436,10 @@ fn parse_nav_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
         .find(|n| n.tag_name().name() == "ol")
         .context("nav missing <ol>")?;
 
-    Ok(parse_nav_ol(ol, opf_dir))
+    parse_nav_ol(ol, opf_dir)
 }
 
-fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Vec<TocEntry> {
+fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Result<Vec<TocEntry>> {
     let mut entries = Vec::new();
     for li in ol.children() {
         if !li.is_element() || li.tag_name().name() != "li" {
@@ -355,7 +453,8 @@ fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Vec<TocEntry> {
             let title = a.text().unwrap_or("").trim().to_string();
             let href = a
                 .attribute("href")
-                .map(|s| resolve_path(opf_dir, s))
+                .map(|source| resolve_path(opf_dir, source))
+                .transpose()?
                 .unwrap_or_default();
             (title, href)
         } else {
@@ -366,6 +465,7 @@ fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Vec<TocEntry> {
             .children()
             .find(|n| n.is_element() && n.tag_name().name() == "ol")
             .map(|ol| parse_nav_ol(ol, opf_dir))
+            .transpose()?
             .unwrap_or_default();
 
         entries.push(TocEntry {
@@ -374,7 +474,7 @@ fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Vec<TocEntry> {
             children,
         });
     }
-    entries
+    Ok(entries)
 }
 
 /// Load chapters in spine order, assigning titles from the TOC where possible.
@@ -425,7 +525,7 @@ fn load_chapters(
     Ok(chapters)
 }
 
-/// Load non-XHTML resources (images, CSS, fonts) from the manifest.
+/// Load every available manifest resource as its original bytes.
 fn load_resources(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     manifest: &HashMap<String, ManifestItem>,
@@ -433,13 +533,6 @@ fn load_resources(
     let mut resources = HashMap::new();
 
     for item in manifest.values() {
-        // Skip XHTML documents (chapters) and NCX.
-        if item.media_type == "application/xhtml+xml"
-            || item.media_type == "application/x-dtbncx+xml"
-        {
-            continue;
-        }
-
         // Best effort: skip resources we can't read (e.g. missing from archive).
         if let Ok(data) = read_archive_bytes(archive, &item.href) {
             resources.insert(item.href.clone(), data);
@@ -450,10 +543,117 @@ fn load_resources(
 }
 
 /// Resolve a relative path against the OPF directory.
-fn resolve_path(opf_dir: &str, href: &str) -> String {
-    if opf_dir.is_empty() {
-        href.to_string()
-    } else {
-        format!("{opf_dir}/{href}")
+fn resolve_path(opf_dir: &str, href: &str) -> Result<String> {
+    let reference = CanonicalEpubPath::resolve(opf_dir, href)?;
+    let mut resolved = reference.path.as_str().to_string();
+    if let Some(fragment) = reference.fragment {
+        resolved.push('#');
+        resolved.push_str(&fragment);
+    }
+    Ok(resolved)
+}
+
+fn resolve_manifest_path(opf_dir: &str, href: &str) -> Result<String> {
+    let reference = CanonicalEpubPath::resolve(opf_dir, href)?;
+    if reference.fragment.is_some() {
+        anyhow::bail!("EPUB manifest href must not contain a fragment: {href}");
+    }
+    Ok(reference.path.as_str().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor, Write};
+
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    use super::EpubDoc;
+    use super::parse_opf;
+
+    fn archive_with_entries(names: &[&str]) -> Vec<u8> {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        for name in names {
+            archive
+                .start_file(name, SimpleFileOptions::default())
+                .unwrap();
+            archive.write_all(b"content").unwrap();
+        }
+        archive.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn epub_rejects_noncanonical_archive_entries_before_lookup() {
+        let error = EpubDoc::from_bytes(archive_with_entries(&[
+            "META-INF/container.xml",
+            "OEBPS/../chapter.xhtml",
+        ]))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unsafe EPUB archive entry"));
+    }
+
+    #[test]
+    fn epub_rejects_duplicate_archive_entries_before_lookup() {
+        let mut archive = archive_with_entries(&[
+            "META-INF/container.xml",
+            "OEBPS/chapter1.xhtml",
+            "OEBPS/chapter2.xhtml",
+        ]);
+        let old_name = b"OEBPS/chapter2.xhtml";
+        let new_name = b"OEBPS/chapter1.xhtml";
+        let offsets = archive
+            .windows(old_name.len())
+            .enumerate()
+            .filter_map(|(offset, bytes)| (bytes == old_name).then_some(offset))
+            .collect::<Vec<_>>();
+        assert_eq!(offsets.len(), 2, "expected local and central ZIP names");
+        for offset in offsets {
+            archive[offset..offset + new_name.len()].copy_from_slice(new_name);
+        }
+
+        let error = EpubDoc::from_bytes(archive).unwrap_err();
+
+        assert!(
+            error.to_string().contains("duplicate EPUB archive entry"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn epub_rejects_fragment_aliases_in_the_manifest() {
+        let opf = r#"<package xmlns="http://www.idpf.org/2007/opf">
+            <manifest>
+                <item id="one" href="chapter.xhtml#one" media-type="application/xhtml+xml"/>
+                <item id="two" href="./chapter.xhtml#two" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine/>
+        </package>"#;
+
+        let error = parse_opf(opf, "OEBPS").unwrap_err();
+
+        assert!(
+            error.to_string().contains("must not contain a fragment"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn epub_rejects_overflowing_zip64_offsets_without_panicking() {
+        let mut archive = Vec::new();
+        archive.extend_from_slice(b"PK\x06\x07");
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&u64::MAX.to_le_bytes());
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(b"PK\x05\x06");
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+
+        assert!(EpubDoc::from_bytes(archive).is_err());
     }
 }
