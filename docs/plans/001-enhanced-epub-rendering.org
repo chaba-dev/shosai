@@ -68,6 +68,8 @@ external links follow an explicit confirmation/allow policy.
 
 ** Spike A — ~wry~
 
+Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
+
 - [ ] Render one chapter from bytes through a custom, non-network resource
   protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.
 - [ ] Disable scripts, remote navigation, downloads, popups, and external

@@ -8,6 +8,13 @@ license.workspace = true
 name = "shosai"
 path = "src/main.rs"
 
+[[example]]
+name = "epub-wry-spike"
+required-features = ["epub-wry-spike"]
+
+[features]
+epub-wry-spike = ["dep:wry"]
+
 [dependencies]
 shosai-core.workspace = true
 anyhow.workspace = true
@@ -17,6 +24,7 @@ rfd = "0.15"
 tokio = { version = "1", features = ["fs", "macros", "rt", "time"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 open = "5.3.3"
+wry = { version = "0.56.1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
