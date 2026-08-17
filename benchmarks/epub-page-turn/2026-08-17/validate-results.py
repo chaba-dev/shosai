@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate that the EPUB performance matrix completed without partial results."""
+"""Validate that the 2026-08-17 EPUB performance matrix completed."""
 
 import argparse
 from pathlib import Path

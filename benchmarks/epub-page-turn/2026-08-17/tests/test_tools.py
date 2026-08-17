@@ -5,11 +5,11 @@ import tempfile
 import unittest
 
 
-ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_DIR = Path(__file__).resolve().parents[1]
 
 
 def load_script(name: str):
-    path = ROOT / "scripts" / name
+    path = BENCHMARK_DIR / name
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -17,8 +17,8 @@ def load_script(name: str):
     return module
 
 
-generator = load_script("generate-epub-perf-fixtures.py")
-validator = load_script("validate_epub_perf_results.py")
+generator = load_script("generate-fixtures.py")
+validator = load_script("validate-results.py")
 
 
 class EpubPerfToolTests(unittest.TestCase):

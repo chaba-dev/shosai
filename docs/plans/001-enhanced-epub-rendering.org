@@ -62,8 +62,8 @@ external links follow an explicit confirmation/allow policy.
   turns, chapter transitions, and font-size relayout using ~sample.epub~ plus
   generated large text/image workloads in single-page and spread modes.  The
   reproducible release harness, protocol, budgets, and 2026-08-17 M4 Max
-  baseline are recorded in ADR 001; all measured paths meet their initial
-  budgets.
+  baseline are recorded in the dated benchmark linked from ADR 001; all
+  measured paths meet their initial budgets.
 - [X] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
   malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,

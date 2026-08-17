@@ -154,64 +154,12 @@ copying its content.
 
 ## Native performance baseline
 
-The app contains an opt-in synthetic release harness in `app/perf.rs`. It
-starts timing when Iced delivers a navigation or font-size action to the
-application and finishes when the subscription result for the resulting Iced
-redraw is processed. In Iced 0.14's Winit runner, that redraw event is broadcast
-after draw and directly before `compositor.present`; its subscription message
-is processed after the current event-loop callback. The metric therefore covers
-application input dispatch, state/pagination work, Iced layout/draw, and
-compositor presentation. It does not include the OS input event before Iced
-dispatch, physical display scan-out, or panel response time.
-
-Run the complete protocol with:
-
-```sh
-./scripts/benchmark-epub-turns.sh 50
-```
-
-The script builds `--release`, generates redistribution-safe large text and
-image EPUBs under `target/`, fixes the benchmark viewport at 700×700 (588 px
-reader, single page) and 1000×700 (888 px reader, spread), waits 60 frames for
-window stabilization, discards five operation warmups, then records 50 samples.
-The generated books contain 16 chapters so the same run can select stable
-within-chapter and chapter-boundary pairs. Generated archives are byte-stable,
-and the script fails if a run reports an error, never produces pages, omits one
-of the 16 summaries, or records a different sample count. Initial budgets are:
-
-| Operation | p50 budget | p95 budget |
-|---|---:|---:|
-| Warm page turn | ≤ 8 ms | ≤ 16.7 ms |
-| Chapter transition | ≤ 16.7 ms | ≤ 33.3 ms |
-| Font-size relayout | ≤ 50 ms | ≤ 100 ms |
-
-Baseline host: MacBook Pro Mac16,5, Apple M4 Max, 48 GB, macOS 26.5.2, rustc
-1.94.0. Results from 2026-08-17 (milliseconds):
-
-| Fixture | Mode | Operation | p50 | p95 |
-|---|---|---|---:|---:|
-| `sample.epub` | Single | Chapter transition | 0.581 | 1.618 |
-| `sample.epub` | Single | Relayout | 0.432 | 0.662 |
-| `sample.epub` | Spread | Chapter transition | 0.684 | 1.699 |
-| `sample.epub` | Spread | Relayout | 0.366 | 0.598 |
-| Generated large text | Single | Warm page turn | 1.603 | 2.906 |
-| Generated large text | Single | Chapter transition | 1.370 | 3.465 |
-| Generated large text | Single | Relayout | 18.018 | 20.671 |
-| Generated large text | Spread | Warm page turn | 2.813 | 6.306 |
-| Generated large text | Spread | Chapter transition | 1.835 | 3.435 |
-| Generated large text | Spread | Relayout | 22.485 | 25.588 |
-| Generated large image | Single | Warm page turn | 0.337 | 1.196 |
-| Generated large image | Single | Chapter transition | 0.587 | 1.683 |
-| Generated large image | Single | Relayout | 1.341 | 2.944 |
-| Generated large image | Spread | Warm page turn | 0.581 | 1.258 |
-| Generated large image | Spread | Chapter transition | 0.846 | 2.204 |
-| Generated large image | Spread | Relayout | 1.223 | 2.010 |
-
-The small checked-in fixture has no within-chapter warm pair, so that cell is
-intentionally omitted. Large-text relayout remains the dominant native cost but
-is within the initial budget. These numbers are a renderer-comparison baseline,
-not a universal guarantee; repeat the same protocol on released platforms and
-under representative power/display conditions.
+The dated
+[2026-08-17 EPUB page-turn benchmark](../../benchmarks/epub-page-turn/2026-08-17/)
+records the synthetic app-action-to-compositor-present protocol, reproducible
+workloads, host details, budgets, and complete native baseline. All measured
+paths met their initial budgets; large-text relayout was the dominant native
+cost.
 
 ## Next spike steps
 

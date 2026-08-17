@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+benchmark_dir=$(cd "$(dirname "$0")" && pwd)
+root=$(cd "$benchmark_dir/../../.." && pwd)
 samples=${1:-50}
 fixtures="$root/target/epub-perf-fixtures"
 results="$root/target/epub-perf-results"
@@ -9,7 +10,7 @@ timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 log="$results/$timestamp.log"
 
 mkdir -p "$results"
-python3 "$root/scripts/generate-epub-perf-fixtures.py" "$fixtures" >/dev/null
+python3 "$benchmark_dir/generate-fixtures.py" "$fixtures" >/dev/null
 cargo build --release -p shosai-app
 
 {
@@ -46,6 +47,6 @@ for width in 700 1000; do
   done
 done
 
-python3 "$root/scripts/validate_epub_perf_results.py" "$log" "$samples"
+python3 "$benchmark_dir/validate-results.py" "$log" "$samples"
 printf '\nSummaries written to %s\n' "$log"
 rg '^perf-(config|summary)' "$log"

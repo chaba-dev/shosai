@@ -6,7 +6,7 @@ import sys
 import zipfile
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[3]
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 LOREM = (
     "Shōsai keeps a stable logical reading position while the renderer lays out "
