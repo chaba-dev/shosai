@@ -13,6 +13,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
             state.reading_state = Some(store);
             state.storage_initializing = false;
+            let geometry = (!state.performance.is_automated())
+                .then_some(geometry)
+                .flatten();
             state.saved_window_geometry = geometry;
             let geometry_task =
                 if let (Some(id), Some((size, position))) = (state.window_id, geometry) {
@@ -320,6 +323,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FontSizeUp => {
+            perf::begin_relayout(state);
             state.font_size = (state.font_size + 2.0).min(48.0);
             invalidate_continuous_layout(state);
             if uses_paginated_epub_layout(state) {
@@ -329,6 +333,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FontSizeDown => {
+            perf::begin_relayout(state);
             state.font_size = (state.font_size - 2.0).max(8.0);
             invalidate_continuous_layout(state);
             if uses_paginated_epub_layout(state) {
@@ -862,6 +867,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::Opened { position, size } => {
                     state.window_size = size;
                     state.window_position = position;
+                    perf::window_resized(state, size);
                     let generation = state.window_scale_generation;
                     application_icon = Task::batch([
                         crate::application_icon_task(id),
@@ -882,6 +888,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 window::Event::Resized(size) => {
                     state.window_size = size;
+                    perf::window_resized(state, size);
                     invalidate_continuous_layout(state);
                 }
                 window::Event::Rescaled(scale_factor) => {
@@ -936,6 +943,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ReadingStateFlushed(id) => return window::close(id),
+
+        Message::PerfFramePresented => return perf::frame_presented(state),
     }
 
     Task::none()

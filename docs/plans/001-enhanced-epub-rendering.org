@@ -31,9 +31,10 @@ and maintenance consequences.
   limits, and directly creates Iced widgets for both reader modes.  Ordinary
   paginated turns reuse ~epub_pages~, resolve bookmark state from the loaded
   bookmark cache, and queue/coalesce reading-state writes off the UI thread.
-  The writer is flushed before shutdown, but input-to-present latency and the
-  remaining Iced widget rebuild are not yet measured.  Internal-link fragments
-  are ignored; user-activated HTTP(S) and mail links open in the system handler.
+  The writer is flushed before shutdown.  Release app-action-to-present
+  measurements are recorded in ADR 001; the remaining Iced widget rebuild is
+  included in those measurements.  Internal-link fragments are ignored;
+  user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
   font-loading policy.
@@ -54,11 +55,14 @@ external links follow an explicit confirmation/allow policy.
 
 ** Prerequisites
 
-- [ ] Capture baseline screenshots, load time, memory use, and input-to-present
-  p50/p95 latency for warm page turns, chapter transitions, and layout-changing
-  operations using ~crates/shosai-core/tests/fixtures/sample.epub~ and at least
-  one large EPUB.  Measure text-heavy and image-heavy pages in single-page and
-  spread modes, and define target budgets before selecting a backend.
+- [ ] Capture baseline screenshots, load time, and memory use using
+  ~crates/shosai-core/tests/fixtures/sample.epub~ and at least one large EPUB.
+- [X] Capture host input-to-compositor-present p50/p95 latency for warm page
+  turns, chapter transitions, and font-size relayout using ~sample.epub~ plus
+  generated large text/image workloads in single-page and spread modes.  The
+  reproducible release harness, protocol, budgets, and 2026-08-17 M4 Max
+  baseline are recorded in ADR 001; all measured paths meet their initial
+  budgets.
 - [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
   malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,

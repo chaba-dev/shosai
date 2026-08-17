@@ -51,16 +51,26 @@ fn application_icon_task(window_id: iced::window::Id) -> iced::Task<app::Message
 }
 
 fn main() -> iced::Result {
+    let benchmark_size = std::env::var("SHOSAI_PERF_ACTION")
+        .ok()
+        .filter(|action| matches!(action.as_str(), "warm" | "chapter" | "relayout"))
+        .and_then(|_| std::env::var("SHOSAI_PERF_WIDTH").ok())
+        .and_then(|value| value.parse().ok())
+        .map(|width| iced::Size::new(width, 700.0));
+    let window_size = benchmark_size.unwrap_or_else(|| iced::Size::new(900.0, 700.0));
     iced::application(app::boot, app::update, app::view)
         .title(app::title)
         .theme(theme::application())
         .subscription(app::subscription)
         .window(iced::window::Settings {
             icon: window_icon(),
+            size: window_size,
+            min_size: benchmark_size,
+            max_size: benchmark_size,
+            resizable: benchmark_size.is_none(),
             ..iced::window::Settings::default()
         })
         .exit_on_close_request(false)
         .centered()
-        .window_size((900.0, 700.0))
         .run()
 }
