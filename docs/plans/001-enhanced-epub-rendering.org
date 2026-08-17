@@ -63,14 +63,23 @@ external links follow an explicit confirmation/allow policy.
   reproducible release harness, protocol, budgets, and 2026-08-17 M4 Max
   baseline are recorded in ADR 001; all measured paths meet their initial
   budgets.
-- [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
+- [X] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
   malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,
-  oversized archives/images, and internal/external links.
-- [ ] Confirm tested versus released targets and distribution constraints from
+  oversized archives/images, and internal/external links.  ADR 001 assigns
+  stable fixture IDs and semantic/security assertions, including a synthetic
+  nested-image/table regression derived from a non-redistributable field report.
+- [X] Confirm tested versus released targets and distribution constraints from
   Nix and packaging jobs before evaluating native webview availability.  In
-  particular, Windows is CI-tested but has no release artifact today; decide
-  whether the selected renderer must merely build there or be shipped there.
+  particular, Windows remains a build/test target until a Windows artifact is
+  published; the production renderer must ship on macOS arm64 and Linux
+  x86_64/arm64 under both X11 and Wayland.  ADR 001 records why a Wry-only route
+  does not yet meet that boundary.
+- [ ] Introduce the minimal backend-neutral canonical archive-path and EPUB-URI
+  resolver needed by both spikes (percent decoding, fragments, scheme/origin
+  checks, traversal rejection, normalized-entry uniqueness, and MIME lookup).
+  Do this before candidate-specific resource adapters so Gate 0 tests one
+  security boundary rather than two provisional resolvers.
 
 ** Spike A — ~wry~
 
@@ -116,10 +125,6 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 * Shared Foundation (After Gate 0)
 
-- [ ] Introduce canonical archive-path and URI resolution in
-  ~crates/shosai-core/src/epub/parser.rs~ (percent decoding, fragments,
-  scheme/origin checks, traversal rejection, normalized-entry uniqueness, MIME
-  lookup); reuse it for CSS, images, fonts, and links.
 - [ ] Replace unrestricted resource access with a read-only EPUB resource API
   carrying bytes, media type, and canonical path.  Add configurable per-entry
   input/archive, entry-count, compression-ratio, per-entry, and aggregate limits

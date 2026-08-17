@@ -5,9 +5,11 @@
 
 use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Size, Subscription, Task, window};
+use shosai_core::epub::EpubDoc;
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
 use wry::raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, WindowHandle};
@@ -18,6 +20,69 @@ const PADDING: f32 = 24.0;
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
+    static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug)]
+struct SpikeResource {
+    content_type: String,
+    body: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct SpikeBook {
+    start_url: String,
+    resources: HashMap<String, SpikeResource>,
+    requests: Vec<String>,
+}
+
+impl SpikeBook {
+    fn from_epub_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+        let epub = EpubDoc::from_bytes(bytes).map_err(|error| error.to_string())?;
+        let first_chapter = epub
+            .content
+            .chapters
+            .first()
+            .ok_or_else(|| "EPUB has no readable spine chapter".to_string())?;
+        let start_url = format!("shosai://book/{}", first_chapter.path);
+        let mut resources = HashMap::new();
+
+        for chapter in &epub.content.chapters {
+            resources.insert(
+                chapter.path.clone(),
+                SpikeResource {
+                    // WebKit currently rejects the fixture when served as XML;
+                    // retaining HTML here keeps that MIME question visible.
+                    content_type: "text/html; charset=utf-8".into(),
+                    body: chapter.content.as_bytes().to_vec(),
+                },
+            );
+        }
+        for item in epub.content.manifest.values() {
+            if let Some(body) = epub.content.resources.get(&item.href) {
+                resources.insert(
+                    item.href.clone(),
+                    SpikeResource {
+                        content_type: item.media_type.clone(),
+                        body: body.clone(),
+                    },
+                );
+            }
+        }
+        resources.insert(
+            "_spike/conformance.xhtml".into(),
+            SpikeResource {
+                content_type: "text/html; charset=utf-8".into(),
+                body: SPIKE_CHAPTER.as_bytes().to_vec(),
+            },
+        );
+
+        Ok(Self {
+            start_url,
+            resources,
+            requests: Vec::new(),
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -130,6 +195,15 @@ fn view(state: &State) -> Element<'_, Message> {
 
 fn create_webview(id: window::Id, size: Size) -> Task<Message> {
     window::run(id, move |window| {
+        let book = SpikeBook::from_epub_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )?;
+        let start_url = if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
+            "shosai://book/_spike/conformance.xhtml".to_string()
+        } else {
+            book.start_url.clone()
+        };
+        BOOK.with(|slot| *slot.borrow_mut() = Some(book));
         let raw = window
             .window_handle()
             .map_err(|error| error.to_string())?
@@ -138,7 +212,7 @@ fn create_webview(id: window::Id, size: Size) -> Task<Message> {
         let webview = WebViewBuilder::new()
             .with_bounds(webview_bounds(size))
             .with_custom_protocol("shosai".into(), serve_epub_resource)
-            .with_url("shosai://book/chapter.xhtml")
+            .with_url(&start_url)
             .with_javascript_disabled()
             .with_navigation_handler(|url| is_allowed_navigation(&url))
             .with_download_started_handler(|_, _| false)
@@ -188,18 +262,28 @@ fn serve_epub_resource(
     _webview_id: wry::WebViewId<'_>,
     request: Request<Vec<u8>>,
 ) -> Response<Cow<'static, [u8]>> {
-    let path = request.uri().path();
-    let (status, content_type, body) = if path.ends_with("chapter.xhtml") || path == "/" {
-        (200, "text/html; charset=utf-8", SPIKE_CHAPTER.as_bytes())
-    } else {
-        (404, "text/plain", b"not found" as &[u8])
-    };
+    let uri = request.uri().to_string();
+    eprintln!("wry-spike-request uri={uri}");
+    let path = request.uri().path().trim_start_matches('/');
+    let response = BOOK.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let book = slot.as_mut()?;
+        book.requests.push(uri);
+        (request.uri().host() == Some("book"))
+            .then(|| book.resources.get(path))
+            .flatten()
+            .map(|resource| (resource.content_type.clone(), resource.body.clone()))
+    });
+    let (status, content_type, body) = response.map_or_else(
+        || (404, "text/plain".to_string(), b"not found".to_vec()),
+        |(content_type, body)| (200, content_type, body),
+    );
 
     Response::builder()
         .status(status)
-        .header("Content-Type", content_type)
+        .header("Content-Type", &content_type)
         .header("Content-Security-Policy", SPIKE_CSP)
-        .body(Cow::Owned(body.to_vec()))
+        .body(Cow::Owned(body))
         .expect("static spike response must be valid")
 }
 
@@ -230,6 +314,14 @@ const SPIKE_CHAPTER: &str = r#"<!DOCTYPE html>
 mod tests {
     use super::*;
 
+    fn install_sample_book() {
+        let book = SpikeBook::from_epub_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("sample fixture should load");
+        BOOK.with(|slot| *slot.borrow_mut() = Some(book));
+    }
+
     #[test]
     fn navigation_policy_allows_only_book_protocol() {
         assert!(is_allowed_navigation("shosai://book/chapter.xhtml"));
@@ -242,16 +334,48 @@ mod tests {
     }
 
     #[test]
-    fn protocol_serves_only_known_resources_with_csp() {
+    fn protocol_serves_epub_chapters_and_manifest_resources_with_csp() {
+        install_sample_book();
         let chapter = serve_epub_resource(
             "spike".into(),
-            Request::get("shosai://book/chapter.xhtml")
+            Request::get("shosai://book/OEBPS/chapter1.xhtml")
                 .body(Vec::new())
                 .unwrap(),
         );
         assert_eq!(chapter.status(), 200);
+        assert_eq!(
+            chapter.headers()["Content-Type"],
+            "text/html; charset=utf-8"
+        );
         assert_eq!(chapter.headers()["Content-Security-Policy"], SPIKE_CSP);
-        assert!(chapter.body().starts_with(b"<!DOCTYPE html>"));
+        assert!(chapter.body().starts_with(b"<?xml version="));
+
+        let stylesheet = serve_epub_resource(
+            "spike".into(),
+            Request::get("shosai://book/OEBPS/style.css")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(stylesheet.status(), 200);
+        assert_eq!(stylesheet.headers()["Content-Type"], "text/css");
+
+        let image = serve_epub_resource(
+            "spike".into(),
+            Request::get("shosai://book/OEBPS/images/cover.png")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(image.status(), 200);
+        assert_eq!(image.headers()["Content-Type"], "image/png");
+
+        let conformance = serve_epub_resource(
+            "spike".into(),
+            Request::get("shosai://book/_spike/conformance.xhtml")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(conformance.status(), 200);
+        assert!(conformance.body().starts_with(b"<!DOCTYPE html>"));
 
         let missing = serve_epub_resource(
             "spike".into(),
@@ -260,5 +384,26 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(missing.status(), 404);
+
+        let foreign_book = serve_epub_resource(
+            "spike".into(),
+            Request::get("shosai://other/OEBPS/chapter1.xhtml")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(foreign_book.status(), 404);
+
+        let encoded_traversal = serve_epub_resource(
+            "spike".into(),
+            Request::get("shosai://book/OEBPS/%2e%2e/chapter1.xhtml")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        assert_eq!(encoded_traversal.status(), 404);
+
+        BOOK.with(|slot| {
+            let slot = slot.borrow();
+            assert_eq!(slot.as_ref().unwrap().requests.len(), 7);
+        });
     }
 }
