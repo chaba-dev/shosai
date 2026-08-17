@@ -50,6 +50,7 @@
           # tools
           git-cliff
           jujutsu
+          hugo
 
           # build deps
           pkg-config

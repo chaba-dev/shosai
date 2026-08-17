@@ -1,0 +1,54 @@
+# Shōsai
+
+Shōsai (書斎, "study") is a native desktop ebook reader for PDF, EPUB, and CBZ files. It is written in Rust and uses a GPU-accelerated native interface.
+
+## Features
+
+- Read PDF, EPUB, and CBZ files
+- Organize a searchable local library
+- Resume reading, manage bookmarks and notes, and export bookmarks as Markdown
+- Customize font size, line spacing, and light, dark, or sepia reading themes
+- Search within documents and use continuous or paginated reading modes
+
+## Installation
+
+Pre-built releases and platform-specific installation instructions are published on the [Releases page](https://github.com/chaba-dev/shosai/releases).
+
+### Build from source
+
+The repository includes a Nix development environment:
+
+```sh
+nix develop
+cargo run --package shosai-app
+```
+
+Alternatively, install Rust 1.94 or newer and the native dependencies required by Iced and PDFium for your platform, then run the same Cargo command.
+
+## Development
+
+```sh
+nix develop
+make lint
+make test
+```
+
+The project is a Cargo workspace:
+
+- `crates/shosai-core` contains document formats, library storage, and reader logic.
+- `crates/shosai-app` contains the native Iced application.
+- `website` contains the Hugo source for the project website.
+
+## Website
+
+The public site is a dependency-free Hugo site in [`website`](website). Run it locally with:
+
+```sh
+hugo server --source website
+```
+
+See [`website/README.md`](website/README.md) for the Cloudflare Pages build configuration.
+
+## License
+
+Shōsai is licensed under the [Apache License 2.0](LICENSE).

@@ -1,0 +1,7 @@
+baseURL = "https://shosai.pages.dev/"
+languageCode = "en-us"
+title = "Shōsai — A native reader for your library"
+disableKinds = ["taxonomy", "term"]
+
+[params]
+  description = "A focused, native desktop reader for PDF, EPUB, and CBZ files."
