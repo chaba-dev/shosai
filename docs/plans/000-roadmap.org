@@ -246,7 +246,7 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 *Goal*: Extended format support, mobile, and distribution.
 
 ** TODO Enhanced EPUB rendering
-Plan: [[file:enhanced-epub-rendering.org][Enhanced EPUB Rendering Plan]]
+Plan: [[file:001-enhanced-epub-rendering.org][Enhanced EPUB Rendering Plan]]
 
 - [ ] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
 - [ ] Or build custom text layout engine using ~cosmic-text~
@@ -254,7 +254,7 @@ Plan: [[file:enhanced-epub-rendering.org][Enhanced EPUB Rendering Plan]]
 - [ ] CSS ~@font-face~ support with embedded fonts
 
 ** TODO Additional ebook formats
-Plan: [[file:additional-formats.org][Additional Ebook Formats Plan]]
+Plan: [[file:002-additional-formats.org][Additional Ebook Formats Plan]]
 
 - [ ] MOBI / AZW3 (Amazon Kindle) — evaluate legal feasibility
 - [ ] FB2 (FictionBook)
@@ -263,7 +263,7 @@ Plan: [[file:additional-formats.org][Additional Ebook Formats Plan]]
 - [ ] CBR (RAR-based comic archives) — note: ~unrar~ has restrictive license
 
 ** TODO Cloud sync (optional)
-Plan: [[file:cloud-sync.org][Cloud Sync Plan]]
+Plan: [[file:003-cloud-sync.org][Cloud Sync Plan]]
 
 - [ ] Design sync protocol for reading progress + bookmarks
 - [ ] Evaluate backends (self-hosted, WebDAV, etc.)
@@ -271,14 +271,14 @@ Plan: [[file:cloud-sync.org][Cloud Sync Plan]]
 - [ ] Start with local storage, architecture should support sync later
 
 ** TODO Mobile support
-Plan: [[file:mobile-support.org][Mobile Support Plan]]
+Plan: [[file:004-mobile-support.org][Mobile Support Plan]]
 
 - [ ] Evaluate Iced's future mobile story
 - [ ] Consider companion app approach
 - [ ] Sync reading progress across desktop and mobile
 
 ** TODO Distribution & packaging
-Plan: [[file:distribution-packaging.org][Distribution and Packaging Plan]]
+Plan: [[file:005-distribution-packaging.org][Distribution and Packaging Plan]]
 
 - [X] CI/CD pipeline for automated builds and releases
 - [X] Portable Linux archives (x86_64 and aarch64)

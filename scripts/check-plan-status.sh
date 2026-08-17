@@ -142,21 +142,35 @@ read_checklist_counts() {
     ' "${plan}"
 }
 
-printf "%s%-4s  %-10s  %-9s  %s%s\n" "${color_bold}" "Plan" "Status" "Progress" "Title" "${color_reset}"
-printf "%s%-4s  %-10s  %-9s  %s%s\n" "${color_dim}" "----" "------" "--------" "------------------------------" "${color_reset}"
-
 failures=0
 found=0
+seen_plan_ids=" "
 
 shopt -s nullglob
 plans=("${plans_dir}"/*.org "${plans_dir}"/*.md)
 shopt -u nullglob
 
+plan_width=4
+for plan in "${plans[@]}"; do
+    filename="$(basename "${plan}")"
+    plan_id="${filename%.*}"
+    plan_id="${plan_id%%-*}"
+    if [[ "${#plan_id}" -gt "${plan_width}" ]]; then
+        plan_width="${#plan_id}"
+    fi
+done
+printf -v plan_rule '%*s' "${plan_width}" ''
+plan_rule="${plan_rule// /-}"
+
+printf "%s%-*s  %-10s  %-9s  %s%s\n" "${color_bold}" "${plan_width}" "Plan" "Status" "Progress" "Title" "${color_reset}"
+printf "%s%-*s  %-10s  %-9s  %s%s\n" "${color_dim}" "${plan_width}" "${plan_rule}" "------" "--------" "------------------------------" "${color_reset}"
+
 for plan in "${plans[@]}"; do
     found=1
 
     filename="$(basename "${plan}")"
-    plan_id="${filename%%-*}"
+    plan_id="${filename%.*}"
+    plan_id="${plan_id%%-*}"
     extension="${filename##*.}"
 
     case "${extension}" in
@@ -188,12 +202,24 @@ for plan in "${plans[@]}"; do
         failures=$((failures + 1))
     fi
 
+    if [[ ! "${filename%.*}" =~ ^[0-9]{3}-.+ ]]; then
+        printf "  %sinvalid plan filename%s: %s (expected NNN-name.%s)\n" "${color_red}" "${color_reset}" "${filename}" "${extension}" >&2
+        failures=$((failures + 1))
+    fi
+
+    if [[ "${seen_plan_ids}" == *" ${plan_id} "* ]]; then
+        printf "  %sduplicate plan ID%s in %s: %s\n" "${color_red}" "${color_reset}" "${filename}" "${plan_id}" >&2
+        failures=$((failures + 1))
+    else
+        seen_plan_ids+="${plan_id} "
+    fi
+
     status_field="$(printf "%-10s" "${status}")"
     progress_field="$(printf "%-9s" "${complete_count}/${total_count}")"
     progress_text="$(colorize_progress "${complete_count}" "${total_count}" "${progress_field}")"
     status_text="$(colorize_status "${status}" "${status_field}")"
 
-    printf "%-4s  %s  %s  %s\n" "${plan_id}" "${status_text}" "${progress_text}" "${title}"
+    printf "%-*s  %s  %s  %s\n" "${plan_width}" "${plan_id}" "${status_text}" "${progress_text}" "${title}"
 
     if [[ "${status}" != "Draft" && "${status}" != "Active" && "${status}" != "Paused" && "${status}" != "Done" && "${status}" != "Cancelled" ]]; then
         printf "  %sinvalid status%s in %s: %s\n" "${color_red}" "${color_reset}" "${filename}" "${status}" >&2
