@@ -256,6 +256,7 @@ Plan: [[file:001-enhanced-epub-rendering.org][Enhanced EPUB Rendering Plan]]
 ** TODO Additional ebook formats
 Plan: [[file:002-additional-formats.org][Additional Ebook Formats Plan]]
 
+- [ ] Package CBZ/CBR comic support for the first post-launch release
 - [ ] MOBI / AZW3 (Amazon Kindle) — evaluate legal feasibility
 - [ ] FB2 (FictionBook)
 - [ ] DjVu

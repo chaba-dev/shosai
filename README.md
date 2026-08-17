@@ -1,14 +1,16 @@
 # Shōsai
 
-Shōsai (書斎, "study") is a native desktop ebook reader for PDF, EPUB, and CBZ files. It is written in Rust and uses a GPU-accelerated native interface.
+Shōsai (書斎, "study") is a native desktop ebook reader for PDF and EPUB files. It is written in Rust and uses a GPU-accelerated native interface.
 
 ## Features
 
-- Read PDF, EPUB, and CBZ files
+- Read PDF and EPUB files
 - Organize a searchable local library
 - Resume reading, manage bookmarks and notes, and export bookmarks as Markdown
 - Customize font size, line spacing, and light, dark, or sepia reading themes
 - Search within documents and use continuous or paginated reading modes
+
+CBZ comic support is planned for a post-launch release.
 
 ## Installation
 
