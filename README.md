@@ -12,7 +12,7 @@ Shōsai (書斎, "study") is a native desktop ebook reader for PDF, EPUB, and CB
 
 ## Installation
 
-Pre-built releases and platform-specific installation instructions are published on the [Releases page](https://github.com/chaba-dev/shosai/releases).
+Shōsai is currently a work in progress and has not been released yet. Follow development on [GitHub](https://github.com/chaba-dev/shosai) or watch the [Releases page](https://github.com/chaba-dev/shosai/releases) for its first release.
 
 ### Build from source
 

@@ -32,3 +32,14 @@ Create a Pages project connected to this GitHub repository with these settings:
 | Node.js version | Not required |
 
 Cloudflare Pages provides Hugo when using the Hugo framework preset. Once the custom domain is known, update `baseURL` in `hugo.toml` to its canonical `https://` URL.
+
+### Build watch paths
+
+To avoid deploying the site for application-only changes, go to **Settings** > **Build** > **Build watch paths** in the Pages project and configure:
+
+| Setting | Value |
+| --- | --- |
+| Include paths | `website/*` |
+| Exclude paths | *(empty)* |
+
+Cloudflare Pages then creates a deployment only when a changed path is in `website/`. Root-level files are intentionally excluded; include them here if the website later depends on one.
