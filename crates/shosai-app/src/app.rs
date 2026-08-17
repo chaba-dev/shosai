@@ -31,6 +31,7 @@ use crate::{theme as app_theme, widgets};
 
 mod dispatch;
 mod message;
+mod perf;
 
 pub use dispatch::update;
 pub use message::Message;
@@ -415,6 +416,7 @@ pub struct State {
     window_geometry_dirty: bool,
     window_geometry_saving: bool,
     close_after_geometry_save: Option<window::Id>,
+    performance: perf::Performance,
 }
 
 /// Color theme for the EPUB reader.
@@ -465,6 +467,7 @@ impl ReaderTheme {
 // ---------------------------------------------------------------------------
 
 pub fn boot() -> (State, Task<Message>) {
+    let (performance, performance_file) = perf::Performance::from_environment();
     let state = State {
         screen: Screen::Library,
 
@@ -538,7 +541,7 @@ pub fn boot() -> (State, Task<Message>) {
         library_offset: 0,
         storage_initializing: true,
         storage_error: None,
-        pending_open: None,
+        pending_open: performance_file.map(PendingOpen::FileSelected),
         window_id: None,
         window_size: Size::new(900.0, 700.0),
         window_scale_factor: 1.0,
@@ -549,6 +552,7 @@ pub fn boot() -> (State, Task<Message>) {
         window_geometry_dirty: false,
         window_geometry_saving: false,
         close_after_geometry_save: None,
+        performance,
     };
     let initialize = Task::perform(
         async {
@@ -850,8 +854,9 @@ fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
     let document = match load_document(&path) {
         Ok(document) => document,
         Err(error) => {
+            let performance_task = perf::fail(state, &format!("document failed to open: {error}"));
             state.open_error = Some(error);
-            return Task::none();
+            return performance_task;
         }
     };
     save_active_tab(state);
@@ -1600,6 +1605,7 @@ fn turn_epub_page(state: &mut State, forward: bool) -> Task<Message> {
     } else {
         return Task::none();
     };
+    perf::begin_page_turn(state, page);
     state.epub_page = page;
     sync_epub_location(state);
     save_reading_state(state);
@@ -1631,7 +1637,8 @@ fn uses_page_spreads(state: &State) -> bool {
 }
 
 fn available_reader_size(state: &State) -> Size {
-    let compact = uses_compact_reader_layout(state.window_size.width);
+    let window_size = state.performance.window_size().unwrap_or(state.window_size);
+    let compact = uses_compact_reader_layout(window_size.width);
     let bookmarks_width = if state.show_bookmarks_panel {
         BOOKMARKS_PANEL_WIDTH
     } else {
@@ -1653,8 +1660,8 @@ fn available_reader_size(state: &State) -> Size {
         0.0
     };
     Size::new(
-        (state.window_size.width - bookmarks_width - READER_HORIZONTAL_PADDING).max(1.0),
-        (state.window_size.height
+        (window_size.width - bookmarks_width - READER_HORIZONTAL_PADDING).max(1.0),
+        (window_size.height
             - READER_VERTICAL_CHROME
             - search_height
             - settings_height
@@ -4251,6 +4258,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
     Subscription::batch([
         keyboard::listen().map(Message::KeyPressed),
         window::events().map(|(id, event)| Message::WindowEvent(id, event)),
+        perf::subscription(state),
         if library_activity_active(state) {
             iced::time::every(LIBRARY_ACTIVITY_TICK).map(|_| Message::LibraryActivityTick)
         } else {

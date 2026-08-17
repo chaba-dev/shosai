@@ -22,6 +22,8 @@ The Wry harness is isolated from production behind an optional Cargo feature:
 
 ```sh
 cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_PAGE=conformance \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
@@ -31,6 +33,10 @@ It currently proves on macOS arm64 that:
   Wry 0.56.1 can use to build a child `WKWebView`;
 - an in-memory `shosai:` custom protocol can render a chapter containing CSS,
   a table with `rowspan`, and presentation MathML;
+- the same protocol now opens the checked-in `sample.epub` from bytes and serves
+  every available manifest resource, including spine and navigation XHTML,
+  stylesheet, and image bytes, using manifest media types; every protocol
+  request is recorded by the harness;
 - the child can be resized with its Iced parent and explicitly focused;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
@@ -38,10 +44,11 @@ It currently proves on macOS arm64 that:
 
 The successful macOS run was visually checked. The security callbacks and CSP
 are configured and unit-tested, but the required proof that no remote subresource
-request reaches the network is still outstanding. The harness serves the XHTML
-bytes as `text/html`; serving the same valid XML as `application/xhtml+xml`
-produced a WebKit XML error and needs investigation before the spike can claim
-EPUB MIME-equivalent behavior.
+request reaches the network is still outstanding. Checked-in book resources are
+served with their exact manifest media types, including
+`application/xhtml+xml`; the generated conformance page remains explicitly
+declared as `text/html` because it is harness-owned rather than an EPUB manifest
+resource.
 
 ## Integration findings
 
@@ -74,6 +81,26 @@ license report and notices check remains required. Windows is tested in CI but
 is not currently a release artifact, so build support and shipped support must
 not be conflated.
 
+The current support boundary is now explicit:
+
+- release artifacts ship for Linux x86_64, Linux arm64, and macOS arm64;
+- CI runs the workspace tests on Linux, macOS, and Windows, but no Windows
+  artifact is published;
+- the Nix package closes over Iced's X11 and Wayland runtime libraries, but the
+  published Linux tarballs are a separate format: they bundle PDFium and rely
+  on compatible host X11/Wayland graphics libraries. Neither distribution path
+  currently includes WebKitGTK;
+- the selected production renderer must therefore work in the shipped macOS
+  and Linux artifacts, including both X11 and Wayland sessions. It must compile
+  and retain backend-independent core tests on Windows; shipping a Windows
+  renderer is deferred until Shōsai publishes a Windows artifact.
+
+A Wry-only implementation does not currently satisfy that boundary because it
+has no child-view path in Shōsai's Wayland host and would add an unbundled
+WebKitGTK runtime to Linux. Gate 0 may still select Wry only if the spike proves
+a maintainable Wayland integration or defines and evaluates a native fallback;
+silently disabling EPUB rendering on a shipped session type is not acceptable.
+
 Authoritative implementation references:
 
 - [Wry `WebViewBuilder`](https://docs.rs/wry/0.56.1/wry/struct.WebViewBuilder.html)
@@ -91,29 +118,54 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Iced integration | Possible but outside widget composition | Natural widget composition | Focus, overlay, clipping, tabs, IME |
 | Accessibility/selection | Unknown platform behavior | Not currently modeled | Screen-reader and selection tests |
 | Portability | Wayland blocker; platform runtimes differ | Existing Iced targets | macOS, Windows, X11, Wayland spikes |
-| Warm page-turn latency | Unknown | Blocking storage removed; reported baseline around 200–500 ms | Input-to-present p50/p95 release measurements |
+| Warm page-turn latency | Unknown | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements |
 | Packaging cost | WebKitGTK added on Linux | Dependency set not selected | Binary/runtime/package smoke tests |
 | Maintenance cost | Browser integration and platform variance | CSS/layout implementation scope | Native component/dependency prototype |
 
 ## Fixture and measurement matrix
 
-| Fixture/workload | Wry | Native/current | Required assertion |
-|---|---|---|---|
-| Existing `sample.epub` | Not wired yet | Existing tests pass | Navigation, search, progress unchanged |
-| Table (`rowspan`, caption) | Static spike renders on macOS | Not represented faithfully | Structure, overflow, pagination, headers |
-| Presentation MathML fraction | Static spike renders on macOS | Not represented faithfully | Inline/display scaling and fallback text |
-| WOFF2/TTF/OTF and fallback | Not started | Not started | In-archive only, deterministic fallback |
-| RTL and mixed script | Not started | Not started | Order, shaping, selection, navigation |
-| Traversal/duplicate paths | Not started | Current resolver is unsafe | Canonical rejection and no aliasing |
-| Remote script/image/font/navigation | Policy configured only | No content fetch; external click opens system handler | Zero book-initiated network requests |
-| Malformed/oversized input | Not started | Limits incomplete | Bounded failure with diagnostics |
-| Warm turn/chapter/relayout latency | Not measured | Blocking storage removed; remaining latency not measured | p50/p95 input-to-present budgets |
+Every fixture must be generated from redistribution-safe inputs. Isolated books
+identify failures precisely; `conformance.epub` combines the fidelity cases to
+expose cascade, resource, and pagination interactions. Semantic assertions are
+required in automated tests. Screenshots are supporting evidence only and must
+use fixed fonts, viewport, theme, and backend versions.
+
+| ID | Fixture content | Required assertion |
+|---|---|---|
+| `baseline` | Existing `sample.epub` | TOC, chapter navigation, search offsets, bookmarks, progress, themes, and both reader modes remain stable |
+| `nested-image` | Block and `<p><img></p>` images, figure/caption, missing image, image in a table cell | Every local image resolves relative to its chapter, nested images are not dropped, captions remain associated, and missing content has deterministic fallback |
+| `css-cascade` | Element/class/compound/descendant selectors, specificity ties, source order, inheritance, inline style, relative lengths, `display:none` | Computed values and fallback match the documented supported CSS subset without leaking reader overrides |
+| `table` | Caption, header groups, nested content, links/images, `colspan`, `rowspan`, narrow and over-wide tables | Cell and header structure is preserved; pagination and overflow never flatten or silently discard content |
+| `fonts` | Local WOFF, WOFF2, TTF, and OTF faces; weight/style variants; missing/corrupt source; same family in two books | Only in-archive fonts load, fallback is deterministic, variants map correctly, and per-book registrations are released |
+| `mathml` | Inline/display fractions, roots, scripts, operators, matrix, annotations, malformed markup | Math remains legible at each font size/theme and exposes readable fallback without scripts or remote assets |
+| `bidi` | RTL paragraphs and lists, Arabic/Hebrew with Latin/numbers, combining marks, emoji and CJK | Visual order, shaping, wrapping, search offsets, selection, and navigation retain logical text order |
+| `links` | Same-chapter and cross-chapter fragments, percent-encoded paths, HTTP(S), mail, and unsupported schemes | Internal targets restore a stable logical location; external targets follow the explicit user policy and never navigate the book view implicitly |
+| `malformed-markup` | Recoverable and fatal XHTML/CSS, deep nesting, missing spine/resource entries | Failures are bounded and diagnosed by chapter/resource; one bad resource does not abort unrelated readable chapters |
+| `canonical-paths` | `.`/`..`, encoded traversal, query/fragment, case variants, duplicate normalized entries, absolute and foreign schemes | One canonical resolver rejects traversal/aliasing and never serves outside the EPUB origin |
+| `remote-content` | Remote image/font/CSS imports, redirects, scripts, popups, downloads, forms, and navigation attempts | Automated request recording proves zero book-initiated network requests and zero script execution |
+| `resource-limits` | Excess entries, high compression ratio, oversized entry/aggregate XML/text, huge declared/decoded images and fonts | Configured limits fail before unbounded allocation or backend decoding and produce actionable diagnostics |
+| `conformance` | All fidelity cases above in a multi-chapter book | Both candidate renderers run the same navigation, layout, accessibility, resource, and screenshot protocol |
+| `performance` | Existing sample plus generated large text/image workloads | Warm turn, chapter transition, relayout, load, and memory measurements use equivalent release protocols on each candidate |
+
+The commercial EPUB that exposed missing `<p><img></p>` diagrams and flattened
+tables is evidence for `nested-image` and `table`, but is not redistributable and
+must not be checked in. The generated cases reproduce those structures without
+copying its content.
+
+## Native performance baseline
+
+The dated
+[2026-08-17 EPUB page-turn benchmark](../../benchmarks/epub-page-turn/2026-08-17/)
+records the synthetic app-action-to-compositor-present protocol, reproducible
+workloads, host details, budgets, and complete native baseline. All measured
+paths met their initial budgets; large-text relayout was the dominant native
+cost.
 
 ## Next spike steps
 
-1. Serve `sample.epub` chapter and manifest resources from bytes through the
-   custom protocol using one canonical resolver; record every request and prove
-   remote requests are blocked with a network monitor or controlled proxy.
+1. Prove remote requests are blocked with a network monitor or controlled
+   proxy. The shared canonical resolver now protects `sample.epub`
+   chapter/CSS/image serving and request recording.
 2. Replace fixed child bounds with an identified Iced placeholder and test
    resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
 3. Run the same child spike on Windows and Linux/X11. Decide whether lack of a
@@ -121,8 +173,8 @@ Scores remain unset until the same fixture and measurement protocol is used.
 4. Build the native computed-style boundary for the same table/font/MathML/RTL
    fixture, inventory maintained permissive selector/layout/math dependencies,
    and estimate unsupported work explicitly.
-5. Add release-build instrumentation for warm page turns, chapter transitions,
-   and relayout before assigning comparison scores or choosing a renderer.
+5. Run the same release performance protocol for Wry and on the other released
+   platforms before assigning final comparison scores or choosing a renderer.
 
 ## Decision
 

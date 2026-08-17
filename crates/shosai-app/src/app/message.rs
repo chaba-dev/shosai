@@ -154,4 +154,5 @@ pub enum Message {
     PersistWindowGeometry(u64),
     WindowGeometryPersisted,
     ReadingStateFlushed(window::Id),
+    PerfFramePresented,
 }

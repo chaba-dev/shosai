@@ -16,10 +16,10 @@ and maintenance consequences.
 * Current Baseline
 
 - ~crates/shosai-core/src/epub/parser.rs~ reads container/OPF, spine, TOC,
-  XHTML, and manifest resources.  Non-XHTML resources are held eagerly in
-  ~EpubContent.resources~ without archive-entry, count, compression-ratio, or
-  aggregate-byte limits.  Relative paths are joined as strings rather than
-  canonicalized, scheme-aware EPUB URIs.
+  XHTML, and manifest resources.  Manifest resources are held eagerly in
+  ~EpubContent.resources~ without entry-count, compression-ratio, or
+  aggregate-byte limits.  A shared canonical resolver now validates archive
+  names and same-book paths before parser or custom-protocol lookup.
 - ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but extracts class
   tokens from serialized selectors into a small-property ~StyleMap~.  It does
   not implement selector matching, the cascade, inheritance, layout, or
@@ -31,9 +31,10 @@ and maintenance consequences.
   limits, and directly creates Iced widgets for both reader modes.  Ordinary
   paginated turns reuse ~epub_pages~, resolve bookmark state from the loaded
   bookmark cache, and queue/coalesce reading-state writes off the UI thread.
-  The writer is flushed before shutdown, but input-to-present latency and the
-  remaining Iced widget rebuild are not yet measured.  Internal-link fragments
-  are ignored; user-activated HTTP(S) and mail links open in the system handler.
+  The writer is flushed before shutdown.  Release app-action-to-present
+  measurements are recorded in ADR 001; the remaining Iced widget rebuild is
+  included in those measurements.  Internal-link fragments are ignored;
+  user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
   font-loading policy.
@@ -54,25 +55,38 @@ external links follow an explicit confirmation/allow policy.
 
 ** Prerequisites
 
-- [ ] Capture baseline screenshots, load time, memory use, and input-to-present
-  p50/p95 latency for warm page turns, chapter transitions, and layout-changing
-  operations using ~crates/shosai-core/tests/fixtures/sample.epub~ and at least
-  one large EPUB.  Measure text-heavy and image-heavy pages in single-page and
-  spread modes, and define target budgets before selecting a backend.
-- [ ] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
+- [ ] Capture baseline screenshots, load time, and memory use using
+  ~crates/shosai-core/tests/fixtures/sample.epub~ and at least one large EPUB.
+- [X] Capture synthetic app-action-to-compositor-present p50/p95 latency for
+  warm page
+  turns, chapter transitions, and font-size relayout using ~sample.epub~ plus
+  generated large text/image workloads in single-page and spread modes.  The
+  reproducible release harness, protocol, budgets, and 2026-08-17 M4 Max
+  baseline are recorded in the dated benchmark linked from ADR 001; all
+  measured paths meet their initial budgets.
+- [X] Define a fixture matrix: nested/rowspan tables, local WOFF/WOFF2/TTF/OTF,
   ~@font-face~ fallback, inline and presentation MathML, RTL/mixed-script text,
   malformed CSS/XHTML, missing resources, duplicate/encoded traversal paths,
-  oversized archives/images, and internal/external links.
-- [ ] Confirm tested versus released targets and distribution constraints from
+  oversized archives/images, and internal/external links.  ADR 001 assigns
+  stable fixture IDs and semantic/security assertions, including a synthetic
+  nested-image/table regression derived from a non-redistributable field report.
+- [X] Confirm tested versus released targets and distribution constraints from
   Nix and packaging jobs before evaluating native webview availability.  In
-  particular, Windows is CI-tested but has no release artifact today; decide
-  whether the selected renderer must merely build there or be shipped there.
+  particular, Windows remains a build/test target until a Windows artifact is
+  published; the production renderer must ship on macOS arm64 and Linux
+  x86_64/arm64 under both X11 and Wayland.  ADR 001 records why a Wry-only route
+  does not yet meet that boundary.
+- [X] Introduce the minimal backend-neutral canonical archive-path and EPUB-URI
+  resolver needed by both spikes (percent decoding, fragments, scheme/origin
+  checks, traversal rejection, normalized-entry uniqueness, and MIME lookup).
+  Do this before candidate-specific resource adapters so Gate 0 tests one
+  security boundary rather than two provisional resolvers.
 
 ** Spike A — ~wry~
 
 Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
-- [ ] Render one chapter from bytes through a custom, non-network resource
+- [X] Render one chapter from bytes through a custom, non-network resource
   protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.
 - [ ] Disable scripts, remote navigation, downloads, popups, and external
   resource fetching by default; prove blocked requests in a test/harness.
@@ -112,10 +126,6 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 * Shared Foundation (After Gate 0)
 
-- [ ] Introduce canonical archive-path and URI resolution in
-  ~crates/shosai-core/src/epub/parser.rs~ (percent decoding, fragments,
-  scheme/origin checks, traversal rejection, normalized-entry uniqueness, MIME
-  lookup); reuse it for CSS, images, fonts, and links.
 - [ ] Replace unrestricted resource access with a read-only EPUB resource API
   carrying bytes, media type, and canonical path.  Add configurable per-entry
   input/archive, entry-count, compression-ratio, per-entry, and aggregate limits

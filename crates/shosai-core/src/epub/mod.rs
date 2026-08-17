@@ -8,8 +8,10 @@
 
 mod parser;
 pub mod render;
+mod resource;
 pub mod style;
 mod types;
 
 pub use parser::EpubDoc;
+pub use resource::{CanonicalEpubPath, EpubReference};
 pub use types::*;
