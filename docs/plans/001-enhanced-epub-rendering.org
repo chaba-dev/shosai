@@ -29,9 +29,11 @@ and maintenance consequences.
 - ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
   ~app.rs~ reparses all chapters on layout refresh, decodes images without pixel
   limits, and directly creates Iced widgets for both reader modes.  Ordinary
-  paginated turns reuse ~epub_pages~, but synchronously query bookmark state and
-  write reading state before the next frame.  Internal-link fragments are
-  ignored; user-activated HTTP(S) and mail links open in the system handler.
+  paginated turns reuse ~epub_pages~, resolve bookmark state from the loaded
+  bookmark cache, and queue/coalesce reading-state writes off the UI thread.
+  The writer is flushed before shutdown, but input-to-present latency and the
+  remaining Iced widget rebuild are not yet measured.  Internal-link fragments
+  are ignored; user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
   font-loading policy.

@@ -9,6 +9,7 @@ use iced::widget::{
     span, text, text_input,
 };
 use iced::{Element, Font, Length, Point, Size, Subscription, Task, window};
+use tokio::sync::{mpsc, oneshot};
 
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
@@ -302,6 +303,18 @@ pub struct InitializedState {
     window_geometry: Option<(Size, Point)>,
 }
 
+#[derive(Debug)]
+struct ReadingStateSave {
+    path: PathBuf,
+    reading: FileReadingState,
+}
+
+#[derive(Debug)]
+enum ReadingStateWriterMessage {
+    Save(ReadingStateSave),
+    Flush(oneshot::Sender<()>),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PageCacheKey {
     page: usize,
@@ -358,6 +371,7 @@ pub struct State {
 
     // -- Shared --
     reading_state: Option<ReadingStateStore>,
+    reading_state_saves: Option<mpsc::UnboundedSender<ReadingStateWriterMessage>>,
     library: Option<Library>,
     bookmark_store: Option<BookmarkStore>,
 
@@ -495,6 +509,7 @@ pub fn boot() -> (State, Task<Message>) {
         bookmark_store: None,
 
         reading_state: None,
+        reading_state_saves: None,
         library: None,
 
         bookmarks: Vec::new(),
@@ -926,10 +941,10 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
 
     state.page_input = format!("{}", state.current_page + 1);
     state.file_path = Some(path);
-    update_bookmark_status(state);
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
         state.bookmarks = store.list_for_file(path).unwrap_or_default();
     }
+    update_bookmark_status(state);
 }
 
 fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
@@ -1946,23 +1961,26 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
 }
 
 fn update_bookmark_status(state: &mut State) {
-    if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-        state.current_page_bookmarked =
-            store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
-    } else {
-        state.current_page_bookmarked = false;
-    }
+    let location_offset = current_epub_offset(state);
+    state.current_page_bookmarked = state.bookmarks.iter().any(|bookmark| {
+        bookmark.page == state.current_page
+            && bookmark.location_offset == location_offset
+            && bookmark.note.is_none()
+    });
 }
 
 fn save_reading_state(state: &State) {
-    if let (Some(path), Some(store)) = (&state.file_path, &state.reading_state) {
-        let reading = FileReadingState {
-            page: state.current_page,
-            location_offset: current_epub_offset(state),
-            zoom: state.zoom.scale(),
+    if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
+        let save = ReadingStateSave {
+            path: path.clone(),
+            reading: FileReadingState {
+                page: state.current_page,
+                location_offset: current_epub_offset(state),
+                zoom: state.zoom.scale(),
+            },
         };
-        if let Err(e) = store.set(path, &reading) {
-            eprintln!("warning: failed to save reading state: {e}");
+        if saves.send(ReadingStateWriterMessage::Save(save)).is_err() {
+            eprintln!("warning: reading state writer stopped unexpectedly");
         }
     }
 
@@ -1977,6 +1995,63 @@ fn save_reading_state(state: &State) {
             let _ = lib.update_progress_by_path(&path, progress).await;
         });
     }
+}
+
+fn start_reading_state_writer(
+    store: ReadingStateStore,
+) -> mpsc::UnboundedSender<ReadingStateWriterMessage> {
+    let (sender, mut receiver) = mpsc::unbounded_channel::<ReadingStateWriterMessage>();
+    tokio::spawn(async move {
+        while let Some(first) = receiver.recv().await {
+            let mut pending = HashMap::new();
+            let mut flushes = Vec::new();
+            match first {
+                ReadingStateWriterMessage::Save(save) => {
+                    pending.insert(save.path, save.reading);
+                }
+                ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
+            }
+            while let Ok(message) = receiver.try_recv() {
+                match message {
+                    ReadingStateWriterMessage::Save(save) => {
+                        pending.insert(save.path, save.reading);
+                    }
+                    ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
+                }
+            }
+
+            for (path, reading) in pending {
+                if let Err(error) = store.set_async(&path, &reading).await {
+                    eprintln!("warning: failed to save reading state: {error}");
+                }
+            }
+            for flush in flushes {
+                let _ = flush.send(());
+            }
+        }
+    });
+    sender
+}
+
+fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Message> {
+    let Some(saves) = &state.reading_state_saves else {
+        return window::close(id);
+    };
+    let (flushed, wait_for_flush) = oneshot::channel();
+    if saves
+        .send(ReadingStateWriterMessage::Flush(flushed))
+        .is_err()
+    {
+        eprintln!("warning: reading state writer stopped before shutdown");
+        return window::close(id);
+    }
+    Task::perform(
+        async move {
+            let _ = wait_for_flush.await;
+            id
+        },
+        Message::ReadingStateFlushed,
+    )
 }
 
 fn persist_window_geometry(state: &mut State) -> Task<Message> {
@@ -6142,6 +6217,9 @@ mod tests {
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let (saves, mut queued_saves) = mpsc::unbounded_channel();
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.reading_state_saves = Some(saves);
         state.window_size.width = 900.0;
         state.epub_pages = vec![
             EpubPage {
@@ -6160,6 +6238,16 @@ mod tests {
                 nodes: Vec::new(),
             },
         ];
+        state.bookmarks.push(Bookmark {
+            id: 1,
+            file_path: "book.epub".to_string(),
+            page: 2,
+            location_offset: Some(0),
+            title: None,
+            note: None,
+            color: "yellow".to_string(),
+            created_at: "2026-08-17".to_string(),
+        });
 
         assert_eq!(epub_visible_pages(&state), vec![0, 1]);
         assert!(can_turn_epub_page(&state, true));
@@ -6170,6 +6258,52 @@ mod tests {
         assert_eq!(state.epub_page, 2);
         assert_eq!(state.current_page, 2);
         assert_eq!(epub_visible_pages(&state), vec![2]);
+        assert!(state.current_page_bookmarked);
+        let ReadingStateWriterMessage::Save(save) = queued_saves
+            .try_recv()
+            .expect("page turn should queue persistence")
+        else {
+            panic!("page turn queued a flush instead of a save");
+        };
+        assert_eq!(save.path, PathBuf::from("book.epub"));
+        assert_eq!(save.reading.page, 2);
+        assert_eq!(save.reading.location_offset, Some(0));
+    }
+
+    #[tokio::test]
+    async fn reading_state_writer_coalesces_queued_positions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let saves = start_reading_state_writer(store.clone());
+
+        for page in 1..=3 {
+            saves
+                .send(ReadingStateWriterMessage::Save(ReadingStateSave {
+                    path: path.clone(),
+                    reading: FileReadingState {
+                        page,
+                        location_offset: Some(page * 10),
+                        zoom: 1.0,
+                    },
+                }))
+                .unwrap();
+        }
+
+        let (flushed, wait_for_flush) = oneshot::channel();
+        saves
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait_for_flush.await.unwrap();
+
+        let saved = store
+            .get_async(&path)
+            .await
+            .expect("flush should persist the latest queued position");
+        assert_eq!(saved.page, 3);
+        assert_eq!(saved.location_offset, Some(30));
     }
 
     #[test]

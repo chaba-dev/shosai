@@ -10,6 +10,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let pool = store.pool().clone();
             state.library = Some(Library::new(pool.clone()));
             state.bookmark_store = Some(BookmarkStore::new(pool));
+            state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
             state.reading_state = Some(store);
             state.storage_initializing = false;
             state.saved_window_geometry = geometry;
@@ -501,15 +502,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         // Bookmarks
         Message::ToggleBookmark => {
             if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
+                let page = state.current_page;
+                let location_offset = current_epub_offset(state);
                 let page_title = format!("Page {}", state.current_page + 1);
-                match store.toggle_at(
-                    path,
-                    state.current_page,
-                    current_epub_offset(state),
-                    Some(&page_title),
-                ) {
-                    Ok(Some(_)) => state.current_page_bookmarked = true,
-                    Ok(None) => state.current_page_bookmarked = false,
+                match store.toggle_at(path, page, location_offset, Some(&page_title)) {
+                    Ok(Some(bookmark)) => {
+                        state.bookmarks.push(bookmark);
+                        state.current_page_bookmarked = true;
+                    }
+                    Ok(None) => {
+                        state.bookmarks.retain(|bookmark| {
+                            bookmark.page != page
+                                || bookmark.location_offset != location_offset
+                                || bookmark.note.is_some()
+                        });
+                        state.current_page_bookmarked = false;
+                    }
                     Err(e) => eprintln!("warning: failed to toggle bookmark: {e}"),
                 }
                 return refresh_bookmarks(state);
@@ -536,13 +544,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             state.bookmarks = bookmarks;
-            // Update current page bookmark status.
-            if let Some(path) = &state.file_path
-                && let Some(store) = &state.bookmark_store
-            {
-                state.current_page_bookmarked =
-                    store.is_bookmarked_at(path, state.current_page, current_epub_offset(state));
-            }
+            update_bookmark_status(state);
         }
 
         Message::GoToBookmark(page, location_offset) => {
@@ -929,9 +931,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return persist_window_geometry(state);
             }
             if let Some(id) = state.close_after_geometry_save.take() {
-                return window::close(id);
+                return flush_reading_state_before_close(state, id);
             }
         }
+
+        Message::ReadingStateFlushed(id) => return window::close(id),
     }
 
     Task::none()

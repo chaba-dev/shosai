@@ -91,7 +91,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Iced integration | Possible but outside widget composition | Natural widget composition | Focus, overlay, clipping, tabs, IME |
 | Accessibility/selection | Unknown platform behavior | Not currently modeled | Screen-reader and selection tests |
 | Portability | Wayland blocker; platform runtimes differ | Existing Iced targets | macOS, Windows, X11, Wayland spikes |
-| Warm page-turn latency | Unknown | Current path reported around 200–500 ms | Input-to-present p50/p95 release measurements |
+| Warm page-turn latency | Unknown | Blocking storage removed; reported baseline around 200–500 ms | Input-to-present p50/p95 release measurements |
 | Packaging cost | WebKitGTK added on Linux | Dependency set not selected | Binary/runtime/package smoke tests |
 | Maintenance cost | Browser integration and platform variance | CSS/layout implementation scope | Native component/dependency prototype |
 
@@ -107,7 +107,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Traversal/duplicate paths | Not started | Current resolver is unsafe | Canonical rejection and no aliasing |
 | Remote script/image/font/navigation | Policy configured only | No content fetch; external click opens system handler | Zero book-initiated network requests |
 | Malformed/oversized input | Not started | Limits incomplete | Bounded failure with diagnostics |
-| Warm turn/chapter/relayout latency | Not measured | User-visible delay reported | p50/p95 input-to-present budgets |
+| Warm turn/chapter/relayout latency | Not measured | Blocking storage removed; remaining latency not measured | p50/p95 input-to-present budgets |
 
 ## Next spike steps
 
