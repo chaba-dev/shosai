@@ -100,7 +100,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [ ] Prove that a child webview can be embedded and resized inside the Iced
   reader on each target, with defined focus/input/event routing, tab lifecycle,
   accessibility-tree behavior, and teardown.  Map browser positions back to
-  stable logical EPUB locations rather than pixel/scroll offsets.
+  stable logical EPUB locations rather than pixel/scroll offsets.  The macOS
+  harness now creates and resizes the child from actual Iced placeholder bounds
+  and has an automated parent-resize/child-update/teardown proof; the
+  cross-platform, routing, accessibility, tab, and logical-location portions
+  remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.

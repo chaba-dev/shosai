@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use iced::advanced::widget::{self, operation};
 use iced::widget::{button, column, container, row, text};
-use iced::{Element, Length, Size, Subscription, Task, window};
+use iced::{Element, Length, Rectangle, Subscription, Task, window};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
@@ -23,6 +24,9 @@ use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 const HEADER_HEIGHT: f32 = 112.0;
 const PADDING: f32 = 24.0;
+const PLACEHOLDER_ID: &str = "epub-wry-spike-placeholder";
+const LIFECYCLE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF";
+const LIFECYCLE_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -35,6 +39,7 @@ thread_local! {
     static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static LIFECYCLE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug)]
@@ -185,17 +190,48 @@ impl SpikeBook {
 #[derive(Debug, Default)]
 struct State {
     window: Option<window::Id>,
-    size: Size,
+    measured_bounds: Option<Rectangle>,
+    creation_bounds: Option<Rectangle>,
+    applied_bounds: Option<Rectangle>,
+    webview_ready: bool,
+    lifecycle_initial_bounds: Option<Rectangle>,
+    lifecycle_deadline: Option<Instant>,
     status: String,
     network_proof_deadline: Option<Instant>,
     network_proof_timeout: Option<Instant>,
 }
 
+struct PlaceholderBoundsOperation {
+    target: widget::Id,
+    bounds: Option<Rectangle>,
+}
+
+impl operation::Operation<Rectangle> for PlaceholderBoundsOperation {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn operation::Operation<Rectangle>)) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&widget::Id>, bounds: Rectangle) {
+        if id == Some(&self.target) {
+            self.bounds = Some(bounds);
+        }
+    }
+
+    fn finish(&self) -> operation::Outcome<Rectangle> {
+        self.bounds
+            .map_or(operation::Outcome::None, operation::Outcome::Some)
+    }
+}
+
 #[derive(Debug, Clone)]
 enum Message {
     WindowEvent(window::Id, window::Event),
+    PlaceholderMeasured(Rectangle),
     WebViewCreated(Result<(), String>),
-    WebViewResized(Result<(), String>),
+    WebViewSynchronized {
+        bounds: Option<Rectangle>,
+        result: Result<(), String>,
+    },
     FocusWebView,
     NetworkProofTick(Instant),
 }
@@ -234,6 +270,19 @@ fn main() -> ExitCode {
             }
         });
     }
+    if lifecycle_proof_requested() {
+        return LIFECYCLE_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-lifecycle-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-lifecycle-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
     ExitCode::SUCCESS
 }
 
@@ -249,7 +298,7 @@ fn boot() -> (State, Task<Message>) {
 
 fn subscription(_state: &State) -> Subscription<Message> {
     let events = window::events().map(|(id, event)| Message::WindowEvent(id, event));
-    if network_proof_requested() {
+    if network_proof_requested() || lifecycle_proof_requested() {
         Subscription::batch([
             events,
             iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick),
@@ -261,42 +310,73 @@ fn subscription(_state: &State) -> Subscription<Message> {
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::WindowEvent(id, window::Event::Opened { size, .. }) => {
+        Message::WindowEvent(id, window::Event::Opened { .. }) => {
             state.window = Some(id);
-            state.size = size;
-            state.status = "creating locked-down child webview".into();
-            create_webview(id, size)
+            state.status = "measuring Iced reader placeholder".into();
+            measure_placeholder()
         }
-        Message::WindowEvent(id, window::Event::Resized(size)) if state.window == Some(id) => {
-            state.size = size;
-            resize_webview(id, size)
+        Message::WindowEvent(id, window::Event::Resized(_)) if state.window == Some(id) => {
+            measure_placeholder()
+        }
+        Message::WindowEvent(id, window::Event::Rescaled(_)) if state.window == Some(id) => {
+            measure_placeholder()
         }
         Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
-            WEBVIEW.with(|slot| slot.borrow_mut().take());
+            teardown_webview();
             Task::none()
         }
         Message::WindowEvent(_, _) => Task::none(),
+        Message::PlaceholderMeasured(bounds) => {
+            state.measured_bounds = usable_bounds(bounds);
+            synchronize_webview(state)
+        }
         Message::WebViewCreated(result) => match result {
             Ok(()) => {
+                state.webview_ready = true;
+                state.applied_bounds = state.creation_bounds.take();
                 state.status = if network_proof_requested() {
                     state.network_proof_timeout = Some(Instant::now() + NETWORK_PROOF_TIMEOUT);
                     "embedded; waiting for hostile page to finish loading".into()
                 } else {
-                    "embedded; deny-by-default handlers configured".into()
+                    "embedded in measured Iced placeholder; deny-by-default handlers configured"
+                        .into()
                 };
-                Task::none()
+                if lifecycle_proof_requested() {
+                    state.lifecycle_initial_bounds = state.applied_bounds;
+                    state.lifecycle_deadline = Some(Instant::now() + LIFECYCLE_PROOF_TIMEOUT);
+                    state
+                        .window
+                        .map_or_else(Task::none, |id| window::resize(id, (1040.0, 760.0).into()))
+                } else {
+                    synchronize_webview(state)
+                }
             }
             Err(error) if network_proof_requested() => {
+                state.creation_bounds = None;
                 finish_network_proof(state, Err(format!("webview creation failed: {error}")))
             }
+            Err(error) if lifecycle_proof_requested() => {
+                state.creation_bounds = None;
+                finish_lifecycle_proof(state, Err(format!("webview creation failed: {error}")))
+            }
             Err(error) => {
+                state.creation_bounds = None;
                 state.status = format!("webview creation failed: {error}");
                 Task::none()
             }
         },
-        Message::WebViewResized(result) => {
-            if let Err(error) = result {
-                state.status = format!("webview resize failed: {error}");
+        Message::WebViewSynchronized { bounds, result } => {
+            match result {
+                Ok(()) => {
+                    state.applied_bounds = bounds;
+                    if lifecycle_proof_requested()
+                        && bounds.is_some()
+                        && bounds != state.lifecycle_initial_bounds
+                    {
+                        return finish_lifecycle_proof(state, Ok(()));
+                    }
+                }
+                Err(error) => state.status = format!("webview synchronization failed: {error}"),
             }
             Task::none()
         }
@@ -308,8 +388,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             });
             Task::none()
         }
+        Message::NetworkProofTick(now) if lifecycle_proof_requested() => {
+            update_lifecycle_proof(state, now)
+        }
         Message::NetworkProofTick(now) => update_network_proof(state, now),
     }
+}
+
+fn update_lifecycle_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state
+        .lifecycle_deadline
+        .is_some_and(|deadline| now >= deadline)
+    {
+        return finish_lifecycle_proof(state, Err("timed out waiting for measured resize".into()));
+    }
+    measure_placeholder()
+}
+
+fn finish_lifecycle_proof(state: &State, result: Result<(), String>) -> Task<Message> {
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!("wry-spike-lifecycle-proof PASS: measured resize and teardown completed");
+    }
+    LIFECYCLE_PROOF_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn update_network_proof(state: &mut State, now: Instant) -> Task<Message> {
@@ -386,6 +488,7 @@ fn view(state: &State) -> Element<'_, Message> {
             .height(HEADER_HEIGHT)
             .padding([20, PADDING as u16]),
         container(text("Native child webview overlays this placeholder"))
+            .id(PLACEHOLDER_ID)
             .width(Length::Fill)
             .height(Length::Fill)
             .center(Length::Fill),
@@ -393,7 +496,15 @@ fn view(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn create_webview(id: window::Id, size: Size) -> Task<Message> {
+fn measure_placeholder() -> Task<Message> {
+    iced::advanced::widget::operate(PlaceholderBoundsOperation {
+        target: widget::Id::from(PLACEHOLDER_ID),
+        bounds: None,
+    })
+    .map(Message::PlaceholderMeasured)
+}
+
+fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
     window::run(id, move |window| {
         let mut book = SpikeBook::from_epub_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -424,7 +535,7 @@ fn create_webview(id: window::Id, size: Size) -> Task<Message> {
             .as_raw();
         let parent = ParentHandle(raw);
         let webview = WebViewBuilder::new()
-            .with_bounds(webview_bounds(size))
+            .with_bounds(webview_bounds(bounds))
             .with_custom_protocol("shosai".into(), serve_epub_resource)
             .with_url(&start_url)
             .with_javascript_disabled()
@@ -447,6 +558,10 @@ fn create_webview(id: window::Id, size: Size) -> Task<Message> {
 
 fn network_proof_requested() -> bool {
     std::env::var_os(NETWORK_PROOF_ENV).is_some()
+}
+
+fn lifecycle_proof_requested() -> bool {
+    std::env::var_os(LIFECYCLE_PROOF_ENV).is_some()
 }
 
 fn is_network_proof_page(url: &str) -> bool {
@@ -478,29 +593,65 @@ fn remote_content_chapter(endpoint: &str) -> String {
     )
 }
 
-fn resize_webview(id: window::Id, size: Size) -> Task<Message> {
+fn synchronize_webview(state: &mut State) -> Task<Message> {
+    let Some(id) = state.window else {
+        return Task::none();
+    };
+    if !state.webview_ready {
+        if state.creation_bounds.is_none()
+            && let Some(bounds) = state.measured_bounds
+        {
+            state.creation_bounds = Some(bounds);
+            state.status = "creating locked-down child webview in measured bounds".into();
+            return create_webview(id, bounds);
+        }
+        return Task::none();
+    }
+    if state.measured_bounds == state.applied_bounds {
+        return Task::none();
+    }
+    let bounds = state.measured_bounds;
     window::run(id, move |_| {
         WEBVIEW.with(|slot| {
             if let Some(webview) = slot.borrow().as_ref() {
-                webview
-                    .set_bounds(webview_bounds(size))
-                    .map_err(|error| error.to_string())?;
+                if let Some(bounds) = bounds {
+                    webview
+                        .set_bounds(webview_bounds(bounds))
+                        .map_err(|error| error.to_string())?;
+                    webview
+                        .set_visible(true)
+                        .map_err(|error| error.to_string())?;
+                } else {
+                    webview
+                        .set_visible(false)
+                        .map_err(|error| error.to_string())?;
+                }
             }
             Ok(())
         })
     })
-    .map(Message::WebViewResized)
+    .map(move |result| Message::WebViewSynchronized { bounds, result })
 }
 
-fn webview_bounds(size: Size) -> Rect {
+fn usable_bounds(bounds: Rectangle) -> Option<Rectangle> {
+    (bounds.x.is_finite()
+        && bounds.y.is_finite()
+        && bounds.width.is_finite()
+        && bounds.height.is_finite()
+        && bounds.width > 0.0
+        && bounds.height > 0.0)
+        .then_some(bounds)
+}
+
+fn webview_bounds(bounds: Rectangle) -> Rect {
     Rect {
-        position: LogicalPosition::new(PADDING, HEADER_HEIGHT).into(),
-        size: LogicalSize::new(
-            (size.width - PADDING * 2.0).max(1.0),
-            (size.height - HEADER_HEIGHT - PADDING).max(1.0),
-        )
-        .into(),
+        position: LogicalPosition::new(bounds.x, bounds.y).into(),
+        size: LogicalSize::new(bounds.width, bounds.height).into(),
     }
+}
+
+fn teardown_webview() {
+    WEBVIEW.with(|slot| slot.borrow_mut().take());
 }
 
 fn is_allowed_navigation(url: &str) -> bool {
@@ -658,6 +809,56 @@ mod tests {
         assert_eq!(
             monitor.stop_and_count().unwrap_err(),
             "network monitor worker panicked"
+        );
+    }
+
+    #[test]
+    fn placeholder_bounds_reject_empty_and_non_finite_geometry() {
+        let valid = Rectangle {
+            x: 24.0,
+            y: 112.0,
+            width: 852.0,
+            height: 564.0,
+        };
+        assert_eq!(usable_bounds(valid), Some(valid));
+
+        for invalid in [
+            Rectangle {
+                width: 0.0,
+                ..valid
+            },
+            Rectangle {
+                height: -1.0,
+                ..valid
+            },
+            Rectangle {
+                x: f32::NAN,
+                ..valid
+            },
+            Rectangle {
+                height: f32::INFINITY,
+                ..valid
+            },
+        ] {
+            assert_eq!(usable_bounds(invalid), None);
+        }
+    }
+
+    #[test]
+    fn measured_iced_bounds_are_preserved_as_logical_wry_bounds() {
+        let bounds = Rectangle {
+            x: 17.5,
+            y: 93.25,
+            width: 640.5,
+            height: 480.75,
+        };
+
+        assert_eq!(
+            webview_bounds(bounds),
+            Rect {
+                position: LogicalPosition::new(17.5, 93.25).into(),
+                size: LogicalSize::new(640.5, 480.75).into(),
+            }
         );
     }
 
