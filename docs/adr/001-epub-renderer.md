@@ -24,6 +24,8 @@ The Wry harness is isolated from production behind an optional Cargo feature:
 cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_PAGE=conformance \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_NETWORK_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
@@ -40,12 +42,17 @@ It currently proves on macOS arm64 that:
 - the child can be resized with its Iced parent and explicitly focused;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
-  attached to protocol responses.
+  attached to protocol responses;
+- the automated hostile-content mode loads remote CSS imports, images, fonts,
+  frames, objects, and external/inline scripts against a controlled loopback
+  listener, requires the exact hostile resource to be served and finish loading,
+  then waits through a grace period.  It exits nonzero for any connection,
+  listener error, worker panic, wrong/missing page load, or missing protocol
+  response.  A control test proves that a direct connection is detected.
 
-The successful macOS run was visually checked. The security callbacks and CSP
-are configured and unit-tested, but the required proof that no remote subresource
-request reaches the network is still outstanding. Checked-in book resources are
-served with their exact manifest media types, including
+The successful macOS rendering run was visually checked, and the automated
+network proof passes on macOS arm64. Checked-in book resources are served with
+their exact manifest media types, including
 `application/xhtml+xml`; the generated conformance page remains explicitly
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
@@ -69,12 +76,12 @@ Those behaviors need explicit tests rather than visual inference.
 
 ## Platform and packaging findings
 
-| Target | Child-view path | Current finding |
-|---|---|---|
-| macOS 12+ | Iced raw AppKit handle → child `WKWebView` | Builds and renders with the system WebKit; no extra runtime packaged |
-| Windows CI | Iced raw Win32 handle → child WebView2 | API path exists; runtime, accessibility, focus, and CI spike not yet tested |
-| Linux X11 | Iced raw Xlib handle → WebKitGTK child | Requires GTK initialization/event pumping and WebKitGTK 4.1; current Nix/release dependencies do not include them |
-| Linux Wayland | GTK container via Wry Unix extension | Raw child embedding is unsupported; standard Iced runner exposes no GTK container, making this the main Wry portability blocker |
+| Target        | Child-view path                            | Current finding                                                                                                                 |
+|---------------|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| macOS 12+     | Iced raw AppKit handle → child `WKWebView` | Builds and renders with the system WebKit; no extra runtime packaged                                                            |
+| Windows CI    | Iced raw Win32 handle → child WebView2     | API path exists; runtime, accessibility, focus, and CI spike not yet tested                                                     |
+| Linux X11     | Iced raw Xlib handle → WebKitGTK child     | Requires GTK initialization/event pumping and WebKitGTK 4.1; current Nix/release dependencies do not include them               |
+| Linux Wayland | GTK container via Wry Unix extension       | Raw child embedding is unsupported; standard Iced runner exposes no GTK container, making this the main Wry portability blocker |
 
 Wry 0.56.1 is Apache-2.0 OR MIT and uses system engines. A full transitive
 license report and notices check remains required. Windows is tested in CI but
@@ -111,16 +118,16 @@ Authoritative implementation references:
 
 Scores remain unset until the same fixture and measurement protocol is used.
 
-| Criterion | Wry route | Native route | Evidence still needed |
-|---|---|---|---|
-| CSS/table/MathML fidelity | Promising on macOS system WebKit | Unknown | Combined fixture on every target |
-| Sandbox and offline policy | Handlers/CSP configured, network proof incomplete | Smaller surface, resource policy incomplete | Hostile fixture plus network monitor/proxy |
-| Iced integration | Possible but outside widget composition | Natural widget composition | Focus, overlay, clipping, tabs, IME |
-| Accessibility/selection | Unknown platform behavior | Not currently modeled | Screen-reader and selection tests |
-| Portability | Wayland blocker; platform runtimes differ | Existing Iced targets | macOS, Windows, X11, Wayland spikes |
-| Warm page-turn latency | Unknown | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements |
-| Packaging cost | WebKitGTK added on Linux | Dependency set not selected | Binary/runtime/package smoke tests |
-| Maintenance cost | Browser integration and platform variance | CSS/layout implementation scope | Native component/dependency prototype |
+| Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
+|----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
+| Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows and Linux/X11; resource limits |
+| Iced integration           | Possible but outside widget composition                                                                       | Natural widget composition                                      | Focus, overlay, clipping, tabs, IME                    |
+| Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
+| Portability                | Wayland blocker; platform runtimes differ                                                                     | Existing Iced targets                                           | macOS, Windows, X11, Wayland spikes                    |
+| Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
+| Packaging cost             | WebKitGTK added on Linux                                                                                      | Dependency set not selected                                     | Binary/runtime/package smoke tests                     |
+| Maintenance cost           | Browser integration and platform variance                                                                     | CSS/layout implementation scope                                 | Native component/dependency prototype                  |
 
 ## Fixture and measurement matrix
 
@@ -130,22 +137,22 @@ expose cascade, resource, and pagination interactions. Semantic assertions are
 required in automated tests. Screenshots are supporting evidence only and must
 use fixed fonts, viewport, theme, and backend versions.
 
-| ID | Fixture content | Required assertion |
-|---|---|---|
-| `baseline` | Existing `sample.epub` | TOC, chapter navigation, search offsets, bookmarks, progress, themes, and both reader modes remain stable |
-| `nested-image` | Block and `<p><img></p>` images, figure/caption, missing image, image in a table cell | Every local image resolves relative to its chapter, nested images are not dropped, captions remain associated, and missing content has deterministic fallback |
-| `css-cascade` | Element/class/compound/descendant selectors, specificity ties, source order, inheritance, inline style, relative lengths, `display:none` | Computed values and fallback match the documented supported CSS subset without leaking reader overrides |
-| `table` | Caption, header groups, nested content, links/images, `colspan`, `rowspan`, narrow and over-wide tables | Cell and header structure is preserved; pagination and overflow never flatten or silently discard content |
-| `fonts` | Local WOFF, WOFF2, TTF, and OTF faces; weight/style variants; missing/corrupt source; same family in two books | Only in-archive fonts load, fallback is deterministic, variants map correctly, and per-book registrations are released |
-| `mathml` | Inline/display fractions, roots, scripts, operators, matrix, annotations, malformed markup | Math remains legible at each font size/theme and exposes readable fallback without scripts or remote assets |
-| `bidi` | RTL paragraphs and lists, Arabic/Hebrew with Latin/numbers, combining marks, emoji and CJK | Visual order, shaping, wrapping, search offsets, selection, and navigation retain logical text order |
-| `links` | Same-chapter and cross-chapter fragments, percent-encoded paths, HTTP(S), mail, and unsupported schemes | Internal targets restore a stable logical location; external targets follow the explicit user policy and never navigate the book view implicitly |
-| `malformed-markup` | Recoverable and fatal XHTML/CSS, deep nesting, missing spine/resource entries | Failures are bounded and diagnosed by chapter/resource; one bad resource does not abort unrelated readable chapters |
-| `canonical-paths` | `.`/`..`, encoded traversal, query/fragment, case variants, duplicate normalized entries, absolute and foreign schemes | One canonical resolver rejects traversal/aliasing and never serves outside the EPUB origin |
-| `remote-content` | Remote image/font/CSS imports, redirects, scripts, popups, downloads, forms, and navigation attempts | Automated request recording proves zero book-initiated network requests and zero script execution |
-| `resource-limits` | Excess entries, high compression ratio, oversized entry/aggregate XML/text, huge declared/decoded images and fonts | Configured limits fail before unbounded allocation or backend decoding and produce actionable diagnostics |
-| `conformance` | All fidelity cases above in a multi-chapter book | Both candidate renderers run the same navigation, layout, accessibility, resource, and screenshot protocol |
-| `performance` | Existing sample plus generated large text/image workloads | Warm turn, chapter transition, relayout, load, and memory measurements use equivalent release protocols on each candidate |
+| ID                 | Fixture content                                                                                                                          | Required assertion                                                                                                                                            |
+|--------------------|------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `baseline`         | Existing `sample.epub`                                                                                                                   | TOC, chapter navigation, search offsets, bookmarks, progress, themes, and both reader modes remain stable                                                     |
+| `nested-image`     | Block and `<p><img></p>` images, figure/caption, missing image, image in a table cell                                                    | Every local image resolves relative to its chapter, nested images are not dropped, captions remain associated, and missing content has deterministic fallback |
+| `css-cascade`      | Element/class/compound/descendant selectors, specificity ties, source order, inheritance, inline style, relative lengths, `display:none` | Computed values and fallback match the documented supported CSS subset without leaking reader overrides                                                       |
+| `table`            | Caption, header groups, nested content, links/images, `colspan`, `rowspan`, narrow and over-wide tables                                  | Cell and header structure is preserved; pagination and overflow never flatten or silently discard content                                                     |
+| `fonts`            | Local WOFF, WOFF2, TTF, and OTF faces; weight/style variants; missing/corrupt source; same family in two books                           | Only in-archive fonts load, fallback is deterministic, variants map correctly, and per-book registrations are released                                        |
+| `mathml`           | Inline/display fractions, roots, scripts, operators, matrix, annotations, malformed markup                                               | Math remains legible at each font size/theme and exposes readable fallback without scripts or remote assets                                                   |
+| `bidi`             | RTL paragraphs and lists, Arabic/Hebrew with Latin/numbers, combining marks, emoji and CJK                                               | Visual order, shaping, wrapping, search offsets, selection, and navigation retain logical text order                                                          |
+| `links`            | Same-chapter and cross-chapter fragments, percent-encoded paths, HTTP(S), mail, and unsupported schemes                                  | Internal targets restore a stable logical location; external targets follow the explicit user policy and never navigate the book view implicitly              |
+| `malformed-markup` | Recoverable and fatal XHTML/CSS, deep nesting, missing spine/resource entries                                                            | Failures are bounded and diagnosed by chapter/resource; one bad resource does not abort unrelated readable chapters                                           |
+| `canonical-paths`  | `.`/`..`, encoded traversal, query/fragment, case variants, duplicate normalized entries, absolute and foreign schemes                   | One canonical resolver rejects traversal/aliasing and never serves outside the EPUB origin                                                                    |
+| `remote-content`   | Remote image/font/CSS imports, redirects, scripts, popups, downloads, forms, and navigation attempts                                     | Automated request recording proves zero book-initiated network requests and zero script execution                                                             |
+| `resource-limits`  | Excess entries, high compression ratio, oversized entry/aggregate XML/text, huge declared/decoded images and fonts                       | Configured limits fail before unbounded allocation or backend decoding and produce actionable diagnostics                                                     |
+| `conformance`      | All fidelity cases above in a multi-chapter book                                                                                         | Both candidate renderers run the same navigation, layout, accessibility, resource, and screenshot protocol                                                    |
+| `performance`      | Existing sample plus generated large text/image workloads                                                                                | Warm turn, chapter transition, relayout, load, and memory measurements use equivalent release protocols on each candidate                                     |
 
 The commercial EPUB that exposed missing `<p><img></p>` diagrams and flattened
 tables is evidence for `nested-image` and `table`, but is not redistributable and
@@ -163,17 +170,15 @@ cost.
 
 ## Next spike steps
 
-1. Prove remote requests are blocked with a network monitor or controlled
-   proxy. The shared canonical resolver now protects `sample.epub`
-   chapter/CSS/image serving and request recording.
-2. Replace fixed child bounds with an identified Iced placeholder and test
+1. Replace fixed child bounds with an identified Iced placeholder and test
    resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
-3. Run the same child spike on Windows and Linux/X11. Decide whether lack of a
+2. Run the same child and hostile-content spikes on Windows and Linux/X11.
+   Decide whether lack of a
    viable Wayland host rejects Wry or justifies a documented backend fallback.
-4. Build the native computed-style boundary for the same table/font/MathML/RTL
+3. Build the native computed-style boundary for the same table/font/MathML/RTL
    fixture, inventory maintained permissive selector/layout/math dependencies,
    and estimate unsupported work explicitly.
-5. Run the same release performance protocol for Wry and on the other released
+4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 
 ## Decision

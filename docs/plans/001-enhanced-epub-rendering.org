@@ -88,8 +88,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 - [X] Render one chapter from bytes through a custom, non-network resource
   protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.
-- [ ] Disable scripts, remote navigation, downloads, popups, and external
-  resource fetching by default; prove blocked requests in a test/harness.
+- [X] Disable scripts, remote navigation, downloads, popups, and external
+  resource fetching by default.  The macOS harness loads hostile remote
+  CSS/image/font/frame/object/script references against a controlled loopback
+  listener and fails unless it observes zero connections; unit tests cover the
+  canonical navigation policy and prove the monitor detects a control
+  connection.
 - [ ] Prototype theme/font-size injection, internal fragment links, reading
   position capture/restore, search highlighting, and continuous/paginated
   behavior.

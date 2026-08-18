@@ -6,6 +6,12 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::net::TcpListener;
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use iced::widget::{button, column, container, row, text};
 use iced::{Element, Length, Size, Subscription, Task, window};
@@ -13,14 +19,100 @@ use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
 use wry::raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, WindowHandle};
-use wry::{NewWindowResponse, Rect, WebView, WebViewBuilder};
+use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 const HEADER_HEIGHT: f32 = 112.0;
 const PADDING: f32 = 24.0;
+const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
+const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
+const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
+const NETWORK_PROOF_PATH: &str = "_spike/conformance.xhtml";
+const NETWORK_PROOF_URL: &str = "shosai://book/_spike/conformance.xhtml";
+const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xhtml";
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
     static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
+    static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
+    static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+}
+
+#[derive(Debug)]
+struct NetworkMonitor {
+    endpoint: String,
+    attempts: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<Result<(), String>>>,
+}
+
+impl NetworkMonitor {
+    fn start() -> Result<Self, String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|error| error.to_string())?;
+        let endpoint = format!(
+            "http://{}",
+            listener.local_addr().map_err(|error| error.to_string())?
+        );
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_attempts = Arc::clone(&attempts);
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::spawn(move || {
+            loop {
+                match listener.accept() {
+                    Ok((_stream, _peer)) => {
+                        worker_attempts.fetch_add(1, Ordering::AcqRel);
+                    }
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && worker_stop.load(Ordering::Acquire) =>
+                    {
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(format!("network monitor accept failed: {error}")),
+                }
+            }
+            Ok(())
+        });
+
+        Ok(Self {
+            endpoint,
+            attempts,
+            stop,
+            worker: Some(worker),
+        })
+    }
+
+    fn attempts(&self) -> usize {
+        self.attempts.load(Ordering::Acquire)
+    }
+
+    fn stop_and_count(&mut self) -> Result<usize, String> {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            worker
+                .join()
+                .map_err(|_| "network monitor worker panicked".to_string())??;
+        }
+        Ok(self.attempts())
+    }
+}
+
+impl Drop for NetworkMonitor {
+    fn drop(&mut self) {
+        let _ = self.stop_and_count();
+    }
+}
+
+#[derive(Debug)]
+struct NetworkProof {
+    monitor: NetworkMonitor,
+    page_loaded: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -34,11 +126,13 @@ struct SpikeBook {
     start_url: String,
     resources: HashMap<CanonicalEpubPath, SpikeResource>,
     requests: Vec<String>,
+    network_proof_page_served: bool,
 }
 
 impl SpikeBook {
     fn from_epub_bytes(bytes: Vec<u8>) -> Result<Self, String> {
-        let epub = EpubDoc::from_bytes(bytes).map_err(|error| error.to_string())?;
+        let epub =
+            EpubDoc::from_bytes_for_renderer_spike(bytes).map_err(|error| error.to_string())?;
         let first_chapter = epub
             .content
             .chapters
@@ -48,22 +142,31 @@ impl SpikeBook {
             CanonicalEpubPath::new(&first_chapter.path).map_err(|error| error.to_string())?;
         let start_url = first_path.to_protocol_uri();
         let mut resources = HashMap::new();
+        let mut chapter_resources = epub
+            .content
+            .chapters
+            .into_iter()
+            .map(|chapter| (chapter.path, chapter.content.into_bytes()))
+            .collect::<HashMap<_, _>>();
+        let mut manifest_resources = epub.content.resources;
 
-        for item in epub.content.manifest.values() {
-            if let Some(body) = epub.content.resources.get(&item.href) {
+        for item in epub.content.manifest.into_values() {
+            if let Some(body) = manifest_resources
+                .remove(&item.href)
+                .or_else(|| chapter_resources.remove(&item.href))
+            {
                 let path = CanonicalEpubPath::new(&item.href).map_err(|error| error.to_string())?;
                 resources.insert(
                     path,
                     SpikeResource {
-                        content_type: item.media_type.clone(),
-                        body: body.clone(),
+                        content_type: item.media_type,
+                        body,
                     },
                 );
             }
         }
         resources.insert(
-            CanonicalEpubPath::new("_spike/conformance.xhtml")
-                .map_err(|error| error.to_string())?,
+            CanonicalEpubPath::new(NETWORK_PROOF_PATH).map_err(|error| error.to_string())?,
             SpikeResource {
                 content_type: "text/html; charset=utf-8".into(),
                 body: SPIKE_CHAPTER.as_bytes().to_vec(),
@@ -74,6 +177,7 @@ impl SpikeBook {
             start_url,
             resources,
             requests: Vec::new(),
+            network_proof_page_served: false,
         })
     }
 }
@@ -83,6 +187,8 @@ struct State {
     window: Option<window::Id>,
     size: Size,
     status: String,
+    network_proof_deadline: Option<Instant>,
+    network_proof_timeout: Option<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +197,7 @@ enum Message {
     WebViewCreated(Result<(), String>),
     WebViewResized(Result<(), String>),
     FocusWebView,
+    NetworkProofTick(Instant),
 }
 
 #[derive(Clone, Copy)]
@@ -104,12 +211,30 @@ impl HasWindowHandle for ParentHandle {
     }
 }
 
-fn main() -> iced::Result {
-    iced::application(boot, update, view)
+fn main() -> ExitCode {
+    let result = iced::application(boot, update, view)
         .title("Shōsai EPUB Wry spike")
         .subscription(subscription)
         .window_size((900.0, 700.0))
-        .run()
+        .run();
+    if let Err(error) = result {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
+    if network_proof_requested() {
+        return NETWORK_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-network-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-network-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    ExitCode::SUCCESS
 }
 
 fn boot() -> (State, Task<Message>) {
@@ -123,7 +248,15 @@ fn boot() -> (State, Task<Message>) {
 }
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    window::events().map(|(id, event)| Message::WindowEvent(id, event))
+    let events = window::events().map(|(id, event)| Message::WindowEvent(id, event));
+    if network_proof_requested() {
+        Subscription::batch([
+            events,
+            iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick),
+        ])
+    } else {
+        events
+    }
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -143,13 +276,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::WindowEvent(_, _) => Task::none(),
-        Message::WebViewCreated(result) => {
-            state.status = match result {
-                Ok(()) => "embedded; deny-by-default handlers configured".into(),
-                Err(error) => format!("webview creation failed: {error}"),
-            };
-            Task::none()
-        }
+        Message::WebViewCreated(result) => match result {
+            Ok(()) => {
+                state.status = if network_proof_requested() {
+                    state.network_proof_timeout = Some(Instant::now() + NETWORK_PROOF_TIMEOUT);
+                    "embedded; waiting for hostile page to finish loading".into()
+                } else {
+                    "embedded; deny-by-default handlers configured".into()
+                };
+                Task::none()
+            }
+            Err(error) if network_proof_requested() => {
+                finish_network_proof(state, Err(format!("webview creation failed: {error}")))
+            }
+            Err(error) => {
+                state.status = format!("webview creation failed: {error}");
+                Task::none()
+            }
+        },
         Message::WebViewResized(result) => {
             if let Err(error) = result {
                 state.status = format!("webview resize failed: {error}");
@@ -164,7 +308,70 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             });
             Task::none()
         }
+        Message::NetworkProofTick(now) => update_network_proof(state, now),
     }
+}
+
+fn update_network_proof(state: &mut State, now: Instant) -> Task<Message> {
+    let (loaded, served, attempts) = NETWORK_PROOF.with(|proof| {
+        let proof = proof.borrow();
+        proof.as_ref().map_or((false, false, 0), |proof| {
+            (
+                proof.page_loaded.load(Ordering::Acquire),
+                BOOK.with(|book| {
+                    book.borrow()
+                        .as_ref()
+                        .is_some_and(|book| book.network_proof_page_served)
+                }),
+                proof.monitor.attempts(),
+            )
+        })
+    });
+    if attempts > 0 {
+        return finish_network_proof(
+            state,
+            Err(format!("observed {attempts} network connection(s)")),
+        );
+    }
+    if loaded && served && state.network_proof_deadline.is_none() {
+        state.network_proof_deadline = Some(now + NETWORK_PROOF_GRACE);
+        state.status = "hostile page loaded; observing network grace period".into();
+    }
+    if state
+        .network_proof_deadline
+        .is_some_and(|deadline| now >= deadline)
+    {
+        return finish_network_proof(state, Ok(()));
+    }
+    if state
+        .network_proof_timeout
+        .is_some_and(|timeout| now >= timeout)
+    {
+        return finish_network_proof(state, Err("hostile page did not finish loading".into()));
+    }
+    Task::none()
+}
+
+fn finish_network_proof(state: &State, result: Result<(), String>) -> Task<Message> {
+    let monitor_result = NETWORK_PROOF.with(|proof| {
+        proof
+            .borrow_mut()
+            .take()
+            .map(|mut proof| proof.monitor.stop_and_count())
+    });
+    let result = match monitor_result {
+        Some(Err(error)) => Err(error),
+        Some(Ok(attempts)) if result.is_ok() && attempts > 0 => {
+            Err(format!("observed {attempts} network connection(s)"))
+        }
+        None if result.is_ok() => Err("network monitor was not running".into()),
+        _ => result,
+    };
+    if result.is_ok() {
+        eprintln!("wry-spike-network-proof PASS: zero book-initiated network connections");
+    }
+    NETWORK_PROOF_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn view(state: &State) -> Element<'_, Message> {
@@ -188,11 +395,25 @@ fn view(state: &State) -> Element<'_, Message> {
 
 fn create_webview(id: window::Id, size: Size) -> Task<Message> {
     window::run(id, move |window| {
-        let book = SpikeBook::from_epub_bytes(
+        let mut book = SpikeBook::from_epub_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )?;
-        let start_url = if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
-            "shosai://book/_spike/conformance.xhtml".to_string()
+        let page_loaded = Arc::new(AtomicBool::new(false));
+        let start_url = if network_proof_requested() {
+            let monitor = NetworkMonitor::start()?;
+            let path =
+                CanonicalEpubPath::new(NETWORK_PROOF_PATH).map_err(|error| error.to_string())?;
+            book.resources.get_mut(&path).unwrap().body =
+                remote_content_chapter(&monitor.endpoint).into_bytes();
+            NETWORK_PROOF.with(|slot| {
+                *slot.borrow_mut() = Some(NetworkProof {
+                    monitor,
+                    page_loaded: Arc::clone(&page_loaded),
+                });
+            });
+            NETWORK_PROOF_URL.to_string()
+        } else if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
+            NETWORK_PROOF_URL.to_string()
         } else {
             book.start_url.clone()
         };
@@ -210,6 +431,11 @@ fn create_webview(id: window::Id, size: Size) -> Task<Message> {
             .with_navigation_handler(|url| is_allowed_navigation(&url))
             .with_download_started_handler(|_, _| false)
             .with_new_window_req_handler(|_, _| NewWindowResponse::Deny)
+            .with_on_page_load_handler(move |event, url| {
+                if matches!(event, PageLoadEvent::Finished) && is_network_proof_page(&url) {
+                    page_loaded.store(true, Ordering::Release);
+                }
+            })
             .build_as_child(&parent)
             .map_err(|error| error.to_string())?;
 
@@ -217,6 +443,39 @@ fn create_webview(id: window::Id, size: Size) -> Task<Message> {
         Ok(())
     })
     .map(Message::WebViewCreated)
+}
+
+fn network_proof_requested() -> bool {
+    std::env::var_os(NETWORK_PROOF_ENV).is_some()
+}
+
+fn is_network_proof_page(url: &str) -> bool {
+    matches!(url, NETWORK_PROOF_URL | NETWORK_PROOF_URL_ALIAS)
+}
+
+fn remote_content_chapter(endpoint: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="{endpoint}/remote.css" />
+  <style>
+    @import url("{endpoint}/import.css");
+    @font-face {{ font-family: blocked; src: url("{endpoint}/font.woff2"); }}
+    body {{ background-image: url("{endpoint}/background.png"); font-family: blocked; }}
+  </style>
+</head>
+<body>
+  <h1>Remote-content security proof</h1>
+  <img src="{endpoint}/image.png" alt="blocked remote image" />
+  <iframe src="{endpoint}/frame.xhtml"></iframe>
+  <object data="{endpoint}/object.bin"></object>
+  <script src="{endpoint}/script.js"></script>
+  <script>fetch("{endpoint}/inline-script-ran")</script>
+</body>
+</html>"#
+    )
 }
 
 fn resize_webview(id: window::Id, size: Size) -> Task<Message> {
@@ -268,9 +527,18 @@ fn serve_epub_resource(
         let mut slot = slot.borrow_mut();
         let book = slot.as_mut()?;
         book.requests.push(uri);
-        path.as_ref()
+        let resource = path
+            .as_ref()
             .and_then(|path| book.resources.get(path))
-            .map(|resource| (resource.content_type.clone(), resource.body.clone()))
+            .map(|resource| (resource.content_type.clone(), resource.body.clone()));
+        if resource.is_some()
+            && path
+                .as_ref()
+                .is_some_and(|path| path.as_str() == NETWORK_PROOF_PATH)
+        {
+            book.network_proof_page_served = true;
+        }
+        resource
     });
     let (status, content_type, body) = response.map_or_else(
         || (404, "text/plain".to_string(), b"not found".to_vec()),
@@ -311,6 +579,7 @@ const SPIKE_CHAPTER: &str = r#"<!DOCTYPE html>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpStream;
 
     fn install_sample_book() {
         let book = SpikeBook::from_epub_bytes(
@@ -329,6 +598,67 @@ mod tests {
         assert!(!is_allowed_navigation("https://example.com"));
         assert!(!is_allowed_navigation("file:///etc/passwd"));
         assert!(!is_allowed_navigation("data:text/html,hello"));
+    }
+
+    #[test]
+    fn network_proof_accepts_only_the_expected_finished_page() {
+        assert!(is_network_proof_page(NETWORK_PROOF_URL));
+        assert!(is_network_proof_page(NETWORK_PROOF_URL_ALIAS));
+        for unrelated in [
+            "about:blank",
+            "shosai://book",
+            "shosai://book/OEBPS/chapter1.xhtml",
+            "shosai://book/_spike/conformance.xhtml?retry=1",
+            "shosai://other/_spike/conformance.xhtml",
+        ] {
+            assert!(!is_network_proof_page(unrelated), "accepted {unrelated}");
+        }
+    }
+
+    #[test]
+    fn remote_content_fixture_targets_the_controlled_monitor() {
+        let endpoint = "http://127.0.0.1:12345";
+        let chapter = remote_content_chapter(endpoint);
+        for path in [
+            "remote.css",
+            "import.css",
+            "font.woff2",
+            "background.png",
+            "image.png",
+            "frame.xhtml",
+            "object.bin",
+            "script.js",
+            "inline-script-ran",
+        ] {
+            assert!(chapter.contains(&format!("{endpoint}/{path}")));
+        }
+    }
+
+    #[test]
+    fn network_monitor_observes_a_control_connection() {
+        let mut monitor = NetworkMonitor::start().unwrap();
+        let address = monitor.endpoint.strip_prefix("http://").unwrap();
+        let _connection = TcpStream::connect(address).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while monitor.attempts() == 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(monitor.attempts(), 1);
+        assert_eq!(monitor.stop_and_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn network_monitor_reports_worker_panics() {
+        let mut monitor = NetworkMonitor::start().unwrap();
+        monitor.stop_and_count().unwrap();
+        monitor.worker = Some(thread::spawn(|| -> Result<(), String> {
+            panic!("simulated monitor failure")
+        }));
+
+        assert_eq!(
+            monitor.stop_and_count().unwrap_err(),
+            "network monitor worker panicked"
+        );
     }
 
     #[test]
@@ -394,12 +724,13 @@ mod tests {
 
         let conformance = serve_epub_resource(
             "spike".into(),
-            Request::get("shosai://book/_spike/conformance.xhtml")
-                .body(Vec::new())
-                .unwrap(),
+            Request::get(NETWORK_PROOF_URL).body(Vec::new()).unwrap(),
         );
         assert_eq!(conformance.status(), 200);
         assert!(conformance.body().starts_with(b"<!DOCTYPE html>"));
+        BOOK.with(|slot| {
+            assert!(slot.borrow().as_ref().unwrap().network_proof_page_served);
+        });
 
         let missing = serve_epub_resource(
             "spike".into(),
