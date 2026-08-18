@@ -26,6 +26,8 @@ SHOSAI_WRY_SPIKE_PAGE=conformance \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_NETWORK_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
@@ -39,7 +41,12 @@ It currently proves on macOS arm64 that:
   every available manifest resource, including spine and navigation XHTML,
   stylesheet, and image bytes, using manifest media types; every protocol
   request is recorded by the harness;
-- the child can be resized with its Iced parent and explicitly focused;
+- an Iced widget operation reports the real placeholder container's logical
+  bounds and the child is created in those bounds;
+- the automated lifecycle mode resizes the Iced window, requires a changed
+  placeholder measurement and successful Wry bounds update, explicitly drops
+  the child, and then closes the parent; it exits nonzero if the resize is not
+  observed within ten seconds;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -51,19 +58,21 @@ It currently proves on macOS arm64 that:
   response.  A control test proves that a direct connection is detected.
 
 The successful macOS rendering run was visually checked, and the automated
-network proof passes on macOS arm64. Checked-in book resources are served with
-their exact manifest media types, including
+network and measured-bounds lifecycle proofs pass on macOS arm64. Checked-in
+book resources are served with their exact manifest media types, including
 `application/xhtml+xml`; the generated conformance page remains explicitly
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
+
+The harness also implements remeasurement on scale-factor events, hiding for
+unusable bounds, and explicit focus. Those paths are not yet exercised evidence
+and remain open alongside overlay, clipping, tab, IME, and accessibility tests.
 
 ## Integration findings
 
 Iced has no supported native-child widget abstraction. A production Wry route
 would need an Iced placeholder plus application-owned platform state to:
 
-- report the reader pane's actual visible bounds instead of the spike's fixed
-  header/padding geometry;
 - synchronize bounds, clipping, visibility, scale factor, focus, IME, overlays,
   tab switches, and teardown;
 - keep Wry objects on the UI thread while communicating lifecycle results back
@@ -122,7 +131,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
 | Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows and Linux/X11; resource limits |
-| Iced integration           | Possible but outside widget composition                                                                       | Natural widget composition                                      | Focus, overlay, clipping, tabs, IME                    |
+| Iced integration           | Measured placeholder bounds, one parent resize/update, and explicit teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Scale, visibility, focus routing, overlay, clipping, tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
 | Portability                | Wayland blocker; platform runtimes differ                                                                     | Existing Iced targets                                           | macOS, Windows, X11, Wayland spikes                    |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
@@ -170,8 +179,8 @@ cost.
 
 ## Next spike steps
 
-1. Replace fixed child bounds with an identified Iced placeholder and test
-   resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
+1. Exercise scale changes, invalid-bounds visibility, overlays, tabs, focus,
+   IME, accessibility behavior, and ordinary close teardown on macOS.
 2. Run the same child and hostile-content spikes on Windows and Linux/X11.
    Decide whether lack of a
    viable Wayland host rejects Wry or justifies a documented backend fallback.
