@@ -16,14 +16,6 @@ impl ZoomMode {
             Self::FitWidth | Self::FitPage => 1.0,
         }
     }
-
-    pub(crate) fn label(self) -> String {
-        match self {
-            Self::Manual(scale) => format!("{}%", (scale * 100.0) as u32),
-            Self::FitWidth => "Fit Width".to_string(),
-            Self::FitPage => "Fit Page".to_string(),
-        }
-    }
 }
 
 impl Default for ZoomMode {

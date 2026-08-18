@@ -6,7 +6,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let InitializedState {
                 store,
                 window_geometry: geometry,
+                language_preference,
             } = initialized;
+            state.i18n.set_preference(language_preference);
             let pool = store.pool().clone();
             state.library = Some(Library::new(pool.clone()));
             state.bookmark_store = Some(BookmarkStore::new(pool));
@@ -35,21 +37,23 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             eprintln!("warning: failed to open reading state database: {error}");
             state.storage_initializing = false;
             state.library_loading = false;
-            state.storage_error = Some(format!("Failed to initialize storage: {error}"));
+            state.storage_error = Some(AppError::Storage(error));
             if let Some(pending) = state.pending_open.take() {
                 return Task::done(pending.into_message());
             }
         }
 
         Message::OpenFile => {
+            let ebooks = state.i18n.text("ebooks");
+            let open_file = state.i18n.text("open-file");
             return Task::perform(
-                async {
+                async move {
                     let file = rfd::AsyncFileDialog::new()
-                        .add_filter("Ebooks", &["pdf", "epub", "cbz"])
+                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
                         .add_filter("PDF", &["pdf"])
                         .add_filter("EPUB", &["epub"])
                         .add_filter("CBZ", &["cbz"])
-                        .set_title("Open File")
+                        .set_title(&open_file)
                         .pick_file()
                         .await;
 
@@ -422,11 +426,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.library.is_none() {
                 return Task::none();
             }
+            let ebooks = state.i18n.text("ebooks");
+            let import_library = state.i18n.text("import-library");
             return Task::perform(
-                async {
+                async move {
                     let file = rfd::AsyncFileDialog::new()
-                        .add_filter("Ebooks", &["pdf", "epub", "cbz"])
-                        .set_title("Import to Library")
+                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
+                        .set_title(&import_library)
                         .pick_file()
                         .await;
                     file.map(|f| f.path().to_path_buf())
@@ -443,10 +449,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::ImportDirectory => {
             if let Some(lib) = state.library.clone() {
+                let import_directory = state.i18n.text("import-directory");
                 return Task::perform(
                     async move {
                         let dir = rfd::AsyncFileDialog::new()
-                            .set_title("Import Directory")
+                            .set_title(&import_directory)
                             .pick_folder()
                             .await;
                         if let Some(d) = dir {
@@ -504,13 +511,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::CycleLanguage => {
+            let Some(saves) = &state.reading_state_saves else {
+                return Task::none();
+            };
+            let preference = state.i18n.preference().next();
+            state.i18n.set_preference(preference);
+            if saves
+                .send(ReadingStateWriterMessage::Language(preference))
+                .is_err()
+            {
+                eprintln!("warning: state writer stopped unexpectedly");
+            }
+        }
+
         // Bookmarks
         Message::ToggleBookmark => {
             if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
-                let page_title = format!("Page {}", state.current_page + 1);
-                match store.toggle_at(path, page, location_offset, Some(&page_title)) {
+                match store.toggle_at(path, page, location_offset, None) {
                     Ok(Some(bookmark)) => {
                         state.bookmarks.push(bookmark);
                         state.current_page_bookmarked = true;
@@ -767,7 +787,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         state.rendered_page_handle = None;
                         state.rendered_facing_page = None;
                         state.rendered_facing_page_handle = None;
-                        state.error = Some(format!("Failed to render page: {error}"));
+                        state.error = Some(AppError::Render(error));
                     }
                 }
             }
@@ -813,7 +833,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     (true, Err(error)) => {
                         if page == state.current_page {
-                            state.error = Some(format!("Failed to render page: {error}"));
+                            state.error = Some(AppError::Render(error));
                             return Task::none();
                         }
                         state.continuous_visible.remove(&page);

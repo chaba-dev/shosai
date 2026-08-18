@@ -91,6 +91,7 @@ pub enum Message {
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
+    CycleLanguage,
 
     // Bookmarks
     ToggleBookmark,

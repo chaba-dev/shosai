@@ -24,6 +24,9 @@ rfd = "0.15"
 tokio = { version = "1", features = ["fs", "macros", "rt", "sync", "time"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 open = "5.3.3"
+fluent-templates = "0.15.1"
+sys-locale = "0.3.2"
+unic-langid = { version = "0.9", features = ["macros"] }
 wry = { version = "0.56.1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
