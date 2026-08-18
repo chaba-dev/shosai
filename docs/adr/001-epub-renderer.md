@@ -31,6 +31,23 @@ SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
+On Linux the harness is deliberately an X11-only spike. The Nix development
+shell supplies GTK 3 and WebKitGTK 4.1; force both Iced/winit and GTK onto X11
+so a Wayland session cannot be mistaken for native Wayland support:
+
+```sh
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_NETWORK_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+```
+
+Without those backend settings, a native Wayland GTK display or a non-Xlib
+Iced parent is rejected with an explicit diagnostic. This is a feasibility
+boundary, not a compatibility fallback.
+
 It currently proves on macOS arm64 that:
 
 - Iced 0.14's public `window::run` callback exposes a parent window handle that
@@ -78,6 +95,18 @@ exercised separately on macOS: with Iced's automatic close exit disabled, UI
 automation clicked the native close button and the handler recorded that it
 dropped the live child before explicitly closing the parent.
 
+On Linux x86_64, the harness compiles against GTK 3.24.51 and WebKitGTK 4.1
+(2.50.6) in the Nix development shell. Under Xvfb/X11, the same automated
+measured-bounds resize/teardown proof passes and the hostile-content proof
+serves the expected page while recording zero book-initiated network
+connections. The harness installs Wry's documented winit X11 error hook for
+the benign WebKit `GLXBadWindow` error 170 and accepts `BadWindow` only after
+the one-shot harness explicitly begins teardown, when GTK can destroy the XIM
+child before winit's cleanup operations; without those cases, the lifecycle
+runs panic during resize or teardown. These headless runs prove the X11 child
+lifecycle and resource policy, not focus/input, accessibility, visual fidelity,
+hardware scaling, Linux arm64, or native Wayland behavior.
+
 ## Integration findings
 
 Iced has no supported native-child widget abstraction. A production Wry route
@@ -99,7 +128,7 @@ Those behaviors need explicit tests rather than visual inference.
 |---------------|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
 | macOS 12+     | Iced raw AppKit handle → child `WKWebView` | Builds and renders with the system WebKit; no extra runtime packaged                                                            |
 | Windows CI    | Iced raw Win32 handle → child WebView2     | API path exists; runtime, accessibility, focus, and CI spike not yet tested                                                     |
-| Linux X11     | Iced raw Xlib handle → WebKitGTK child     | Requires GTK initialization/event pumping and WebKitGTK 4.1; current Nix/release dependencies do not include them               |
+| Linux X11     | Iced raw Xlib handle → WebKitGTK child     | Builds on x86_64; automated resize/teardown and zero-network proofs pass under Xvfb; interactive and arm64 evidence remain open |
 | Linux Wayland | GTK container via Wry Unix extension       | Raw child embedding is unsupported; standard Iced runner exposes no GTK container, making this the main Wry portability blocker |
 
 Wry 0.56.1 is Apache-2.0 OR MIT and uses system engines. A full transitive
@@ -140,10 +169,10 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
-| Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows and Linux/X11; resource limits |
-| Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
+| Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
+| Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
-| Portability                | Wayland blocker; platform runtimes differ                                                                     | Existing Iced targets                                           | macOS, Windows, X11, Wayland spikes                    |
+| Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
 | Packaging cost             | WebKitGTK added on Linux                                                                                      | Dependency set not selected                                     | Binary/runtime/package smoke tests                     |
 | Maintenance cost           | Browser integration and platform variance                                                                     | CSS/layout implementation scope                                 | Native component/dependency prototype                  |
@@ -191,9 +220,10 @@ cost.
 
 1. Exercise scale changes, invalid-bounds visibility, overlays, tabs, focus,
    IME, accessibility behavior, and ordinary close teardown on macOS.
-2. Run the same child and hostile-content spikes on Windows and Linux/X11.
-   Decide whether lack of a
-   viable Wayland host rejects Wry or justifies a documented backend fallback.
+2. Run the same child and hostile-content spikes on Windows and Linux arm64,
+   and complete interactive Linux/X11 input/accessibility checks. Decide whether
+   lack of a viable Wayland host rejects Wry or justifies a documented backend
+   fallback.
 3. Build the native computed-style boundary for the same table/font/MathML/RTL
    fixture, inventory maintained permissive selector/layout/math dependencies,
    and estimate unsupported work explicitly.
