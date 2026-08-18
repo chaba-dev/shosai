@@ -42,9 +42,7 @@ It currently proves on macOS arm64 that:
   stylesheet, and image bytes, using manifest media types; every protocol
   request is recorded by the harness;
 - an Iced widget operation reports the real placeholder container's logical
-  bounds; the child is created in those bounds, resynchronized after parent
-  resize or scale-factor events, hidden if the bounds become unusable, and can
-  still be explicitly focused;
+  bounds and the child is created in those bounds;
 - the automated lifecycle mode resizes the Iced window, requires a changed
   placeholder measurement and successful Wry bounds update, explicitly drops
   the child, and then closes the parent; it exits nonzero if the resize is not
@@ -65,6 +63,10 @@ book resources are served with their exact manifest media types, including
 `application/xhtml+xml`; the generated conformance page remains explicitly
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
+
+The harness also implements remeasurement on scale-factor events, hiding for
+unusable bounds, and explicit focus. Those paths are not yet exercised evidence
+and remain open alongside overlay, clipping, tab, IME, and accessibility tests.
 
 ## Integration findings
 
@@ -129,7 +131,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
 | Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows and Linux/X11; resource limits |
-| Iced integration           | Measured placeholder bounds, parent resize, and explicit teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Focus routing, overlay, clipping, tabs, IME, other targets |
+| Iced integration           | Measured placeholder bounds, one parent resize/update, and explicit teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Scale, visibility, focus routing, overlay, clipping, tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
 | Portability                | Wayland blocker; platform runtimes differ                                                                     | Existing Iced targets                                           | macOS, Windows, X11, Wayland spikes                    |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
@@ -177,8 +179,8 @@ cost.
 
 ## Next spike steps
 
-1. Replace fixed child bounds with an identified Iced placeholder and test
-   resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
+1. Exercise scale changes, invalid-bounds visibility, overlays, tabs, focus,
+   IME, accessibility behavior, and ordinary close teardown on macOS.
 2. Run the same child and hostile-content spikes on Windows and Linux/X11.
    Decide whether lack of a
    viable Wayland host rejects Wry or justifies a documented backend fallback.

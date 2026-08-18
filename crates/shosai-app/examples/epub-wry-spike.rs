@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{self, operation};
 use iced::widget::{button, column, container, row, text};
-use iced::{Element, Length, Rectangle, Subscription, Task, window};
+use iced::{Element, Length, Rectangle, Size, Subscription, Task, window};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
@@ -27,6 +27,8 @@ const PADDING: f32 = 24.0;
 const PLACEHOLDER_ID: &str = "epub-wry-spike-placeholder";
 const LIFECYCLE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF";
 const LIFECYCLE_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
+const LIFECYCLE_WINDOW_WIDTH: f32 = 1040.0;
+const LIFECYCLE_WINDOW_HEIGHT: f32 = 760.0;
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -194,11 +196,82 @@ struct State {
     creation_bounds: Option<Rectangle>,
     applied_bounds: Option<Rectangle>,
     webview_ready: bool,
-    lifecycle_initial_bounds: Option<Rectangle>,
-    lifecycle_deadline: Option<Instant>,
+    lifecycle_proof: LifecycleProof,
+    measurement_epoch: u64,
+    proof_timeout: Option<Instant>,
     status: String,
     network_proof_deadline: Option<Instant>,
-    network_proof_timeout: Option<Instant>,
+    network_proof_finished: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum LifecycleProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    WaitingForResize {
+        initial: Rectangle,
+    },
+    WaitingForMeasurement {
+        initial: Rectangle,
+        epoch: u64,
+    },
+    Synchronizing {
+        expected: Rectangle,
+    },
+    Complete,
+}
+
+impl LifecycleProof {
+    fn observe_resize_event(&mut self, size: Size, epoch: u64) -> bool {
+        if size == Size::new(LIFECYCLE_WINDOW_WIDTH, LIFECYCLE_WINDOW_HEIGHT)
+            && let Self::WaitingForResize { initial } = *self
+        {
+            *self = Self::WaitingForMeasurement { initial, epoch };
+            return true;
+        }
+        false
+    }
+
+    fn observe_measurement(&mut self, epoch: u64, bounds: Option<Rectangle>) -> bool {
+        let Self::WaitingForMeasurement {
+            initial,
+            epoch: expected_epoch,
+        } = *self
+        else {
+            return false;
+        };
+        if epoch != expected_epoch {
+            return false;
+        }
+        let Some(expected) = bounds.filter(|bounds| *bounds != initial) else {
+            return false;
+        };
+        *self = Self::Synchronizing { expected };
+        true
+    }
+
+    fn observe_synchronization(&mut self, bounds: Option<Rectangle>, succeeded: bool) -> bool {
+        let Self::Synchronizing { expected } = *self else {
+            return false;
+        };
+        if succeeded && bounds == Some(expected) {
+            return true;
+        }
+        false
+    }
+
+    fn expects_synchronization(&self, bounds: Option<Rectangle>) -> bool {
+        matches!(self, Self::Synchronizing { expected } if bounds == Some(*expected))
+    }
+
+    fn complete(&mut self) -> bool {
+        if *self == Self::Complete {
+            return false;
+        }
+        *self = Self::Complete;
+        true
+    }
 }
 
 struct PlaceholderBoundsOperation {
@@ -206,8 +279,11 @@ struct PlaceholderBoundsOperation {
     bounds: Option<Rectangle>,
 }
 
-impl operation::Operation<Rectangle> for PlaceholderBoundsOperation {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn operation::Operation<Rectangle>)) {
+impl operation::Operation<Option<Rectangle>> for PlaceholderBoundsOperation {
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn operation::Operation<Option<Rectangle>>),
+    ) {
         operate(self);
     }
 
@@ -217,16 +293,18 @@ impl operation::Operation<Rectangle> for PlaceholderBoundsOperation {
         }
     }
 
-    fn finish(&self) -> operation::Outcome<Rectangle> {
-        self.bounds
-            .map_or(operation::Outcome::None, operation::Outcome::Some)
+    fn finish(&self) -> operation::Outcome<Option<Rectangle>> {
+        operation::Outcome::Some(self.bounds)
     }
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     WindowEvent(window::Id, window::Event),
-    PlaceholderMeasured(Rectangle),
+    PlaceholderMeasured {
+        epoch: u64,
+        bounds: Option<Rectangle>,
+    },
     WebViewCreated(Result<(), String>),
     WebViewSynchronized {
         bounds: Option<Rectangle>,
@@ -312,41 +390,76 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::WindowEvent(id, window::Event::Opened { .. }) => {
             state.window = Some(id);
+            if network_proof_requested() || lifecycle_proof_requested() {
+                let timeout = if lifecycle_proof_requested() {
+                    LIFECYCLE_PROOF_TIMEOUT
+                } else {
+                    NETWORK_PROOF_TIMEOUT
+                };
+                state.proof_timeout = Some(Instant::now() + timeout);
+            }
+            if lifecycle_proof_requested() {
+                state.lifecycle_proof = LifecycleProof::WaitingForCreation;
+            }
             state.status = "measuring Iced reader placeholder".into();
-            measure_placeholder()
+            measure_placeholder(state.measurement_epoch)
         }
-        Message::WindowEvent(id, window::Event::Resized(_)) if state.window == Some(id) => {
-            measure_placeholder()
+        Message::WindowEvent(id, window::Event::Resized(size)) if state.window == Some(id) => {
+            let next_epoch = state.measurement_epoch.wrapping_add(1);
+            if state.lifecycle_proof.observe_resize_event(size, next_epoch) {
+                state.measurement_epoch = next_epoch;
+            }
+            measure_placeholder(state.measurement_epoch)
         }
         Message::WindowEvent(id, window::Event::Rescaled(_)) if state.window == Some(id) => {
-            measure_placeholder()
+            measure_placeholder(state.measurement_epoch)
         }
         Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
             teardown_webview();
             Task::none()
         }
         Message::WindowEvent(_, _) => Task::none(),
-        Message::PlaceholderMeasured(bounds) => {
-            state.measured_bounds = usable_bounds(bounds);
-            synchronize_webview(state)
+        Message::PlaceholderMeasured { epoch, bounds } => {
+            state.measured_bounds = bounds.and_then(usable_bounds);
+            if lifecycle_proof_requested() {
+                let should_synchronize =
+                    matches!(state.lifecycle_proof, LifecycleProof::WaitingForCreation)
+                        || state
+                            .lifecycle_proof
+                            .observe_measurement(epoch, state.measured_bounds);
+                if should_synchronize {
+                    synchronize_webview(state)
+                } else {
+                    Task::none()
+                }
+            } else {
+                synchronize_webview(state)
+            }
         }
         Message::WebViewCreated(result) => match result {
             Ok(()) => {
                 state.webview_ready = true;
                 state.applied_bounds = state.creation_bounds.take();
                 state.status = if network_proof_requested() {
-                    state.network_proof_timeout = Some(Instant::now() + NETWORK_PROOF_TIMEOUT);
                     "embedded; waiting for hostile page to finish loading".into()
                 } else {
                     "embedded in measured Iced placeholder; deny-by-default handlers configured"
                         .into()
                 };
                 if lifecycle_proof_requested() {
-                    state.lifecycle_initial_bounds = state.applied_bounds;
-                    state.lifecycle_deadline = Some(Instant::now() + LIFECYCLE_PROOF_TIMEOUT);
-                    state
-                        .window
-                        .map_or_else(Task::none, |id| window::resize(id, (1040.0, 760.0).into()))
+                    let Some(initial) = state.applied_bounds else {
+                        return finish_lifecycle_proof(
+                            state,
+                            Err("webview was created without measured bounds".into()),
+                        );
+                    };
+                    state.lifecycle_proof = LifecycleProof::WaitingForResize { initial };
+                    state.window.map_or_else(Task::none, |id| {
+                        window::resize(
+                            id,
+                            Size::new(LIFECYCLE_WINDOW_WIDTH, LIFECYCLE_WINDOW_HEIGHT),
+                        )
+                    })
                 } else {
                     synchronize_webview(state)
                 }
@@ -366,12 +479,20 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         },
         Message::WebViewSynchronized { bounds, result } => {
+            if lifecycle_proof_requested()
+                && state.lifecycle_proof.expects_synchronization(bounds)
+                && let Err(error) = &result
+            {
+                return finish_lifecycle_proof(
+                    state,
+                    Err(format!("webview synchronization failed: {error}")),
+                );
+            }
             match result {
                 Ok(()) => {
                     state.applied_bounds = bounds;
                     if lifecycle_proof_requested()
-                        && bounds.is_some()
-                        && bounds != state.lifecycle_initial_bounds
+                        && state.lifecycle_proof.observe_synchronization(bounds, true)
                     {
                         return finish_lifecycle_proof(state, Ok(()));
                     }
@@ -396,25 +517,39 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
 }
 
 fn update_lifecycle_proof(state: &mut State, now: Instant) -> Task<Message> {
-    if state
-        .lifecycle_deadline
-        .is_some_and(|deadline| now >= deadline)
-    {
-        return finish_lifecycle_proof(state, Err("timed out waiting for measured resize".into()));
+    if state.lifecycle_proof == LifecycleProof::Complete {
+        return Task::none();
     }
-    measure_placeholder()
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_lifecycle_proof(
+            state,
+            Err(format!(
+                "timed out during lifecycle phase {:?}",
+                state.lifecycle_proof
+            )),
+        );
+    }
+    measure_placeholder(state.measurement_epoch)
 }
 
-fn finish_lifecycle_proof(state: &State, result: Result<(), String>) -> Task<Message> {
+fn finish_lifecycle_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if !state.lifecycle_proof.complete() {
+        return Task::none();
+    }
     teardown_webview();
     if result.is_ok() {
         eprintln!("wry-spike-lifecycle-proof PASS: measured resize and teardown completed");
     }
-    LIFECYCLE_PROOF_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+    LIFECYCLE_PROOF_RESULT.with(|slot| {
+        record_terminal_result(&mut slot.borrow_mut(), result);
+    });
     state.window.map_or_else(Task::none, window::close)
 }
 
 fn update_network_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.network_proof_finished {
+        return Task::none();
+    }
     let (loaded, served, attempts) = NETWORK_PROOF.with(|proof| {
         let proof = proof.borrow();
         proof.as_ref().map_or((false, false, 0), |proof| {
@@ -445,16 +580,22 @@ fn update_network_proof(state: &mut State, now: Instant) -> Task<Message> {
     {
         return finish_network_proof(state, Ok(()));
     }
-    if state
-        .network_proof_timeout
-        .is_some_and(|timeout| now >= timeout)
-    {
-        return finish_network_proof(state, Err("hostile page did not finish loading".into()));
+    if state.proof_timeout.is_some_and(|timeout| now >= timeout) {
+        let stage = if state.webview_ready {
+            "hostile page did not finish loading"
+        } else {
+            "timed out waiting for placeholder measurement and webview creation"
+        };
+        return finish_network_proof(state, Err(stage.into()));
     }
     Task::none()
 }
 
-fn finish_network_proof(state: &State, result: Result<(), String>) -> Task<Message> {
+fn finish_network_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if state.network_proof_finished {
+        return Task::none();
+    }
+    state.network_proof_finished = true;
     let monitor_result = NETWORK_PROOF.with(|proof| {
         proof
             .borrow_mut()
@@ -472,7 +613,9 @@ fn finish_network_proof(state: &State, result: Result<(), String>) -> Task<Messa
     if result.is_ok() {
         eprintln!("wry-spike-network-proof PASS: zero book-initiated network connections");
     }
-    NETWORK_PROOF_RESULT.with(|slot| *slot.borrow_mut() = Some(result));
+    NETWORK_PROOF_RESULT.with(|slot| {
+        record_terminal_result(&mut slot.borrow_mut(), result);
+    });
     state.window.map_or_else(Task::none, window::close)
 }
 
@@ -496,12 +639,12 @@ fn view(state: &State) -> Element<'_, Message> {
     .into()
 }
 
-fn measure_placeholder() -> Task<Message> {
+fn measure_placeholder(epoch: u64) -> Task<Message> {
     iced::advanced::widget::operate(PlaceholderBoundsOperation {
         target: widget::Id::from(PLACEHOLDER_ID),
         bounds: None,
     })
-    .map(Message::PlaceholderMeasured)
+    .map(move |bounds| Message::PlaceholderMeasured { epoch, bounds })
 }
 
 fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
@@ -612,25 +755,35 @@ fn synchronize_webview(state: &mut State) -> Task<Message> {
     }
     let bounds = state.measured_bounds;
     window::run(id, move |_| {
-        WEBVIEW.with(|slot| {
-            if let Some(webview) = slot.borrow().as_ref() {
-                if let Some(bounds) = bounds {
-                    webview
-                        .set_bounds(webview_bounds(bounds))
-                        .map_err(|error| error.to_string())?;
-                    webview
-                        .set_visible(true)
-                        .map_err(|error| error.to_string())?;
-                } else {
-                    webview
-                        .set_visible(false)
-                        .map_err(|error| error.to_string())?;
-                }
-            }
-            Ok(())
-        })
+        WEBVIEW.with(|slot| synchronize_webview_instance(slot.borrow().as_ref(), bounds))
     })
     .map(move |result| Message::WebViewSynchronized { bounds, result })
+}
+
+fn synchronize_webview_instance(
+    webview: Option<&WebView>,
+    bounds: Option<Rectangle>,
+) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    if let Some(bounds) = bounds {
+        webview
+            .set_bounds(webview_bounds(bounds))
+            .map_err(|error| error.to_string())?;
+        webview
+            .set_visible(true)
+            .map_err(|error| error.to_string())?;
+    } else {
+        webview
+            .set_visible(false)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn record_terminal_result(slot: &mut Option<Result<(), String>>, result: Result<(), String>) {
+    if slot.is_none() {
+        *slot = Some(result);
+    }
 }
 
 fn usable_bounds(bounds: Rectangle) -> Option<Rectangle> {
@@ -859,6 +1012,120 @@ mod tests {
                 position: LogicalPosition::new(17.5, 93.25).into(),
                 size: LogicalSize::new(640.5, 480.75).into(),
             }
+        );
+    }
+
+    #[test]
+    fn lifecycle_proof_ignores_measurements_until_requested_resize_event() {
+        let initial = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let resized = Rectangle::new((0.0, 100.0).into(), (1040.0, 660.0).into());
+        let mut proof = LifecycleProof::WaitingForResize { initial };
+
+        assert!(!proof.observe_measurement(0, Some(resized)));
+        assert_eq!(proof, LifecycleProof::WaitingForResize { initial });
+
+        assert!(!proof.observe_resize_event(Size::new(900.0, 700.0), 1));
+        assert_eq!(proof, LifecycleProof::WaitingForResize { initial });
+
+        assert!(proof.observe_resize_event(
+            Size::new(LIFECYCLE_WINDOW_WIDTH, LIFECYCLE_WINDOW_HEIGHT),
+            1,
+        ));
+        assert!(!proof.observe_measurement(0, Some(resized)));
+        assert!(proof.observe_measurement(1, Some(resized)));
+        assert_eq!(proof, LifecycleProof::Synchronizing { expected: resized });
+    }
+
+    #[test]
+    fn lifecycle_proof_accepts_only_its_expected_synchronization_once() {
+        let expected = Rectangle::new((0.0, 100.0).into(), (1040.0, 660.0).into());
+        let stale = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut proof = LifecycleProof::Synchronizing { expected };
+
+        assert!(!proof.observe_synchronization(Some(stale), true));
+        assert!(!proof.observe_synchronization(Some(expected), false));
+        assert!(proof.observe_synchronization(Some(expected), true));
+        assert_eq!(proof, LifecycleProof::Synchronizing { expected });
+        assert!(proof.complete());
+        assert_eq!(proof, LifecycleProof::Complete);
+        assert!(!proof.observe_synchronization(Some(expected), true));
+        assert!(!proof.complete());
+    }
+
+    #[test]
+    fn proof_results_are_terminal() {
+        let mut result = None;
+        record_terminal_result(&mut result, Err("timed out".into()));
+        record_terminal_result(&mut result, Ok(()));
+
+        assert_eq!(result, Some(Err("timed out".into())));
+    }
+
+    #[test]
+    fn lifecycle_timeout_covers_initial_placeholder_measurement() {
+        let now = Instant::now();
+        let mut state = State {
+            lifecycle_proof: LifecycleProof::WaitingForCreation,
+            proof_timeout: Some(now),
+            ..State::default()
+        };
+        LIFECYCLE_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update_lifecycle_proof(&mut state, now));
+
+        assert_eq!(state.lifecycle_proof, LifecycleProof::Complete);
+        LIFECYCLE_PROOF_RESULT.with(|result| {
+            assert!(
+                result
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("WaitingForCreation")
+            );
+        });
+    }
+
+    #[test]
+    fn network_timeout_covers_initial_placeholder_measurement() {
+        let now = Instant::now();
+        let mut state = State {
+            proof_timeout: Some(now),
+            ..State::default()
+        };
+        NETWORK_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update_network_proof(&mut state, now));
+
+        assert!(state.network_proof_finished);
+        NETWORK_PROOF_RESULT.with(|result| {
+            assert_eq!(
+                result.borrow().as_ref().unwrap().as_ref().unwrap_err(),
+                "timed out waiting for placeholder measurement and webview creation"
+            );
+        });
+    }
+
+    #[test]
+    fn missing_placeholder_is_an_explicit_measurement() {
+        let operation = PlaceholderBoundsOperation {
+            target: widget::Id::from(PLACEHOLDER_ID),
+            bounds: None,
+        };
+
+        assert!(matches!(
+            operation::Operation::finish(&operation),
+            operation::Outcome::Some(None)
+        ));
+    }
+
+    #[test]
+    fn synchronization_fails_when_the_webview_is_missing() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        assert_eq!(
+            synchronize_webview_instance(None, Some(bounds)).unwrap_err(),
+            "webview is not available"
         );
     }
 
