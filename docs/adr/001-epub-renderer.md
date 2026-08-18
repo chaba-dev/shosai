@@ -45,10 +45,11 @@ It currently proves on macOS arm64 that:
   bounds and the child is created in those bounds;
 - the automated lifecycle mode resizes the Iced window, requires a changed
   placeholder measurement and successful Wry bounds update, checks the reported
-  logical child size, successfully invokes child focus, parent focus, hide, and
-  show operations, then destroys and recreates the child at the measured bounds
-  before final teardown and parent close; it exits nonzero if any step fails or
-  the sequence does not complete within ten seconds;
+  logical child size, invokes child focus, parent focus, hide, and show methods
+  and requires each to return `Ok`, then destroys and recreates the child and
+  checks the replacement's reported logical size before final teardown and
+  parent close; it exits nonzero if any observable step fails or the sequence
+  does not complete within ten seconds;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -66,12 +67,16 @@ book resources are served with their exact manifest media types, including
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
-The focus and visibility results prove that the macOS APIs accept the operations,
-not that keyboard/IME events route correctly or that the visual result matches
-Iced composition. The harness also implements remeasurement on scale-factor
-events, hiding for unusable bounds, and cleanup on an ordinary close request.
-Those paths are not yet exercised evidence and remain open alongside overlay,
-clipping, real tab switching, IME, and accessibility tests.
+The focus results prove only that Wry's methods returned `Ok`; Wry's macOS
+implementation does not expose AppKit's boolean first-responder result. They do
+not prove that focus changed, keyboard/IME events route correctly, or that the
+visual result matches Iced composition. The harness also implements
+remeasurement on scale-factor events and hiding for unusable bounds; those paths
+are not yet exercised evidence and remain open alongside overlay, clipping,
+real tab switching, IME, and accessibility tests. Ordinary close cleanup is
+exercised separately on macOS: with Iced's automatic close exit disabled, UI
+automation clicked the native close button and the handler recorded that it
+dropped the live child before explicitly closing the parent.
 
 ## Integration findings
 
@@ -136,7 +141,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
 | Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows and Linux/X11; resource limits |
-| Iced integration           | Measured bounds, resize, focus/visibility API calls, destroy/recreate, and teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Visual visibility, focus routing, scale, overlay, clipping, real tabs, IME, other targets |
+| Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
 | Portability                | Wayland blocker; platform runtimes differ                                                                     | Existing Iced targets                                           | macOS, Windows, X11, Wayland spikes                    |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |

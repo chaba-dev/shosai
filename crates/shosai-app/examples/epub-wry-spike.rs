@@ -4,7 +4,7 @@
 //! feasibility harness, not a production EPUB renderer.
 
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::ExitCode;
@@ -38,6 +38,7 @@ const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xht
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
+    static WEBVIEW_CREATION_GENERATION: Cell<u64> = const { Cell::new(0) };
     static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -272,6 +273,10 @@ impl LifecycleProof {
         matches!(self, Self::Synchronizing { expected } if bounds == Some(*expected))
     }
 
+    fn expects_replacement_verification(&self, bounds: Rectangle) -> bool {
+        matches!(self, Self::Recreating { expected } if bounds == *expected)
+    }
+
     fn complete(&mut self) -> bool {
         if *self == Self::Complete {
             return false;
@@ -318,6 +323,7 @@ enum Message {
         result: Result<(), String>,
     },
     LifecycleInteractionsCompleted(Result<(), String>),
+    LifecycleReplacementVerified(Result<(), String>),
     FocusWebView,
     NetworkProofTick(Instant),
 }
@@ -338,6 +344,7 @@ fn main() -> ExitCode {
         .title("Shōsai EPUB Wry spike")
         .subscription(subscription)
         .window_size((900.0, 700.0))
+        .exit_on_close_request(false)
         .run();
     if let Err(error) = result {
         eprintln!("EPUB Wry spike failed: {error}");
@@ -423,7 +430,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             measure_placeholder(state.measurement_epoch)
         }
         Message::WindowEvent(id, window::Event::CloseRequested) if state.window == Some(id) => {
-            teardown_webview();
+            let webview_dropped = teardown_webview();
+            eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
             window::close(id)
         }
         Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
@@ -460,13 +468,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.webview_ready = true;
                 state.applied_bounds = state.creation_bounds.take();
                 if let LifecycleProof::Recreating { expected } = state.lifecycle_proof {
-                    if state.applied_bounds != Some(expected) {
-                        return finish_lifecycle_proof(
-                            state,
-                            Err("replacement webview used unexpected bounds".into()),
-                        );
-                    }
-                    return finish_lifecycle_proof(state, Ok(()));
+                    return verify_lifecycle_replacement(state, expected);
                 }
                 state.status = if network_proof_requested() {
                     "embedded; waiting for hostile page to finish loading".into()
@@ -537,6 +539,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("webview interaction sequence failed: {error}")),
             ),
         },
+        Message::LifecycleReplacementVerified(result) => match result {
+            Ok(()) => finish_lifecycle_proof(state, Ok(())),
+            Err(error) => finish_lifecycle_proof(
+                state,
+                Err(format!("replacement verification failed: {error}")),
+            ),
+        },
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -593,6 +602,24 @@ fn recreate_lifecycle_webview(state: &mut State) -> Task<Message> {
     state.creation_bounds = Some(expected);
     state.lifecycle_proof = LifecycleProof::Recreating { expected };
     create_webview(id, expected)
+}
+
+fn verify_lifecycle_replacement(state: &State, expected: Rectangle) -> Task<Message> {
+    if !state
+        .lifecycle_proof
+        .expects_replacement_verification(expected)
+    {
+        return Task::none();
+    }
+    let Some(id) = state.window else {
+        return Task::done(Message::LifecycleReplacementVerified(Err(
+            "parent window is not available".into(),
+        )));
+    };
+    window::run(id, move |_| {
+        WEBVIEW.with(|slot| verify_webview_size(slot.borrow().as_ref(), expected))
+    })
+    .map(Message::LifecycleReplacementVerified)
 }
 
 fn finish_lifecycle_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
@@ -678,6 +705,7 @@ fn finish_network_proof(state: &mut State, result: Result<(), String>) -> Task<M
     if result.is_ok() {
         eprintln!("wry-spike-network-proof PASS: zero book-initiated network connections");
     }
+    teardown_webview();
     NETWORK_PROOF_RESULT.with(|slot| {
         record_terminal_result(&mut slot.borrow_mut(), result);
     });
@@ -713,7 +741,9 @@ fn measure_placeholder(epoch: u64) -> Task<Message> {
 }
 
 fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
+    let generation = begin_webview_creation();
     window::run(id, move |window| {
+        ensure_webview_creation_is_current(generation)?;
         let mut book = SpikeBook::from_epub_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )?;
@@ -849,15 +879,8 @@ fn exercise_webview_interactions(
     webview: Option<&WebView>,
     expected: Rectangle,
 ) -> Result<(), String> {
-    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
-    let actual = webview.bounds().map_err(|error| error.to_string())?;
-    let expected = webview_bounds(expected);
-    if actual.size != expected.size {
-        return Err(format!(
-            "webview size mismatch: expected {:?}, got {:?}",
-            expected.size, actual.size
-        ));
-    }
+    verify_webview_size(webview, expected)?;
+    let webview = webview.expect("size verification requires a webview");
     webview.focus().map_err(|error| error.to_string())?;
     webview.focus_parent().map_err(|error| error.to_string())?;
     webview
@@ -867,6 +890,41 @@ fn exercise_webview_interactions(
         .set_visible(true)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn verify_webview_size(webview: Option<&WebView>, expected: Rectangle) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    let actual = webview.bounds().map_err(|error| error.to_string())?;
+    let expected = webview_bounds(expected);
+    if actual.size != expected.size {
+        return Err(format!(
+            "webview size mismatch: expected {:?}, got {:?}",
+            expected.size, actual.size
+        ));
+    }
+    Ok(())
+}
+
+fn begin_webview_creation() -> u64 {
+    WEBVIEW_CREATION_GENERATION.with(|generation| {
+        let next = generation.get().wrapping_add(1);
+        generation.set(next);
+        next
+    })
+}
+
+fn invalidate_webview_creation() {
+    WEBVIEW_CREATION_GENERATION.with(|generation| {
+        generation.set(generation.get().wrapping_add(1));
+    });
+}
+
+fn ensure_webview_creation_is_current(generation: u64) -> Result<(), String> {
+    WEBVIEW_CREATION_GENERATION.with(|current| {
+        (current.get() == generation)
+            .then_some(())
+            .ok_or_else(|| "webview creation was canceled".to_string())
+    })
 }
 
 fn record_terminal_result(slot: &mut Option<Result<(), String>>, result: Result<(), String>) {
@@ -892,8 +950,11 @@ fn webview_bounds(bounds: Rectangle) -> Rect {
     }
 }
 
-fn teardown_webview() {
-    WEBVIEW.with(|slot| slot.borrow_mut().take());
+fn teardown_webview() -> bool {
+    invalidate_webview_creation();
+    let webview_dropped = WEBVIEW.with(|slot| slot.borrow_mut().take().is_some());
+    BOOK.with(|slot| slot.borrow_mut().take());
+    webview_dropped
 }
 
 fn is_allowed_navigation(url: &str) -> bool {
@@ -1166,6 +1227,29 @@ mod tests {
     }
 
     #[test]
+    fn invalidated_creation_is_rejected_before_callback_mutation() {
+        let generation = begin_webview_creation();
+        invalidate_webview_creation();
+
+        assert_eq!(
+            ensure_webview_creation_is_current(generation).unwrap_err(),
+            "webview creation was canceled"
+        );
+    }
+
+    #[test]
+    fn replacement_requires_observed_size_before_completion() {
+        let expected = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let proof = LifecycleProof::Recreating { expected };
+
+        assert!(proof.expects_replacement_verification(expected));
+        assert!(!proof.expects_replacement_verification(Rectangle {
+            width: 1.0,
+            ..expected
+        }));
+    }
+
+    #[test]
     fn lifecycle_timeout_covers_initial_placeholder_measurement() {
         let now = Instant::now();
         let mut state = State {
@@ -1233,6 +1317,10 @@ mod tests {
         );
         assert_eq!(
             exercise_webview_interactions(None, bounds).unwrap_err(),
+            "webview is not available"
+        );
+        assert_eq!(
+            verify_webview_size(None, bounds).unwrap_err(),
             "webview is not available"
         );
     }

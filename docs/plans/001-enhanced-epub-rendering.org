@@ -103,8 +103,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   stable logical EPUB locations rather than pixel/scroll offsets.  The macOS
   harness now creates and resizes the child from actual Iced placeholder bounds
   and has an automated parent-resize/child-update/focus/visibility/
-  destroy-recreate/teardown proof.  These are successful API operations, not
-  proof of visual composition or keyboard/IME routing; the cross-platform,
+  destroy-recreate/teardown proof, including an observed replacement size.
+  Focus is only a successful Wry method return, not proof of actual focus,
+  visual composition, or keyboard/IME routing; the cross-platform,
   accessibility, real-tab, routing, and logical-location portions remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
