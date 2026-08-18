@@ -219,6 +219,12 @@ enum LifecycleProof {
     Synchronizing {
         expected: Rectangle,
     },
+    Interacting {
+        expected: Rectangle,
+    },
+    Recreating {
+        expected: Rectangle,
+    },
     Complete,
 }
 
@@ -256,6 +262,7 @@ impl LifecycleProof {
             return false;
         };
         if succeeded && bounds == Some(expected) {
+            *self = Self::Interacting { expected };
             return true;
         }
         false
@@ -310,6 +317,7 @@ enum Message {
         bounds: Option<Rectangle>,
         result: Result<(), String>,
     },
+    LifecycleInteractionsCompleted(Result<(), String>),
     FocusWebView,
     NetworkProofTick(Instant),
 }
@@ -414,6 +422,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::WindowEvent(id, window::Event::Rescaled(_)) if state.window == Some(id) => {
             measure_placeholder(state.measurement_epoch)
         }
+        Message::WindowEvent(id, window::Event::CloseRequested) if state.window == Some(id) => {
+            teardown_webview();
+            window::close(id)
+        }
         Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
             teardown_webview();
             Task::none()
@@ -436,10 +448,26 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 synchronize_webview(state)
             }
         }
+        Message::WebViewCreated(_)
+            if state.lifecycle_proof == LifecycleProof::Complete
+                || state.network_proof_finished =>
+        {
+            teardown_webview();
+            Task::none()
+        }
         Message::WebViewCreated(result) => match result {
             Ok(()) => {
                 state.webview_ready = true;
                 state.applied_bounds = state.creation_bounds.take();
+                if let LifecycleProof::Recreating { expected } = state.lifecycle_proof {
+                    if state.applied_bounds != Some(expected) {
+                        return finish_lifecycle_proof(
+                            state,
+                            Err("replacement webview used unexpected bounds".into()),
+                        );
+                    }
+                    return finish_lifecycle_proof(state, Ok(()));
+                }
                 state.status = if network_proof_requested() {
                     "embedded; waiting for hostile page to finish loading".into()
                 } else {
@@ -494,13 +522,21 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     if lifecycle_proof_requested()
                         && state.lifecycle_proof.observe_synchronization(bounds, true)
                     {
-                        return finish_lifecycle_proof(state, Ok(()));
+                        let expected = bounds.expect("successful lifecycle sync has bounds");
+                        return exercise_lifecycle_interactions(state, expected);
                     }
                 }
                 Err(error) => state.status = format!("webview synchronization failed: {error}"),
             }
             Task::none()
         }
+        Message::LifecycleInteractionsCompleted(result) => match result {
+            Ok(()) => recreate_lifecycle_webview(state),
+            Err(error) => finish_lifecycle_proof(
+                state,
+                Err(format!("webview interaction sequence failed: {error}")),
+            ),
+        },
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -532,13 +568,42 @@ fn update_lifecycle_proof(state: &mut State, now: Instant) -> Task<Message> {
     measure_placeholder(state.measurement_epoch)
 }
 
+fn exercise_lifecycle_interactions(state: &State, expected: Rectangle) -> Task<Message> {
+    let Some(id) = state.window else {
+        return Task::done(Message::LifecycleInteractionsCompleted(Err(
+            "parent window is not available".into(),
+        )));
+    };
+    window::run(id, move |_| {
+        WEBVIEW.with(|slot| exercise_webview_interactions(slot.borrow().as_ref(), expected))
+    })
+    .map(Message::LifecycleInteractionsCompleted)
+}
+
+fn recreate_lifecycle_webview(state: &mut State) -> Task<Message> {
+    let LifecycleProof::Interacting { expected } = state.lifecycle_proof else {
+        return Task::none();
+    };
+    let Some(id) = state.window else {
+        return finish_lifecycle_proof(state, Err("parent window is not available".into()));
+    };
+    teardown_webview();
+    state.webview_ready = false;
+    state.applied_bounds = None;
+    state.creation_bounds = Some(expected);
+    state.lifecycle_proof = LifecycleProof::Recreating { expected };
+    create_webview(id, expected)
+}
+
 fn finish_lifecycle_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
     if !state.lifecycle_proof.complete() {
         return Task::none();
     }
     teardown_webview();
     if result.is_ok() {
-        eprintln!("wry-spike-lifecycle-proof PASS: measured resize and teardown completed");
+        eprintln!(
+            "wry-spike-lifecycle-proof PASS: resize, focus, visibility, replacement, and teardown completed"
+        );
     }
     LIFECYCLE_PROOF_RESULT.with(|slot| {
         record_terminal_result(&mut slot.borrow_mut(), result);
@@ -777,6 +842,30 @@ fn synchronize_webview_instance(
             .set_visible(false)
             .map_err(|error| error.to_string())?;
     }
+    Ok(())
+}
+
+fn exercise_webview_interactions(
+    webview: Option<&WebView>,
+    expected: Rectangle,
+) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    let actual = webview.bounds().map_err(|error| error.to_string())?;
+    let expected = webview_bounds(expected);
+    if actual.size != expected.size {
+        return Err(format!(
+            "webview size mismatch: expected {:?}, got {:?}",
+            expected.size, actual.size
+        ));
+    }
+    webview.focus().map_err(|error| error.to_string())?;
+    webview.focus_parent().map_err(|error| error.to_string())?;
+    webview
+        .set_visible(false)
+        .map_err(|error| error.to_string())?;
+    webview
+        .set_visible(true)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -1045,7 +1134,7 @@ mod tests {
         assert!(!proof.observe_synchronization(Some(stale), true));
         assert!(!proof.observe_synchronization(Some(expected), false));
         assert!(proof.observe_synchronization(Some(expected), true));
-        assert_eq!(proof, LifecycleProof::Synchronizing { expected });
+        assert_eq!(proof, LifecycleProof::Interacting { expected });
         assert!(proof.complete());
         assert_eq!(proof, LifecycleProof::Complete);
         assert!(!proof.observe_synchronization(Some(expected), true));
@@ -1059,6 +1148,21 @@ mod tests {
         record_terminal_result(&mut result, Ok(()));
 
         assert_eq!(result, Some(Err("timed out".into())));
+    }
+
+    #[test]
+    fn completed_proof_ignores_late_webview_creation() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut state = State {
+            lifecycle_proof: LifecycleProof::Complete,
+            creation_bounds: Some(bounds),
+            ..State::default()
+        };
+
+        drop(update(&mut state, Message::WebViewCreated(Ok(()))));
+
+        assert!(!state.webview_ready);
+        assert_eq!(state.creation_bounds, Some(bounds));
     }
 
     #[test]
@@ -1125,6 +1229,10 @@ mod tests {
         let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
         assert_eq!(
             synchronize_webview_instance(None, Some(bounds)).unwrap_err(),
+            "webview is not available"
+        );
+        assert_eq!(
+            exercise_webview_interactions(None, bounds).unwrap_err(),
             "webview is not available"
         );
     }
