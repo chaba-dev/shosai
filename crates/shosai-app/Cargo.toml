@@ -13,7 +13,7 @@ name = "epub-wry-spike"
 required-features = ["epub-wry-spike"]
 
 [features]
-epub-wry-spike = ["dep:wry"]
+epub-wry-spike = ["dep:gtk", "dep:winit", "dep:wry", "dep:x11-dl"]
 
 [dependencies]
 shosai-core.workspace = true
@@ -33,6 +33,11 @@ wry = { version = "0.56.1", optional = true }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder"] }
 objc2-foundation = { version = "0.3", features = ["NSData"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18.2", optional = true }
+winit = { version = "0.30.13", optional = true }
+x11-dl = { version = "2.21.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"
