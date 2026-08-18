@@ -25,6 +25,8 @@ use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 const HEADER_HEIGHT: f32 = 112.0;
 const PADDING: f32 = 24.0;
 const PLACEHOLDER_ID: &str = "epub-wry-spike-placeholder";
+#[cfg(target_os = "linux")]
+const GTK_PUMP_INTERVAL: Duration = Duration::from_millis(16);
 const LIFECYCLE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF";
 const LIFECYCLE_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const LIFECYCLE_WINDOW_WIDTH: f32 = 1040.0;
@@ -35,6 +37,8 @@ const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_PROOF_PATH: &str = "_spike/conformance.xhtml";
 const NETWORK_PROOF_URL: &str = "shosai://book/_spike/conformance.xhtml";
 const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xhtml";
+#[cfg(target_os = "linux")]
+static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -43,6 +47,8 @@ thread_local! {
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static LIFECYCLE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Debug)]
@@ -326,6 +332,8 @@ enum Message {
     LifecycleReplacementVerified(Result<(), String>),
     FocusWebView,
     NetworkProofTick(Instant),
+    #[cfg(target_os = "linux")]
+    PumpGtk,
 }
 
 #[derive(Clone, Copy)]
@@ -340,11 +348,15 @@ impl HasWindowHandle for ParentHandle {
 }
 
 fn main() -> ExitCode {
+    if let Err(error) = initialize_platform() {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     let result = iced::application(boot, update, view)
         .title("Shōsai EPUB Wry spike")
         .subscription(subscription)
-        .window_size((900.0, 700.0))
         .exit_on_close_request(false)
+        .window_size((900.0, 700.0))
         .run();
     if let Err(error) = result {
         eprintln!("EPUB Wry spike failed: {error}");
@@ -391,14 +403,14 @@ fn boot() -> (State, Task<Message>) {
 
 fn subscription(_state: &State) -> Subscription<Message> {
     let events = window::events().map(|(id, event)| Message::WindowEvent(id, event));
+    let mut subscriptions = vec![events];
     if network_proof_requested() || lifecycle_proof_requested() {
-        Subscription::batch([
-            events,
-            iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick),
-        ])
-    } else {
-        events
+        subscriptions
+            .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
     }
+    #[cfg(target_os = "linux")]
+    subscriptions.push(iced::time::every(GTK_PUMP_INTERVAL).map(|_| Message::PumpGtk));
+    Subscription::batch(subscriptions)
 }
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -558,6 +570,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             update_lifecycle_proof(state, now)
         }
         Message::NetworkProofTick(now) => update_network_proof(state, now),
+        #[cfg(target_os = "linux")]
+        Message::PumpGtk => {
+            pump_gtk_events();
+            Task::none()
+        }
     }
 }
 
@@ -771,6 +788,7 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             .window_handle()
             .map_err(|error| error.to_string())?
             .as_raw();
+        ensure_supported_parent_handle(raw)?;
         let parent = ParentHandle(raw);
         let webview = WebViewBuilder::new()
             .with_bounds(webview_bounds(bounds))
@@ -800,6 +818,58 @@ fn network_proof_requested() -> bool {
 
 fn lifecycle_proof_requested() -> bool {
     std::env::var_os(LIFECYCLE_PROOF_ENV).is_some()
+}
+
+#[cfg(target_os = "linux")]
+fn initialize_platform() -> Result<(), String> {
+    use gtk::prelude::DisplayExtManual;
+
+    gtk::init().map_err(|error| format!("GTK initialization failed: {error}"))?;
+    let display = gtk::gdk::Display::default().ok_or_else(|| {
+        "GTK did not find a display; run this spike in an X11 session".to_string()
+    })?;
+    if display.backend().is_wayland() {
+        return Err(
+            "native Wayland child embedding is unsupported by Wry with the Iced host; run the bounded X11 spike with WINIT_UNIX_BACKEND=x11 GDK_BACKEND=x11"
+                .into(),
+        );
+    }
+    winit::platform::x11::register_xlib_error_hook(Box::new(|_display, error| {
+        let error = error.cast::<x11_dl::xlib::XErrorEvent>();
+        // SAFETY: winit invokes this hook with the Xlib error event pointer for
+        // the duration of the callback. Wry documents GLX error 170 as benign
+        // for its GTK child-window bridge and uses the same hook in its example.
+        // Once this one-shot harness starts teardown, GTK may win races with
+        // winit's XIM child, making idempotent cleanup return BadWindow (3).
+        unsafe {
+            (*error).error_code == 170
+                || ((*error).error_code == 3 && X11_TEARDOWN_STARTED.load(Ordering::Acquire))
+        }
+    }));
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn initialize_platform() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn pump_gtk_events() {
+    while gtk::events_pending() {
+        gtk::main_iteration_do(false);
+    }
+}
+
+fn ensure_supported_parent_handle(handle: RawWindowHandle) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if !matches!(handle, RawWindowHandle::Xlib(_)) {
+        return Err(format!(
+            "Wry child embedding requires an Iced X11/Xlib window on Linux, but Iced provided {handle:?}; unset WAYLAND_DISPLAY and WAYLAND_SOCKET, set DISPLAY to an X11 server, and run with GDK_BACKEND=x11"
+        ));
+    }
+    let _ = handle;
+    Ok(())
 }
 
 fn is_network_proof_page(url: &str) -> bool {
@@ -952,6 +1022,10 @@ fn webview_bounds(bounds: Rectangle) -> Rect {
 
 fn teardown_webview() -> bool {
     invalidate_webview_creation();
+    #[cfg(test)]
+    TEARDOWN_CALLS.with(|calls| calls.set(calls.get() + 1));
+    #[cfg(target_os = "linux")]
+    X11_TEARDOWN_STARTED.store(true, Ordering::Release);
     let webview_dropped = WEBVIEW.with(|slot| slot.borrow_mut().take().is_some());
     BOOK.with(|slot| slot.borrow_mut().take());
     webview_dropped
@@ -1163,6 +1237,46 @@ mod tests {
                 size: LogicalSize::new(640.5, 480.75).into(),
             }
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_child_embedding_accepts_xlib_and_rejects_wayland() {
+        use std::ffi::c_void;
+        use std::ptr::NonNull;
+        use wry::raw_window_handle::{WaylandWindowHandle, XlibWindowHandle};
+
+        let xlib = RawWindowHandle::Xlib(XlibWindowHandle::new(1));
+        assert_eq!(ensure_supported_parent_handle(xlib), Ok(()));
+
+        let surface = NonNull::new(1_usize as *mut c_void).unwrap();
+        let wayland = RawWindowHandle::Wayland(WaylandWindowHandle::new(surface));
+        let error = ensure_supported_parent_handle(wayland).unwrap_err();
+        assert!(error.contains("requires an Iced X11/Xlib window"));
+        assert!(error.contains("unset WAYLAND_DISPLAY and WAYLAND_SOCKET"));
+    }
+
+    #[test]
+    fn every_parent_close_path_tears_down_the_webview_first() {
+        let id = window::Id::unique();
+        let mut state = State {
+            window: Some(id),
+            ..State::default()
+        };
+
+        TEARDOWN_CALLS.with(|calls| calls.set(0));
+        drop(update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        ));
+        TEARDOWN_CALLS.with(|calls| assert_eq!(calls.get(), 1, "ordinary close must teardown"));
+
+        TEARDOWN_CALLS.with(|calls| calls.set(0));
+        drop(finish_network_proof(
+            &mut state,
+            Err("simulated proof failure".into()),
+        ));
+        TEARDOWN_CALLS.with(|calls| assert_eq!(calls.get(), 1, "network proof must teardown"));
     }
 
     #[test]
