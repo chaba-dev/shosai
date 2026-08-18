@@ -241,12 +241,17 @@ async fn test_preferences_persist_across_opens() {
             .set_pref_int_async("library.cards_per_row", 6)
             .await
             .unwrap();
+        store.set_pref_async("language", "ja").await.unwrap();
     }
 
     {
         let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
         let value = store.get_pref_int_async("library.cards_per_row").await;
         assert_eq!(value, Some(6));
+        assert_eq!(
+            store.get_pref_async("language").await.as_deref(),
+            Some("ja")
+        );
     }
 }
 

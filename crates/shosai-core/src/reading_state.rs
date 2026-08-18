@@ -151,6 +151,35 @@ impl ReadingStateStore {
         Ok(())
     }
 
+    /// Get a stored preference value.
+    pub async fn get_pref_async(&self, key: &str) -> Option<String> {
+        sqlx::query("SELECT value FROM preferences WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|row| row.get::<String, _>("value"))
+    }
+
+    /// Set a stored preference value.
+    pub async fn set_pref_async(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO preferences (key, value, updated_at)
+             VALUES (?, ?, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at",
+        )
+        .bind(key)
+        .bind(value)
+        .execute(&self.pool)
+        .await
+        .context("failed to save preference")?;
+
+        Ok(())
+    }
+
     /// Get a stored preference value as an integer.
     pub fn get_pref_int(&self, key: &str) -> Option<i64> {
         // Preferences are stored as strings to keep the table flexible.
@@ -166,31 +195,14 @@ impl ReadingStateStore {
 
     /// Async: get a preference value as an integer.
     pub async fn get_pref_int_async(&self, key: &str) -> Option<i64> {
-        sqlx::query("SELECT value FROM preferences WHERE key = ?")
-            .bind(key)
-            .fetch_optional(&self.pool)
+        self.get_pref_async(key)
             .await
-            .ok()
-            .flatten()
-            .and_then(|row| row.get::<String, _>("value").parse::<i64>().ok())
+            .and_then(|value| value.parse::<i64>().ok())
     }
 
     /// Async: set a preference value as an integer.
     pub async fn set_pref_int_async(&self, key: &str, value: i64) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO preferences (key, value, updated_at)
-             VALUES (?, ?, datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET
-                value = excluded.value,
-                updated_at = excluded.updated_at",
-        )
-        .bind(key)
-        .bind(value.to_string())
-        .execute(&self.pool)
-        .await
-        .context("failed to save preference")?;
-
-        Ok(())
+        self.set_pref_async(key, &value.to_string()).await
     }
 
     /// Async: atomically set multiple integer preferences.

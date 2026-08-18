@@ -4,31 +4,31 @@ use iced::{Element, Length};
 use crate::theme;
 
 pub fn primary_button<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl Into<String>,
     message: Option<Message>,
 ) -> Button<'a, Message> {
-    button(text(label).size(14))
+    button(text(label.into()).size(14))
         .on_press_maybe(message)
         .padding([9, 14])
         .style(theme::primary_button)
 }
 
 pub fn secondary_button<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl Into<String>,
     message: Option<Message>,
 ) -> Button<'a, Message> {
-    button(text(label).size(14))
+    button(text(label.into()).size(14))
         .on_press_maybe(message)
         .padding([9, 14])
         .style(theme::secondary_button)
 }
 
 pub fn navigation_button<'a, Message: Clone + 'a>(
-    label: &'a str,
+    label: impl Into<String>,
     selected: bool,
     message: Message,
 ) -> Button<'a, Message> {
-    button(text(label).size(14))
+    button(text(label.into()).size(14))
         .on_press(message)
         .padding([9, 12])
         .width(Length::Fill)

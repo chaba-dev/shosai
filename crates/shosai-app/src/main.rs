@@ -1,5 +1,6 @@
 mod app;
 mod epub;
+mod i18n;
 mod pdf;
 mod theme;
 mod widgets;

@@ -26,6 +26,7 @@ use crate::epub::{
     Page as EpubPage, PageNode as EpubPageNode, content_node_text_len, paginate_epub_chapter,
     spans_text_len,
 };
+use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
 use crate::{theme as app_theme, widgets};
 
@@ -36,6 +37,8 @@ mod perf;
 pub use dispatch::update;
 pub use message::Message;
 
+const LANGUAGE_PREFERENCE_KEY: &str = "language";
+
 // ---------------------------------------------------------------------------
 // Open document wrapper
 // ---------------------------------------------------------------------------
@@ -45,6 +48,55 @@ enum OpenDocument {
     Pdf(Arc<PdfDoc>),
     Epub(Arc<EpubDoc>),
     Cbz(Arc<CbzDoc>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AppError {
+    Storage(String),
+    Open {
+        format: &'static str,
+        detail: String,
+    },
+    UnsupportedFormat(String),
+    Render(String),
+    EpubEmpty,
+}
+
+impl AppError {
+    fn localized(&self, i18n: &I18n) -> String {
+        match self {
+            Self::Storage(detail) => {
+                i18n.text_with_args("failed-storage", [("error", detail.clone().into())])
+            }
+            Self::Open { format, detail } => i18n.text_with_args(
+                "failed-open",
+                [
+                    ("format", (*format).into()),
+                    ("error", detail.clone().into()),
+                ],
+            ),
+            Self::UnsupportedFormat(extension) => i18n.text_with_args(
+                "unsupported-format",
+                [("extension", extension.clone().into())],
+            ),
+            Self::Render(detail) => {
+                i18n.text_with_args("failed-render", [("error", detail.clone().into())])
+            }
+            Self::EpubEmpty => i18n.text("epub-empty"),
+        }
+    }
+
+    fn diagnostic(&self) -> String {
+        match self {
+            Self::Storage(detail) => format!("failed to initialize storage: {detail}"),
+            Self::Open { format, detail } => format!("failed to open {format}: {detail}"),
+            Self::UnsupportedFormat(extension) => {
+                format!("unsupported file format: .{extension}")
+            }
+            Self::Render(detail) => format!("failed to render page: {detail}"),
+            Self::EpubEmpty => "EPUB contains no readable content".to_string(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -273,7 +325,7 @@ struct ReaderTab {
     continuous_tail_extent: f32,
     render_generation: u64,
     page_input: String,
-    error: Option<String>,
+    error: Option<AppError>,
     font_size: f32,
     line_spacing: f32,
     theme: ReaderTheme,
@@ -302,6 +354,7 @@ pub struct ContinuousRequest {
 pub struct InitializedState {
     store: ReadingStateStore,
     window_geometry: Option<(Size, Point)>,
+    language_preference: LanguagePreference,
 }
 
 #[derive(Debug)]
@@ -313,6 +366,7 @@ struct ReadingStateSave {
 #[derive(Debug)]
 enum ReadingStateWriterMessage {
     Save(ReadingStateSave),
+    Language(LanguagePreference),
     Flush(oneshot::Sender<()>),
 }
 
@@ -330,6 +384,7 @@ pub(crate) struct PageCacheKey {
 #[derive(Debug)]
 pub struct State {
     screen: Screen,
+    i18n: I18n,
 
     // -- Reader state --
     file_path: Option<PathBuf>,
@@ -357,7 +412,7 @@ pub struct State {
     continuous_activation: u64,
     next_continuous_request_id: u64,
     page_input: String,
-    error: Option<String>,
+    error: Option<AppError>,
     font_size: f32,
     line_spacing: f32,
     theme: ReaderTheme,
@@ -366,7 +421,7 @@ pub struct State {
     active_tab: Option<usize>,
     active_tab_id: Option<u64>,
     next_tab_id: u64,
-    open_error: Option<String>,
+    open_error: Option<AppError>,
     show_reader_settings: bool,
     show_reader_more: bool,
 
@@ -404,7 +459,7 @@ pub struct State {
     library_book_ids: Arc<Vec<i64>>,
     library_offset: usize,
     storage_initializing: bool,
-    storage_error: Option<String>,
+    storage_error: Option<AppError>,
     pending_open: Option<PendingOpen>,
     window_id: Option<window::Id>,
     window_size: Size,
@@ -445,14 +500,6 @@ impl ReaderTheme {
         }
     }
 
-    fn label(&self) -> &'static str {
-        match self {
-            ReaderTheme::Light => "Light",
-            ReaderTheme::Dark => "Dark",
-            ReaderTheme::Sepia => "Sepia",
-        }
-    }
-
     fn next(&self) -> Self {
         match self {
             ReaderTheme::Light => ReaderTheme::Dark,
@@ -470,6 +517,7 @@ pub fn boot() -> (State, Task<Message>) {
     let (performance, performance_file) = perf::Performance::from_environment();
     let state = State {
         screen: Screen::Library,
+        i18n: I18n::new(LanguagePreference::System),
 
         file_path: None,
         document: None,
@@ -574,6 +622,12 @@ pub fn boot() -> (State, Task<Message>) {
                 }
                 _ => None,
             };
+            let language_preference = LanguagePreference::from_stored(
+                store
+                    .get_pref_async(LANGUAGE_PREFERENCE_KEY)
+                    .await
+                    .as_deref(),
+            );
             eprintln!(
                 "startup: database and preferences initialized in {} ms",
                 started.elapsed().as_millis()
@@ -581,6 +635,7 @@ pub fn boot() -> (State, Task<Message>) {
             Ok(InitializedState {
                 store,
                 window_geometry: geometry,
+                language_preference,
             })
         },
         Message::Initialized,
@@ -854,7 +909,7 @@ fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
     let document = match load_document(&path) {
         Ok(document) => document,
         Err(error) => {
-            let performance_task = perf::fail(state, &format!("document failed to open: {error}"));
+            let performance_task = perf::fail(state, &error.diagnostic());
             state.open_error = Some(error);
             return performance_task;
         }
@@ -875,7 +930,7 @@ fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
     task
 }
 
-fn load_document(path: &PathBuf) -> Result<OpenDocument, String> {
+fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
     let ext = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -883,14 +938,23 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, String> {
     match ext.as_str() {
         "pdf" => PdfDoc::open(path)
             .map(|document| OpenDocument::Pdf(Arc::new(document)))
-            .map_err(|error| format!("Failed to open PDF: {error}")),
+            .map_err(|error| AppError::Open {
+                format: "PDF",
+                detail: error.to_string(),
+            }),
         "epub" => EpubDoc::open(path)
             .map(|document| OpenDocument::Epub(Arc::new(document)))
-            .map_err(|error| format!("Failed to open EPUB: {error}")),
+            .map_err(|error| AppError::Open {
+                format: "EPUB",
+                detail: error.to_string(),
+            }),
         "cbz" => CbzDoc::open(path)
             .map(|document| OpenDocument::Cbz(Arc::new(document)))
-            .map_err(|error| format!("Failed to open CBZ: {error}")),
-        _ => Err(format!("Unsupported file format: .{ext}")),
+            .map_err(|error| AppError::Open {
+                format: "CBZ",
+                detail: error.to_string(),
+            }),
+        _ => Err(AppError::UnsupportedFormat(ext)),
     }
 }
 
@@ -1263,7 +1327,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             if state.epub_pages.is_empty() {
                 state.chapter_content.clear();
                 state.epub_page = 0;
-                state.error = Some("EPUB contains no readable content".to_string());
+                state.error = Some(AppError::EpubEmpty);
             } else {
                 let requested_page = epub_page_for_location(state, anchor.0, anchor.1);
                 state.epub_page = requested_page.min(state.epub_pages.len() - 1);
@@ -2011,17 +2075,22 @@ fn start_reading_state_writer(
     tokio::spawn(async move {
         while let Some(first) = receiver.recv().await {
             let mut pending = HashMap::new();
+            let mut language = None;
             let mut flushes = Vec::new();
             match first {
                 ReadingStateWriterMessage::Save(save) => {
                     pending.insert(save.path, save.reading);
                 }
+                ReadingStateWriterMessage::Language(preference) => language = Some(preference),
                 ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
             }
             while let Ok(message) = receiver.try_recv() {
                 match message {
                     ReadingStateWriterMessage::Save(save) => {
                         pending.insert(save.path, save.reading);
+                    }
+                    ReadingStateWriterMessage::Language(preference) => {
+                        language = Some(preference);
                     }
                     ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
                 }
@@ -2031,6 +2100,13 @@ fn start_reading_state_writer(
                 if let Err(error) = store.set_async(&path, &reading).await {
                     eprintln!("warning: failed to save reading state: {error}");
                 }
+            }
+            if let Some(preference) = language
+                && let Err(error) = store
+                    .set_pref_async(LANGUAGE_PREFERENCE_KEY, preference.stored())
+                    .await
+            {
+                eprintln!("warning: failed to save language preference: {error}");
             }
             for flush in flushes {
                 let _ = flush.send(());
@@ -2308,7 +2384,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
     if let Some(error) = &state.open_error {
         layout = layout.push(
             container(
-                text(error)
+                text(error.localized(&state.i18n))
                     .size(13)
                     .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
             )
@@ -2441,17 +2517,30 @@ fn status_bar(state: &State) -> Element<'_, Message> {
         let first = visible.first().copied().unwrap_or(0) + 1;
         let last = visible.last().copied().unwrap_or(0) + 1;
         if first == last {
-            format!("Page {first} · {percentage}%")
+            state.i18n.text_with_args(
+                "single-page-status",
+                [("page", first.into()), ("percentage", percentage.into())],
+            )
         } else {
-            format!("Pages {first}–{last} · {percentage}%")
+            state.i18n.text_with_args(
+                "page-range-status",
+                [
+                    ("first", first.into()),
+                    ("last", last.into()),
+                    ("percentage", percentage.into()),
+                ],
+            )
         }
     } else if state.document.is_some() {
-        format!(
-            "Page {} · {percentage}%",
-            state.current_page.saturating_add(1)
+        state.i18n.text_with_args(
+            "single-page-status",
+            [
+                ("page", state.current_page.saturating_add(1).into()),
+                ("percentage", percentage.into()),
+            ],
         )
     } else {
-        "No book open".to_string()
+        state.i18n.text("no-book-open")
     };
 
     container(
@@ -2495,11 +2584,11 @@ fn reader_header(state: &State, compact: bool) -> Element<'_, Message> {
                 .and_then(|path| path.file_stem())
                 .map(|name| name.to_string_lossy().into_owned())
         })
-        .unwrap_or_else(|| "Reader".to_string());
+        .unwrap_or_else(|| state.i18n.text("reader"));
     let title = truncate_reader_label(&title, if compact { 24 } else { 58 });
     let actions = row![
         reader_control_button(
-            "Contents",
+            state.i18n.text("contents"),
             state
                 .document
                 .as_ref()
@@ -2521,7 +2610,7 @@ fn reader_header(state: &State, compact: bool) -> Element<'_, Message> {
 
     container(
         row![
-            widgets::secondary_button("‹ Library", Some(Message::ShowLibrary),),
+            widgets::secondary_button(state.i18n.text("back-library"), Some(Message::ShowLibrary),),
             container(text(title).size(if compact { 15 } else { 17 }))
                 .width(Length::Fill)
                 .center_x(Length::Fill),
@@ -2555,8 +2644,8 @@ fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
     let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
     let mut reading = row![].spacing(5).align_y(iced::Alignment::Center);
     let mode_label = match state.reading_mode {
-        ReadingMode::Paginated => "Paginated",
-        ReadingMode::Continuous => "Continuous",
+        ReadingMode::Paginated => state.i18n.text("paginated"),
+        ReadingMode::Continuous => state.i18n.text("continuous"),
     };
     reading = reading.push(reader_control_button(
         mode_label,
@@ -2568,19 +2657,19 @@ fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
         reading = reading
             .push(reader_control_button("−", Some(Message::ZoomOut), false))
             .push(
-                text(state.zoom.label())
+                text(zoom_label(state))
                     .size(12)
                     .width(70)
                     .color(app_theme::TEXT_MUTED),
             )
             .push(reader_control_button("+", Some(Message::ZoomIn), false))
             .push(reader_control_button(
-                if compact { "Width" } else { "Fit width" },
+                state.i18n.text("fit-width"),
                 Some(Message::SetZoomFitWidth),
                 state.zoom == ZoomMode::FitWidth,
             ))
             .push(reader_control_button(
-                if compact { "Page" } else { "Fit page" },
+                state.i18n.text("fit-page"),
                 Some(Message::SetZoomFitPage),
                 state.zoom == ZoomMode::FitPage,
             ));
@@ -2604,7 +2693,7 @@ fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
                 false,
             ))
             .push(reader_control_button(
-                state.theme.label(),
+                theme_label(state),
                 Some(Message::CycleTheme),
                 false,
             ));
@@ -2614,9 +2703,9 @@ fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
         scrollable(
             row![
                 text(if compact {
-                    "Reading"
+                    state.i18n.text("reading")
                 } else {
-                    "Reading appearance"
+                    state.i18n.text("reading-appearance")
                 })
                 .size(12)
                 .color(app_theme::TEXT_MUTED),
@@ -2637,6 +2726,22 @@ fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
     .into()
 }
 
+fn zoom_label(state: &State) -> String {
+    match state.zoom {
+        ZoomMode::Manual(scale) => format!("{}%", (scale * 100.0) as u32),
+        ZoomMode::FitWidth => state.i18n.text("fit-width"),
+        ZoomMode::FitPage => state.i18n.text("fit-page"),
+    }
+}
+
+fn theme_label(state: &State) -> String {
+    state.i18n.text(match state.theme {
+        ReaderTheme::Light => "light",
+        ReaderTheme::Dark => "dark",
+        ReaderTheme::Sepia => "sepia",
+    })
+}
+
 fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     let total = if uses_paginated_epub_layout(state) {
         state.epub_pages.len()
@@ -2644,14 +2749,18 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
         state.total_pages
     };
     let location = row![
-        text_input("Page", &state.page_input)
+        text_input(&state.i18n.text("page"), &state.page_input)
             .on_input(Message::PageInputChanged)
             .on_submit(Message::GoToPage)
             .padding([7, 8])
             .width(64),
-        text(format!("of {total}"))
-            .size(12)
-            .color(app_theme::TEXT_MUTED),
+        text(
+            state
+                .i18n
+                .text_with_args("of-pages", [("total", total.into())]),
+        )
+        .size(12)
+        .color(app_theme::TEXT_MUTED),
     ]
     .spacing(6)
     .align_y(iced::Alignment::Center);
@@ -2659,20 +2768,28 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     let mut actions = row![
         reader_control_button(
             if state.current_page_bookmarked {
-                "★ Saved"
+                state.i18n.text("saved")
             } else {
-                "☆ Bookmark"
+                state.i18n.text("bookmark")
             },
             state.document.as_ref().map(|_| Message::ToggleBookmark),
             state.current_page_bookmarked,
         ),
-        reader_control_button("Open book", Some(Message::OpenFile), false),
+        reader_control_button(state.i18n.text("open-book"), Some(Message::OpenFile), false),
+        reader_control_button(
+            state.i18n.selector_label(),
+            state
+                .reading_state_saves
+                .as_ref()
+                .map(|_| Message::CycleLanguage),
+            false,
+        ),
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
     if state.document.is_some() && !matches!(state.document, Some(OpenDocument::Cbz(_))) {
         actions = actions.push(reader_control_button(
-            "Search",
+            state.i18n.text("search"),
             Some(Message::ToggleSearchBar),
             state.show_search_bar,
         ));
@@ -2700,8 +2817,8 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
 fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
     let heading = row![
         column![
-            text("Contents").size(18),
-            text("Chapters and saved places")
+            text(state.i18n.text("contents")).size(18),
+            text(state.i18n.text("chapters-saved-places"))
                 .size(11)
                 .color(app_theme::TEXT_MUTED),
         ]
@@ -2713,13 +2830,21 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
     let mut panel = column![heading].spacing(10).padding(14).width(Length::Fill);
 
     if let Some(OpenDocument::Epub(document)) = &state.document {
-        panel = panel.push(text("Chapters").size(12).color(app_theme::TEXT_MUTED));
+        panel = panel.push(
+            text(state.i18n.text("chapters"))
+                .size(12)
+                .color(app_theme::TEXT_MUTED),
+        );
         for (index, chapter) in document.content.chapters.iter().enumerate() {
             let title = chapter
                 .title
                 .clone()
                 .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| format!("Chapter {}", index + 1));
+                .unwrap_or_else(|| {
+                    state
+                        .i18n
+                        .text_with_args("chapter-number", [("number", (index + 1).into())])
+                });
             panel = panel.push(
                 button(text(truncate_reader_label(&title, 38)).size(12))
                     .on_press(Message::GoToBookmark(index, None))
@@ -2731,17 +2856,21 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
     }
 
     panel = panel.push(
-        text(format!("Bookmarks · {}", state.bookmarks.len()))
-            .size(12)
-            .color(app_theme::TEXT_MUTED),
+        text(
+            state
+                .i18n
+                .text_with_args("bookmark-count", [("count", state.bookmarks.len().into())]),
+        )
+        .size(12)
+        .color(app_theme::TEXT_MUTED),
     );
 
     if state.bookmarks.is_empty() {
         panel = panel.push(
             container(
                 column![
-                    text("No bookmarks yet").size(15),
-                    text("Save a page to keep it close at hand.")
+                    text(state.i18n.text("no-bookmarks")).size(15),
+                    text(state.i18n.text("bookmark-empty-hint"))
                         .size(12)
                         .color(app_theme::TEXT_MUTED),
                 ]
@@ -2751,10 +2880,11 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
         );
     } else {
         for bm in &state.bookmarks {
-            let title = bm
-                .title
-                .clone()
-                .unwrap_or_else(|| format!("Pg {}", bm.page + 1));
+            let title = bm.title.clone().unwrap_or_else(|| {
+                state
+                    .i18n
+                    .text_with_args("page-short", [("page", (bm.page + 1).into())])
+            });
 
             let is_editing = state.editing_note_id == Some(bm.id);
 
@@ -2767,9 +2897,13 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                     .padding([4, 6])
                     .style(app_theme::bookmark_link),
                 iced::widget::Space::new().width(Length::Fill),
-                text(format!("p.{}", bm.page + 1))
-                    .size(10)
-                    .color(app_theme::TEXT_MUTED),
+                text(
+                    state
+                        .i18n
+                        .text_with_args("page-abbreviated", [("page", (bm.page + 1).into())],)
+                )
+                .size(10)
+                .color(app_theme::TEXT_MUTED),
                 button(text("\u{2715}").size(10))
                     .on_press(Message::DeleteBookmark(bm.id))
                     .padding([4, 6])
@@ -2782,17 +2916,28 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
 
             if is_editing {
                 // Note editing mode
-                let input = text_input("Add a note...", &state.editing_note_text)
-                    .on_input(Message::EditNoteChanged)
-                    .on_submit(Message::SaveNote)
-                    .size(12)
-                    .padding(8)
-                    .width(Length::Fill);
+                let input = text_input(
+                    &state.i18n.text("add-note-placeholder"),
+                    &state.editing_note_text,
+                )
+                .on_input(Message::EditNoteChanged)
+                .on_submit(Message::SaveNote)
+                .size(12)
+                .padding(8)
+                .width(Length::Fill);
                 entry_col = entry_col.push(input);
                 entry_col = entry_col.push(
                     row![
-                        reader_control_button("Save", Some(Message::SaveNote), true),
-                        reader_control_button("Cancel", Some(Message::CancelEditNote), false),
+                        reader_control_button(
+                            state.i18n.text("save"),
+                            Some(Message::SaveNote),
+                            true,
+                        ),
+                        reader_control_button(
+                            state.i18n.text("cancel"),
+                            Some(Message::CancelEditNote),
+                            false,
+                        ),
                     ]
                     .spacing(5),
                 );
@@ -2802,9 +2947,9 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                         entry_col.push(text(note.clone()).size(11).color(app_theme::TEXT_MUTED));
                 }
                 let edit_label = if bm.note.is_some() {
-                    "Edit note"
+                    state.i18n.text("edit-note")
                 } else {
-                    "Add note"
+                    state.i18n.text("add-note")
                 };
                 let existing_note = bm.note.clone().unwrap_or_default();
                 entry_col = entry_col.push(
@@ -2826,7 +2971,7 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
 
     if !state.bookmarks.is_empty() {
         panel = panel.push(widgets::secondary_button(
-            "Export as Markdown",
+            state.i18n.text("export-markdown"),
             Some(Message::ExportBookmarks),
         ));
     }
@@ -2839,18 +2984,21 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
 }
 
 fn search_bar(state: &State, compact: bool) -> Element<'_, Message> {
-    let input = text_input("Search in document...", &state.search_query)
-        .id(search_input_id())
-        .on_input(Message::SearchQueryChanged)
-        .on_submit(Message::SearchNext)
-        .padding([8, 10])
-        .width(Length::Fill);
+    let input = text_input(
+        &state.i18n.text("search-document-placeholder"),
+        &state.search_query,
+    )
+    .id(search_input_id())
+    .on_input(Message::SearchQueryChanged)
+    .on_submit(Message::SearchNext)
+    .padding([8, 10])
+    .width(Length::Fill);
 
     let result_info = if state.search_results.is_empty() {
         if state.search_query.is_empty() {
             String::new()
         } else {
-            "No results".to_string()
+            state.i18n.text("no-results")
         }
     } else {
         format!(
@@ -2897,7 +3045,7 @@ fn search_input_id() -> iced::widget::Id {
 
 fn content_view(state: &State) -> Element<'_, Message> {
     if let Some(error) = &state.error {
-        return center(text(error).size(16))
+        return center(text(error.localized(&state.i18n)).size(16))
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
@@ -2910,7 +3058,7 @@ fn content_view(state: &State) -> Element<'_, Message> {
     match &state.document {
         Some(OpenDocument::Pdf(_) | OpenDocument::Cbz(_)) => pdf_page_view(state),
         Some(OpenDocument::Epub(_)) => epub_chapter_view(state),
-        None => welcome_view(),
+        None => welcome_view(state),
     }
 }
 
@@ -2941,13 +3089,23 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                     }
                     .map(|(_, height)| height * state.zoom.scale())
                     .unwrap_or(600.0);
-                    center(text("Rendering...")).height(page_height).into()
+                    center(text(state.i18n.text("rendering")))
+                        .height(page_height)
+                        .into()
                 };
                 let page = container(
-                    column![text(format!("Page {}", index + 1)).size(12), content]
-                        .spacing(4)
-                        .align_x(iced::Alignment::Center)
-                        .width(Length::Fill),
+                    column![
+                        text(
+                            state
+                                .i18n
+                                .text_with_args("page-number", [("page", (index + 1).into())],)
+                        )
+                        .size(12),
+                        content
+                    ]
+                    .spacing(4)
+                    .align_x(iced::Alignment::Center)
+                    .width(Length::Fill),
                 )
                 .id(continuous_item_id(tab_id, activation, index))
                 .width(Length::Fill);
@@ -3002,6 +3160,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                 for node in nodes {
                     chapter = chapter.push(render_content_node(
                         node,
+                        &state.i18n,
                         state.font_size,
                         state.theme.text_color(),
                         &state.epub_image_handles,
@@ -3058,14 +3217,14 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
             .height(Length::Fill)
             .into()
         }
-        None => welcome_view(),
+        None => welcome_view(state),
     }
 }
 
 fn pdf_page_view(state: &State) -> Element<'_, Message> {
     let pages = displayed_paginated_raster_pages(state);
     if pages.is_empty() {
-        return center(text("Rendering...").size(16))
+        return center(text(state.i18n.text("rendering")).size(16))
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
@@ -3110,7 +3269,11 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
                     .into()
             }
         } else {
-            center(text(format!("Rendering page {}...", page + 1))).into()
+            center(text(state.i18n.text_with_args(
+                "rendering-page",
+                [("page", (page + 1).into())],
+            )))
+            .into()
         };
         let page_container = match state.zoom {
             ZoomMode::FitPage => container(content)
@@ -3197,6 +3360,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
         for page_node in &epub_page.nodes {
             page = page.push(render_content_node(
                 &page_node.node,
+                &state.i18n,
                 font_size,
                 text_color,
                 &state.epub_image_handles,
@@ -3262,8 +3426,10 @@ fn content_starts_with_heading(nodes: &[ContentNode], title: &str) -> bool {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_content_node<'a>(
     node: &ContentNode,
+    i18n: &I18n,
     font_size: f32,
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
@@ -3316,6 +3482,7 @@ fn render_content_node<'a>(
             for child in children {
                 col = col.push(render_content_node(
                     child,
+                    i18n,
                     font_size,
                     text_color,
                     image_handles,
@@ -3398,6 +3565,7 @@ fn render_content_node<'a>(
         ContentNode::Image { src, alt } => render_epub_image(
             src,
             alt,
+            i18n,
             font_size,
             text_color,
             image_handles,
@@ -3418,6 +3586,7 @@ fn render_content_node<'a>(
 fn render_epub_image<'a>(
     src: &str,
     alt: &str,
+    i18n: &I18n,
     font_size: f32,
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
@@ -3443,7 +3612,7 @@ fn render_epub_image<'a>(
 
     // Fallback: show alt text placeholder.
     let mut spans: Vec<iced::widget::text::Span<'_, String>> = vec![
-        span("[Image: ".to_string())
+        span(format!("[{}: ", i18n.text("image")))
             .size(font_size)
             .color(text_color),
     ];
@@ -3812,17 +3981,27 @@ fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
 }
 
 fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
-    let search_input = text_input("Search by title or author...", &state.library_search)
-        .id(library_search_input_id())
-        .on_input(Message::LibrarySearchChanged)
-        .padding([10, 12])
-        .width(Length::Fill);
+    let search_input = text_input(
+        &state.i18n.text("search-library-placeholder"),
+        &state.library_search,
+    )
+    .id(library_search_input_id())
+    .on_input(Message::LibrarySearchChanged)
+    .padding([10, 12])
+    .width(Length::Fill);
     let search = container(search_input).width(Length::Fill).max_width(380);
     let import_message = state.library.is_some().then_some(Message::ImportFile);
     let folder_message = state.library.is_some().then_some(Message::ImportDirectory);
     let actions = row![
-        widgets::secondary_button("Scan folder", folder_message),
-        widgets::primary_button("＋ Add book", import_message),
+        widgets::secondary_button(
+            state.i18n.selector_label(),
+            state
+                .reading_state_saves
+                .as_ref()
+                .map(|_| Message::CycleLanguage),
+        ),
+        widgets::secondary_button(state.i18n.text("scan-folder"), folder_message),
+        widgets::primary_button(state.i18n.text("add-book"), import_message),
     ]
     .spacing(8)
     .align_y(iced::Alignment::Center);
@@ -3831,8 +4010,8 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         column![
             row![
                 column![
-                    text("Library").size(26),
-                    text("Your private reading room")
+                    text(state.i18n.text("library")).size(26),
+                    text(state.i18n.text("library-subtitle"))
                         .size(12)
                         .color(app_theme::TEXT_MUTED),
                 ]
@@ -3848,8 +4027,8 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
     } else {
         row![
             column![
-                text("Library").size(26),
-                text("Your private reading room")
+                text(state.i18n.text("library")).size(26),
+                text(state.i18n.text("library-subtitle"))
                     .size(12)
                     .color(app_theme::TEXT_MUTED),
             ]
@@ -3890,9 +4069,11 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
 
 fn library_sidebar(state: &State) -> Element<'_, Message> {
     let content = column![
-        text("COLLECTION").size(11).color(app_theme::TEXT_MUTED),
+        text(state.i18n.text("collection"))
+            .size(11)
+            .color(app_theme::TEXT_MUTED),
         widgets::navigation_button(
-            "All books",
+            state.i18n.text("all-books"),
             state.library_filter.is_none(),
             Message::LibraryFilterChanged(None),
         ),
@@ -3921,7 +4102,7 @@ fn mobile_library_filters(state: &State) -> Element<'_, Message> {
     container(
         row![
             widgets::navigation_button(
-                "All",
+                state.i18n.text("all"),
                 state.library_filter.is_none(),
                 Message::LibraryFilterChanged(None),
             ),
@@ -3951,21 +4132,21 @@ fn library_collection(state: &State) -> Element<'_, Message> {
     if state.library_books.is_empty() {
         let constrained = !state.library_search.is_empty() || state.library_filter.is_some();
         let empty_msg = if state.library_loading {
-            "Loading library..."
+            state.i18n.text("loading-library")
         } else if let Some(error) = &state.storage_error {
-            error
+            error.localized(&state.i18n)
         } else if state.library_search.is_empty() && state.library_filter.is_none() {
-            "No books in library. Import files to get started."
+            state.i18n.text("empty-library")
         } else {
-            "No books match your search or filter."
+            state.i18n.text("empty-search")
         };
 
         let heading = if state.library_loading {
-            "Loading your library"
+            state.i18n.text("loading-library-heading")
         } else if constrained {
-            "No matching books"
+            state.i18n.text("no-matching-books")
         } else {
-            "A quiet place for every book"
+            state.i18n.text("empty-library-heading")
         };
         let mut empty = column![
             text(heading).size(24),
@@ -3977,11 +4158,11 @@ fn library_collection(state: &State) -> Element<'_, Message> {
             empty = empty.push(
                 row![
                     widgets::primary_button(
-                        "＋ Add your first book",
+                        state.i18n.text("add-first-book"),
                         state.library.is_some().then_some(Message::ImportFile),
                     ),
                     widgets::secondary_button(
-                        "Scan a folder",
+                        state.i18n.text("scan-folder-long"),
                         state.library.is_some().then_some(Message::ImportDirectory),
                     ),
                 ]
@@ -3998,28 +4179,30 @@ fn library_collection(state: &State) -> Element<'_, Message> {
     let cards = state
         .library_books
         .iter()
-        .map(render_book_card)
+        .map(|book| render_book_card(state, book))
         .collect::<Vec<_>>();
     let book_grid = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
     let mut sections = column![].spacing(16).width(Length::Fill);
 
     if let Some(book) = continue_reading_book(state) {
         sections = sections
-            .push(text("Continue reading").size(18))
-            .push(render_continue_card(book))
+            .push(text(state.i18n.text("continue-reading")).size(18))
+            .push(render_continue_card(state, book))
             .push(iced::widget::Space::new().height(4));
     }
 
     let section_title = if state.library_search.is_empty() {
-        "All books"
+        state.i18n.text("all-books")
     } else {
-        "Search results"
+        state.i18n.text("search-results")
     };
     sections = sections.push(text(section_title).size(18)).push(book_grid);
 
     if state.library_loading && state.library_offset > 0 {
-        sections = sections
-            .push(center(text("Loading more…").color(app_theme::TEXT_MUTED)).width(Length::Fill));
+        sections = sections.push(
+            center(text(state.i18n.text("loading-more")).color(app_theme::TEXT_MUTED))
+                .width(Length::Fill),
+        );
     }
     if let Some(key) = library_load_sensor_key(state) {
         sections = sections.push(
@@ -4059,9 +4242,9 @@ fn library_refresh_placeholder(state: &State) -> Element<'_, Message> {
         .collect::<Vec<_>>();
     let placeholders = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
     let section_title = if state.library_search.is_empty() {
-        "All books"
+        state.i18n.text("all-books")
     } else {
-        "Search results"
+        state.i18n.text("search-results")
     };
 
     scrollable(
@@ -4108,23 +4291,29 @@ fn library_search_input_id() -> iced::widget::Id {
     iced::widget::Id::new("library-search-query")
 }
 
-fn render_book_card(book: &Book) -> Element<'_, Message> {
+fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
     let cover = render_book_cover(book, Length::Fill, 210.0);
     let title_text = text(book.title.clone())
         .size(13)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph);
-    let author = text(book.author.as_deref().unwrap_or("Unknown author"))
-        .size(11)
-        .color(app_theme::TEXT_MUTED);
+    let author = text(
+        book.author
+            .clone()
+            .unwrap_or_else(|| state.i18n.text("unknown-author")),
+    )
+    .size(11)
+    .color(app_theme::TEXT_MUTED);
     let format_label = text(book.format.as_str().to_uppercase())
         .size(10)
         .color(app_theme::TEXT_MUTED);
     let percentage = (book.progress.clamp(0.0, 1.0) * 100.0).round() as u32;
     let progress_label = text(if percentage == 0 {
-        "Not started".to_string()
+        state.i18n.text("not-started")
     } else {
-        format!("{percentage}%")
+        state
+            .i18n
+            .text_with_args("percent", [("percentage", percentage.into())])
     })
     .size(10)
     .color(app_theme::TEXT_MUTED);
@@ -4150,18 +4339,26 @@ fn render_book_card(book: &Book) -> Element<'_, Message> {
         .into()
 }
 
-fn render_continue_card(book: &Book) -> Element<'_, Message> {
+fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
     let percentage = (book.progress.clamp(0.0, 1.0) * 100.0).round() as u32;
     let details = column![
         text(book.title.clone()).size(16),
-        text(book.author.as_deref().unwrap_or("Unknown author"))
-            .size(12)
-            .color(app_theme::TEXT_MUTED),
+        text(
+            book.author
+                .clone()
+                .unwrap_or_else(|| state.i18n.text("unknown-author")),
+        )
+        .size(12)
+        .color(app_theme::TEXT_MUTED),
         iced::widget::Space::new().height(Length::Fill),
-        text(format!("{percentage}% complete"))
-            .size(11)
-            .color(app_theme::TEXT_MUTED),
+        text(
+            state
+                .i18n
+                .text_with_args("percent-complete", [("percentage", percentage.into())]),
+        )
+        .size(11)
+        .color(app_theme::TEXT_MUTED),
         widgets::reading_progress(book.progress),
     ]
     .spacing(6)
@@ -4170,7 +4367,9 @@ fn render_continue_card(book: &Book) -> Element<'_, Message> {
     let content = row![
         render_book_cover(book, Length::Fixed(72.0), 100.0),
         details,
-        text("Continue  ›").size(13).color(app_theme::ACCENT),
+        text(state.i18n.text("continue"))
+            .size(13)
+            .color(app_theme::ACCENT),
     ]
     .spacing(14)
     .align_y(iced::Alignment::Center);
@@ -4219,12 +4418,12 @@ fn cover_placeholder(width: Length, height: f32, title: &str) -> Element<'_, Mes
         .into()
 }
 
-fn welcome_view<'a>() -> Element<'a, Message> {
+fn welcome_view(state: &State) -> Element<'_, Message> {
     center(
         column![
-            text("Shosai (書斎)").size(32),
-            text("Open a PDF, EPUB, or CBZ file to start reading").size(16),
-            button("Open File").on_press(Message::OpenFile),
+            text(state.i18n.text("welcome-title")).size(32),
+            text(state.i18n.text("welcome-message")).size(16),
+            button(text(state.i18n.text("open-file"))).on_press(Message::OpenFile),
         ]
         .spacing(20)
         .align_x(iced::Center),
@@ -4652,7 +4851,7 @@ mod tests {
         state.file_path = Some(PathBuf::from("first.pdf"));
         state.reading_mode = ReadingMode::Continuous;
         state.continuous_pages = vec![None];
-        state.error = Some("stale render error".to_string());
+        state.error = Some(AppError::Render("stale render error".to_string()));
         let stale_request = ContinuousRequest {
             id: 1,
             generation: state.render_generation,
@@ -5913,13 +6112,16 @@ mod tests {
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        state.storage_error = Some("storage failed".to_string());
+        state.storage_error = Some(AppError::Storage("storage failed".to_string()));
 
         let task = update(&mut state, Message::ImportFile);
 
         assert_eq!(task.units(), 0);
         assert!(state.library.is_none());
-        assert_eq!(state.storage_error.as_deref(), Some("storage failed"));
+        assert!(matches!(
+            state.storage_error,
+            Some(AppError::Storage(ref detail)) if detail == "storage failed"
+        ));
     }
 
     #[test]
@@ -6107,12 +6309,10 @@ mod tests {
             (&state.document, old_document),
             (Some(OpenDocument::Cbz(_)), Some(OpenDocument::Cbz(_)))
         ));
-        assert!(
-            state
-                .open_error
-                .as_deref()
-                .is_some_and(|error| error.contains("Unsupported"))
-        );
+        assert!(matches!(
+            state.open_error,
+            Some(AppError::UnsupportedFormat(ref format)) if format == "txt"
+        ));
 
         let _ = update(
             &mut state,
@@ -6314,6 +6514,36 @@ mod tests {
         assert_eq!(saved.location_offset, Some(30));
     }
 
+    #[tokio::test]
+    async fn reading_state_writer_flushes_the_latest_language_preference() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let saves = start_reading_state_writer(store.clone());
+
+        saves
+            .send(ReadingStateWriterMessage::Language(
+                LanguagePreference::Japanese,
+            ))
+            .unwrap();
+        saves
+            .send(ReadingStateWriterMessage::Language(
+                LanguagePreference::English,
+            ))
+            .unwrap();
+        let (flushed, wait_for_flush) = oneshot::channel();
+        saves
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait_for_flush.await.unwrap();
+
+        assert_eq!(
+            store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await,
+            Some(LanguagePreference::English.stored().to_string())
+        );
+    }
+
     #[test]
     fn paginated_epub_caps_wide_pages_at_a_readable_line_length() {
         let epub = EpubDoc::from_bytes(
@@ -6358,6 +6588,7 @@ mod tests {
         let first_id = handles.get("image.png").unwrap().0.id();
         drop(render_content_node(
             &nodes[0],
+            &I18n::new(LanguagePreference::English),
             16.0,
             iced::Color::BLACK,
             &handles,
@@ -6368,6 +6599,7 @@ mod tests {
         cache_epub_image_handles(&mut handles, &nodes, &resources);
         drop(render_content_node(
             &nodes[0],
+            &I18n::new(LanguagePreference::English),
             16.0,
             iced::Color::BLACK,
             &handles,
@@ -6556,5 +6788,80 @@ mod tests {
             .sum();
 
         assert_eq!(rendered_length, extracted.chars().count());
+    }
+
+    #[test]
+    fn language_selection_is_ignored_until_storage_finishes_initializing() {
+        let (mut state, _) = boot();
+
+        let _ = update(&mut state, Message::CycleLanguage);
+
+        assert_eq!(state.i18n.preference(), LanguagePreference::System);
+    }
+
+    #[test]
+    fn render_errors_are_kept_as_raw_details() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let generation = state.render_generation;
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 1,
+                generation,
+                key: PageCacheKey {
+                    page: 0,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
+                result: Err("renderer detail".to_string()),
+            },
+        );
+
+        assert!(matches!(
+            &state.error,
+            Some(AppError::Render(detail)) if detail == "renderer detail"
+        ));
+        let error = state.error.as_ref().unwrap();
+        assert_eq!(
+            error
+                .localized(&I18n::new(LanguagePreference::English))
+                .replace(['\u{2068}', '\u{2069}'], ""),
+            "Failed to render page: renderer detail"
+        );
+        assert_eq!(
+            error
+                .localized(&I18n::new(LanguagePreference::Japanese))
+                .replace(['\u{2068}', '\u{2069}'], ""),
+            "ページを表示できませんでした：renderer detail"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn generated_bookmark_titles_are_not_persisted() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(
+            CbzDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+            )
+            .unwrap(),
+        )));
+        state.file_path = Some(directory.path().join("book.cbz"));
+        state.bookmark_store = Some(BookmarkStore::new(store.pool().clone()));
+        state.i18n.set_preference(LanguagePreference::Japanese);
+
+        tokio::task::block_in_place(|| {
+            let _ = update(&mut state, Message::ToggleBookmark);
+        });
+
+        assert_eq!(state.bookmarks.len(), 1);
+        assert!(state.bookmarks[0].title.is_none());
     }
 }
