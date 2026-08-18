@@ -11,6 +11,8 @@ use super::CanonicalEpubPath;
 use super::types::*;
 use crate::document::DocumentMetadata;
 
+const MAX_ARCHIVE_ENTRIES: usize = u16::MAX as usize;
+
 /// A parsed EPUB document.
 #[derive(Debug)]
 pub struct EpubDoc {
@@ -28,6 +30,16 @@ impl EpubDoc {
 
     /// Open an EPUB from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+        Self::from_bytes_inner(data, false)
+    }
+
+    /// Open an EPUB while retaining non-spine content documents for the renderer spike.
+    #[doc(hidden)]
+    pub fn from_bytes_for_renderer_spike(data: Vec<u8>) -> Result<Self> {
+        Self::from_bytes_inner(data, true)
+    }
+
+    fn from_bytes_inner(data: Vec<u8>, include_non_spine_content: bool) -> Result<Self> {
         let declared_entries = declared_archive_entry_count(&data)?;
         let cursor = Cursor::new(data);
         let mut archive = ZipArchive::new(cursor).context("failed to open EPUB as ZIP archive")?;
@@ -53,7 +65,16 @@ impl EpubDoc {
         let chapters = load_chapters(&mut archive, &spine_ids, &manifest, &toc)?;
 
         // 5. Load resources (images, CSS, fonts).
-        let resources = load_resources(&mut archive, &manifest)?;
+        let chapter_paths = chapters
+            .iter()
+            .map(|chapter| chapter.path.as_str())
+            .collect::<HashSet<_>>();
+        let resources = load_resources(
+            &mut archive,
+            &manifest,
+            &chapter_paths,
+            include_non_spine_content,
+        )?;
 
         // 6. Parse CSS stylesheets into a class → style map.
         let css_sources: Vec<(&str, String)> = manifest
@@ -186,7 +207,7 @@ fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
         .context("invalid EPUB ZIP footer")?;
     let entries = read_u16(data, entries_offset).context("invalid EPUB ZIP footer")?;
     if entries != u16::MAX {
-        return Ok(usize::from(entries));
+        return bounded_archive_entry_count(u64::from(entries));
     }
 
     let locator_offset = eocd_offset
@@ -206,8 +227,16 @@ fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
     let entry_count_offset = zip64_offset
         .checked_add(32)
         .context("invalid EPUB ZIP64 footer")?;
-    usize::try_from(read_u64(data, entry_count_offset).context("invalid EPUB ZIP64 footer")?)
-        .context("EPUB ZIP64 entry count is too large")
+    bounded_archive_entry_count(
+        read_u64(data, entry_count_offset).context("invalid EPUB ZIP64 footer")?,
+    )
+}
+
+fn bounded_archive_entry_count(entries: u64) -> Result<usize> {
+    if entries > MAX_ARCHIVE_ENTRIES as u64 {
+        anyhow::bail!("EPUB archive has too many entries: {entries}");
+    }
+    usize::try_from(entries).context("EPUB ZIP64 entry count is too large")
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
@@ -525,14 +554,26 @@ fn load_chapters(
     Ok(chapters)
 }
 
-/// Load every available manifest resource as its original bytes.
+/// Load binary resources, plus non-spine content documents requested by a spike.
 fn load_resources(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     manifest: &HashMap<String, ManifestItem>,
+    chapter_paths: &HashSet<&str>,
+    include_non_spine_content: bool,
 ) -> Result<HashMap<String, Vec<u8>>> {
     let mut resources = HashMap::new();
 
     for item in manifest.values() {
+        let is_content_document = matches!(
+            item.media_type.as_str(),
+            "application/xhtml+xml" | "application/x-dtbncx+xml"
+        );
+        if is_content_document
+            && (!include_non_spine_content || chapter_paths.contains(item.href.as_str()))
+        {
+            continue;
+        }
+
         // Best effort: skip resources we can't read (e.g. missing from archive).
         if let Ok(data) = read_archive_bytes(archive, &item.href) {
             resources.insert(item.href.clone(), data);
@@ -569,6 +610,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     use super::EpubDoc;
+    use super::declared_archive_entry_count;
     use super::parse_opf;
 
     fn archive_with_entries(names: &[&str]) -> Vec<u8> {
@@ -580,6 +622,63 @@ mod tests {
             archive.write_all(b"content").unwrap();
         }
         archive.finish().unwrap().into_inner()
+    }
+
+    fn zip64_footer(entry_count: u64) -> Vec<u8> {
+        let mut archive = Vec::new();
+        archive.extend_from_slice(b"PK\x06\x06");
+        archive.extend_from_slice(&44_u64.to_le_bytes());
+        archive.extend_from_slice(&45_u16.to_le_bytes());
+        archive.extend_from_slice(&45_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&entry_count.to_le_bytes());
+        archive.extend_from_slice(&entry_count.to_le_bytes());
+        archive.extend_from_slice(&0_u64.to_le_bytes());
+        archive.extend_from_slice(&0_u64.to_le_bytes());
+        archive.extend_from_slice(b"PK\x06\x07");
+        archive.extend_from_slice(&0_u32.to_le_bytes());
+        archive.extend_from_slice(&0_u64.to_le_bytes());
+        archive.extend_from_slice(&1_u32.to_le_bytes());
+        archive.extend_from_slice(b"PK\x05\x06");
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&u32::MAX.to_le_bytes());
+        archive.extend_from_slice(&u32::MAX.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive
+    }
+
+    #[test]
+    fn epub_rejects_zip64_entry_counts_above_the_archive_limit() {
+        let error = declared_archive_entry_count(&zip64_footer(u64::from(u16::MAX) + 1))
+            .expect_err("oversized ZIP64 entry count must fail before ZIP parsing");
+
+        assert!(
+            error.to_string().contains("too many entries"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn production_resources_do_not_duplicate_content_documents() {
+        let epub = EpubDoc::from_bytes(include_bytes!("../../tests/fixtures/sample.epub").to_vec())
+            .unwrap();
+
+        for item in epub.content.manifest.values().filter(|item| {
+            matches!(
+                item.media_type.as_str(),
+                "application/xhtml+xml" | "application/x-dtbncx+xml"
+            )
+        }) {
+            assert!(
+                !epub.content.resources.contains_key(&item.href),
+                "content document duplicated in resources: {}",
+                item.href
+            );
+        }
     }
 
     #[test]

@@ -24,6 +24,8 @@ The Wry harness is isolated from production behind an optional Cargo feature:
 cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_PAGE=conformance \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_NETWORK_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
@@ -40,12 +42,17 @@ It currently proves on macOS arm64 that:
 - the child can be resized with its Iced parent and explicitly focused;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
-  attached to protocol responses.
+  attached to protocol responses;
+- the automated hostile-content mode loads remote CSS imports, images, fonts,
+  frames, objects, and external/inline scripts against a controlled loopback
+  listener, requires the exact hostile resource to be served and finish loading,
+  then waits through a grace period.  It exits nonzero for any connection,
+  listener error, worker panic, wrong/missing page load, or missing protocol
+  response.  A control test proves that a direct connection is detected.
 
-The successful macOS run was visually checked. The security callbacks and CSP
-are configured and unit-tested, but the required proof that no remote subresource
-request reaches the network is still outstanding. Checked-in book resources are
-served with their exact manifest media types, including
+The successful macOS rendering run was visually checked, and the automated
+network proof passes on macOS arm64. Checked-in book resources are served with
+their exact manifest media types, including
 `application/xhtml+xml`; the generated conformance page remains explicitly
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
@@ -114,7 +121,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Criterion | Wry route | Native route | Evidence still needed |
 |---|---|---|---|
 | CSS/table/MathML fidelity | Promising on macOS system WebKit | Unknown | Combined fixture on every target |
-| Sandbox and offline policy | Handlers/CSP configured, network proof incomplete | Smaller surface, resource policy incomplete | Hostile fixture plus network monitor/proxy |
+| Sandbox and offline policy | macOS hostile-content proof records zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete | Repeat proof on Windows and Linux/X11; resource limits |
 | Iced integration | Possible but outside widget composition | Natural widget composition | Focus, overlay, clipping, tabs, IME |
 | Accessibility/selection | Unknown platform behavior | Not currently modeled | Screen-reader and selection tests |
 | Portability | Wayland blocker; platform runtimes differ | Existing Iced targets | macOS, Windows, X11, Wayland spikes |
@@ -163,17 +170,15 @@ cost.
 
 ## Next spike steps
 
-1. Prove remote requests are blocked with a network monitor or controlled
-   proxy. The shared canonical resolver now protects `sample.epub`
-   chapter/CSS/image serving and request recording.
-2. Replace fixed child bounds with an identified Iced placeholder and test
+1. Replace fixed child bounds with an identified Iced placeholder and test
    resizing, scale changes, overlays, tabs, focus, IME, and teardown on macOS.
-3. Run the same child spike on Windows and Linux/X11. Decide whether lack of a
+2. Run the same child and hostile-content spikes on Windows and Linux/X11.
+   Decide whether lack of a
    viable Wayland host rejects Wry or justifies a documented backend fallback.
-4. Build the native computed-style boundary for the same table/font/MathML/RTL
+3. Build the native computed-style boundary for the same table/font/MathML/RTL
    fixture, inventory maintained permissive selector/layout/math dependencies,
    and estimate unsupported work explicitly.
-5. Run the same release performance protocol for Wry and on the other released
+4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 
 ## Decision
