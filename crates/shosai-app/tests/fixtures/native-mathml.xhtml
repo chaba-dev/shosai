@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <p><span id="mixed" dir="rtl">English العربية 日本語</span></p>
+    <p>
+      inline
+      <math id="fraction" xmlns="http://www.w3.org/1998/Math/MathML">
+        <mfrac><mi>a</mi><mi>b</mi></mfrac>
+      </math>
+    </p>
+    <math id="root" display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+      <mrow><msqrt><mi>x</mi></msqrt><mo>+</mo><mroot><mi>y</mi><mn>3</mn></mroot></mrow>
+    </math>
+    <math id="scripts" xmlns="http://www.w3.org/1998/Math/MathML">
+      <msubsup><mo>∑</mo><mi>i</mi><mi>n</mi></msubsup>
+    </math>
+    <math id="matrix" display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+      <mfenced>
+        <mtable>
+          <mtr><mtd><mi>a</mi></mtd><mtd><mi>b</mi></mtd></mtr>
+          <mtr><mtd><mi>c</mi></mtd><mtd><mi>d</mi></mtd></mtr>
+        </mtable>
+      </mfenced>
+    </math>
+    <math id="annotated" xmlns="http://www.w3.org/1998/Math/MathML">
+      <semantics>
+        <mrow><mi>E</mi><mo>=</mo><mi>m</mi><msup><mi>c</mi><mn>2</mn></msup></mrow>
+        <annotation encoding="application/x-tex">E=mc^2</annotation>
+      </semantics>
+    </math>
+    <math id="invalid-fraction" xmlns="http://www.w3.org/1998/Math/MathML">
+      <mfrac><mi>only</mi></mfrac>
+    </math>
+    <math id="unsupported" xmlns="http://www.w3.org/1998/Math/MathML">
+      <menclose notation="box"><mtext>fallback</mtext></menclose>
+    </math>
+  </body>
+</html>
