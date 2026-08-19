@@ -236,14 +236,14 @@ Scores remain unset until the same fixture and measurement protocol is used.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, and bounded EPUB font-loading prototypes pass semantic assertions; CSS inline/table algorithms, production font integration, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, one 2→1 display-scale transition, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, physical-pixel correctness, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
-| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy and Wuff candidates are pure Rust but not selected for production | Remaining dependency size; package smoke tests         |
-| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, explicit table-grid lowering, and bounded font admission are feasible, but CSS inline/table compatibility plus production font policy and MathML remain substantial | Native math dependency prototype                       |
+| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy and Wuff candidates are pure Rust but not selected for production; no direct native MathML dependency was identified | Remaining dependency size; package smoke tests         |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, explicit table-grid lowering, bounded font admission, and a narrow MathML subset are feasible, but CSS inline/table compatibility plus production font/math policy remain substantial | Estimate native compatibility and accessibility cost   |
 
 ## Fixture and measurement matrix
 
@@ -503,6 +503,56 @@ loaded font's internal family because it does not add a fontdb alias. Source
 selection is not connected to the computed-style, production resource, layout,
 cache, or close lifecycle paths. A production design must resolve those
 semantics and add hostile-parser hardening before adopting this component.
+
+## Native MathML and mixed-script spike
+
+A redistribution-safe XHTML fixture extends the earlier structural fraction and
+mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
+square and indexed roots, subscript/superscript operators, a two-by-two matrix,
+presentation markup with a TeX annotation, a structurally invalid fraction, and
+an unsupported `menclose`. A test-only bounded adapter uses the existing
+`roxmltree` and `cosmic-text` dev dependencies to lower a narrow Presentation
+MathML subset into positioned text and horizontal-rule primitives. Semantic
+tests prove that:
+
+- supported inline/display expressions produce finite positive width, height,
+  baseline, and in-bounds primitive geometry, including compound roots and
+  fraction scripts; inline fractions align their rule to the box baseline;
+- fractions emit a rule, roots emit overbars, scripts use reduced text, and
+  matrix cells retain two-dimensional placement;
+- invalid or unsupported constructs fail explicitly while preserving readable
+  source-order text fallback; split token text is retained while nested and
+  multiline tokens are rejected, and `semantics` requires one presentation
+  child followed only by annotations;
+- one allocation-free subtree preflight counts rows, cells, annotations, and
+  annotation descendants; enforces the MathML namespace except beneath
+  `annotation-xml`; and rejects more than 64 elements, 16 levels, or 1,024 bytes
+  of aggregate visible token/fence text before creating fonts or math boxes; and
+- the fixture's Latin and Arabic text shapes with nonzero glyphs and RTL levels,
+  while Japanese still produces a missing glyph, keeping the known CJK font
+  coverage gap visible rather than claiming legibility.
+
+This is geometry evidence, not standards-conforming MathML rendering. The fixed
+heuristics do not read OpenType MATH tables, operator dictionaries, or MathML
+style attributes; assemble stretchy glyphs; perform math line breaking; connect
+to computed CSS, painting, pagination, selection, or accessibility; or bound the
+initial XML parse independently of EPUB resource limits. The primitives are not
+Iced widgets or pixels. Token shaping is deliberately single-line and requires
+every source byte to map to a non-missing glyph. Production would need all of
+those boundaries plus a complete fallback and font policy.
+
+Dependency inspection found no maintained permissively licensed Rust library
+that accepts existing Presentation MathML and emits native geometry. `mathml`
+0.4.4 and `mathml-rs` 0.1.2 are inactive MIT/Apache-2.0 Content MathML parsers
+without typographic layout. `alemat` 0.8.0 is an Apache-2.0 MathML builder and
+serializer, not an input parser or layout engine. `katex-rs` 0.2.4 is active and
+MIT-licensed and contains substantial math layout, but accepts TeX and emits a
+KaTeX HTML/CSS/MathML/SVG model rather than consuming EPUB MathML or producing a
+renderer-neutral native glyph scene. Adapting it would still require a MathML
+front end and native font/scene backend. No candidate was added merely to wrap
+the wrong input or output boundary; selecting the native route therefore means
+owning or funding a substantial MathML integration rather than filling this gap
+with a current dependency.
 
 ## Native performance baseline
 

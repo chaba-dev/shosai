@@ -178,8 +178,16 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   transformed-table scratch allocations and does not implement arbitrary
   CSS-family aliases, production resource budgets, cache lifecycle, complete
   descriptor matching, or hostile-font/parser hardening.
-- [ ] Render the same MathML/mixed-script fixtures and identify
-  whether maintained permissive dependencies can fill each missing component.
+- [X] Render the same MathML/mixed-script fixtures and identify whether
+  maintained permissive dependencies can fill each missing component.  A
+  bounded test-only adapter produces semantic geometry for a narrow
+  Presentation MathML subset and readable fallback for invalid/unsupported
+  elements, while shaping keeps the missing CJK glyph evidence visible.  No
+  maintained permissive Rust dependency directly accepts Presentation MathML
+  and emits native geometry; the active MIT ~katex-rs~ candidate is TeX-in and
+  web-markup/virtual-DOM-out, so a native route still owns the MathML front end,
+  OpenType MATH layout, scene integration, selection, and accessibility
+  boundaries.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
   subset, including accessibility and selection.
 
