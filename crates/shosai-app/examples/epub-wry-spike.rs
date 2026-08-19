@@ -63,6 +63,7 @@ const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xht
 #[cfg(target_os = "linux")]
 static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
+static INPUT_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 thread_local! {
@@ -270,7 +271,9 @@ enum InputProof {
     },
     FocusingParent,
     SettlingParent,
-    WaitingForParentKey,
+    WaitingForParentKey {
+        revision_cutoff: u64,
+    },
     ParentKeyObserved,
     Complete,
 }
@@ -322,16 +325,19 @@ impl InputProof {
         true
     }
 
-    fn begin_parent_key_wait(&mut self) -> bool {
+    fn begin_parent_key_wait(&mut self, revision_cutoff: u64) -> bool {
         if *self != Self::SettlingParent {
             return false;
         }
-        *self = Self::WaitingForParentKey;
+        *self = Self::WaitingForParentKey { revision_cutoff };
         true
     }
 
-    fn observe_parent_key(&mut self) -> bool {
-        if *self != Self::WaitingForParentKey {
+    fn observe_parent_key(&mut self, revision: u64, repeat: bool) -> bool {
+        let Self::WaitingForParentKey { revision_cutoff } = *self else {
+            return false;
+        };
+        if revision <= revision_cutoff || repeat {
             return false;
         }
         *self = Self::ParentKeyObserved;
@@ -1066,7 +1072,10 @@ impl operation::Operation<Option<Rectangle>> for PlaceholderBoundsOperation {
 #[derive(Debug, Clone)]
 enum Message {
     WindowEvent(window::Id, window::Event, u64),
-    IcedKeyPressed,
+    IcedKeyPressed {
+        revision: u64,
+        repeat: bool,
+    },
     PlaceholderMeasured {
         epoch: u64,
         bounds: Option<Rectangle>,
@@ -1294,9 +1303,10 @@ fn subscription(_state: &State) -> Subscription<Message> {
     }
     if input_proof_requested() {
         subscriptions.push(event::listen_with(|event, _, _| {
-            if matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. })) {
+            if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = event {
+                let revision = INPUT_KEY_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
                 eprintln!("wry-spike-input-proof event=iced-keydown");
-                Some(Message::IcedKeyPressed)
+                Some(Message::IcedKeyPressed { revision, repeat })
             } else {
                 None
             }
@@ -1786,11 +1796,13 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("failed to restore parent focus: {error}")),
             ),
         },
-        Message::IcedKeyPressed if state.input_proof.observe_parent_key() => {
+        Message::IcedKeyPressed { revision, repeat }
+            if state.input_proof.observe_parent_key(revision, repeat) =>
+        {
             eprintln!("wry-spike-input-proof phase=parent-key-observed");
             finish_input_proof(state, Ok(()))
         }
-        Message::IcedKeyPressed => {
+        Message::IcedKeyPressed { .. } => {
             eprintln!(
                 "wry-spike-input-proof phase=ignored-iced-key state={:?}",
                 state.input_proof
@@ -1841,7 +1853,9 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
     if state
         .input_parent_settle_deadline
         .is_some_and(|deadline| now >= deadline)
-        && state.input_proof.begin_parent_key_wait()
+        && state
+            .input_proof
+            .begin_parent_key_wait(INPUT_KEY_REVISION.load(Ordering::Acquire))
     {
         eprintln!("wry-spike-input-proof phase=waiting-for-parent-key");
         state.input_parent_settle_deadline = None;
@@ -3675,11 +3689,23 @@ mod tests {
             proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
             InputAction::FocusParent
         );
-        assert!(!proof.observe_parent_key());
+        assert!(!proof.observe_parent_key(1, false));
         assert!(proof.parent_focused(true));
-        assert!(!proof.observe_parent_key());
-        assert!(proof.begin_parent_key_wait());
-        assert!(proof.observe_parent_key());
+        assert!(!proof.observe_parent_key(2, false));
+        assert!(proof.begin_parent_key_wait(2));
+        assert!(proof.observe_parent_key(3, false));
+        assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn input_proof_rejects_stale_and_repeated_parent_keys() {
+        let mut proof = InputProof::SettlingParent;
+
+        assert!(proof.begin_parent_key_wait(8));
+        assert!(!proof.observe_parent_key(7, false));
+        assert!(!proof.observe_parent_key(8, false));
+        assert!(!proof.observe_parent_key(9, true));
+        assert!(proof.observe_parent_key(9, false));
         assert_eq!(proof, InputProof::ParentKeyObserved);
     }
 
