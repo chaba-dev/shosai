@@ -30,6 +30,8 @@ SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_BOUNDS_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
@@ -85,6 +87,13 @@ It currently proves on macOS arm64 that:
   the spike, showing a child again after a settled hide returned from Wry but
   left Iced without subsequent proof progress; an in-place visibility restore is
   therefore not treated as viable evidence;
+- the automated macOS bounds mode collapses the Iced placeholder to zero
+  height and requires the widget operation to report no usable placeholder,
+  requires the current child generation's hide call to return `Ok`, destroys
+  the hidden child, restores the placeholder, and recreates the child at the
+  newly measured logical bounds.  It verifies the replacement's reported size
+  and fails on stale generations, stale measurement epochs, failed calls,
+  missing children, close, or timeout;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -103,15 +112,16 @@ declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
 The focus and visibility results prove only that Wry's methods returned `Ok`;
-the reported replacement size proves geometry, and the visual observation
+the reported replacement size proves only its logical size, not placement or
+visual restoration, and the visual observation
 proves the uncoordinated z-order failure.  They do not prove a visually correct
 restored frame after modal dismissal. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. They do
 not prove that focus changed, keyboard/IME events route correctly, or that the
-restored visual result matches Iced composition. The harness also implements
-remeasurement on scale-factor events and hiding for unusable bounds; those paths
-are not yet exercised evidence and remain open alongside clipping,
-real tab switching, IME, and accessibility tests. Ordinary close cleanup is
+restored visual result matches Iced composition. The harness remeasures on
+scale-factor events, but that path is not yet exercised evidence and remains
+open alongside clipping, real tab switching, IME, and accessibility tests.
+Ordinary close cleanup is
 exercised separately on macOS: with Iced's automatic close exit disabled, UI
 automation clicked the native close button and the handler recorded that it
 dropped the live child before explicitly closing the parent.
