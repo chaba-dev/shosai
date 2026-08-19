@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,8 @@ const BOUNDS_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const SCALE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_SCALE_PROOF";
 const SCALE_PROOF_TARGET_ENV: &str = "SHOSAI_WRY_SPIKE_SCALE_TARGET";
 const SCALE_PROOF_TIMEOUT: Duration = Duration::from_secs(20);
+const SCALE_PROOF_INITIAL_SETTLE: Duration = Duration::from_secs(1);
+const SCALE_PROOF_SETTLE: Duration = Duration::from_millis(100);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -51,6 +53,7 @@ const NETWORK_PROOF_URL: &str = "shosai://book/_spike/conformance.xhtml";
 const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xhtml";
 #[cfg(target_os = "linux")]
 static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
+static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -230,6 +233,7 @@ struct State {
     status: String,
     network_proof_deadline: Option<Instant>,
     overlay_restore_deadline: Option<Instant>,
+    scale_settle_deadline: Option<Instant>,
     network_proof_finished: bool,
 }
 
@@ -242,6 +246,18 @@ enum ScaleProof {
         generation: u64,
         bounds: Rectangle,
     },
+    SettlingInitialScale {
+        generation: u64,
+        bounds: Rectangle,
+        initial_scale: f32,
+        event_revision: u64,
+    },
+    ConfirmingInitialScale {
+        generation: u64,
+        bounds: Rectangle,
+        initial_scale: f32,
+        event_revision: u64,
+    },
     WaitingForTransition {
         generation: u64,
         initial_scale: f32,
@@ -250,12 +266,14 @@ enum ScaleProof {
         generation: u64,
         initial_scale: f32,
         observed_scale: f32,
+        event_revision: u64,
     },
     WaitingForMeasurement {
         generation: u64,
         initial_scale: f32,
         current_scale: f32,
         epoch: u64,
+        event_revision: u64,
     },
     Verifying {
         generation: u64,
@@ -263,6 +281,15 @@ enum ScaleProof {
         current_scale: f32,
         epoch: u64,
         expected: Rectangle,
+        event_revision: u64,
+    },
+    Settling {
+        generation: u64,
+        initial_scale: f32,
+        current_scale: f32,
+        epoch: u64,
+        expected: Rectangle,
+        event_revision: u64,
     },
     ConfirmingFinalScale {
         generation: u64,
@@ -270,11 +297,19 @@ enum ScaleProof {
         current_scale: f32,
         epoch: u64,
         expected: Rectangle,
+        event_revision: u64,
     },
     Complete,
 }
 
 impl ScaleProof {
+    fn accepts_initial_geometry(&self) -> bool {
+        matches!(
+            self,
+            Self::SettlingInitialScale { .. } | Self::ConfirmingInitialScale { .. }
+        )
+    }
+
     fn begin_initial_query(&mut self, generation: u64, bounds: Rectangle) -> bool {
         if *self != Self::WaitingForCreation {
             return false;
@@ -283,25 +318,127 @@ impl ScaleProof {
         true
     }
 
-    fn observe_initial_scale(&mut self, generation: u64, scale: f32) -> Option<Rectangle> {
+    fn observe_initial_scale(&mut self, generation: u64, scale: f32, event_revision: u64) -> bool {
         let Self::WaitingForInitialScale {
             generation: expected_generation,
             bounds,
         } = *self
         else {
-            return None;
+            return false;
         };
         if generation != expected_generation || !valid_scale_factor(scale) {
+            return false;
+        }
+        *self = Self::SettlingInitialScale {
+            generation,
+            bounds,
+            initial_scale: scale,
+            event_revision,
+        };
+        true
+    }
+
+    fn observe_initial_rescale(&mut self, scale: f32, event_revision: u64) -> bool {
+        let (generation, bounds, initial_scale) = match *self {
+            Self::SettlingInitialScale {
+                generation,
+                bounds,
+                initial_scale,
+                ..
+            }
+            | Self::ConfirmingInitialScale {
+                generation,
+                bounds,
+                initial_scale,
+                ..
+            } => (generation, bounds, initial_scale),
+            _ => return false,
+        };
+        if !valid_scale_factor(scale) {
+            return false;
+        }
+        *self = Self::SettlingInitialScale {
+            generation,
+            bounds,
+            initial_scale,
+            event_revision,
+        };
+        true
+    }
+
+    fn observe_initial_move(&mut self, event_revision: u64) -> bool {
+        let (generation, bounds, initial_scale) = match *self {
+            Self::SettlingInitialScale {
+                generation,
+                bounds,
+                initial_scale,
+                ..
+            }
+            | Self::ConfirmingInitialScale {
+                generation,
+                bounds,
+                initial_scale,
+                ..
+            } => (generation, bounds, initial_scale),
+            _ => return false,
+        };
+        *self = Self::SettlingInitialScale {
+            generation,
+            bounds,
+            initial_scale,
+            event_revision,
+        };
+        true
+    }
+
+    fn begin_settled_initial_query(&mut self) -> Option<(u64, u64)> {
+        let Self::SettlingInitialScale {
+            generation,
+            bounds,
+            initial_scale,
+            event_revision,
+        } = *self
+        else {
+            return None;
+        };
+        *self = Self::ConfirmingInitialScale {
+            generation,
+            bounds,
+            initial_scale,
+            event_revision,
+        };
+        Some((generation, event_revision))
+    }
+
+    fn confirm_settled_initial_scale(
+        &mut self,
+        generation: u64,
+        event_revision: u64,
+        scale: f32,
+    ) -> Option<(Rectangle, f32)> {
+        let Self::ConfirmingInitialScale {
+            generation: expected_generation,
+            bounds,
+            event_revision: expected_revision,
+            ..
+        } = *self
+        else {
+            return None;
+        };
+        if generation != expected_generation
+            || event_revision != expected_revision
+            || !valid_scale_factor(scale)
+        {
             return None;
         }
         *self = Self::WaitingForTransition {
             generation,
             initial_scale: scale,
         };
-        Some(bounds)
+        Some((bounds, scale))
     }
 
-    fn observe_rescale(&mut self, generation: u64, scale: f32) -> bool {
+    fn observe_rescale(&mut self, generation: u64, scale: f32, event_revision: u64) -> bool {
         let Self::WaitingForTransition {
             generation: expected_generation,
             initial_scale,
@@ -320,6 +457,7 @@ impl ScaleProof {
             generation,
             initial_scale,
             observed_scale: scale,
+            event_revision,
         };
         true
     }
@@ -329,6 +467,7 @@ impl ScaleProof {
             generation: expected_generation,
             initial_scale,
             observed_scale,
+            event_revision,
         } = *self
         else {
             return false;
@@ -345,6 +484,7 @@ impl ScaleProof {
             initial_scale,
             current_scale: queried_scale,
             epoch,
+            event_revision,
         };
         true
     }
@@ -360,6 +500,7 @@ impl ScaleProof {
             initial_scale,
             current_scale,
             epoch: expected_epoch,
+            event_revision,
         } = *self
         else {
             return None;
@@ -374,6 +515,7 @@ impl ScaleProof {
             current_scale,
             epoch,
             expected,
+            event_revision,
         };
         Some(expected)
     }
@@ -390,23 +532,81 @@ impl ScaleProof {
         )
     }
 
-    fn rejects_additional_rescale(&self) -> bool {
+    fn needs_scale_reconfirmation(&self) -> bool {
         matches!(
             self,
             Self::ConfirmingTransition { .. }
                 | Self::WaitingForMeasurement { .. }
                 | Self::Verifying { .. }
+                | Self::Settling { .. }
                 | Self::ConfirmingFinalScale { .. }
         )
     }
 
-    fn begin_final_confirmation(&mut self, generation: u64, epoch: u64, bounds: Rectangle) -> bool {
+    fn restart_confirmation(&mut self, event_revision: u64) -> Option<u64> {
+        let (generation, initial_scale, observed_scale) = match *self {
+            Self::ConfirmingTransition {
+                generation,
+                initial_scale,
+                observed_scale,
+                ..
+            } => (generation, initial_scale, observed_scale),
+            Self::WaitingForMeasurement {
+                generation,
+                initial_scale,
+                current_scale,
+                ..
+            }
+            | Self::Verifying {
+                generation,
+                initial_scale,
+                current_scale,
+                ..
+            }
+            | Self::Settling {
+                generation,
+                initial_scale,
+                current_scale,
+                ..
+            }
+            | Self::ConfirmingFinalScale {
+                generation,
+                initial_scale,
+                current_scale,
+                ..
+            } => (generation, initial_scale, current_scale),
+            _ => return None,
+        };
+        *self = Self::ConfirmingTransition {
+            generation,
+            initial_scale,
+            observed_scale,
+            event_revision,
+        };
+        Some(generation)
+    }
+
+    fn event_revision(&self) -> Option<u64> {
+        match self {
+            Self::SettlingInitialScale { event_revision, .. }
+            | Self::ConfirmingInitialScale { event_revision, .. }
+            | Self::ConfirmingTransition { event_revision, .. }
+            | Self::WaitingForMeasurement { event_revision, .. }
+            | Self::Verifying { event_revision, .. }
+            | Self::Settling { event_revision, .. }
+            | Self::ConfirmingFinalScale { event_revision, .. } => Some(*event_revision),
+            _ => None,
+        }
+    }
+
+    fn begin_settling(&mut self, generation: u64, epoch: u64, bounds: Rectangle) -> bool {
         let Self::Verifying {
             generation: expected_generation,
             initial_scale,
             current_scale,
             epoch: expected_epoch,
             expected,
+            event_revision,
         } = *self
         else {
             return false;
@@ -414,25 +614,51 @@ impl ScaleProof {
         if generation != expected_generation || epoch != expected_epoch || bounds != expected {
             return false;
         }
+        *self = Self::Settling {
+            generation,
+            initial_scale,
+            current_scale,
+            epoch,
+            expected,
+            event_revision,
+        };
+        true
+    }
+
+    fn begin_final_confirmation(&mut self) -> Option<(u64, u64)> {
+        let Self::Settling {
+            generation,
+            initial_scale,
+            current_scale,
+            epoch,
+            expected,
+            event_revision,
+        } = *self
+        else {
+            return None;
+        };
         *self = Self::ConfirmingFinalScale {
             generation,
             initial_scale,
             current_scale,
             epoch,
             expected,
+            event_revision,
         };
-        true
+        Some((generation, event_revision))
     }
 
-    fn confirm_final_scale(&self, generation: u64, scale: f32) -> bool {
+    fn confirm_final_scale(&self, generation: u64, event_revision: u64, scale: f32) -> bool {
         matches!(
             self,
             Self::ConfirmingFinalScale {
                 generation: expected_generation,
                 initial_scale,
                 current_scale,
+                event_revision: expected_revision,
                 ..
             } if generation == *expected_generation
+                && event_revision == *expected_revision
                 && valid_scale_factor(scale)
                 && !same_scale_factor(*initial_scale, scale)
                 && same_scale_factor(*current_scale, scale)
@@ -737,7 +963,7 @@ impl operation::Operation<Option<Rectangle>> for PlaceholderBoundsOperation {
 
 #[derive(Debug, Clone)]
 enum Message {
-    WindowEvent(window::Id, window::Event),
+    WindowEvent(window::Id, window::Event, u64),
     PlaceholderMeasured {
         epoch: u64,
         bounds: Option<Rectangle>,
@@ -771,8 +997,14 @@ enum Message {
         generation: u64,
         scale: f32,
     },
+    SettledInitialScaleObserved {
+        generation: u64,
+        event_revision: u64,
+        scale: f32,
+    },
     ScaleTransitionConfirmed {
         generation: u64,
+        event_revision: u64,
         scale: f32,
     },
     ScaleBoundsVerified {
@@ -783,6 +1015,7 @@ enum Message {
     },
     FinalScaleObserved {
         generation: u64,
+        event_revision: u64,
         scale: f32,
     },
     FocusWebView,
@@ -803,6 +1036,12 @@ impl HasWindowHandle for ParentHandle {
 }
 
 fn main() -> ExitCode {
+    if let Err(error) =
+        validate_scale_proof_platform(scale_proof_env_requested(), cfg!(target_os = "macos"))
+    {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = validate_proof_mode_selection(
         network_proof_requested(),
         lifecycle_proof_requested(),
@@ -819,6 +1058,9 @@ fn main() -> ExitCode {
     {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
+    }
+    if scale_proof_requested() {
+        SCALE_EVENT_REVISION.store(0, Ordering::Release);
     }
     if let Err(error) = initialize_platform() {
         eprintln!("EPUB Wry spike failed: {error}");
@@ -913,7 +1155,7 @@ fn boot() -> (State, Task<Message>) {
 }
 
 fn subscription(_state: &State) -> Subscription<Message> {
-    let events = window::events().map(|(id, event)| Message::WindowEvent(id, event));
+    let events = window::events().map(|(id, event)| map_window_event(id, event));
     let mut subscriptions = vec![events];
     if network_proof_requested()
         || lifecycle_proof_requested()
@@ -931,7 +1173,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
-        Message::WindowEvent(id, window::Event::Opened { .. }) => {
+        Message::WindowEvent(id, window::Event::Opened { .. }, _) => {
             state.window = Some(id);
             if network_proof_requested()
                 || lifecycle_proof_requested()
@@ -970,27 +1212,79 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.status = "measuring Iced reader placeholder".into();
             measure_placeholder(state.measurement_epoch)
         }
-        Message::WindowEvent(id, window::Event::Resized(size)) if state.window == Some(id) => {
+        Message::WindowEvent(id, window::Event::Resized(size), _) if state.window == Some(id) => {
             let next_epoch = state.measurement_epoch.wrapping_add(1);
             if state.lifecycle_proof.observe_resize_event(size, next_epoch) {
                 state.measurement_epoch = next_epoch;
             }
             measure_placeholder(state.measurement_epoch)
         }
-        Message::WindowEvent(id, window::Event::Rescaled(scale))
+        Message::WindowEvent(id, window::Event::Moved(position), event_revision)
             if state.window == Some(id) && scale_proof_requested() =>
         {
-            if state.scale_proof.rejects_additional_rescale() {
-                return finish_scale_proof(
-                    state,
-                    Err(format!(
-                        "observed an additional scale-factor event {scale} before proof completion"
-                    )),
-                );
+            eprintln!("wry-spike-scale-proof phase=moved position={position:?}");
+            if state.scale_proof.observe_initial_move(event_revision) {
+                state.scale_settle_deadline = Some(Instant::now() + SCALE_PROOF_INITIAL_SETTLE);
+                return Task::none();
+            }
+            if let Some(generation) = state.scale_proof.restart_confirmation(event_revision) {
+                let Some(id) = state.window else {
+                    return finish_scale_proof(state, Err("parent window is not available".into()));
+                };
+                state.measurement_epoch = state.measurement_epoch.wrapping_add(1);
+                state.scale_settle_deadline = None;
+                state.status = "window move observed; reconfirming current scale".into();
+                return window::scale_factor(id).map(move |scale| {
+                    Message::ScaleTransitionConfirmed {
+                        generation,
+                        event_revision,
+                        scale,
+                    }
+                });
+            }
+            Task::none()
+        }
+        Message::WindowEvent(id, window::Event::Rescaled(scale), event_revision)
+            if state.window == Some(id) && scale_proof_requested() =>
+        {
+            if state.scale_proof.accepts_initial_geometry() {
+                if !state
+                    .scale_proof
+                    .observe_initial_rescale(scale, event_revision)
+                {
+                    return finish_scale_proof(
+                        state,
+                        Err(format!("invalid initial scale-factor event: {scale}")),
+                    );
+                }
+                state.scale_settle_deadline = Some(Instant::now() + SCALE_PROOF_INITIAL_SETTLE);
+                return Task::none();
+            }
+            if state.scale_proof.needs_scale_reconfirmation() {
+                if !valid_scale_factor(scale) {
+                    return finish_scale_proof(
+                        state,
+                        Err(format!("invalid additional scale-factor event: {scale}")),
+                    );
+                }
+                let Some(generation) = state.scale_proof.restart_confirmation(event_revision)
+                else {
+                    return Task::none();
+                };
+                state.measurement_epoch = state.measurement_epoch.wrapping_add(1);
+                state.scale_settle_deadline = None;
+                state.status = "additional scale event observed; reconfirming current scale".into();
+                return window::scale_factor(id).map(move |scale| {
+                    Message::ScaleTransitionConfirmed {
+                        generation,
+                        event_revision,
+                        scale,
+                    }
+                });
             }
             if !state
                 .scale_proof
-                .observe_rescale(state.webview_generation, scale)
+                .observe_rescale(state.webview_generation, scale, event_revision)
             {
                 return Task::none();
             }
@@ -1000,13 +1294,16 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             eprintln!(
                 "wry-spike-scale-proof phase=rescaled generation={generation} observed_scale={scale}"
             );
-            window::scale_factor(id)
-                .map(move |scale| Message::ScaleTransitionConfirmed { generation, scale })
+            window::scale_factor(id).map(move |scale| Message::ScaleTransitionConfirmed {
+                generation,
+                event_revision,
+                scale,
+            })
         }
-        Message::WindowEvent(id, window::Event::Rescaled(_)) if state.window == Some(id) => {
+        Message::WindowEvent(id, window::Event::Rescaled(_), _) if state.window == Some(id) => {
             measure_placeholder(state.measurement_epoch)
         }
-        Message::WindowEvent(id, window::Event::CloseRequested) if state.window == Some(id) => {
+        Message::WindowEvent(id, window::Event::CloseRequested, _) if state.window == Some(id) => {
             if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
                 return finish_overlay_proof(
                     state,
@@ -1030,7 +1327,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
             window::close(id)
         }
-        Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
+        Message::WindowEvent(id, window::Event::Closed, _) if state.window == Some(id) => {
             if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
                 return finish_overlay_proof(
                     state,
@@ -1053,7 +1350,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             teardown_webview();
             Task::none()
         }
-        Message::WindowEvent(_, _) => Task::none(),
+        Message::WindowEvent(_, _, _) => Task::none(),
         Message::PlaceholderMeasured { .. } if state.bounds_proof == BoundsProof::Complete => {
             Task::none()
         }
@@ -1278,18 +1575,27 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::InitialScaleObserved { generation, scale } => {
             update_initial_scale(state, generation, scale)
         }
-        Message::ScaleTransitionConfirmed { generation, scale } => {
-            update_scale_confirmation(state, generation, scale)
-        }
+        Message::SettledInitialScaleObserved {
+            generation,
+            event_revision,
+            scale,
+        } => update_settled_initial_scale(state, generation, event_revision, scale),
+        Message::ScaleTransitionConfirmed {
+            generation,
+            event_revision,
+            scale,
+        } => update_scale_confirmation(state, generation, event_revision, scale),
         Message::ScaleBoundsVerified {
             generation,
             epoch,
             bounds,
             result,
         } => update_scale_verification(state, generation, epoch, bounds, result),
-        Message::FinalScaleObserved { generation, scale } => {
-            update_final_scale(state, generation, scale)
-        }
+        Message::FinalScaleObserved {
+            generation,
+            event_revision,
+            scale,
+        } => update_final_scale(state, generation, event_revision, scale),
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -1361,11 +1667,36 @@ fn update_initial_scale(state: &mut State, generation: u64, scale: f32) -> Task<
     ) {
         return Task::none();
     }
-    let Some(bounds) = state.scale_proof.observe_initial_scale(generation, scale) else {
+    let event_revision = SCALE_EVENT_REVISION.load(Ordering::Acquire);
+    if !state
+        .scale_proof
+        .observe_initial_scale(generation, scale, event_revision)
+    {
         return finish_scale_proof(
             state,
             Err(format!("invalid initial window scale factor: {scale}")),
         );
+    }
+    state.scale_settle_deadline = Some(Instant::now() + SCALE_PROOF_INITIAL_SETTLE);
+    state.status = format!("initial scale {scale}; settling startup window events");
+    Task::none()
+}
+
+fn update_settled_initial_scale(
+    state: &mut State,
+    generation: u64,
+    event_revision: u64,
+    scale: f32,
+) -> Task<Message> {
+    if SCALE_EVENT_REVISION.load(Ordering::Acquire) != event_revision {
+        return Task::none();
+    }
+    let Some((bounds, initial_scale)) =
+        state
+            .scale_proof
+            .confirm_settled_initial_scale(generation, event_revision, scale)
+    else {
+        return Task::none();
     };
     let Some(id) = state.window else {
         return finish_scale_proof(state, Err("parent window is not available".into()));
@@ -1375,27 +1706,41 @@ fn update_initial_scale(state: &mut State, generation: u64, scale: f32) -> Task<
         Err(error) => return finish_scale_proof(state, Err(error)),
     };
     state.status = format!(
-        "initial scale {scale}; moving window to ({}, {})",
+        "initial scale {initial_scale}; moving window to ({}, {})",
         target.x, target.y
     );
     eprintln!(
-        "wry-spike-scale-proof phase=moving generation={generation} initial_scale={scale} initial_bounds={bounds:?} target={target:?}"
+        "wry-spike-scale-proof phase=moving generation={generation} initial_scale={initial_scale} initial_bounds={bounds:?} target={target:?}"
     );
     window::move_to(id, target)
 }
 
-fn update_scale_confirmation(state: &mut State, generation: u64, scale: f32) -> Task<Message> {
+fn update_scale_confirmation(
+    state: &mut State,
+    generation: u64,
+    event_revision: u64,
+    scale: f32,
+) -> Task<Message> {
     if !matches!(
         state.scale_proof,
         ScaleProof::ConfirmingTransition {
             generation: expected,
+            event_revision: expected_revision,
             ..
-        } if generation == expected && generation == state.webview_generation
+        } if generation == expected
+            && generation == state.webview_generation
+            && event_revision == expected_revision
     ) {
         return Task::none();
     }
     if scale_proof_expired(state, Instant::now()) {
         return finish_scale_proof(state, Err("timed out before scale confirmation".into()));
+    }
+    if !scale_event_revision_is_current(&state.scale_proof) {
+        return finish_scale_proof(
+            state,
+            Err("scale event revision changed before scale confirmation".into()),
+        );
     }
     let epoch = state.measurement_epoch.wrapping_add(1);
     if !state
@@ -1435,6 +1780,12 @@ fn update_scale_measurement(
     }
     if scale_proof_expired(state, Instant::now()) {
         return finish_scale_proof(state, Err("timed out before scale remeasurement".into()));
+    }
+    if !scale_event_revision_is_current(&state.scale_proof) {
+        return finish_scale_proof(
+            state,
+            Err("scale event revision changed before scale remeasurement".into()),
+        );
     }
     let Some(expected) = state
         .scale_proof
@@ -1487,21 +1838,21 @@ fn update_scale_verification(
     if scale_proof_expired(state, Instant::now()) {
         return finish_scale_proof(state, Err("timed out before bounds verification".into()));
     }
+    if !scale_event_revision_is_current(&state.scale_proof) {
+        return finish_scale_proof(
+            state,
+            Err("scale event revision changed before bounds verification".into()),
+        );
+    }
     match result {
         Ok(()) => {
-            let Some(id) = state.window else {
-                return finish_scale_proof(state, Err("parent window is not available".into()));
-            };
-            if !state
-                .scale_proof
-                .begin_final_confirmation(generation, epoch, bounds)
-            {
+            if !state.scale_proof.begin_settling(generation, epoch, bounds) {
                 return Task::none();
             }
             state.applied_bounds = Some(bounds);
-            state.status = "Wry logical bounds verified; confirming final window scale".into();
-            window::scale_factor(id)
-                .map(move |scale| Message::FinalScaleObserved { generation, scale })
+            state.scale_settle_deadline = Some(Instant::now() + SCALE_PROOF_SETTLE);
+            state.status = "Wry logical bounds verified; settling queued window events".into();
+            Task::none()
         }
         Err(error) => finish_scale_proof(
             state,
@@ -1512,7 +1863,12 @@ fn update_scale_verification(
     }
 }
 
-fn update_final_scale(state: &mut State, generation: u64, scale: f32) -> Task<Message> {
+fn update_final_scale(
+    state: &mut State,
+    generation: u64,
+    event_revision: u64,
+    scale: f32,
+) -> Task<Message> {
     if !matches!(
         state.scale_proof,
         ScaleProof::ConfirmingFinalScale {
@@ -1528,7 +1884,16 @@ fn update_final_scale(state: &mut State, generation: u64, scale: f32) -> Task<Me
             Err("timed out before final scale confirmation".into()),
         );
     }
-    if !state.scale_proof.confirm_final_scale(generation, scale) {
+    if SCALE_EVENT_REVISION.load(Ordering::Acquire) != event_revision {
+        return finish_scale_proof(
+            state,
+            Err("scale event revision changed before final scale confirmation".into()),
+        );
+    }
+    if !state
+        .scale_proof
+        .confirm_final_scale(generation, event_revision, scale)
+    {
         return finish_scale_proof(
             state,
             Err(format!(
@@ -1541,6 +1906,12 @@ fn update_final_scale(state: &mut State, generation: u64, scale: f32) -> Task<Me
 
 fn scale_proof_expired(state: &State, now: Instant) -> bool {
     state.proof_timeout.is_some_and(|deadline| now >= deadline)
+}
+
+fn scale_event_revision_is_current(proof: &ScaleProof) -> bool {
+    proof
+        .event_revision()
+        .is_some_and(|revision| SCALE_EVENT_REVISION.load(Ordering::Acquire) == revision)
 }
 
 fn update_scale_proof(state: &mut State, now: Instant) -> Task<Message> {
@@ -1556,6 +1927,54 @@ fn update_scale_proof(state: &mut State, now: Instant) -> Task<Message> {
             )),
         );
     }
+    if matches!(state.scale_proof, ScaleProof::SettlingInitialScale { .. })
+        && state
+            .scale_settle_deadline
+            .is_some_and(|deadline| now >= deadline)
+    {
+        if !scale_event_revision_is_current(&state.scale_proof) {
+            return Task::none();
+        }
+        let Some(id) = state.window else {
+            return finish_scale_proof(state, Err("parent window is not available".into()));
+        };
+        let Some((generation, event_revision)) = state.scale_proof.begin_settled_initial_query()
+        else {
+            return Task::none();
+        };
+        state.scale_settle_deadline = None;
+        state.status = "startup events settled; confirming initial window scale".into();
+        return window::scale_factor(id).map(move |scale| Message::SettledInitialScaleObserved {
+            generation,
+            event_revision,
+            scale,
+        });
+    }
+    if matches!(state.scale_proof, ScaleProof::Settling { .. })
+        && state
+            .scale_settle_deadline
+            .is_some_and(|deadline| now >= deadline)
+    {
+        if !scale_event_revision_is_current(&state.scale_proof) {
+            return finish_scale_proof(
+                state,
+                Err("scale event revision changed while settling window events".into()),
+            );
+        }
+        let Some(id) = state.window else {
+            return finish_scale_proof(state, Err("parent window is not available".into()));
+        };
+        let Some((generation, event_revision)) = state.scale_proof.begin_final_confirmation()
+        else {
+            return Task::none();
+        };
+        state.status = "queued events settled; confirming final window scale".into();
+        return window::scale_factor(id).map(move |scale| Message::FinalScaleObserved {
+            generation,
+            event_revision,
+            scale,
+        });
+    }
     Task::none()
 }
 
@@ -1567,6 +1986,7 @@ fn finish_scale_proof(state: &mut State, result: Result<(), String>) -> Task<Mes
     state.measured_bounds = None;
     state.creation_bounds = None;
     state.applied_bounds = None;
+    state.scale_settle_deadline = None;
     state.webview_generation = state.webview_generation.wrapping_add(1);
     teardown_webview();
     if result.is_ok() {
@@ -2203,8 +2623,36 @@ fn bounds_proof_requested() -> bool {
     cfg!(target_os = "macos") && std::env::var_os(BOUNDS_PROOF_ENV).is_some()
 }
 
+fn scale_proof_env_requested() -> bool {
+    std::env::var_os(SCALE_PROOF_ENV).is_some()
+}
+
 fn scale_proof_requested() -> bool {
-    cfg!(target_os = "macos") && std::env::var_os(SCALE_PROOF_ENV).is_some()
+    cfg!(target_os = "macos") && scale_proof_env_requested()
+}
+
+fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
+    if requested && !is_macos {
+        return Err("SHOSAI_WRY_SPIKE_SCALE_PROOF is only supported on macOS".into());
+    }
+    Ok(())
+}
+
+fn map_window_event(id: window::Id, event: window::Event) -> Message {
+    let tracked = scale_proof_env_requested()
+        && matches!(
+            event,
+            window::Event::Moved(_)
+                | window::Event::Rescaled(_)
+                | window::Event::CloseRequested
+                | window::Event::Closed
+        );
+    let revision = if tracked {
+        SCALE_EVENT_REVISION.fetch_add(1, Ordering::AcqRel) + 1
+    } else {
+        SCALE_EVENT_REVISION.load(Ordering::Acquire)
+    };
+    Message::WindowEvent(id, event, revision)
 }
 
 fn scale_proof_target() -> Result<Point, String> {
@@ -2732,7 +3180,7 @@ mod tests {
         TEARDOWN_CALLS.with(|calls| calls.set(0));
         drop(update(
             &mut state,
-            Message::WindowEvent(id, window::Event::CloseRequested),
+            Message::WindowEvent(id, window::Event::CloseRequested, 0),
         ));
         TEARDOWN_CALLS.with(|calls| assert_eq!(calls.get(), 1, "ordinary close must teardown"));
 
@@ -2796,17 +3244,39 @@ mod tests {
     }
 
     #[test]
+    fn scale_proof_request_is_rejected_on_unsupported_platforms() {
+        assert_eq!(validate_scale_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_scale_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_scale_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on macOS")
+        );
+    }
+
+    #[test]
     fn scale_proof_requires_a_changed_confirmed_scale_on_current_generation() {
         let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
         let mut proof = ScaleProof::WaitingForCreation;
 
         assert!(proof.begin_initial_query(7, bounds));
-        assert_eq!(proof.observe_initial_scale(6, 2.0), None);
-        assert_eq!(proof.observe_initial_scale(7, f32::NAN), None);
-        assert_eq!(proof.observe_initial_scale(7, 2.0), Some(bounds));
-        assert!(!proof.observe_rescale(6, 1.0));
-        assert!(!proof.observe_rescale(7, 2.0));
-        assert!(proof.observe_rescale(7, 1.0));
+        assert!(!proof.observe_initial_scale(6, 2.0, 2));
+        assert!(!proof.observe_initial_scale(7, f32::NAN, 2));
+        assert!(proof.observe_initial_scale(7, 2.0, 2));
+        assert!(proof.observe_initial_rescale(1.0, 3));
+        assert_eq!(proof.begin_settled_initial_query(), Some((7, 3)));
+        assert!(proof.accepts_initial_geometry());
+        assert!(proof.observe_initial_rescale(1.0, 4));
+        assert!(matches!(proof, ScaleProof::SettlingInitialScale { .. }));
+        assert_eq!(proof.begin_settled_initial_query(), Some((7, 4)));
+        assert_eq!(proof.confirm_settled_initial_scale(7, 2, 1.0), None);
+        assert_eq!(
+            proof.confirm_settled_initial_scale(7, 4, 2.0),
+            Some((bounds, 2.0))
+        );
+        assert!(!proof.observe_rescale(6, 1.0, 3));
+        assert!(!proof.observe_rescale(7, 2.0, 3));
+        assert!(proof.observe_rescale(7, 1.0, 3));
         assert!(!proof.confirm_transition(6, 1.0, 4));
         assert!(!proof.confirm_transition(7, 2.0, 4));
         assert!(proof.confirm_transition(7, 1.0, 4));
@@ -2817,6 +3287,7 @@ mod tests {
                 initial_scale: 2.0,
                 current_scale: 1.0,
                 epoch: 4,
+                event_revision: 3,
             }
         );
     }
@@ -2829,6 +3300,7 @@ mod tests {
             initial_scale: 2.0,
             current_scale: 1.0,
             epoch: 4,
+            event_revision: 3,
         };
 
         assert_eq!(proof.observe_measurement(7, 3, Some(bounds)), None);
@@ -2860,6 +3332,7 @@ mod tests {
                 current_scale: 1.0,
                 epoch: 4,
                 expected: bounds,
+                event_revision: 3,
             },
             webview_generation: 7,
             ..State::default()
@@ -2882,19 +3355,21 @@ mod tests {
     }
 
     #[test]
-    fn scale_proof_rejects_an_additional_transition_after_confirmation_starts() {
+    fn scale_proof_reconfirms_after_an_additional_geometry_event() {
         let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
-        for proof in [
+        for mut proof in [
             ScaleProof::ConfirmingTransition {
                 generation: 7,
                 initial_scale: 2.0,
                 observed_scale: 1.0,
+                event_revision: 3,
             },
             ScaleProof::WaitingForMeasurement {
                 generation: 7,
                 initial_scale: 2.0,
                 current_scale: 1.0,
                 epoch: 4,
+                event_revision: 3,
             },
             ScaleProof::Verifying {
                 generation: 7,
@@ -2902,6 +3377,15 @@ mod tests {
                 current_scale: 1.0,
                 epoch: 4,
                 expected: bounds,
+                event_revision: 3,
+            },
+            ScaleProof::Settling {
+                generation: 7,
+                initial_scale: 2.0,
+                current_scale: 1.0,
+                epoch: 4,
+                expected: bounds,
+                event_revision: 3,
             },
             ScaleProof::ConfirmingFinalScale {
                 generation: 7,
@@ -2909,17 +3393,44 @@ mod tests {
                 current_scale: 1.0,
                 epoch: 4,
                 expected: bounds,
+                event_revision: 3,
             },
         ] {
-            assert!(proof.rejects_additional_rescale());
+            assert!(proof.needs_scale_reconfirmation());
+            assert_eq!(proof.restart_confirmation(4), Some(7));
+            assert_eq!(
+                proof,
+                ScaleProof::ConfirmingTransition {
+                    generation: 7,
+                    initial_scale: 2.0,
+                    observed_scale: 1.0,
+                    event_revision: 4,
+                }
+            );
         }
         assert!(
             !ScaleProof::WaitingForTransition {
                 generation: 7,
                 initial_scale: 2.0,
             }
-            .rejects_additional_rescale()
+            .needs_scale_reconfirmation()
         );
+    }
+
+    #[test]
+    fn scale_reconfirmation_distinguishes_stale_and_actual_scale_reversions() {
+        for (queried_scale, confirmed) in [(1.0, true), (2.0, false)] {
+            let mut proof = ScaleProof::WaitingForMeasurement {
+                generation: 7,
+                initial_scale: 2.0,
+                current_scale: 1.0,
+                epoch: 4,
+                event_revision: 3,
+            };
+
+            assert_eq!(proof.restart_confirmation(4), Some(7));
+            assert_eq!(proof.confirm_transition(7, queried_scale, 5), confirmed);
+        }
     }
 
     #[test]
@@ -2931,12 +3442,15 @@ mod tests {
             current_scale: 1.0,
             epoch: 4,
             expected: bounds,
+            event_revision: 3,
         };
 
-        assert!(proof.begin_final_confirmation(7, 4, bounds));
-        assert!(!proof.confirm_final_scale(6, 1.0));
-        assert!(!proof.confirm_final_scale(7, 2.0));
-        assert!(proof.confirm_final_scale(7, 1.0));
+        assert!(proof.begin_settling(7, 4, bounds));
+        assert_eq!(proof.begin_final_confirmation(), Some((7, 3)));
+        assert!(!proof.confirm_final_scale(6, 3, 1.0));
+        assert!(!proof.confirm_final_scale(7, 2, 1.0));
+        assert!(!proof.confirm_final_scale(7, 3, 2.0));
+        assert!(proof.confirm_final_scale(7, 3, 1.0));
     }
 
     #[test]
@@ -2950,6 +3464,7 @@ mod tests {
                 current_scale: 1.0,
                 epoch: 4,
                 expected: bounds,
+                event_revision: 3,
             },
             webview_generation: 7,
             proof_timeout: Some(Instant::now() - Duration::from_millis(1)),
@@ -2969,6 +3484,41 @@ mod tests {
                     .as_ref()
                     .unwrap_err()
                     .contains("timed out")
+            );
+        });
+    }
+
+    #[test]
+    fn mapped_scale_event_invalidates_a_queued_final_scale_callback() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            scale_proof: ScaleProof::ConfirmingFinalScale {
+                generation: 7,
+                initial_scale: 2.0,
+                current_scale: 1.0,
+                epoch: 4,
+                expected: bounds,
+                event_revision: 3,
+            },
+            webview_generation: 7,
+            ..State::default()
+        };
+        SCALE_EVENT_REVISION.store(4, Ordering::Release);
+        SCALE_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update_final_scale(&mut state, 7, 3, 1.0));
+
+        assert_eq!(state.scale_proof, ScaleProof::Complete);
+        SCALE_PROOF_RESULT.with(|result| {
+            assert!(
+                result
+                    .borrow()
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("event revision")
             );
         });
     }
@@ -2994,7 +3544,7 @@ mod tests {
         assert_eq!(state.scale_proof, ScaleProof::Complete);
         assert_eq!(state.webview_generation, 8);
         assert_eq!(state.applied_bounds, None);
-        assert!(!state.scale_proof.observe_rescale(7, 1.0));
+        assert!(!state.scale_proof.observe_rescale(7, 1.0, 3));
         SCALE_PROOF_RESULT.with(|result| {
             assert!(
                 result
@@ -3282,7 +3832,7 @@ mod tests {
 
         drop(update(
             &mut state,
-            Message::WindowEvent(id, window::Event::CloseRequested),
+            Message::WindowEvent(id, window::Event::CloseRequested, 0),
         ));
 
         assert_eq!(state.webview_generation, 10);
