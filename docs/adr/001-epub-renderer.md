@@ -332,33 +332,44 @@ input structure mirrors already-proven computed values without connecting the
 two private test modules or changing production pagination. Tests prove that:
 
 - Taffy's block algorithm applies fixed inline-axis margins, stacks text leaves,
-  collapses adjoining positive block margins, and removes `display:none` leaves;
+  collapses adjoining positive block margins, and removes `display:none` leaves
+  with nonzero margins from sibling flow;
 - computed font size, line height, alignment, and inline bold/italic runs reach
-  `cosmic-text`, whose measured lines determine the leaf height at Taffy's width;
+  `cosmic-text`; size and alignment change observable glyph geometry, and the
+  measured lines determine the leaf height at Taffy's width;
 - mixed Latin/Arabic/Hebrew glyph ranges remain chapter-global through block
   placement. A neutral bidi separator for which the rich-text layout emits no
   glyph is retained explicitly as unshaped source rather than silently lost;
 - a replaced-image leaf is constrained to the available width while preserving
   its intrinsic ratio; and
 - fixed inputs, fonts, viewport, and disabled pixel rounding produce repeatable
-  block, line, and glyph geometry.
+  same-process block, line, and glyph geometry on each tested target.
 
 Taffy is MIT-licensed, pure Rust, and the spike enables only its `std`, `alloc`,
-tree, and block-layout features. Its block implementation accepts externally
-measured leaves and implements margin collapse, but it deliberately has no CSS
-inline formatting context or table algorithm. Shōsai would still need to build
-anonymous inline roots, collapse/preserve CSS whitespace, position inline
-replaced boxes, combine baselines, and retain per-line geometry for painting,
-hit testing, selection, and fragmentation. [Taffy's style model](https://docs.rs/taffy/0.13.0/taffy/style/struct.Style.html)
+tree, and block-layout features. That path activates ArrayVec 0.7.6
+(MIT OR Apache-2.0) and SlotMap 1.1.1 (Zlib); both versions were already present
+in the workspace lockfile, and notice/package consequences begin only if Taffy
+is promoted from a dev dependency. Serde is not enabled by this feature set.
+Taffy's block implementation accepts externally measured leaves and implements
+margin collapse, but it deliberately has no CSS inline formatting context or
+table algorithm. Shōsai would still need to build anonymous inline roots,
+collapse/preserve CSS whitespace, position inline replaced boxes, combine
+baselines, and retain per-line geometry for painting, hit testing, selection,
+and fragmentation. [Taffy's style model](https://docs.rs/taffy/0.13.0/taffy/style/struct.Style.html)
 exposes only block/flow-root/none in this feature set.
 
 The spike also does not connect CSS `direction` to `cosmic-text` paragraph base
 direction: Taffy's direction affects its box algorithm while `cosmic-text`
 infers bidi direction from text. Explicit CSS direction, logical margins,
 nested blocks, min/max-content fidelity, floats, inline images, tables,
-pagination, and accessibility remain unproven. Taffy may measure a text leaf
-multiple times, so a production bridge would require shared font state and a
-width-keyed shaping/layout cache. Blitz demonstrates a maintained
+pagination, and accessibility remain unproven. The bounded bridge explicitly
+rejects Taffy min-content text queries rather than returning zero-width shaping,
+and rejects more than one Unicode bidi paragraph per anonymous inline-root leaf
+rather than rebasing against a different line splitter. Separators remain
+explicit unshaped source. Taffy may measure a text leaf multiple times, so a
+production bridge would require shared font state and a width-keyed shaping/
+layout cache. Same-process repetition does not establish cross-run or
+cross-target numeric equality. Blitz demonstrates a maintained
 [Taffy/Stylo/Parley integration](https://github.com/DioxusLabs/blitz), but it is
 a substantially larger HTML/CSS stack, uses Parley rather than the proven
 `cosmic-text` path, and was not added by this spike. This remains component

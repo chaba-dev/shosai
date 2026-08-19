@@ -146,9 +146,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   The test-only Taffy spike proves block flow, adjoining positive margin
   collapse, ~display:none~, rich cosmic-text leaf measurement, stable source
   ranges plus explicit unshaped bidi separators, constrained image placeholders,
-  and deterministic geometry.  Taffy is only a block-box engine: CSS inline
+  and same-process repeatable geometry on each tested target.  The bounded
+  bridge rejects min-content text queries and multi-paragraph inline leaves
+  rather than approximating them.  Taffy is only a block-box engine: CSS inline
   construction/whitespace, explicit base direction, tables, fragmentation,
-  selection/accessibility, and production caching remain separate work.
+  selection/accessibility, cross-target numeric stability, and production
+  caching remain separate work.
 - [ ] Render the same table/font/MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
