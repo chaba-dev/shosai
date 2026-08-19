@@ -54,6 +54,12 @@ const INPUT_PROOF_PARENT_SETTLE: Duration = Duration::from_millis(250);
 const INPUT_PROOF_TOKEN: &str = "shosai-input-proof";
 const INPUT_PROOF_PATH: &str = "_spike/input.xhtml";
 const INPUT_PROOF_URL: &str = "shosai://book/_spike/input.xhtml";
+const TAB_PROOF_URL: &str = "shosai://book/_spike/input.xhtml#proof-anchor";
+const TAB_PROOF_READY: &str = "ready:/_spike/input.xhtml#proof-anchor";
+const TAB_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_TAB_PROOF";
+const TAB_PROOF_TIMEOUT: Duration = Duration::from_secs(120);
+const TAB_PROOF_AWAY_HOLD: Duration = Duration::from_millis(250);
+const TAB_PROOF_SWITCHES: u8 = 2;
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -64,11 +70,12 @@ const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xht
 static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
-static INPUT_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static INPUT_PROOF_EVENTS: Mutex<Vec<InputProofEvent>> = Mutex::new(Vec::new());
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
     static WEBVIEW_CREATION_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static NATIVE_OPERATION_EPOCH: Cell<u64> = const { Cell::new(0) };
     static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -77,6 +84,7 @@ thread_local! {
     static BOUNDS_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static SCALE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static TAB_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -246,8 +254,11 @@ struct State {
     bounds_proof: BoundsProof,
     scale_proof: ScaleProof,
     input_proof: InputProof,
+    tab_proof: TabProof,
     placeholder_collapsed: bool,
+    tab_away: bool,
     webview_generation: u64,
+    active_creation_generation: Option<u64>,
     measurement_epoch: u64,
     proof_timeout: Option<Instant>,
     status: String,
@@ -255,6 +266,7 @@ struct State {
     overlay_restore_deadline: Option<Instant>,
     scale_settle_deadline: Option<Instant>,
     input_parent_settle_deadline: Option<Instant>,
+    tab_restore_deadline: Option<Instant>,
     network_proof_finished: bool,
 }
 
@@ -283,6 +295,163 @@ enum InputAction {
     None,
     FocusChild,
     FocusParent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InputProofEvent {
+    creation_generation: u64,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum TabProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    Input {
+        round: u8,
+    },
+    Hiding {
+        round: u8,
+        generation: u64,
+    },
+    WaitingForAwayMeasurement {
+        next_round: u8,
+        epoch: u64,
+    },
+    Away {
+        next_round: u8,
+    },
+    WaitingForMeasurement {
+        round: u8,
+        epoch: u64,
+    },
+    Recreating {
+        round: u8,
+        expected: Rectangle,
+    },
+    Complete,
+}
+
+impl TabProof {
+    fn begin_initial_input(&mut self) -> bool {
+        if *self != Self::WaitingForCreation {
+            return false;
+        }
+        *self = Self::Input { round: 0 };
+        true
+    }
+
+    fn begin_hiding(&mut self, generation: u64) -> bool {
+        let Self::Input { round } = *self else {
+            return false;
+        };
+        *self = Self::Hiding { round, generation };
+        true
+    }
+
+    fn observe_hidden(&mut self, generation: u64, epoch: u64) -> bool {
+        let Self::Hiding {
+            round,
+            generation: expected,
+        } = *self
+        else {
+            return false;
+        };
+        if generation != expected {
+            return false;
+        }
+        *self = Self::WaitingForAwayMeasurement {
+            next_round: round + 1,
+            epoch,
+        };
+        true
+    }
+
+    fn observe_away_measurement(&mut self, epoch: u64, bounds: Option<Rectangle>) -> Option<bool> {
+        let Self::WaitingForAwayMeasurement {
+            next_round,
+            epoch: expected_epoch,
+        } = *self
+        else {
+            return None;
+        };
+        if epoch != expected_epoch {
+            return None;
+        }
+        if bounds.is_some() {
+            return Some(false);
+        }
+        *self = Self::Away { next_round };
+        Some(true)
+    }
+
+    fn begin_restore(&mut self, epoch: u64) -> bool {
+        let Self::Away { next_round } = *self else {
+            return false;
+        };
+        *self = Self::WaitingForMeasurement {
+            round: next_round,
+            epoch,
+        };
+        true
+    }
+
+    fn observe_measurement(&mut self, epoch: u64, bounds: Option<Rectangle>) -> Option<Rectangle> {
+        let Self::WaitingForMeasurement {
+            round,
+            epoch: expected_epoch,
+        } = *self
+        else {
+            return None;
+        };
+        if epoch != expected_epoch {
+            return None;
+        }
+        let bounds = bounds.and_then(usable_bounds)?;
+        *self = Self::Recreating {
+            round,
+            expected: bounds,
+        };
+        Some(bounds)
+    }
+
+    fn observe_replacement(&mut self, bounds: Rectangle) -> bool {
+        let Self::Recreating { round, expected } = *self else {
+            return false;
+        };
+        if bounds != expected {
+            return false;
+        }
+        *self = Self::Input { round };
+        true
+    }
+
+    fn current_round(self) -> Option<u8> {
+        match self {
+            Self::Input { round } => Some(round),
+            _ => None,
+        }
+    }
+
+    fn blocks_geometry_synchronization(self) -> bool {
+        matches!(
+            self,
+            Self::Hiding { .. }
+                | Self::WaitingForAwayMeasurement { .. }
+                | Self::Away { .. }
+                | Self::WaitingForMeasurement { .. }
+                | Self::Recreating { .. }
+        )
+    }
+
+    fn complete(&mut self) -> bool {
+        if *self == Self::Complete {
+            return false;
+        }
+        *self = Self::Complete;
+        true
+    }
 }
 
 impl InputProof {
@@ -1080,8 +1249,12 @@ enum Message {
         epoch: u64,
         bounds: Option<Rectangle>,
     },
-    WebViewCreated(Result<(), String>),
+    WebViewCreated {
+        creation_generation: u64,
+        result: Result<(), String>,
+    },
     WebViewSynchronized {
+        generation: u64,
         bounds: Option<Rectangle>,
         result: Result<(), String>,
     },
@@ -1132,6 +1305,15 @@ enum Message {
     },
     InputChildFocused(Result<(), String>),
     InputParentFocused(Result<(), String>),
+    TabChildHidden {
+        generation: u64,
+        result: Result<(), String>,
+    },
+    TabReplacementVerified {
+        generation: u64,
+        bounds: Rectangle,
+        result: Result<(), String>,
+    },
     FocusWebView,
     NetworkProofTick(Instant),
     #[cfg(target_os = "linux")]
@@ -1162,7 +1344,13 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
-    if let Err(error) = validate_proof_mode_selection(
+    if let Err(error) =
+        validate_tab_proof_platform(tab_proof_env_requested(), cfg!(target_os = "macos"))
+    {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(error) = validate_proof_mode_selection([
         network_proof_requested(),
         lifecycle_proof_requested(),
         overlay_proof_requested(),
@@ -1170,7 +1358,8 @@ fn main() -> ExitCode {
         bounds_proof_requested(),
         scale_proof_requested(),
         input_proof_requested(),
-    ) {
+        tab_proof_requested(),
+    ]) {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
@@ -1219,6 +1408,19 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("wry-spike-input-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    if tab_proof_requested() {
+        return TAB_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-tab-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-tab-proof FAIL: proof did not complete");
                 ExitCode::FAILURE
             }
         });
@@ -1297,11 +1499,12 @@ fn subscription(_state: &State) -> Subscription<Message> {
         || bounds_proof_requested()
         || scale_proof_requested()
         || input_proof_requested()
+        || tab_proof_requested()
     {
         subscriptions
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
     }
-    if input_proof_requested() {
+    if keyboard_input_proof_requested() {
         subscriptions.push(event::listen_with(|event, _, _| {
             if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = event {
                 let revision = INPUT_KEY_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
@@ -1327,6 +1530,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || bounds_proof_requested()
                 || scale_proof_requested()
                 || input_proof_requested()
+                || tab_proof_requested()
             {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
@@ -1338,6 +1542,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     SCALE_PROOF_TIMEOUT
                 } else if input_proof_requested() {
                     INPUT_PROOF_TIMEOUT
+                } else if tab_proof_requested() {
+                    TAB_PROOF_TIMEOUT
                 } else {
                     NETWORK_PROOF_TIMEOUT
                 };
@@ -1356,6 +1562,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.scale_proof = ScaleProof::WaitingForCreation;
             }
             if input_proof_requested() {
+                state.input_proof = InputProof::WaitingForCreation;
+                INPUT_PROOF_EVENTS.lock().unwrap().clear();
+            }
+            if tab_proof_requested() {
+                state.tab_proof = TabProof::WaitingForCreation;
                 state.input_proof = InputProof::WaitingForCreation;
                 INPUT_PROOF_EVENTS.lock().unwrap().clear();
             }
@@ -1481,6 +1692,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before input proof completed".into()),
                 );
             }
+            if tab_proof_requested() && state.tab_proof != TabProof::Complete {
+                return finish_tab_proof(
+                    state,
+                    Err("parent closed before tab proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             let webview_dropped = teardown_webview();
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
@@ -1511,6 +1728,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before input proof completed".into()),
                 );
             }
+            if tab_proof_requested() && state.tab_proof != TabProof::Complete {
+                return finish_tab_proof(
+                    state,
+                    Err("parent closed before tab proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             teardown_webview();
             Task::none()
@@ -1522,7 +1745,28 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PlaceholderMeasured { .. } if state.scale_proof == ScaleProof::Complete => {
             Task::none()
         }
+        Message::PlaceholderMeasured { .. } if state.tab_proof == TabProof::Complete => {
+            Task::none()
+        }
         Message::PlaceholderMeasured { epoch, bounds } => {
+            if tab_proof_requested()
+                && matches!(state.tab_proof, TabProof::WaitingForAwayMeasurement { .. })
+            {
+                return match state.tab_proof.observe_away_measurement(epoch, bounds) {
+                    Some(true) => {
+                        state.tab_restore_deadline = Some(Instant::now() + TAB_PROOF_AWAY_HOLD);
+                        state.status =
+                            "alternate Iced tab active; reader placeholder absent".into();
+                        eprintln!("wry-spike-tab-proof phase=away epoch={epoch}");
+                        Task::none()
+                    }
+                    Some(false) => finish_tab_proof(
+                        state,
+                        Err("reader placeholder remained in the alternate tab".into()),
+                    ),
+                    None => Task::none(),
+                };
+            }
             if scale_proof_requested()
                 && !matches!(
                     state.scale_proof,
@@ -1536,6 +1780,25 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 };
             }
             state.measured_bounds = bounds.and_then(usable_bounds);
+            if tab_proof_requested() {
+                if matches!(state.tab_proof, TabProof::WaitingForMeasurement { .. }) {
+                    let Some(bounds) = state.tab_proof.observe_measurement(epoch, bounds) else {
+                        return Task::none();
+                    };
+                    let Some(id) = state.window else {
+                        return finish_tab_proof(
+                            state,
+                            Err("parent window is not available".into()),
+                        );
+                    };
+                    state.creation_bounds = Some(bounds);
+                    state.status = "reader tab restored; recreating native child".into();
+                    return create_webview(id, bounds);
+                }
+                if state.tab_proof.blocks_geometry_synchronization() {
+                    return Task::none();
+                }
+            }
             if bounds_proof_requested()
                 && !matches!(
                     state.bounds_proof,
@@ -1569,21 +1832,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 synchronize_webview(state)
             }
         }
-        Message::WebViewCreated(_)
+        Message::WebViewCreated { .. }
             if state.lifecycle_proof == LifecycleProof::Complete
                 || state.overlay_proof == OverlayProof::Complete
                 || state.bounds_proof == BoundsProof::Complete
                 || state.scale_proof == ScaleProof::Complete
                 || state.input_proof == InputProof::Complete
+                || state.tab_proof == TabProof::Complete
                 || state.network_proof_finished =>
         {
             teardown_webview();
             Task::none()
         }
-        Message::WebViewCreated(result) => match result {
+        Message::WebViewCreated {
+            creation_generation,
+            ..
+        } if ensure_webview_creation_is_current(creation_generation).is_err() => Task::none(),
+        Message::WebViewCreated {
+            creation_generation,
+            result,
+        } => match result {
             Ok(()) => {
                 state.webview_ready = true;
                 state.webview_generation = state.webview_generation.wrapping_add(1);
+                state.active_creation_generation = Some(creation_generation);
                 state.applied_bounds = state.creation_bounds.take();
                 if let LifecycleProof::Recreating { expected } = state.lifecycle_proof {
                     return verify_lifecycle_replacement(state, expected);
@@ -1601,6 +1873,17 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 if scale_proof_requested() {
                     return begin_scale_proof(state);
+                }
+                if tab_proof_requested() {
+                    if state.tab_proof.begin_initial_input() {
+                        state.input_proof = InputProof::WaitingForReady;
+                        state.status =
+                            "reader tab embedded; waiting for trusted input readiness".into();
+                        return Task::none();
+                    }
+                    if matches!(state.tab_proof, TabProof::Recreating { .. }) {
+                        return verify_tab_replacement(state);
+                    }
                 }
                 if input_proof_requested() {
                     state.input_proof = InputProof::WaitingForReady;
@@ -1659,13 +1942,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.creation_bounds = None;
                 finish_input_proof(state, Err(format!("webview creation failed: {error}")))
             }
+            Err(error) if tab_proof_requested() => {
+                state.creation_bounds = None;
+                finish_tab_proof(state, Err(format!("webview creation failed: {error}")))
+            }
             Err(error) => {
                 state.creation_bounds = None;
                 state.status = format!("webview creation failed: {error}");
                 Task::none()
             }
         },
-        Message::WebViewSynchronized { bounds, result } => {
+        Message::WebViewSynchronized {
+            generation,
+            bounds,
+            result,
+        } => {
+            if generation != state.webview_generation {
+                return Task::none();
+            }
             if !matches!(
                 state.bounds_proof,
                 BoundsProof::Disabled | BoundsProof::Complete
@@ -1778,9 +2072,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Task::none()
             }
             Ok(()) => Task::none(),
-            Err(error) => {
-                finish_input_proof(state, Err(format!("failed to focus child input: {error}")))
-            }
+            Err(error) => finish_keyboard_input_proof(
+                state,
+                Err(format!("failed to focus child input: {error}")),
+            ),
         },
         Message::InputParentFocused(result) => match result {
             Ok(()) if state.input_proof.parent_focused(true) => {
@@ -1791,7 +2086,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.window.map_or_else(Task::none, window::gain_focus)
             }
             Ok(()) => Task::none(),
-            Err(error) => finish_input_proof(
+            Err(error) => finish_keyboard_input_proof(
                 state,
                 Err(format!("failed to restore parent focus: {error}")),
             ),
@@ -1800,7 +2095,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.input_proof.observe_parent_key(revision, repeat) =>
         {
             eprintln!("wry-spike-input-proof phase=parent-key-observed");
-            finish_input_proof(state, Ok(()))
+            if tab_proof_requested() {
+                if state.tab_proof.current_round() == Some(TAB_PROOF_SWITCHES) {
+                    finish_tab_proof(state, Ok(()))
+                } else {
+                    begin_tab_switch(state)
+                }
+            } else {
+                finish_input_proof(state, Ok(()))
+            }
         }
         Message::IcedKeyPressed { .. } => {
             eprintln!(
@@ -1809,6 +2112,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             );
             Task::none()
         }
+        Message::TabChildHidden { generation, result } => {
+            update_tab_hidden(state, generation, result)
+        }
+        Message::TabReplacementVerified {
+            generation,
+            bounds,
+            result,
+        } => update_tab_replacement(state, generation, bounds, result),
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -1828,6 +2139,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::NetworkProofTick(now) if scale_proof_requested() => update_scale_proof(state, now),
         Message::NetworkProofTick(now) if input_proof_requested() => update_input_proof(state, now),
+        Message::NetworkProofTick(now) if tab_proof_requested() => update_tab_proof(state, now),
         Message::NetworkProofTick(now) => update_network_proof(state, now),
         #[cfg(target_os = "linux")]
         Message::PumpGtk => {
@@ -1850,6 +2162,10 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
             )),
         );
     }
+    update_keyboard_input(state, now)
+}
+
+fn update_keyboard_input(state: &mut State, now: Instant) -> Task<Message> {
     if state
         .input_parent_settle_deadline
         .is_some_and(|deadline| now >= deadline)
@@ -1863,11 +2179,35 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
     }
     let events = std::mem::take(&mut *INPUT_PROOF_EVENTS.lock().unwrap());
     for event in events {
-        match state.input_proof.observe_ipc(&event) {
+        if state.active_creation_generation != Some(event.creation_generation) {
+            eprintln!(
+                "wry-spike-input-proof phase=ignored-stale-ipc generation={}",
+                event.creation_generation
+            );
+            continue;
+        }
+        let message = if event.message.starts_with("ready:") {
+            if tab_proof_requested() && event.message != TAB_PROOF_READY {
+                return finish_tab_proof(
+                    state,
+                    Err(format!(
+                        "restored tab reported unexpected logical location {:?}",
+                        event.message
+                    )),
+                );
+            }
+            "ready"
+        } else {
+            &event.message
+        };
+        match state.input_proof.observe_ipc(message) {
             InputAction::None => {}
             InputAction::FocusChild => {
                 let Some(id) = state.window else {
-                    return finish_input_proof(state, Err("parent window is not available".into()));
+                    return finish_keyboard_input_proof(
+                        state,
+                        Err("parent window is not available".into()),
+                    );
                 };
                 state.status = "trusted page ready; focusing child input".into();
                 return window::run(id, move |_| {
@@ -1877,7 +2217,10 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
             }
             InputAction::FocusParent => {
                 let Some(id) = state.window else {
-                    return finish_input_proof(state, Err("parent window is not available".into()));
+                    return finish_keyboard_input_proof(
+                        state,
+                        Err("parent window is not available".into()),
+                    );
                 };
                 state.status = "child typing observed; restoring focus to Iced".into();
                 return window::run(id, move |window| {
@@ -1888,6 +2231,186 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
         }
     }
     Task::none()
+}
+
+fn finish_keyboard_input_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if tab_proof_requested() {
+        finish_tab_proof(state, result)
+    } else {
+        finish_input_proof(state, result)
+    }
+}
+
+fn begin_tab_switch(state: &mut State) -> Task<Message> {
+    let generation = state.webview_generation;
+    if !state.tab_proof.begin_hiding(generation) {
+        return finish_tab_proof(
+            state,
+            Err(format!(
+                "parent key arrived during invalid tab phase {:?}",
+                state.tab_proof
+            )),
+        );
+    }
+    let operation_epoch = begin_native_operation_epoch();
+    let Some(id) = state.window else {
+        return finish_tab_proof(state, Err("parent window is not available".into()));
+    };
+    let Some(creation_generation) = state.active_creation_generation else {
+        return finish_tab_proof(
+            state,
+            Err("native child generation is not available".into()),
+        );
+    };
+    state.status = "switching away from reader tab; hiding native child".into();
+    eprintln!("wry-spike-tab-proof phase=hiding generation={generation}");
+    window::run(id, move |_| {
+        ensure_native_operation_is_current(operation_epoch)?;
+        ensure_webview_creation_is_current(creation_generation)?;
+        WEBVIEW.with(|slot| set_webview_visible(slot.borrow().as_ref(), false))
+    })
+    .map(move |result| Message::TabChildHidden { generation, result })
+}
+
+fn update_tab_hidden(
+    state: &mut State,
+    generation: u64,
+    result: Result<(), String>,
+) -> Task<Message> {
+    if generation != state.webview_generation {
+        return Task::none();
+    }
+    if let Err(error) = result {
+        return finish_tab_proof(state, Err(format!("webview hide failed: {error}")));
+    }
+    let epoch = state.measurement_epoch.wrapping_add(1);
+    if !state.tab_proof.observe_hidden(generation, epoch) {
+        return Task::none();
+    }
+    if !teardown_webview() {
+        return finish_tab_proof(state, Err("webview was missing after tab hide".into()));
+    }
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    state.active_creation_generation = None;
+    state.webview_ready = false;
+    state.applied_bounds = None;
+    state.measured_bounds = None;
+    state.input_proof = InputProof::WaitingForCreation;
+    state.tab_away = true;
+    state.measurement_epoch = epoch;
+    state.status = "alternate Iced tab active; verifying reader placeholder removal".into();
+    eprintln!("wry-spike-tab-proof phase=measuring-away generation={generation} epoch={epoch}");
+    measure_placeholder(epoch)
+}
+
+fn verify_tab_replacement(state: &State) -> Task<Message> {
+    let TabProof::Recreating { expected, .. } = state.tab_proof else {
+        return Task::none();
+    };
+    let Some(id) = state.window else {
+        return Task::done(Message::TabReplacementVerified {
+            generation: state.webview_generation,
+            bounds: expected,
+            result: Err("parent window is not available".into()),
+        });
+    };
+    let generation = state.webview_generation;
+    window::run(id, move |_| {
+        WEBVIEW.with(|slot| verify_webview_size(slot.borrow().as_ref(), expected))
+    })
+    .map(move |result| Message::TabReplacementVerified {
+        generation,
+        bounds: expected,
+        result,
+    })
+}
+
+fn update_tab_replacement(
+    state: &mut State,
+    generation: u64,
+    bounds: Rectangle,
+    result: Result<(), String>,
+) -> Task<Message> {
+    if generation != state.webview_generation || state.applied_bounds != Some(bounds) {
+        return Task::none();
+    }
+    if let Err(error) = result {
+        return finish_tab_proof(
+            state,
+            Err(format!("tab replacement verification failed: {error}")),
+        );
+    }
+    if !state.tab_proof.observe_replacement(bounds) {
+        return Task::none();
+    }
+    state.input_proof = InputProof::WaitingForReady;
+    let round = state.tab_proof.current_round().unwrap_or_default();
+    state.status =
+        format!("reader tab restored for round {round}; waiting for trusted input readiness");
+    eprintln!("wry-spike-tab-proof phase=restored round={round} generation={generation}");
+    Task::none()
+}
+
+fn update_tab_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.tab_proof == TabProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_tab_proof(
+            state,
+            Err(format!("timed out during tab phase {:?}", state.tab_proof)),
+        );
+    }
+    if matches!(state.tab_proof, TabProof::WaitingForAwayMeasurement { .. }) {
+        return measure_placeholder(state.measurement_epoch);
+    }
+    if matches!(state.tab_proof, TabProof::Away { .. })
+        && state
+            .tab_restore_deadline
+            .is_some_and(|deadline| now >= deadline)
+    {
+        let epoch = state.measurement_epoch.wrapping_add(1);
+        if !state.tab_proof.begin_restore(epoch) {
+            return Task::none();
+        }
+        state.tab_restore_deadline = None;
+        state.tab_away = false;
+        state.measurement_epoch = epoch;
+        state.status = "switching back to reader tab; measuring current placeholder".into();
+        eprintln!("wry-spike-tab-proof phase=restoring epoch={epoch}");
+        return measure_placeholder(epoch);
+    }
+    if matches!(state.tab_proof, TabProof::WaitingForMeasurement { .. }) {
+        return measure_placeholder(state.measurement_epoch);
+    }
+    if !matches!(state.tab_proof, TabProof::Input { .. }) {
+        return Task::none();
+    }
+    update_keyboard_input(state, now)
+}
+
+fn finish_tab_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if !state.tab_proof.complete() {
+        return Task::none();
+    }
+    state.input_proof = InputProof::Complete;
+    state.input_parent_settle_deadline = None;
+    state.tab_restore_deadline = None;
+    state.tab_away = false;
+    state.webview_ready = false;
+    state.measured_bounds = None;
+    state.creation_bounds = None;
+    state.applied_bounds = None;
+    state.active_creation_generation = None;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-tab-proof PASS: two switch-away/destroy/recreate round trips and three child-to-parent input handoffs completed"
+        );
+    }
+    TAB_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn focus_webview_input(webview: Option<&WebView>) -> Result<(), String> {
@@ -2833,6 +3356,25 @@ fn view(state: &State) -> Element<'_, Message> {
     ]
     .spacing(20);
 
+    if state.tab_away {
+        return column![
+            container(column![controls, text(&state.status)].spacing(8))
+                .height(HEADER_HEIGHT)
+                .padding([20, PADDING as u16]),
+            container(
+                column![
+                    text("Library tab").size(28),
+                    text("The reader tab and its native child are inactive."),
+                ]
+                .spacing(12),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill),
+        ]
+        .into();
+    }
+
     let reader: Element<'_, Message> = column![
         container(column![controls, text(&state.status)].spacing(8))
             .height(HEADER_HEIGHT)
@@ -2912,6 +3454,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                 });
             });
             NETWORK_PROOF_URL.to_string()
+        } else if tab_proof_requested() {
+            TAB_PROOF_URL.to_string()
         } else if input_proof_requested() {
             INPUT_PROOF_URL.to_string()
         } else if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
@@ -2930,15 +3474,15 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             .with_bounds(webview_bounds(bounds))
             .with_custom_protocol("shosai".into(), serve_epub_resource)
             .with_url(&start_url);
-        let builder = if input_proof_requested() {
+        let builder = if keyboard_input_proof_requested() {
             builder
                 .with_initialization_script(INPUT_PROOF_SCRIPT)
-                .with_ipc_handler(|request| {
+                .with_ipc_handler(move |request| {
                     eprintln!("wry-spike-input-proof event={:?}", request.body());
-                    INPUT_PROOF_EVENTS
-                        .lock()
-                        .unwrap()
-                        .push(request.body().clone());
+                    INPUT_PROOF_EVENTS.lock().unwrap().push(InputProofEvent {
+                        creation_generation: generation,
+                        message: request.body().clone(),
+                    });
                 })
         } else {
             builder
@@ -2956,10 +3500,14 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             .build_as_child(&parent)
             .map_err(|error| error.to_string())?;
 
+        ensure_webview_creation_is_current(generation)?;
         WEBVIEW.with(|slot| *slot.borrow_mut() = Some(webview));
         Ok(())
     })
-    .map(Message::WebViewCreated)
+    .map(move |result| Message::WebViewCreated {
+        creation_generation: generation,
+        result,
+    })
 }
 
 fn network_proof_requested() -> bool {
@@ -2998,6 +3546,18 @@ fn input_proof_requested() -> bool {
     cfg!(target_os = "macos") && input_proof_env_requested()
 }
 
+fn tab_proof_env_requested() -> bool {
+    std::env::var_os(TAB_PROOF_ENV).is_some()
+}
+
+fn tab_proof_requested() -> bool {
+    cfg!(target_os = "macos") && tab_proof_env_requested()
+}
+
+fn keyboard_input_proof_requested() -> bool {
+    input_proof_requested() || tab_proof_requested()
+}
+
 fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
     if requested && !is_macos {
         return Err("SHOSAI_WRY_SPIKE_SCALE_PROOF is only supported on macOS".into());
@@ -3008,6 +3568,13 @@ fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), 
 fn validate_input_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
     if requested && !is_macos {
         return Err("SHOSAI_WRY_SPIKE_INPUT_PROOF is only supported on macOS".into());
+    }
+    Ok(())
+}
+
+fn validate_tab_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
+    if requested && !is_macos {
+        return Err("SHOSAI_WRY_SPIKE_TAB_PROOF is only supported on macOS".into());
     }
     Ok(())
 }
@@ -3054,32 +3621,22 @@ fn parse_scale_proof_target(value: &str) -> Result<Point, String> {
     Ok(Point::new(x, y))
 }
 
-fn validate_proof_mode_selection(
-    network: bool,
-    lifecycle: bool,
-    overlay: bool,
-    overlay_observation: bool,
-    bounds: bool,
-    scale: bool,
-    input: bool,
-) -> Result<(), String> {
-    if (overlay || overlay_observation || bounds || scale || input)
-        && [
-            network,
-            lifecycle,
-            overlay,
-            overlay_observation,
-            bounds,
-            scale,
-            input,
-        ]
-        .into_iter()
-        .filter(|selected| *selected)
-        .count()
-            > 1
+fn validate_proof_mode_selection(modes: [bool; 8]) -> Result<(), String> {
+    let [
+        _,
+        _,
+        overlay,
+        overlay_observation,
+        bounds,
+        scale,
+        input,
+        tab,
+    ] = modes;
+    if (overlay || overlay_observation || bounds || scale || input || tab)
+        && modes.into_iter().filter(|selected| *selected).count() > 1
     {
         return Err(
-            "macOS overlay, bounds, scale, and input modes cannot be combined with another proof mode"
+            "macOS overlay, bounds, scale, input, and tab modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -3185,10 +3742,21 @@ fn synchronize_webview(state: &mut State) -> Task<Message> {
         return Task::none();
     }
     let bounds = state.measured_bounds;
+    let generation = state.webview_generation;
+    let operation_epoch = current_native_operation_epoch();
+    let Some(creation_generation) = state.active_creation_generation else {
+        return Task::none();
+    };
     window::run(id, move |_| {
+        ensure_native_operation_is_current(operation_epoch)?;
+        ensure_webview_creation_is_current(creation_generation)?;
         WEBVIEW.with(|slot| synchronize_webview_instance(slot.borrow().as_ref(), bounds))
     })
-    .map(move |result| Message::WebViewSynchronized { bounds, result })
+    .map(move |result| Message::WebViewSynchronized {
+        generation,
+        bounds,
+        result,
+    })
 }
 
 fn synchronize_webview_instance(
@@ -3270,6 +3838,28 @@ fn ensure_webview_creation_is_current(generation: u64) -> Result<(), String> {
     })
 }
 
+fn current_native_operation_epoch() -> u64 {
+    NATIVE_OPERATION_EPOCH.with(Cell::get)
+}
+
+fn begin_native_operation_epoch() -> u64 {
+    NATIVE_OPERATION_EPOCH.with(|epoch| {
+        let next = epoch.get().wrapping_add(1);
+        epoch.set(next);
+        next
+    })
+}
+
+fn invalidate_native_operations() {
+    begin_native_operation_epoch();
+}
+
+fn ensure_native_operation_is_current(epoch: u64) -> Result<(), String> {
+    (current_native_operation_epoch() == epoch)
+        .then_some(())
+        .ok_or_else(|| "native webview operation was canceled".to_string())
+}
+
 fn record_terminal_result(slot: &mut Option<Result<(), String>>, result: Result<(), String>) {
     if slot.is_none() {
         *slot = Some(result);
@@ -3311,6 +3901,7 @@ fn webview_bounds(bounds: Rectangle) -> Rect {
 
 fn teardown_webview() -> bool {
     invalidate_webview_creation();
+    invalidate_native_operations();
     #[cfg(test)]
     TEARDOWN_CALLS.with(|calls| calls.set(calls.get() + 1));
     #[cfg(target_os = "linux")]
@@ -3379,7 +3970,7 @@ window.addEventListener('DOMContentLoaded', () => {
   input.addEventListener('keydown', () => window.ipc.postMessage('keydown'));
   input.addEventListener('input', () => window.ipc.postMessage(`input:${input.value}`));
   input.addEventListener('compositionstart', () => window.ipc.postMessage('composition'));
-  window.ipc.postMessage('ready');
+  window.ipc.postMessage(`ready:${location.pathname}${location.hash}`);
 });
 "#;
 
@@ -3396,7 +3987,7 @@ const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   </style>
 </head>
 <body>
-  <h1>Wry input routing proof</h1>
+  <h1 id="proof-anchor">Wry input routing proof</h1>
   <p>The host focuses this trusted input. Type <code>shosai-input-proof</code>.</p>
   <input id="proof-input" type="text" autocomplete="off" />
 </body>
@@ -3672,6 +4263,17 @@ mod tests {
     }
 
     #[test]
+    fn tab_proof_request_is_rejected_on_unsupported_platforms() {
+        assert_eq!(validate_tab_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_tab_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_tab_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on macOS")
+        );
+    }
+
+    #[test]
     fn input_proof_requires_child_and_parent_keyboard_routing_in_order() {
         let mut proof = InputProof::WaitingForReady;
 
@@ -3707,6 +4309,106 @@ mod tests {
         assert!(!proof.observe_parent_key(9, true));
         assert!(proof.observe_parent_key(9, false));
         assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn tab_proof_requires_two_current_generation_round_trips() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let mut proof = TabProof::WaitingForCreation;
+
+        assert!(proof.begin_initial_input());
+        assert_eq!(proof.current_round(), Some(0));
+        assert!(proof.begin_hiding(5));
+        assert!(!proof.observe_hidden(4, 6));
+        assert!(proof.observe_hidden(5, 6));
+        assert_eq!(proof.observe_away_measurement(5, None), None);
+        assert_eq!(proof.observe_away_measurement(6, Some(bounds)), Some(false));
+        assert_eq!(proof.observe_away_measurement(6, None), Some(true));
+        assert!(proof.begin_restore(7));
+        assert_eq!(proof.observe_measurement(6, Some(bounds)), None);
+        assert_eq!(proof.observe_measurement(7, Some(bounds)), Some(bounds));
+        assert!(!proof.observe_replacement(Rectangle {
+            width: 1.0,
+            ..bounds
+        }));
+        assert!(proof.observe_replacement(bounds));
+        assert_eq!(proof.current_round(), Some(1));
+
+        assert!(proof.begin_hiding(7));
+        assert!(proof.observe_hidden(7, 8));
+        assert_eq!(proof.observe_away_measurement(8, None), Some(true));
+        assert!(proof.begin_restore(9));
+        assert_eq!(proof.observe_measurement(9, Some(bounds)), Some(bounds));
+        assert!(proof.observe_replacement(bounds));
+        assert_eq!(proof.current_round(), Some(TAB_PROOF_SWITCHES));
+    }
+
+    #[test]
+    fn input_events_from_destroyed_tab_generations_are_ignored() {
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            input_proof: InputProof::WaitingForReady,
+            active_creation_generation: Some(9),
+            ..State::default()
+        };
+        *INPUT_PROOF_EVENTS.lock().unwrap() = vec![
+            InputProofEvent {
+                creation_generation: 8,
+                message: "ready".into(),
+            },
+            InputProofEvent {
+                creation_generation: 9,
+                message: "ready".into(),
+            },
+        ];
+
+        drop(update_keyboard_input(&mut state, Instant::now()));
+
+        assert_eq!(state.input_proof, InputProof::FocusingChild);
+    }
+
+    #[test]
+    fn stale_tab_hide_callback_cannot_destroy_a_replacement() {
+        let mut state = State {
+            tab_proof: TabProof::Hiding {
+                round: 0,
+                generation: 3,
+            },
+            webview_generation: 4,
+            ..State::default()
+        };
+
+        drop(update_tab_hidden(&mut state, 3, Ok(())));
+
+        assert_eq!(
+            state.tab_proof,
+            TabProof::Hiding {
+                round: 0,
+                generation: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn stale_webview_synchronization_cannot_update_a_replacement() {
+        let previous = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let stale = Rectangle::new((0.0, 112.0).into(), (800.0, 500.0).into());
+        let mut state = State {
+            webview_generation: 4,
+            applied_bounds: Some(previous),
+            ..State::default()
+        };
+
+        drop(update(
+            &mut state,
+            Message::WebViewSynchronized {
+                generation: 3,
+                bounds: Some(stale),
+                result: Ok(()),
+            },
+        ));
+
+        assert_eq!(state.applied_bounds, Some(previous));
     }
 
     #[test]
@@ -4257,42 +4959,23 @@ mod tests {
 
     #[test]
     fn overlay_modes_reject_conflicting_proofs() {
-        assert!(
-            validate_proof_mode_selection(false, false, true, false, false, false, false).is_ok()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, true, false, false, false).is_ok()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, false, true, false, false).is_ok()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, false, false, true, false).is_ok()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, false, false, false, true).is_ok()
-        );
-        assert!(
-            validate_proof_mode_selection(true, false, true, false, false, false, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(false, true, true, false, false, false, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, true, true, false, false, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(true, false, false, true, false, false, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(false, true, false, false, true, false, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, false, true, true, false).is_err()
-        );
-        assert!(
-            validate_proof_mode_selection(false, false, false, false, false, true, true).is_err()
-        );
+        for selected in 2..8 {
+            let mut modes = [false; 8];
+            modes[selected] = true;
+            assert!(validate_proof_mode_selection(modes).is_ok());
+        }
+        for modes in [
+            [true, false, true, false, false, false, false, false],
+            [false, true, true, false, false, false, false, false],
+            [false, false, true, true, false, false, false, false],
+            [true, false, false, true, false, false, false, false],
+            [false, true, false, false, true, false, false, false],
+            [false, false, false, false, true, true, false, false],
+            [false, false, false, false, false, true, true, false],
+            [false, false, false, false, false, false, true, true],
+        ] {
+            assert!(validate_proof_mode_selection(modes).is_err());
+        }
     }
 
     #[test]
@@ -4391,7 +5074,13 @@ mod tests {
             ..State::default()
         };
 
-        drop(update(&mut state, Message::WebViewCreated(Ok(()))));
+        drop(update(
+            &mut state,
+            Message::WebViewCreated {
+                creation_generation: 1,
+                result: Ok(()),
+            },
+        ));
 
         assert!(!state.webview_ready);
         assert_eq!(state.creation_bounds, Some(bounds));
@@ -4458,6 +5147,7 @@ mod tests {
         drop(update(
             &mut state,
             Message::WebViewSynchronized {
+                generation: 0,
                 bounds: Some(bounds),
                 result: Ok(()),
             },
@@ -4481,6 +5171,18 @@ mod tests {
             ensure_webview_creation_is_current(generation).unwrap_err(),
             "webview creation was canceled"
         );
+    }
+
+    #[test]
+    fn beginning_tab_hide_invalidates_queued_native_operations() {
+        let queued_synchronization = current_native_operation_epoch();
+        let hide = begin_native_operation_epoch();
+
+        assert!(ensure_native_operation_is_current(queued_synchronization).is_err());
+        assert_eq!(ensure_native_operation_is_current(hide), Ok(()));
+
+        invalidate_native_operations();
+        assert!(ensure_native_operation_is_current(hide).is_err());
     }
 
     #[test]
