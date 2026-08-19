@@ -7,9 +7,9 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::net::TcpListener;
-#[cfg(target_os = "macos")]
-use std::process::Command;
 use std::process::ExitCode;
+#[cfg(any(target_os = "macos", test))]
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -69,6 +69,8 @@ const READER_PROOF_URL: &str = "shosai://book/_spike/reader.xhtml";
 const READER_PROOF_EXPECTED_OFFSET: usize = 503;
 const ACCESSIBILITY_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF";
 const ACCESSIBILITY_PROOF_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(any(target_os = "macos", test))]
+const ACCESSIBILITY_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -281,7 +283,7 @@ struct State {
     accessibility_proof: AccessibilityProof,
     accessibility_observation_pending: bool,
     accessibility_last_error: Option<String>,
-    accessibility_parent_reachable: bool,
+    accessibility_parent_focused: bool,
     placeholder_collapsed: bool,
     tab_away: bool,
     webview_generation: u64,
@@ -3020,26 +3022,7 @@ fn update_accessibility_observation(
         "wry-spike-accessibility-proof phase={:?} generation={generation} snapshot={snapshot:?}",
         state.accessibility_proof
     );
-    if matches!(
-        state.accessibility_proof,
-        AccessibilityProof::WaitingForInitialTree { .. }
-    ) && snapshot.web_area_count == 1
-        && snapshot.input_count == 1
-    {
-        state.accessibility_parent_reachable = snapshot.parent_control_count == 1;
-    }
-    if matches!(
-        state.accessibility_proof,
-        AccessibilityProof::WaitingForAwayTree { .. }
-            | AccessibilityProof::WaitingForReplacementTree { .. }
-            | AccessibilityProof::WaitingForReplacementFocus { .. }
-    ) && snapshot.parent_control_count != usize::from(state.accessibility_parent_reachable)
-    {
-        state.accessibility_last_error = Some(format!(
-            "Iced control reachability changed during the proof: {snapshot:?}"
-        ));
-        return Task::none();
-    }
+    let observed_phase = state.accessibility_proof;
     let action = match state
         .accessibility_proof
         .observe_snapshot(generation, snapshot)
@@ -3053,6 +3036,13 @@ fn update_accessibility_observation(
             return Task::none();
         }
     };
+    if matches!(
+        observed_phase,
+        AccessibilityProof::WaitingForParentFocus { .. }
+    ) && action == AccessibilityAction::HideChild
+    {
+        state.accessibility_parent_focused = true;
+    }
     match action {
         AccessibilityAction::None => Task::none(),
         AccessibilityAction::FocusChild | AccessibilityAction::FocusReplacement => {
@@ -3095,7 +3085,7 @@ fn update_accessibility_observation(
             measure_placeholder(epoch)
         }
         AccessibilityAction::Complete => {
-            if state.accessibility_parent_reachable {
+            if state.accessibility_parent_focused {
                 finish_accessibility_proof(state, Ok(()))
             } else {
                 finish_accessibility_proof(
@@ -3168,7 +3158,7 @@ fn finish_accessibility_proof(state: &mut State, result: Result<(), String>) -> 
     }
     state.accessibility_observation_pending = false;
     state.accessibility_last_error = None;
-    state.accessibility_parent_reachable = false;
+    state.accessibility_parent_focused = false;
     state.tab_away = false;
     state.webview_ready = false;
     state.measured_bounds = None;
@@ -3238,10 +3228,17 @@ fn focus_accessibility_parent() -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn run_accessibility_script(script: &str) -> Result<String, String> {
-    let output = Command::new("osascript")
-        .args(["-e", script, &std::process::id().to_string()])
-        .output()
-        .map_err(|error| format!("failed to start System Events query: {error}"))?;
+    run_accessibility_script_with_timeout(script, ACCESSIBILITY_QUERY_TIMEOUT)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn run_accessibility_script_with_timeout(
+    script: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    let mut command = Command::new("osascript");
+    command.args(["-e", script, &std::process::id().to_string()]);
+    let output = run_accessibility_command_with_timeout(command, timeout)?;
     if !output.status.success() {
         return Err(format!(
             "System Events query failed: {}",
@@ -3251,7 +3248,44 @@ fn run_accessibility_script(script: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
+fn run_accessibility_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<Output, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("failed to start System Events query: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("failed to collect System Events query: {error}"));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return Err(format!("failed to wait for System Events query: {error}"));
+            }
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            let kill_error = child.kill().err();
+            let reap_error = child.wait_with_output().err();
+            return Err(match (kill_error, reap_error) {
+                (None, None) => format!("System Events query timed out after {timeout:?}"),
+                (kill_error, reap_error) => format!(
+                    "System Events query timed out after {timeout:?}; kill error: {kill_error:?}; reap error: {reap_error:?}"
+                ),
+            });
+        }
+        thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
 const ACCESSIBILITY_SNAPSHOT_SCRIPT: &str = r#"
 on run argv
   set targetPid to item 1 of argv as integer
@@ -3264,21 +3298,38 @@ on run argv
     tell first process whose unix id is targetPid
       set elements to entire contents of window 1
       repeat with element in elements
+        set elementRole to missing value
         try
           set elementRole to role of element as text
+        end try
+        if elementRole is "AXWebArea" then
+          set webAreas to webAreas + 1
+        else if elementRole is "AXTextField" or elementRole is "AXButton" then
+          try
           set elementDescription to description of element as text
           set elementName to name of element as text
-          set elementFocused to value of attribute "AXFocused" of element
-          if elementRole is "AXWebArea" then set webAreas to webAreas + 1
+          on error errorMessage
+            error "failed to read accessibility label for " & elementRole & ": " & errorMessage
+          end try
           if elementRole is "AXTextField" and (elementDescription is "EPUB proof input" or elementName is "EPUB proof input") then
             set proofInputs to proofInputs + 1
+            try
+              set elementFocused to value of attribute "AXFocused" of element
+            on error errorMessage
+              error "failed to read AXFocused for EPUB proof input: " & errorMessage
+            end try
             if elementFocused then set inputFocused to 1
           end if
           if elementRole is "AXButton" and (elementDescription is "Focus webview" or elementName is "Focus webview") then
             set parentControls to parentControls + 1
+            try
+              set elementFocused to value of attribute "AXFocused" of element
+            on error errorMessage
+              error "failed to read AXFocused for Focus webview: " & errorMessage
+            end try
             if elementFocused then set parentFocused to 1
           end if
-        end try
+        end if
       end repeat
     end tell
   end tell
@@ -3286,7 +3337,7 @@ on run argv
 end run
 "#;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 const ACCESSIBILITY_FOCUS_PARENT_SCRIPT: &str = r#"
 on run argv
   set targetPid to item 1 of argv as integer
@@ -4369,7 +4420,7 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
     let generation = begin_webview_creation();
     window::run(id, move |window| {
         ensure_webview_creation_is_current(generation)?;
-        let mut book = if keyboard_input_proof_requested() {
+        let mut book = if keyboard_input_proof_requested() || accessibility_proof_requested() {
             input_proof_book()?
         } else if reader_proof_requested() {
             reader_proof_book()?
@@ -4445,13 +4496,14 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
         } else {
             builder.with_javascript_disabled()
         };
-        let proof_navigation_path = if keyboard_input_proof_requested() {
-            Some(INPUT_PROOF_PATH)
-        } else if reader_proof_requested() {
-            Some(READER_PROOF_PATH)
-        } else {
-            None
-        };
+        let proof_navigation_path =
+            if keyboard_input_proof_requested() || accessibility_proof_requested() {
+                Some(INPUT_PROOF_PATH)
+            } else if reader_proof_requested() {
+                Some(READER_PROOF_PATH)
+            } else {
+                None
+            };
         let webview = builder
             .with_navigation_handler(move |url| {
                 proof_navigation_path.map_or_else(
@@ -5787,6 +5839,132 @@ mod tests {
             AccessibilityAction::HideChild
         );
         assert_eq!(proof, AccessibilityProof::Hiding { generation: 4 });
+    }
+
+    #[test]
+    fn accessibility_proof_records_parent_that_appears_after_initial_tree() {
+        let tree = AccessibilitySnapshot {
+            web_area_count: 1,
+            input_count: 1,
+            ..AccessibilitySnapshot::default()
+        };
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            webview_generation: 4,
+            active_creation_generation: Some(4),
+            accessibility_proof: AccessibilityProof::WaitingForInitialTree { generation: 4 },
+            ..State::default()
+        };
+
+        drop(update_accessibility_observation(&mut state, 4, Ok(tree)));
+        drop(update_accessibility_observation(
+            &mut state,
+            4,
+            Ok(AccessibilitySnapshot {
+                parent_control_count: 1,
+                input_focused: true,
+                ..tree
+            }),
+        ));
+        drop(update_accessibility_observation(
+            &mut state,
+            4,
+            Ok(AccessibilitySnapshot {
+                parent_control_count: 1,
+                parent_control_focused: true,
+                ..tree
+            }),
+        ));
+
+        assert_eq!(
+            state.accessibility_proof,
+            AccessibilityProof::Hiding { generation: 4 }
+        );
+        assert!(state.accessibility_parent_focused);
+    }
+
+    #[test]
+    fn accessibility_proof_allows_parent_to_disappear_while_child_is_away() {
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            webview_generation: 5,
+            accessibility_proof: AccessibilityProof::WaitingForAwayTree { generation: 5 },
+            accessibility_parent_focused: true,
+            ..State::default()
+        };
+
+        drop(update_accessibility_observation(
+            &mut state,
+            5,
+            Ok(AccessibilitySnapshot::default()),
+        ));
+
+        assert!(state.accessibility_last_error.is_none());
+        assert!(matches!(
+            state.accessibility_proof,
+            AccessibilityProof::WaitingForMeasurement { .. }
+        ));
+
+        state.webview_generation = 6;
+        state.accessibility_proof = AccessibilityProof::WaitingForReplacementTree { generation: 6 };
+        drop(update_accessibility_observation(
+            &mut state,
+            6,
+            Ok(AccessibilitySnapshot {
+                web_area_count: 1,
+                input_count: 1,
+                parent_control_count: 1,
+                ..AccessibilitySnapshot::default()
+            }),
+        ));
+
+        assert!(state.accessibility_last_error.is_none());
+        assert_eq!(
+            state.accessibility_proof,
+            AccessibilityProof::WaitingForReplacementFocus { generation: 6 }
+        );
+    }
+
+    #[test]
+    fn accessibility_snapshot_counts_web_areas_before_optional_attributes() {
+        let web_area_count = ACCESSIBILITY_SNAPSHOT_SCRIPT
+            .find("if elementRole is \"AXWebArea\"")
+            .expect("snapshot script should count web areas");
+        let description_read = ACCESSIBILITY_SNAPSHOT_SCRIPT
+            .find("set elementDescription to description of element")
+            .expect("snapshot script should inspect labeled controls");
+
+        assert!(web_area_count < description_read);
+    }
+
+    #[test]
+    fn accessibility_snapshot_surfaces_candidate_attribute_failures() {
+        assert!(
+            ACCESSIBILITY_SNAPSHOT_SCRIPT
+                .contains("error \"failed to read accessibility label for \"")
+        );
+        assert!(
+            ACCESSIBILITY_SNAPSHOT_SCRIPT
+                .contains("error \"failed to read AXFocused for EPUB proof input: \"")
+        );
+        assert!(
+            ACCESSIBILITY_SNAPSHOT_SCRIPT
+                .contains("error \"failed to read AXFocused for Focus webview: \"")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accessibility_script_query_is_killed_at_its_deadline() {
+        let started = Instant::now();
+        let error = run_accessibility_script_with_timeout(
+            "on run argv\n  delay 2\n  return \"finished\"\nend run",
+            Duration::from_millis(50),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
