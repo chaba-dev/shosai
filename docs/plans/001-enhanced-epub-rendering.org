@@ -137,10 +137,18 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   bidi visual order with chapter-rebased logical source ranges and explicit
   unshaped separators, per-script Arabic/Hebrew fallback with valid glyphs,
   observable variable-weight shaping, italic face selection, and line
-  measurement.  ADR 001 separately records that block, inline, table, image,
-  pagination, EPUB font-face, selection/accessibility, stable DOM locations,
-  and MathML remain unimplemented; the bundled fixtures do not provide CJK or
-  emoji glyph coverage.
+  measurement.  ADR 001 separately records that production layout integration,
+  inline construction, tables, pagination, EPUB font-face,
+  selection/accessibility, stable DOM locations, and MathML remain
+  unimplemented; the bundled fixtures do not provide CJK or emoji glyph
+  coverage.
+- [X] Prototype a block-box and anonymous inline-root measurement boundary.
+  The test-only Taffy spike proves block flow, adjoining positive margin
+  collapse, ~display:none~, rich cosmic-text leaf measurement, stable source
+  ranges plus explicit unshaped bidi separators, constrained image placeholders,
+  and deterministic geometry.  Taffy is only a block-box engine: CSS inline
+  construction/whitespace, explicit base direction, tables, fragmentation,
+  selection/accessibility, and production caching remain separate work.
 - [ ] Render the same table/font/MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS

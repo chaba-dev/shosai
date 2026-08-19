@@ -199,14 +199,14 @@ Scores remain unset until the same fixture and measurement protocol is used.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade and `cosmic-text` shaping prototypes pass semantic assertions; table layout, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, and Taffy block-box prototypes pass semantic assertions; inline construction, table layout, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
-| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; other dependencies are not selected | Font and remaining dependency size; package smoke tests |
-| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade and shaping boundaries are feasible, but a production matcher plus block/inline/table/font/MathML layout remains substantial | Native layout/math dependency prototypes               |
+| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy candidate is pure Rust but not selected for production | Font and remaining dependency size; package smoke tests |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, and block-leaf measurement boundaries are feasible, but inline construction plus table/font/MathML layout remains substantial | Native table/math dependency prototypes                |
 
 ## Fixture and measurement matrix
 
@@ -276,10 +276,10 @@ implementation, a maintained DOM/CSS engine, or an explicitly bounded custom
 matcher. `lightningcss` and `parcel_selectors` are MPL-2.0; `roxmltree` is
 MIT/Apache-2.0. The repository already receives `cosmic-text`
 transitively through Iced, but it supplies shaping rather than CSS, block/table
-layout, pagination, selection/accessibility, or MathML. No current dependency
-fills those remaining layers, so the native route remains a high and potentially
-unbounded implementation/maintenance commitment until follow-up prototypes
-identify acceptable maintained components.
+layout, pagination, selection/accessibility, or MathML. The follow-up Taffy
+prototype fills only block-box placement around externally measured leaves; no
+single current dependency fills the remaining layers, so the native route
+remains a high and potentially unbounded implementation/maintenance commitment.
 
 ## Native text-shaping spike
 
@@ -318,11 +318,51 @@ these measurements. The spike rebases `LayoutGlyph`'s line-local UTF-8 offsets,
 but production must preserve the normalized chapter/span bases and inserted
 separators used by search; shaping arbitrary DOM substrings cannot reconstruct
 those locations afterward. Stable DOM/chapter locations, hit testing, selection
-geometry, accessibility semantics, inline box construction, block/table/image
-layout, pagination, and MathML remain separate unimplemented components. The
-spike therefore establishes a viable shaping primitive and interface evidence,
-not a production native renderer. The direct test-only `ttf-parser` check used
-to inspect the variable axis is also MIT OR Apache-2.0.
+geometry, accessibility semantics, inline box construction, production block/
+table/image layout, pagination, and MathML remain separate unimplemented
+components. The spike therefore establishes a viable shaping primitive and
+interface evidence, not a production native renderer. The direct test-only
+`ttf-parser` check used to inspect the variable axis is also MIT OR Apache-2.0.
+
+## Native block/inline layout spike
+
+A test-only Taffy 0.13.0 prototype treats each paragraph-like anonymous inline
+root as a leaf measured by the existing `cosmic-text` fixture shaper. A bounded
+input structure mirrors already-proven computed values without connecting the
+two private test modules or changing production pagination. Tests prove that:
+
+- Taffy's block algorithm applies fixed inline-axis margins, stacks text leaves,
+  collapses adjoining positive block margins, and removes `display:none` leaves;
+- computed font size, line height, alignment, and inline bold/italic runs reach
+  `cosmic-text`, whose measured lines determine the leaf height at Taffy's width;
+- mixed Latin/Arabic/Hebrew glyph ranges remain chapter-global through block
+  placement. A neutral bidi separator for which the rich-text layout emits no
+  glyph is retained explicitly as unshaped source rather than silently lost;
+- a replaced-image leaf is constrained to the available width while preserving
+  its intrinsic ratio; and
+- fixed inputs, fonts, viewport, and disabled pixel rounding produce repeatable
+  block, line, and glyph geometry.
+
+Taffy is MIT-licensed, pure Rust, and the spike enables only its `std`, `alloc`,
+tree, and block-layout features. Its block implementation accepts externally
+measured leaves and implements margin collapse, but it deliberately has no CSS
+inline formatting context or table algorithm. Shōsai would still need to build
+anonymous inline roots, collapse/preserve CSS whitespace, position inline
+replaced boxes, combine baselines, and retain per-line geometry for painting,
+hit testing, selection, and fragmentation. [Taffy's style model](https://docs.rs/taffy/0.13.0/taffy/style/struct.Style.html)
+exposes only block/flow-root/none in this feature set.
+
+The spike also does not connect CSS `direction` to `cosmic-text` paragraph base
+direction: Taffy's direction affects its box algorithm while `cosmic-text`
+infers bidi direction from text. Explicit CSS direction, logical margins,
+nested blocks, min/max-content fidelity, floats, inline images, tables,
+pagination, and accessibility remain unproven. Taffy may measure a text leaf
+multiple times, so a production bridge would require shared font state and a
+width-keyed shaping/layout cache. Blitz demonstrates a maintained
+[Taffy/Stylo/Parley integration](https://github.com/DioxusLabs/blitz), but it is
+a substantially larger HTML/CSS stack, uses Parley rather than the proven
+`cosmic-text` path, and was not added by this spike. This remains component
+feasibility evidence, not a production layout implementation.
 
 ## Native performance baseline
 
@@ -342,10 +382,10 @@ cost.
    and complete interactive Linux/X11 input/accessibility checks. Decide whether
    lack of a viable Wayland host rejects Wry or justifies a documented backend
    fallback.
-3. Extend the native computed-style and shaping evidence with block/inline/table
-   layout, EPUB font loading, selection/accessibility, pagination, and MathML
-   component prototypes, then render the same fixture. Treat both test-only
-   prototypes as evidence, not production implementations.
+3. Extend the native component evidence with inline-tree construction, table
+   layout, EPUB font loading, selection/accessibility, pagination, and MathML,
+   then render the same fixture. Treat every test-only prototype as evidence,
+   not a production implementation.
 4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 
