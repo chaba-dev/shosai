@@ -5059,6 +5059,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "cosmic-text",
  "fluent-templates",
  "gtk",
  "iced",
