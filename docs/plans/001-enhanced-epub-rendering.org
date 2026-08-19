@@ -125,9 +125,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   child DOM input.  After ~focus_parent~, it confirms through AppKit that the
   exact Iced/winit parent view is first responder, drains queued child keys, and
   observes a fresh key in Iced.  The public Wry handoff therefore works on the
-  tested macOS host without the direct AppKit fallback.  Shortcut conflicts,
-  IME, visually correct restoration, cross-platform input, accessibility,
-  repeated real-tab routing, and logical locations remain open.
+  tested macOS host without the direct AppKit fallback.  A tab-state proof then
+  completes two reader/alternate-tab round trips: it hides and destroys each
+  current child, verifies the alternate Iced tree has no reader placeholder,
+  remeasures and recreates a new generation, restores the same canonical
+  chapter fragment, rejects stale-generation callbacks and IPC, and completes
+  a fresh child-to-parent input handoff on all three reader activations.
+  Shortcut conflicts, IME, visually correct restoration, cross-platform input,
+  accessibility, production-tab integration, and arbitrary character-offset
+  locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
