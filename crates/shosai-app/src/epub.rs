@@ -675,6 +675,9 @@ mod text_layout;
 mod text_shaping;
 
 #[cfg(test)]
+mod table_layout;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

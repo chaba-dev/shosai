@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body>
+    <table id="layout-evidence">
+      <caption>Native table evidence</caption>
+      <thead>
+        <tr>
+          <th id="feature">Feature</th>
+          <th id="evidence">Evidence</th>
+          <th id="status">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th id="layout" rowspan="2">Layout</th>
+          <td id="wrapping">A deliberately long measured cell that wraps at a narrow width</td>
+          <td id="verified"><a href="#layout">verified</a></td>
+        </tr>
+        <tr>
+          <td id="nested" colspan="2">
+            <p>Nested content <img src="diagram.png" width="48" height="24" alt="diagram" /></p>
+          </td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td id="summary" colspan="3">Three explicit columns</td>
+        </tr>
+      </tfoot>
+    </table>
+  </body>
+</html>
