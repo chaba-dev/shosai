@@ -280,13 +280,17 @@ already selected transitively by Iced. Semantic tests prove that:
 - advanced shaping handles Arabic, Hebrew, and mixed Latin/RTL text, exposes
   bidi levels and visual positions, and retains each glyph cluster's logical
   UTF-8 byte range;
-- those byte ranges can be converted to the Unicode-scalar offsets currently
-  used by EPUB search without deriving logical order from visual glyph order;
+- line-local byte ranges can be rebased to chapter-global byte and Unicode-
+  scalar offsets currently used by EPUB search, including non-ASCII text before
+  a line break, without deriving logical order from visual glyph order; line
+  endings remain explicit unshaped separators;
 - combining marks form a multi-scalar cluster, while CJK and an emoji ZWJ
   sequence retain complete logical source coverage;
-- a deterministic in-memory fallback set selects Inter, Noto Sans Arabic, and
-  Noto Sans Hebrew as required, and requested variable weight/italic style reach
-  the selected face;
+- a deterministic in-memory fallback set repeatedly selects Inter for Latin and
+  Noto Sans Arabic/Hebrew for every corresponding script cluster with nonzero
+  glyph IDs;
+- the Inter fixture exposes a `wght` axis and regular/bold shaping produces
+  different advances, while italic requests select the italic face;
 - fixed fonts, locale, metrics, and width produce repeatable glyph measurements,
   wrapping, baselines, and line heights.
 
@@ -300,12 +304,15 @@ fallbacks and test missing/corrupt fonts and per-book cleanup.
 
 This does not make the current paginator shaping-aware. Its scalar-count and
 `0.55em` width heuristics can still split grapheme/ZWJ sequences and cannot use
-these measurements. `LayoutGlyph` ranges are line-local UTF-8 offsets; mapping
-them to search works only while shaping the same normalized text. Stable DOM/
-chapter locations, hit testing, selection geometry, accessibility semantics,
-inline box construction, block/table/image layout, pagination, and MathML remain
-separate unimplemented components. The spike therefore establishes a viable
-shaping primitive and interface evidence, not a production native renderer.
+these measurements. The spike rebases `LayoutGlyph`'s line-local UTF-8 offsets,
+but production must preserve the normalized chapter/span bases and inserted
+separators used by search; shaping arbitrary DOM substrings cannot reconstruct
+those locations afterward. Stable DOM/chapter locations, hit testing, selection
+geometry, accessibility semantics, inline box construction, block/table/image
+layout, pagination, and MathML remain separate unimplemented components. The
+spike therefore establishes a viable shaping primitive and interface evidence,
+not a production native renderer. The direct test-only `ttf-parser` check used
+to inspect the variable axis is also MIT OR Apache-2.0.
 
 ## Native performance baseline
 
