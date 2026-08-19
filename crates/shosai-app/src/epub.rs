@@ -681,6 +681,9 @@ mod table_layout;
 mod font_loading;
 
 #[cfg(test)]
+mod math_layout;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
