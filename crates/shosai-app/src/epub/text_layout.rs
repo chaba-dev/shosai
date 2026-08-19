@@ -4,7 +4,8 @@
 use std::{collections::BTreeSet, ops::Range};
 
 use cosmic_text::{
-    Align, Attrs, Buffer, Family, Metrics, Shaping, Weight, Wrap, fontdb::Style as FontStyle,
+    Align, Attrs, BidiParagraphs, Buffer, Family, Metrics, Shaping, Weight, Wrap,
+    fontdb::Style as FontStyle,
 };
 use taffy::prelude::*;
 use taffy::{Point, style::Direction};
@@ -123,7 +124,7 @@ struct LayoutEvidence {
 fn width_constraint(known: Option<f32>, available: AvailableSpace) -> Option<f32> {
     known.or(match available {
         AvailableSpace::Definite(width) => Some(width),
-        AvailableSpace::MinContent => Some(0.0),
+        AvailableSpace::MinContent => None,
         AvailableSpace::MaxContent => None,
     })
 }
@@ -132,6 +133,11 @@ fn shape_text(
     text: &TextLeaf,
     width: Option<f32>,
 ) -> (Size<f32>, Vec<LineBox>, Vec<GlyphBox>, BTreeSet<usize>) {
+    let source = text.text();
+    assert!(
+        source.is_empty() || BidiParagraphs::new(&source).count() == 1,
+        "anonymous inline-root leaf must contain exactly one bidi paragraph"
+    );
     let mut font_system = font_system();
     let metrics = Metrics::new(text.style.font_size, text.style.line_height);
     let mut buffer = Buffer::new(&mut font_system, metrics);
@@ -165,7 +171,6 @@ fn shape_text(
     );
     buffer.shape_until_scroll(&mut font_system, false);
 
-    let source = text.text();
     let line_starts = source_line_starts(&source);
     let mut lines = Vec::new();
     let mut glyphs = Vec::new();
@@ -225,6 +230,10 @@ fn measure_leaf(
 ) -> Size<f32> {
     match leaf {
         Leaf::Text(text) => {
+            assert!(
+                !matches!(available.width, AvailableSpace::MinContent),
+                "min-content text measurement is unsupported by the layout spike"
+            );
             let width = width_constraint(known.width, available.width);
             let (measured, _, _, _) = shape_text(text, width);
             Size {
@@ -488,6 +497,108 @@ fn measured_text_wraps_and_replaced_images_preserve_intrinsic_ratio() {
             width: 200.0,
             height: 150.0
         }
+    );
+}
+
+#[test]
+fn computed_font_size_and_alignment_change_glyph_geometry() {
+    let style = |font_size, alignment| ComputedBlockStyle {
+        font_size,
+        line_height: font_size * 1.5,
+        alignment: Some(alignment),
+        ..ComputedBlockStyle::default()
+    };
+    let layout = |computed_style| {
+        layout_document(
+            vec![text_leaf(
+                vec![InlineSpan::plain("Aligned text")],
+                computed_style,
+                0,
+                0,
+            )],
+            300.0,
+        )
+    };
+
+    let small_left = layout(style(16.0, Align::Left));
+    let large_left = layout(style(24.0, Align::Left));
+    let small_right = layout(style(16.0, Align::Right));
+    assert!(large_left.blocks[0].lines[0].width > small_left.blocks[0].lines[0].width);
+    assert!(
+        small_right.blocks[0].glyphs[0].x > small_left.blocks[0].glyphs[0].x,
+        "right alignment must shift the glyph run within the same block width"
+    );
+}
+
+#[test]
+fn display_none_with_margins_does_not_affect_sibling_flow() {
+    let visible = |text| {
+        text_leaf(
+            vec![InlineSpan::plain(text)],
+            ComputedBlockStyle::default(),
+            0,
+            0,
+        )
+    };
+    let control = layout_document(vec![visible("before"), visible("after")], 200.0);
+    let hidden_style = ComputedBlockStyle {
+        display: Display::None,
+        margin: Rect {
+            top: 100.0,
+            bottom: 100.0,
+            ..Rect::zero()
+        },
+        ..ComputedBlockStyle::default()
+    };
+    let with_hidden = layout_document(
+        vec![
+            visible("before"),
+            text_leaf(vec![InlineSpan::plain("hidden")], hidden_style, 0, 0),
+            visible("after"),
+        ],
+        200.0,
+    );
+
+    assert_eq!(with_hidden.blocks[1].size, Size::ZERO);
+    assert_eq!(
+        with_hidden.blocks[2].location, control.blocks[1].location,
+        "display:none margins must not participate in block flow"
+    );
+}
+
+#[test]
+#[should_panic(expected = "min-content text measurement is unsupported by the layout spike")]
+fn min_content_measurement_fails_explicitly() {
+    let leaf = text_leaf(
+        vec![InlineSpan::plain("min content")],
+        ComputedBlockStyle::default(),
+        0,
+        0,
+    );
+    let _ = measure_leaf(
+        Size {
+            width: None,
+            height: None,
+        },
+        Size {
+            width: AvailableSpace::MinContent,
+            height: AvailableSpace::MaxContent,
+        },
+        &leaf,
+    );
+}
+
+#[test]
+#[should_panic(expected = "anonymous inline-root leaf must contain exactly one bidi paragraph")]
+fn inline_root_rejects_multiple_bidi_paragraphs() {
+    let _ = layout_document(
+        vec![text_leaf(
+            vec![InlineSpan::plain("first\u{2029}second")],
+            ComputedBlockStyle::default(),
+            0,
+            0,
+        )],
+        200.0,
     );
 }
 
