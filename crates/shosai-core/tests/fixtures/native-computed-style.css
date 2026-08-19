@@ -1,0 +1,113 @@
+@font-face {
+  font-family: "Fixture Serif";
+  src: url("fixture.woff2") format("woff2");
+}
+
+article {
+  font-family: "Fixture Serif", serif;
+  font-size: 125%;
+}
+
+.note {
+  font-size: 1.1em;
+  font-style: normal;
+  margin-left: 2em;
+  text-align: left;
+}
+
+article > p.note {
+  font-size: 1.2em;
+  text-align: right;
+}
+
+#lead {
+  font-weight: bold;
+}
+
+p.note {
+  font-weight: normal !important;
+}
+
+h1 + p.note {
+  white-space: pre-wrap;
+}
+
+h1 ~ p.source-order {
+  font-family: monospace;
+}
+
+.source-order {
+  text-align: left;
+}
+
+.source-order {
+  text-align: center;
+}
+
+.hidden {
+  display: none;
+}
+
+.margin-percent {
+  margin-left: 50%;
+}
+
+.display-contents {
+  display: contents;
+}
+
+.light-weight {
+  font-weight: 100;
+}
+
+.bolder-weight {
+  font-weight: bolder;
+}
+
+.heavy-weight {
+  font-weight: 900;
+}
+
+.lighter-weight {
+  font-weight: lighter;
+}
+
+.match-parent-parent {
+  text-align: start;
+}
+
+.match-parent-child {
+  direction: ltr;
+  text-align: match-parent;
+}
+
+.css-direction {
+  direction: rtl;
+}
+
+@layer fixture {
+  #layer-target {
+    text-align: center;
+  }
+}
+
+.rem-length {
+  font-size: 2rem;
+}
+
+.px-length {
+  font-size: 10px;
+}
+
+.pt-length {
+  font-size: 12pt;
+}
+
+table td.emphasis {
+  font-family: monospace;
+  font-size: 80%;
+}
+
+p:nth-child(2) {
+  text-align: justify;
+}

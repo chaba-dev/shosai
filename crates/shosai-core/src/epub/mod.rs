@@ -12,6 +12,9 @@ mod resource;
 pub mod style;
 mod types;
 
+#[cfg(test)]
+mod computed_style;
+
 pub use parser::EpubDoc;
 pub use resource::{CanonicalEpubPath, EpubReference};
 pub use types::*;
