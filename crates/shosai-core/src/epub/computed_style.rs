@@ -1,0 +1,694 @@
+//! Gate 0 native computed-style spike.
+//!
+//! This is deliberately test-only. It exercises a real cascade over the parsed
+//! XHTML tree without changing the class-only production renderer before the
+//! renderer ADR selects a backend.
+
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+
+use lightningcss::declaration::DeclarationBlock;
+use lightningcss::properties::Property;
+use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, DisplayOutside};
+use lightningcss::properties::font::{
+    AbsoluteFontWeight, FontFamily, FontSize, FontStyle, FontWeight, GenericFontFamily,
+};
+use lightningcss::properties::text::{Direction as CssDirection, TextAlign, WhiteSpace};
+use lightningcss::rules::CssRule;
+use lightningcss::selector::{Combinator, Component, Selector};
+use lightningcss::stylesheet::{ParserOptions, StyleAttribute, StyleSheet};
+use lightningcss::traits::ToCss;
+use lightningcss::values::length::{LengthPercentageOrAuto, LengthValue};
+use lightningcss::values::percentage::DimensionPercentage;
+use roxmltree::Node;
+
+const INITIAL_FONT_SIZE_PX: f32 = 16.0;
+const INLINE_SPECIFICITY: u32 = u32::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Direction {
+    Ltr,
+    Rtl,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Alignment {
+    Start,
+    End,
+    Left,
+    Right,
+    Center,
+    Justify,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DisplayRole {
+    None,
+    Inline,
+    Block,
+    Table,
+    TableRowGroup,
+    TableRow,
+    TableCell,
+    TableCaption,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ComputedStyle {
+    display: DisplayRole,
+    font_size_px: f32,
+    bold: bool,
+    italic: bool,
+    monospace: bool,
+    alignment: Alignment,
+    direction: Direction,
+    preserve_whitespace: bool,
+    margin_left_px: f32,
+}
+
+#[derive(Debug)]
+struct PrototypeReport {
+    element_styles: HashMap<String, ComputedStyle>,
+    font_face_rules: usize,
+    unsupported_selectors: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Priority {
+    important: bool,
+    specificity: u32,
+    source_order: usize,
+}
+
+impl Ord for Priority {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.important, self.specificity, self.source_order).cmp(&(
+            other.important,
+            other.specificity,
+            other.source_order,
+        ))
+    }
+}
+
+impl PartialOrd for Priority {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug)]
+struct Slot<T> {
+    candidate: Option<(Priority, T)>,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Self { candidate: None }
+    }
+}
+
+impl<T> Slot<T> {
+    fn offer(&mut self, priority: Priority, value: T) {
+        if self
+            .candidate
+            .as_ref()
+            .is_none_or(|(current, _)| priority >= *current)
+        {
+            self.candidate = Some((priority, value));
+        }
+    }
+
+    fn value(self) -> Option<T> {
+        self.candidate.map(|(_, value)| value)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RelativeLength {
+    Em(f32),
+    Rem(f32),
+    Px(f32),
+    Percent(f32),
+}
+
+impl RelativeLength {
+    fn resolve(self, parent_font_size: f32, root_font_size: f32) -> f32 {
+        match self {
+            Self::Em(value) => value * parent_font_size,
+            Self::Rem(value) => value * root_font_size,
+            Self::Px(value) => value,
+            Self::Percent(value) => value * parent_font_size,
+        }
+    }
+}
+
+#[derive(Default)]
+struct SpecifiedStyle {
+    display: Slot<DisplayRole>,
+    font_size: Slot<RelativeLength>,
+    bold: Slot<bool>,
+    italic: Slot<bool>,
+    monospace: Slot<bool>,
+    alignment: Slot<Alignment>,
+    direction: Slot<Direction>,
+    preserve_whitespace: Slot<bool>,
+    margin_left: Slot<RelativeLength>,
+}
+
+fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, String> {
+    let document = roxmltree::Document::parse(xhtml).map_err(|error| error.to_string())?;
+    let sheet =
+        StyleSheet::parse(css, ParserOptions::default()).map_err(|error| error.to_string())?;
+    let mut unsupported_selectors = HashSet::new();
+    let mut font_face_rules = 0;
+    inventory_rules(
+        &sheet.rules.0,
+        &mut unsupported_selectors,
+        &mut font_face_rules,
+    );
+
+    let mut element_styles = HashMap::new();
+    walk_element(
+        document.root_element(),
+        None,
+        None,
+        &sheet.rules.0,
+        &mut element_styles,
+    );
+    let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
+    unsupported_selectors.sort();
+
+    Ok(PrototypeReport {
+        element_styles,
+        font_face_rules,
+        unsupported_selectors,
+    })
+}
+
+fn walk_element(
+    element: Node<'_, '_>,
+    parent: Option<&ComputedStyle>,
+    root_font_size: Option<f32>,
+    rules: &[CssRule<'_>],
+    styles: &mut HashMap<String, ComputedStyle>,
+) {
+    let style = compute_element_style(
+        element,
+        parent,
+        root_font_size.unwrap_or(INITIAL_FONT_SIZE_PX),
+        rules,
+    );
+    let root_font_size = root_font_size.unwrap_or(style.font_size_px);
+    if let Some(id) = element.attribute("id") {
+        styles.insert(id.to_string(), style.clone());
+    }
+    for child in element.children().filter(Node::is_element) {
+        walk_element(child, Some(&style), Some(root_font_size), rules, styles);
+    }
+}
+
+fn compute_element_style(
+    element: Node<'_, '_>,
+    parent: Option<&ComputedStyle>,
+    root_font_size: f32,
+    rules: &[CssRule<'_>],
+) -> ComputedStyle {
+    let inherited = parent.cloned().unwrap_or(ComputedStyle {
+        display: DisplayRole::Block,
+        font_size_px: INITIAL_FONT_SIZE_PX,
+        bold: false,
+        italic: false,
+        monospace: false,
+        alignment: Alignment::Start,
+        direction: Direction::Ltr,
+        preserve_whitespace: false,
+        margin_left_px: 0.0,
+    });
+    let tag = element.tag_name().name();
+    let mut style = inherited.clone();
+    style.display = ua_display(tag);
+    style.margin_left_px = 0.0;
+    apply_ua_text_defaults(tag, &mut style);
+    if element.attribute("dir") == Some("rtl") {
+        style.direction = Direction::Rtl;
+    } else if element.attribute("dir") == Some("ltr") {
+        style.direction = Direction::Ltr;
+    }
+
+    let mut specified = SpecifiedStyle::default();
+    let mut source_order = 0;
+    apply_rules(rules, element, &mut specified, &mut source_order);
+    if let Some(inline) = element.attribute("style")
+        && let Ok(attribute) = StyleAttribute::parse(inline, ParserOptions::default())
+    {
+        apply_declarations(
+            &attribute.declarations,
+            INLINE_SPECIFICITY,
+            &mut source_order,
+            &mut specified,
+        );
+    }
+
+    let parent_font_size = parent.map_or(INITIAL_FONT_SIZE_PX, |style| style.font_size_px);
+    if let Some(value) = specified.font_size.value() {
+        style.font_size_px = value.resolve(parent_font_size, root_font_size);
+    }
+    if let Some(value) = specified.display.value() {
+        style.display = value;
+    }
+    if let Some(value) = specified.bold.value() {
+        style.bold = value;
+    }
+    if let Some(value) = specified.italic.value() {
+        style.italic = value;
+    }
+    if let Some(value) = specified.monospace.value() {
+        style.monospace = value;
+    }
+    if let Some(value) = specified.alignment.value() {
+        style.alignment = value;
+    }
+    if let Some(value) = specified.direction.value() {
+        style.direction = value;
+    }
+    if let Some(value) = specified.preserve_whitespace.value() {
+        style.preserve_whitespace = value;
+    }
+    if let Some(value) = specified.margin_left.value() {
+        style.margin_left_px = value.resolve(style.font_size_px, root_font_size);
+    }
+    style
+}
+
+fn apply_rules(
+    rules: &[CssRule<'_>],
+    element: Node<'_, '_>,
+    specified: &mut SpecifiedStyle,
+    source_order: &mut usize,
+) {
+    for rule in rules {
+        if let CssRule::Style(rule) = rule {
+            let specificity = rule
+                .selectors
+                .0
+                .iter()
+                .filter(|selector| {
+                    selector_supported(selector) && selector_matches(selector, element)
+                })
+                .map(Selector::specificity)
+                .max();
+            if let Some(specificity) = specificity {
+                apply_declarations(&rule.declarations, specificity, source_order, specified);
+            }
+        }
+    }
+}
+
+fn apply_declarations(
+    declarations: &DeclarationBlock<'_>,
+    specificity: u32,
+    source_order: &mut usize,
+    specified: &mut SpecifiedStyle,
+) {
+    for (important, properties) in [
+        (false, &declarations.declarations),
+        (true, &declarations.important_declarations),
+    ] {
+        for property in properties {
+            *source_order += 1;
+            let priority = Priority {
+                important,
+                specificity,
+                source_order: *source_order,
+            };
+            apply_property(property, priority, specified);
+        }
+    }
+}
+
+fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut SpecifiedStyle) {
+    match property {
+        Property::Display(display) => specified.display.offer(priority, css_display(display)),
+        Property::FontSize(FontSize::Length(value)) => {
+            if let Some(value) = relative_length(value) {
+                specified.font_size.offer(priority, value);
+            }
+        }
+        Property::FontWeight(weight) => specified.bold.offer(priority, is_bold(weight)),
+        Property::FontStyle(style) => specified.italic.offer(
+            priority,
+            matches!(style, FontStyle::Italic | FontStyle::Oblique(_)),
+        ),
+        Property::FontFamily(families) => specified
+            .monospace
+            .offer(priority, has_monospace_family(families)),
+        Property::TextAlign(alignment) => {
+            specified
+                .alignment
+                .offer(priority, css_alignment(alignment));
+        }
+        Property::Direction(direction) => specified.direction.offer(
+            priority,
+            match direction {
+                CssDirection::Ltr => Direction::Ltr,
+                CssDirection::Rtl => Direction::Rtl,
+            },
+        ),
+        Property::WhiteSpace(white_space) => specified.preserve_whitespace.offer(
+            priority,
+            matches!(
+                white_space,
+                WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
+            ),
+        ),
+        Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            if let Some(value) = relative_length(value) {
+                specified.margin_left.offer(priority, value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn inventory_rules(
+    rules: &[CssRule<'_>],
+    unsupported_selectors: &mut HashSet<String>,
+    font_face_rules: &mut usize,
+) {
+    for rule in rules {
+        match rule {
+            CssRule::Style(rule) => {
+                for selector in &rule.selectors.0 {
+                    if !selector_supported(selector) {
+                        unsupported_selectors.insert(
+                            selector
+                                .to_css_string(Default::default())
+                                .unwrap_or_else(|_| "<unserializable selector>".into()),
+                        );
+                    }
+                }
+            }
+            CssRule::FontFace(_) => *font_face_rules += 1,
+            _ => {}
+        }
+    }
+}
+
+fn selector_supported(selector: &Selector<'_>) -> bool {
+    selector
+        .iter_raw_match_order()
+        .all(|component| match component {
+            Component::Combinator(combinator) => matches!(
+                combinator,
+                Combinator::Child
+                    | Combinator::Descendant
+                    | Combinator::NextSibling
+                    | Combinator::LaterSibling
+            ),
+            Component::ExplicitAnyNamespace
+            | Component::ExplicitUniversalType
+            | Component::LocalName(_)
+            | Component::ID(_)
+            | Component::Class(_)
+            | Component::Root
+            | Component::Empty => true,
+            Component::Negation(selectors)
+            | Component::Where(selectors)
+            | Component::Is(selectors)
+            | Component::Any(_, selectors) => selectors.iter().all(selector_supported),
+            _ => false,
+        })
+}
+
+fn selector_matches(selector: &Selector<'_>, element: Node<'_, '_>) -> bool {
+    selector_matches_from(selector, element, 0)
+}
+
+fn selector_matches_from(selector: &Selector<'_>, element: Node<'_, '_>, offset: usize) -> bool {
+    for (index, component) in selector.iter_raw_match_order().enumerate().skip(offset) {
+        if let Component::Combinator(combinator) = component {
+            let next = index + 1;
+            return match combinator {
+                Combinator::Child => parent_element(element)
+                    .is_some_and(|parent| selector_matches_from(selector, parent, next)),
+                Combinator::Descendant => {
+                    let mut parent = parent_element(element);
+                    while let Some(ancestor) = parent {
+                        if selector_matches_from(selector, ancestor, next) {
+                            return true;
+                        }
+                        parent = parent_element(ancestor);
+                    }
+                    false
+                }
+                Combinator::NextSibling => previous_element(element)
+                    .is_some_and(|sibling| selector_matches_from(selector, sibling, next)),
+                Combinator::LaterSibling => {
+                    let mut sibling = previous_element(element);
+                    while let Some(previous) = sibling {
+                        if selector_matches_from(selector, previous, next) {
+                            return true;
+                        }
+                        sibling = previous_element(previous);
+                    }
+                    false
+                }
+                _ => false,
+            };
+        }
+        if !component_matches(component, element) {
+            return false;
+        }
+    }
+    true
+}
+
+fn component_matches(component: &Component<'_>, element: Node<'_, '_>) -> bool {
+    match component {
+        Component::ExplicitAnyNamespace | Component::ExplicitUniversalType => true,
+        Component::LocalName(name) => name.name.0.as_ref() == element.tag_name().name(),
+        Component::ID(id) => element.attribute("id") == Some(id.0.as_ref()),
+        Component::Class(class) => element.attribute("class").is_some_and(|classes| {
+            classes
+                .split_whitespace()
+                .any(|value| value == class.0.as_ref())
+        }),
+        Component::Root => parent_element(element).is_none(),
+        Component::Empty => !element.children().any(|child| {
+            child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
+        }),
+        Component::Negation(selectors) => selectors
+            .iter()
+            .all(|selector| !selector_matches(selector, element)),
+        Component::Where(selectors) | Component::Is(selectors) | Component::Any(_, selectors) => {
+            selectors
+                .iter()
+                .any(|selector| selector_matches(selector, element))
+        }
+        _ => false,
+    }
+}
+
+fn parent_element<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+    node.parent().and_then(|parent| {
+        if parent.is_element() {
+            Some(parent)
+        } else {
+            None
+        }
+    })
+}
+
+fn previous_element<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+    let mut sibling = node.prev_sibling();
+    while let Some(previous) = sibling {
+        if previous.is_element() {
+            return Some(previous);
+        }
+        sibling = previous.prev_sibling();
+    }
+    None
+}
+
+fn ua_display(tag: &str) -> DisplayRole {
+    match tag {
+        "html" | "body" | "article" | "aside" | "blockquote" | "div" | "figure" | "figcaption"
+        | "footer" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "header" | "main" | "nav" | "ol"
+        | "p" | "pre" | "section" | "ul" => DisplayRole::Block,
+        "table" => DisplayRole::Table,
+        "thead" | "tbody" | "tfoot" => DisplayRole::TableRowGroup,
+        "tr" => DisplayRole::TableRow,
+        "td" | "th" => DisplayRole::TableCell,
+        "caption" => DisplayRole::TableCaption,
+        _ => DisplayRole::Inline,
+    }
+}
+
+fn apply_ua_text_defaults(tag: &str, style: &mut ComputedStyle) {
+    match tag {
+        "h1" => {
+            style.bold = true;
+            style.font_size_px *= 2.0;
+        }
+        "h2" => {
+            style.bold = true;
+            style.font_size_px *= 1.5;
+        }
+        "h3" => {
+            style.bold = true;
+            style.font_size_px *= 1.17;
+        }
+        "h4" | "h5" | "h6" | "strong" | "b" | "th" => style.bold = true,
+        "em" | "i" | "cite" => style.italic = true,
+        "code" | "kbd" | "pre" | "samp" | "tt" => {
+            style.monospace = true;
+            style.preserve_whitespace = tag == "pre";
+        }
+        _ => {}
+    }
+}
+
+fn css_display(display: &Display) -> DisplayRole {
+    match display {
+        Display::Keyword(keyword) => match keyword {
+            DisplayKeyword::None => DisplayRole::None,
+            DisplayKeyword::TableRowGroup
+            | DisplayKeyword::TableHeaderGroup
+            | DisplayKeyword::TableFooterGroup => DisplayRole::TableRowGroup,
+            DisplayKeyword::TableRow => DisplayRole::TableRow,
+            DisplayKeyword::TableCell => DisplayRole::TableCell,
+            DisplayKeyword::TableCaption => DisplayRole::TableCaption,
+            _ => DisplayRole::Inline,
+        },
+        Display::Pair(pair) => {
+            if matches!(pair.inside, DisplayInside::Table) {
+                DisplayRole::Table
+            } else if matches!(pair.outside, DisplayOutside::Block) {
+                DisplayRole::Block
+            } else {
+                DisplayRole::Inline
+            }
+        }
+    }
+}
+
+fn css_alignment(alignment: &TextAlign) -> Alignment {
+    match alignment {
+        TextAlign::Start | TextAlign::MatchParent => Alignment::Start,
+        TextAlign::End => Alignment::End,
+        TextAlign::Left => Alignment::Left,
+        TextAlign::Right => Alignment::Right,
+        TextAlign::Center => Alignment::Center,
+        TextAlign::Justify | TextAlign::JustifyAll => Alignment::Justify,
+    }
+}
+
+fn is_bold(weight: &FontWeight) -> bool {
+    match weight {
+        FontWeight::Absolute(AbsoluteFontWeight::Weight(value)) => *value >= 600.0,
+        FontWeight::Absolute(AbsoluteFontWeight::Bold) | FontWeight::Bolder => true,
+        _ => false,
+    }
+}
+
+fn has_monospace_family(families: &[FontFamily]) -> bool {
+    families.iter().any(|family| match family {
+        FontFamily::Generic(family) => matches!(
+            family,
+            GenericFontFamily::Monospace | GenericFontFamily::UIMonospace
+        ),
+        FontFamily::FamilyName(name) => name
+            .to_css_string(Default::default())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains("mono"),
+    })
+}
+
+fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
+    match value {
+        DimensionPercentage::Percentage(value) => Some(RelativeLength::Percent(value.0)),
+        DimensionPercentage::Dimension(LengthValue::Em(value)) => Some(RelativeLength::Em(*value)),
+        DimensionPercentage::Dimension(LengthValue::Rem(value)) => {
+            Some(RelativeLength::Rem(*value))
+        }
+        DimensionPercentage::Dimension(LengthValue::Px(value)) => Some(RelativeLength::Px(*value)),
+        DimensionPercentage::Dimension(LengthValue::Pt(value)) => {
+            Some(RelativeLength::Px(*value * 96.0 / 72.0))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const XHTML: &str = include_str!("../../tests/fixtures/native-computed-style.xhtml");
+    const CSS: &str = include_str!("../../tests/fixtures/native-computed-style.css");
+
+    fn report() -> PrototypeReport {
+        compute_document_styles(XHTML, CSS).expect("computed-style fixture should parse")
+    }
+
+    #[test]
+    fn cascade_respects_specificity_importance_inline_style_and_source_order() {
+        let report = report();
+        let lead = &report.element_styles["lead"];
+        assert!(!lead.bold, "author !important must beat an ID selector");
+        assert!(lead.italic, "inline style must beat an author class rule");
+        assert_eq!(lead.alignment, Alignment::Right);
+        assert!((lead.font_size_px - 24.0).abs() < 0.01);
+        assert!((lead.margin_left_px - 48.0).abs() < 0.01);
+        assert!(
+            lead.preserve_whitespace,
+            "adjacent sibling selector must match"
+        );
+
+        assert_eq!(
+            report.element_styles["source-order"].alignment,
+            Alignment::Center,
+            "later equal-specificity declarations must win"
+        );
+        assert!(
+            report.element_styles["source-order"].monospace,
+            "general sibling selector must match"
+        );
+        assert_eq!(report.element_styles["hidden"].display, DisplayRole::None);
+        assert!((report.element_styles["rem-length"].font_size_px - 32.0).abs() < 0.01);
+        assert!((report.element_styles["px-length"].font_size_px - 10.0).abs() < 0.01);
+        assert!((report.element_styles["pt-length"].font_size_px - 16.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inherited_and_ua_styles_preserve_table_math_font_and_bidi_evidence() {
+        let report = report();
+        let mixed = &report.element_styles["mixed"];
+        assert_eq!(mixed.direction, Direction::Rtl);
+        assert!(mixed.italic);
+        assert!((mixed.font_size_px - 24.0).abs() < 0.01);
+
+        let title = &report.element_styles["title"];
+        assert!(title.bold);
+        assert!((title.font_size_px - 40.0).abs() < 0.01);
+        assert_eq!(report.element_styles["table"].display, DisplayRole::Table);
+        assert_eq!(report.element_styles["row"].display, DisplayRole::TableRow);
+        assert_eq!(
+            report.element_styles["heading"].display,
+            DisplayRole::TableCell
+        );
+        assert!(report.element_styles["heading"].bold);
+        assert!(report.element_styles["cell"].monospace);
+        assert_eq!(
+            report.element_styles["equation"].display,
+            DisplayRole::Inline
+        );
+    }
+
+    #[test]
+    fn inventory_keeps_unsupported_selector_and_font_work_visible() {
+        let report = report();
+        assert_eq!(report.font_face_rules, 1);
+        assert_eq!(report.unsupported_selectors, ["p:first-child"]);
+    }
+}

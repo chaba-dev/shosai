@@ -1,0 +1,71 @@
+@font-face {
+  font-family: "Fixture Serif";
+  src: url("fixture.woff2") format("woff2");
+}
+
+article {
+  direction: rtl;
+  font-family: "Fixture Serif", serif;
+  font-size: 125%;
+}
+
+.note {
+  font-size: 1.1em;
+  font-style: normal;
+  margin-left: 2em;
+  text-align: left;
+}
+
+article > p.note {
+  font-size: 1.2em;
+  text-align: right;
+}
+
+#lead {
+  font-weight: bold;
+}
+
+p.note {
+  font-weight: normal !important;
+}
+
+h1 + p.note {
+  white-space: pre-wrap;
+}
+
+h1 ~ p.source-order {
+  font-family: monospace;
+}
+
+.source-order {
+  text-align: left;
+}
+
+.source-order {
+  text-align: center;
+}
+
+.hidden {
+  display: none;
+}
+
+.rem-length {
+  font-size: 2rem;
+}
+
+.px-length {
+  font-size: 10px;
+}
+
+.pt-length {
+  font-size: 12pt;
+}
+
+table td.emphasis {
+  font-family: monospace;
+  font-size: 80%;
+}
+
+p:first-child {
+  text-align: justify;
+}
