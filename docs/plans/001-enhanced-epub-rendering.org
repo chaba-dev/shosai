@@ -113,8 +113,14 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** Spike B — Native renderer
 
-- [ ] Prototype a real computed-style boundary: parsed DOM, selector matching,
+- [X] Prototype a real computed-style boundary: parsed DOM, selector matching,
   specificity/source order, inheritance, UA defaults, and resolved lengths.
+  The test-only ~native-computed-style~ fixture proves the bounded cascade before
+  production ~ContentNode~ lowering without changing the current renderer.  ADR
+  001 records supported selector/value semantics, the private
+  ~lightningcss~/~parcel_selectors~ matcher boundary, licenses, and the remaining
+  production selector, shaping, layout, font, accessibility, pagination, and
+  MathML work.
 - [ ] Evaluate a maintained text shaper behind measurement/shaping interfaces;
   list separately the required block, inline, table, image, pagination,
   font-face, selection/accessibility, and MathML components.

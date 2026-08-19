@@ -168,14 +168,14 @@ Scores remain unset until the same fixture and measurement protocol is used.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Unknown                                                         | Combined fixture on every target                       |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade prototype passes semantic CSS assertions; table roles are retained, but table layout, font loading, shaping, and MathML rendering remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
 | Packaging cost             | WebKitGTK added on Linux                                                                                      | Dependency set not selected                                     | Binary/runtime/package smoke tests                     |
-| Maintenance cost           | Browser integration and platform variance                                                                     | CSS/layout implementation scope                                 | Native component/dependency prototype                  |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade boundary is feasible, but a production matcher plus block/inline/table/font/MathML layout remains substantial | Native shaping/layout/math dependency prototypes       |
 
 ## Fixture and measurement matrix
 
@@ -207,6 +207,43 @@ tables is evidence for `nested-image` and `table`, but is not redistributable an
 must not be checked in. The generated cases reproduce those structures without
 copying its content.
 
+## Native computed-style spike
+
+The test-only native spike parses the redistribution-safe
+`native-computed-style.xhtml` and CSS fixture with the existing `roxmltree` and
+`lightningcss` dependencies. It computes styles before `ContentNode` lowering
+without changing the class-only production renderer. Semantic tests prove:
+
+- type, class, ID, compound, child, descendant, adjacent-sibling, and
+  general-sibling matching, plus selector specificity and source order;
+- author `!important` ordering, inline style precedence, inherited text
+  properties, `dir`/CSS direction, and UA defaults for headings, code, and
+  table display roles;
+- `em`, `rem`, `px`, `pt`, and font-percentage resolution, including margins
+  resolved against the element's computed font size;
+- preservation of table, MathML, mixed Arabic/Latin/Japanese text, and one
+  `@font-face` rule in the parsed inputs. This is structural evidence only: it
+  does not shape mixed-script text, load the font, lay out table cells, or
+  render MathML.
+
+The prototype deliberately reports unsupported selectors rather than applying
+them approximately; the fixture records `:first-child` as unsupported.
+Attribute/nth/dynamic pseudo-class, namespace, nesting, media-query, and full
+property/value handling also remain outside this bounded matcher.
+
+Dependency inspection found that `lightningcss` exposes its parsed selector AST
+but keeps its `parcel_selectors::SelectorImpl` private, so the generic
+`parcel_selectors` matcher cannot be connected directly to `roxmltree`.
+Production would need either a separately parsed public `parcel_selectors`
+implementation, a maintained DOM/CSS engine, or an explicitly bounded custom
+matcher. `lightningcss` and `parcel_selectors` are MPL-2.0; `roxmltree` is
+MIT/Apache-2.0. The repository already receives MIT/Apache-2.0 `cosmic-text`
+transitively through Iced, but it supplies shaping rather than CSS, block/table
+layout, pagination, selection/accessibility, or MathML. No current dependency
+fills those remaining layers, so the native route remains a high and potentially
+unbounded implementation/maintenance commitment until follow-up prototypes
+identify acceptable maintained components.
+
 ## Native performance baseline
 
 The dated
@@ -219,14 +256,16 @@ cost.
 ## Next spike steps
 
 1. Exercise scale changes, invalid-bounds visibility, overlays, tabs, focus,
-   IME, accessibility behavior, and ordinary close teardown on macOS.
+   IME, and accessibility behavior on macOS. Ordinary close teardown is already
+   proven separately.
 2. Run the same child and hostile-content spikes on Windows and Linux arm64,
    and complete interactive Linux/X11 input/accessibility checks. Decide whether
    lack of a viable Wayland host rejects Wry or justifies a documented backend
    fallback.
-3. Build the native computed-style boundary for the same table/font/MathML/RTL
-   fixture, inventory maintained permissive selector/layout/math dependencies,
-   and estimate unsupported work explicitly.
+3. Extend the native computed-style evidence with maintained shaping,
+   block/inline/table layout, font loading, selection/accessibility, pagination,
+   and MathML component prototypes, then render the same fixture. Treat the
+   bounded selector matcher as evidence, not a production implementation.
 4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 
