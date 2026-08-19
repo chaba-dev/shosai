@@ -32,6 +32,8 @@ SHOSAI_WRY_SPIKE_OVERLAY_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_BOUNDS_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_SCALE_PROOF=1 SHOSAI_WRY_SPIKE_SCALE_TARGET=-1800,100 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
@@ -94,6 +96,18 @@ It currently proves on macOS arm64 that:
   newly measured logical bounds.  It verifies the replacement's reported size
   and fails on stale generations, stale measurement epochs, failed calls,
   missing children, close, or timeout;
+- the automated macOS scale mode queries the initial Iced window scale, moves
+  the parent to explicitly configured desktop coordinates, requires a changed
+  `Rescaled` event and a matching scale query, then requires a fresh Iced
+  placeholder measurement before updating the current-generation child and
+  re-queries the scale before accepting success.
+  On the 2026-08-19 macOS arm64 host, moving from the main 2× display to the
+  display at `-1800,100` produced a 2→1 transition; Iced remeasured the same
+  900×588 logical placeholder and Wry accepted those logical bounds and
+  reported the same logical child size. The proof rejects unchanged or
+  unconfirmed scale values, stale generations and measurement epochs,
+  unusable bounds, premature shared synchronization, failed Wry calls, missing
+  children, close, and timeout;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -111,16 +125,19 @@ book resources are served with their exact manifest media types, including
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
-The focus and visibility results prove only that Wry's methods returned `Ok`;
-the reported replacement size proves only its logical size, not placement or
-visual restoration, and the visual observation
+The focus, visibility, and scale-bound updates prove only that Wry's methods
+returned `Ok`; queried scale factors and reported child sizes prove only the
+observed window scale and logical geometry, not backing-pixel placement or
+visual correctness. The reported replacement size proves only its logical
+size, not placement or visual restoration, and the visual observation
 proves the uncoordinated z-order failure.  They do not prove a visually correct
 restored frame after modal dismissal. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. They do
 not prove that focus changed, keyboard/IME events route correctly, or that the
-restored visual result matches Iced composition. The harness remeasures on
-scale-factor events, but that path is not yet exercised evidence and remains
-open alongside clipping, real tab switching, IME, and accessibility tests.
+restored visual result matches Iced composition. The scale proof exercises one
+real 2→1 display transition, but does not establish correct physical-pixel
+rendering across all display arrangements. Clipping, real tab switching, IME,
+and accessibility tests remain open.
 Ordinary close cleanup is
 exercised separately on macOS: with Iced's automatic close exit disabled, UI
 automation clicked the native close button and the handler recorded that it
@@ -201,7 +218,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade and `cosmic-text` shaping prototypes pass semantic assertions; table layout, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
-| Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
+| Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, one 2→1 display-scale transition, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, physical-pixel correctness, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
@@ -335,9 +352,10 @@ cost.
 
 ## Next spike steps
 
-1. Exercise scale changes, invalid-bounds visibility, overlays, tabs, focus,
-   IME, and accessibility behavior on macOS. Ordinary close teardown is already
-   proven separately.
+1. Exercise broader display arrangements and physical-pixel behavior, tabs,
+   focus, IME, and accessibility behavior on macOS. Logical bounds across one
+   2→1 scale change, invalid-bounds visibility, overlays, and ordinary close
+   teardown are already proven separately.
 2. Run the same child and hostile-content spikes on Windows and Linux arm64,
    and complete interactive Linux/X11 input/accessibility checks. Decide whether
    lack of a viable Wayland host rejects Wry or justifies a documented backend

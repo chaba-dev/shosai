@@ -114,7 +114,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   A second macOS proof collapses the placeholder until no usable bounds are
   reported, requires the current generation's Wry hide call to return ~Ok~,
   drops that child, restores the placeholder, and compares the replacement
-  generation's Wry-reported logical size with the new measurement.
+  generation's Wry-reported logical size with the new measurement.  A third
+  macOS proof moves the real parent from a 2× display to a 1× display, requires
+  the changed Iced scale event to match scale queries before and after the
+  bounds update, obtains a fresh Iced measurement, and compares the current Wry
+  generation's reported logical size after applying those bounds.  This is
+  logical-geometry evidence from one real display transition, not proof of
+  visual or backing-pixel correctness.
   Focus is only a successful Wry method return, not proof of actual focus,
   visually correct restoration, or keyboard/IME routing; the cross-platform,
   accessibility, real-tab, routing, and logical-location portions remain open.
