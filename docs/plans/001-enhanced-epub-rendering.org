@@ -145,11 +145,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   surrounding Iced control remains absent.  This is a Gate 0 blocker, not
   positive end-to-end accessibility evidence.
   The Linux/X11 input diagnostic now retains early DOM-focus evidence and
-  proves exact text entry in the child.  Wry selected the Iced parent XID on a
-  live XWayland session; under Xvfb, a direct Xlib fallback selected and
-  synchronously rechecked it.  Neither path delivered a subsequent synthetic
-  key to Iced without an explicit pointer click in the Iced-only header, so the
-  click control is not accepted as a successful child-to-parent handoff.
+  proves exact text entry and synchronous positive DOM-blur evidence in the
+  child.  Wry selected the Iced parent XID on a live XWayland session; under
+  Xvfb, a direct Xlib fallback selected and synchronously rechecked it.  Neither
+  path delivered a subsequent synthetic key to Iced without an explicit pointer
+  click in the Iced-only header.  The harness now tracks mouse/touch activation
+  throughout parent handoff and rejects a following key, so the click control
+  exits nonzero instead of being mistaken for a successful handoff.
   Shortcut conflicts, Linux parent activation, clipboard, IME, visually correct
   restoration, a viable Iced accessibility tree, screen-reader interaction,
   production-tab integration, production cross-chapter, and arbitrary

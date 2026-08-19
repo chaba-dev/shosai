@@ -223,20 +223,23 @@ child before winit's cleanup operations; without those cases, the lifecycle
 runs panic during resize or teardown.
 
 The Linux input mode now accepts the same host-owned fixture and state machine
-as macOS. It retains an early DOM-focus event until the asynchronous Wry focus
-callback completes, requires ordered focus/keydown/exact-value IPC, blurs the
-trusted DOM input before returning to Iced, waits for queued child events, and
-checks the X input-focus window against Iced's raw Xlib parent. On the live
+as macOS. It retains early DOM-focus, keydown, exact-input, and confirmed-blur
+evidence until the asynchronous Wry focus callback completes. The trusted
+fixture synchronously blurs its input when the exact token arrives, verifies
+that `document.activeElement` changed, and reports positive blur evidence before
+the host may return focus to Iced. The host then waits for queued child events
+and checks the X input-focus window against Iced's raw Xlib parent. On the live
 XWayland session, Wry selected that parent XID without the direct Xlib fallback;
 under Xvfb it did not, so the harness set and synchronously rechecked the Iced
 XID directly. In both environments, an untargeted synthetic post-handoff key
-did not produce an Iced keyboard event. The Xvfb control passed only after an
-explicit pointer click in the Iced-only header, after which the same synthetic
-key was observed by Iced. This proves child focus and exact text entry, exposes
-a focus-order race in the shared harness, and shows that merely returning `Ok`
-or selecting the top-level XID is insufficient evidence of seamless Linux
-child-to-parent keyboard routing. The control is not accepted as a successful
-Wry handoff because the pointer click supplied an additional activation step.
+did not produce an Iced keyboard event. The initial Xvfb control produced an
+Iced key only after an explicit pointer click in the Iced-only header. The
+harness now observes mouse/touch presses throughout parent handoff and rejects
+a subsequent key as pointer-assisted; rerunning that control exits nonzero
+rather than printing a successful handoff. This proves child focus and exact
+text entry, closes two focus-evidence ordering races, and shows that merely
+returning `Ok` or selecting the top-level XID is insufficient evidence of
+seamless Linux child-to-parent keyboard routing.
 These Linux runs therefore prove X11 child lifecycle, resource policy, and
 child keyboard input, but not parent focus restoration, shortcuts, IME,
 accessibility, visual fidelity, hardware scaling, Linux arm64, or native
