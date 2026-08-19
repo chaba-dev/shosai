@@ -217,19 +217,25 @@ without changing the class-only production renderer. Semantic tests prove:
 - type, class, ID, compound, child, descendant, adjacent-sibling, and
   general-sibling matching, plus selector specificity and source order;
 - author `!important` ordering, inline style precedence, inherited text
-  properties, `dir`/CSS direction, and UA defaults for headings, code, and
-  table display roles;
+  properties, independently exercised `dir` and CSS direction, and UA defaults
+  for headings, code, captions, row groups, rows, and table cells;
 - `em`, `rem`, `px`, `pt`, and font-percentage resolution, including margins
   resolved against the element's computed font size;
-- preservation of table, MathML, mixed Arabic/Latin/Japanese text, and one
-  `@font-face` rule in the parsed inputs. This is structural evidence only: it
-  does not shape mixed-script text, load the font, lay out table cells, or
-  render MathML.
+- preservation of table, namespaced MathML fraction/identifier structure,
+  mixed Arabic/Latin/Japanese text, and one `@font-face` rule in the parsed
+  inputs. This is structural evidence only: it does not shape mixed-script
+  text, load the font, lay out table cells, or render MathML.
 
-The prototype deliberately reports unsupported selectors rather than applying
-them approximately; the fixture records `:first-child` as unsupported.
-Attribute/nth/dynamic pseudo-class, namespace, nesting, media-query, and full
-property/value handling also remain outside this bounded matcher.
+The prototype deliberately reports unsupported selectors, rule kinds, and
+property/value pairs rather than applying them approximately. The fixture
+proves that a matching `:nth-child` selector and declarations inside `@layer`
+are withheld and reported. Percentage margins remain unresolved until layout
+provides a containing-block width; relative `bolder`/`lighter` weights and
+unrepresented `display` values are likewise reported and inherited/default
+values remain intact. `text-align: match-parent` is resolved from the parent's
+alignment and direction. Attribute/nth/dynamic pseudo-class, namespace,
+nesting, conditional-rule evaluation, and full property/value handling remain
+outside this bounded matcher.
 
 Dependency inspection found that `lightningcss` exposes its parsed selector AST
 but keeps its `parcel_selectors::SelectorImpl` private, so the generic
