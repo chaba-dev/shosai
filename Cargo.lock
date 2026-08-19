@@ -5069,6 +5069,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "open",
  "rfd",
+ "roxmltree 0.21.1",
  "shosai-core",
  "sys-locale",
  "taffy",
@@ -5716,6 +5717,7 @@ dependencies = [
  "arrayvec",
  "serde",
  "slotmap",
+ "smallvec",
 ]
 
 [[package]]
