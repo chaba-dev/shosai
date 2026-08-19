@@ -27,6 +27,8 @@ use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
 use wry::raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, WindowHandle};
+#[cfg(target_os = "linux")]
+use wry::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 const HEADER_HEIGHT: f32 = 112.0;
@@ -305,13 +307,17 @@ enum InputProof {
     Disabled,
     WaitingForCreation,
     WaitingForReady,
-    FocusingChild,
+    FocusingChild {
+        focused: bool,
+        keydown: bool,
+    },
     WaitingForChildInput {
         focused: bool,
         keydown: bool,
     },
     FocusingParent,
     SettlingParent,
+    FocusingSettledParent,
     WaitingForParentKey {
         revision_cutoff: u64,
     },
@@ -786,16 +792,24 @@ fn require_accessibility_tree(snapshot: AccessibilitySnapshot) -> Result<(), Str
 impl InputProof {
     fn observe_ipc(&mut self, message: &str) -> InputAction {
         if *self == Self::WaitingForReady && message == "ready" {
-            *self = Self::FocusingChild;
+            *self = Self::FocusingChild {
+                focused: false,
+                keydown: false,
+            };
             return InputAction::FocusChild;
         }
-        let Self::WaitingForChildInput { focused, keydown } = self else {
-            return InputAction::None;
+        let (focused, keydown, waiting_for_input) = match self {
+            Self::FocusingChild { focused, keydown } => (focused, keydown, false),
+            Self::WaitingForChildInput { focused, keydown } => (focused, keydown, true),
+            _ => return InputAction::None,
         };
         match message {
             "focus" => *focused = true,
             "keydown" => *keydown = true,
             _ => {}
+        }
+        if !waiting_for_input {
+            return InputAction::None;
         }
         if message == format!("input:{INPUT_PROOF_TOKEN}") && *focused && *keydown {
             *self = Self::FocusingParent;
@@ -805,13 +819,13 @@ impl InputProof {
     }
 
     fn child_focused(&mut self, succeeded: bool) -> bool {
-        if *self != Self::FocusingChild || !succeeded {
+        let Self::FocusingChild { focused, keydown } = *self else {
+            return false;
+        };
+        if !succeeded {
             return false;
         }
-        *self = Self::WaitingForChildInput {
-            focused: false,
-            keydown: false,
-        };
+        *self = Self::WaitingForChildInput { focused, keydown };
         true
     }
 
@@ -823,8 +837,16 @@ impl InputProof {
         true
     }
 
-    fn begin_parent_key_wait(&mut self, revision_cutoff: u64) -> bool {
+    fn begin_settled_parent_focus(&mut self) -> bool {
         if *self != Self::SettlingParent {
+            return false;
+        }
+        *self = Self::FocusingSettledParent;
+        true
+    }
+
+    fn settled_parent_focused(&mut self, revision_cutoff: u64, succeeded: bool) -> bool {
+        if *self != Self::FocusingSettledParent || !succeeded {
             return false;
         }
         *self = Self::WaitingForParentKey { revision_cutoff };
@@ -1634,6 +1656,7 @@ enum Message {
     },
     InputChildFocused(Result<(), String>),
     InputParentFocused(Result<(), String>),
+    InputSettledParentFocused(Result<(), String>),
     TabChildHidden {
         generation: u64,
         result: Result<(), String>,
@@ -1679,9 +1702,11 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
-    if let Err(error) =
-        validate_input_proof_platform(input_proof_env_requested(), cfg!(target_os = "macos"))
-    {
+    if let Err(error) = validate_input_proof_platform(
+        input_proof_env_requested(),
+        cfg!(target_os = "macos"),
+        cfg!(target_os = "linux"),
+    ) {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
@@ -2606,6 +2631,22 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("failed to restore parent focus: {error}")),
             ),
         },
+        Message::InputSettledParentFocused(result) => match result {
+            Ok(())
+                if state
+                    .input_proof
+                    .settled_parent_focused(INPUT_KEY_REVISION.load(Ordering::Acquire), true) =>
+            {
+                eprintln!("wry-spike-input-proof phase=waiting-for-parent-key");
+                state.status = "parent focused; press any new key to prove Iced routing".into();
+                Task::none()
+            }
+            Ok(()) => Task::none(),
+            Err(error) => finish_keyboard_input_proof(
+                state,
+                Err(format!("failed to confirm settled parent focus: {error}")),
+            ),
+        },
         Message::IcedKeyPressed { revision, repeat }
             if state.input_proof.observe_parent_key(revision, repeat) =>
         {
@@ -2708,13 +2749,18 @@ fn update_keyboard_input(state: &mut State, now: Instant) -> Task<Message> {
     if state
         .input_parent_settle_deadline
         .is_some_and(|deadline| now >= deadline)
-        && state
-            .input_proof
-            .begin_parent_key_wait(INPUT_KEY_REVISION.load(Ordering::Acquire))
+        && state.input_proof.begin_settled_parent_focus()
     {
-        eprintln!("wry-spike-input-proof phase=waiting-for-parent-key");
         state.input_parent_settle_deadline = None;
-        state.status = "parent focused; press any new key to prove Iced routing".into();
+        let Some(id) = state.window else {
+            return finish_keyboard_input_proof(
+                state,
+                Err("parent window is not available after focus settlement".into()),
+            );
+        };
+        state.status = "confirming parent focus after queued child events".into();
+        return window::run(id, |window| reassert_webview_parent_focus(window))
+            .map(Message::InputSettledParentFocused);
     }
     let events = std::mem::take(&mut *INPUT_PROOF_EVENTS.lock().unwrap());
     for event in events {
@@ -3408,12 +3454,103 @@ fn focus_webview_parent(
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+fn focus_webview_parent(
+    parent: &(impl HasWindowHandle + HasDisplayHandle + ?Sized),
+    webview: Option<&WebView>,
+) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    webview
+        .evaluate_script("document.getElementById('proof-input').blur()")
+        .map_err(|error| error.to_string())?;
+    webview.focus_parent().map_err(|error| error.to_string())?;
+
+    let (wry_selected_parent, direct_attempted) = focus_x11_parent(parent)?;
+    eprintln!(
+        "wry-spike-input-proof phase=parent-responder wry_selected={wry_selected_parent} direct_attempted={direct_attempted} selected=true"
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn reassert_webview_parent_focus(
+    parent: &(impl HasWindowHandle + HasDisplayHandle + ?Sized),
+) -> Result<(), String> {
+    let (already_selected, direct_attempted) = focus_x11_parent(parent)?;
+    eprintln!(
+        "wry-spike-input-proof phase=settled-parent-responder already_selected={already_selected} direct_attempted={direct_attempted} selected=true"
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn focus_x11_parent(
+    parent: &(impl HasWindowHandle + HasDisplayHandle + ?Sized),
+) -> Result<(bool, bool), String> {
+    let raw_window = parent
+        .window_handle()
+        .map_err(|error| error.to_string())?
+        .as_raw();
+    let RawWindowHandle::Xlib(window) = raw_window else {
+        return Err(format!("expected Xlib parent, got {raw_window:?}"));
+    };
+    let raw_display = parent
+        .display_handle()
+        .map_err(|error| error.to_string())?
+        .as_raw();
+    let RawDisplayHandle::Xlib(display) = raw_display else {
+        return Err(format!("expected Xlib display, got {raw_display:?}"));
+    };
+    let display = display
+        .display
+        .ok_or_else(|| "Iced Xlib display handle has no Display pointer".to_string())?
+        .as_ptr()
+        .cast::<x11_dl::xlib::Display>();
+    let xlib = x11_dl::xlib::Xlib::open().map_err(|error| error.to_string())?;
+    let mut focused = 0;
+    let mut revert_to = 0;
+    // SAFETY: The display and window are borrowed from the live Iced parent
+    // for this callback. XSync completes the focus request before inspection.
+    unsafe {
+        (xlib.XGetInputFocus)(display, &mut focused, &mut revert_to);
+    }
+    let already_selected = focused == window.window;
+    let direct_attempted = !already_selected;
+    if direct_attempted {
+        // SAFETY: The same live Xlib display and Iced parent window are used
+        // synchronously and are not retained after this callback.
+        unsafe {
+            (xlib.XSetInputFocus)(
+                display,
+                window.window,
+                x11_dl::xlib::RevertToParent,
+                x11_dl::xlib::CurrentTime,
+            );
+            (xlib.XSync)(display, 0);
+            (xlib.XGetInputFocus)(display, &mut focused, &mut revert_to);
+        }
+    }
+    let selected_parent = focused == window.window;
+    if !selected_parent {
+        return Err(format!(
+            "X11 rejected Iced parent focus handoff: already_selected={already_selected}, direct_attempted={direct_attempted}, focused={focused}, expected={}",
+            window.window
+        ));
+    }
+    Ok((already_selected, direct_attempted))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn focus_webview_parent(
     _parent: &(impl HasWindowHandle + ?Sized),
     _webview: Option<&WebView>,
 ) -> Result<(), String> {
-    Err("direct parent responder handoff is only supported on macOS".into())
+    Err("direct parent responder handoff is only supported on macOS and Linux/X11".into())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reassert_webview_parent_focus(_parent: &(impl HasWindowHandle + ?Sized)) -> Result<(), String> {
+    Ok(())
 }
 
 fn finish_input_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
@@ -4572,7 +4709,7 @@ fn input_proof_env_requested() -> bool {
 }
 
 fn input_proof_requested() -> bool {
-    cfg!(target_os = "macos") && input_proof_env_requested()
+    cfg!(any(target_os = "macos", target_os = "linux")) && input_proof_env_requested()
 }
 
 fn tab_proof_env_requested() -> bool {
@@ -4606,9 +4743,13 @@ fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), 
     Ok(())
 }
 
-fn validate_input_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
-    if requested && !is_macos {
-        return Err("SHOSAI_WRY_SPIKE_INPUT_PROOF is only supported on macOS".into());
+fn validate_input_proof_platform(
+    requested: bool,
+    is_macos: bool,
+    is_linux: bool,
+) -> Result<(), String> {
+    if requested && !is_macos && !is_linux {
+        return Err("SHOSAI_WRY_SPIKE_INPUT_PROOF is only supported on macOS and Linux/X11".into());
     }
     Ok(())
 }
@@ -5476,13 +5617,14 @@ mod tests {
     }
 
     #[test]
-    fn input_proof_request_is_rejected_on_unsupported_platforms() {
-        assert_eq!(validate_input_proof_platform(false, false), Ok(()));
-        assert_eq!(validate_input_proof_platform(true, true), Ok(()));
+    fn input_proof_request_accepts_macos_and_linux_only() {
+        assert_eq!(validate_input_proof_platform(false, false, false), Ok(()));
+        assert_eq!(validate_input_proof_platform(true, true, false), Ok(()));
+        assert_eq!(validate_input_proof_platform(true, false, true), Ok(()));
         assert!(
-            validate_input_proof_platform(true, false)
+            validate_input_proof_platform(true, false, false)
                 .unwrap_err()
-                .contains("only supported on macOS")
+                .contains("only supported on macOS and Linux/X11")
         );
     }
 
@@ -5598,6 +5740,7 @@ mod tests {
 
         assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
         assert_eq!(proof.observe_ipc("ready"), InputAction::FocusChild);
+        assert_eq!(proof.observe_ipc("focus"), InputAction::None);
         assert!(!proof.child_focused(false));
         assert!(proof.child_focused(true));
         assert_eq!(
@@ -5613,7 +5756,9 @@ mod tests {
         assert!(!proof.observe_parent_key(1, false));
         assert!(proof.parent_focused(true));
         assert!(!proof.observe_parent_key(2, false));
-        assert!(proof.begin_parent_key_wait(2));
+        assert!(proof.begin_settled_parent_focus());
+        assert!(!proof.settled_parent_focused(2, false));
+        assert!(proof.settled_parent_focused(2, true));
         assert!(proof.observe_parent_key(3, false));
         assert_eq!(proof, InputProof::ParentKeyObserved);
     }
@@ -5622,7 +5767,8 @@ mod tests {
     fn input_proof_rejects_stale_and_repeated_parent_keys() {
         let mut proof = InputProof::SettlingParent;
 
-        assert!(proof.begin_parent_key_wait(8));
+        assert!(proof.begin_settled_parent_focus());
+        assert!(proof.settled_parent_focused(8, true));
         assert!(!proof.observe_parent_key(7, false));
         assert!(!proof.observe_parent_key(8, false));
         assert!(!proof.observe_parent_key(9, true));
@@ -5988,7 +6134,13 @@ mod tests {
 
         drop(update_keyboard_input(&mut state, Instant::now()));
 
-        assert_eq!(state.input_proof, InputProof::FocusingChild);
+        assert_eq!(
+            state.input_proof,
+            InputProof::FocusingChild {
+                focused: false,
+                keydown: false,
+            }
+        );
     }
 
     #[test]
