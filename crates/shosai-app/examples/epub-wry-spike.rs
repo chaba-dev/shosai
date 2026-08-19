@@ -749,6 +749,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::WindowEvent(_, _) => Task::none(),
+        Message::PlaceholderMeasured { .. } if state.bounds_proof == BoundsProof::Complete => {
+            Task::none()
+        }
         Message::PlaceholderMeasured { epoch, bounds } => {
             state.measured_bounds = bounds.and_then(usable_bounds);
             if bounds_proof_requested()
@@ -863,12 +866,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         },
         Message::WebViewSynchronized { bounds, result } => {
-            if bounds_proof_requested()
-                && !matches!(
-                    state.bounds_proof,
-                    BoundsProof::Disabled | BoundsProof::WaitingForCreation | BoundsProof::Complete
-                )
-            {
+            if !matches!(
+                state.bounds_proof,
+                BoundsProof::Disabled | BoundsProof::Complete
+            ) {
                 return finish_bounds_proof(
                     state,
                     Err("unexpected webview synchronization during bounds proof".into()),
@@ -1142,6 +1143,10 @@ fn finish_bounds_proof(state: &mut State, result: Result<(), String>) -> Task<Me
         return Task::none();
     }
     state.placeholder_collapsed = false;
+    state.webview_ready = false;
+    state.measured_bounds = None;
+    state.creation_bounds = None;
+    state.applied_bounds = None;
     state.webview_generation = state.webview_generation.wrapping_add(1);
     teardown_webview();
     if result.is_ok() {
@@ -2464,6 +2469,81 @@ mod tests {
 
         assert!(!state.webview_ready);
         assert_eq!(state.creation_bounds, Some(bounds));
+    }
+
+    #[test]
+    fn completed_bounds_proof_ignores_late_placeholder_measurement() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            bounds_proof: BoundsProof::Complete,
+            ..State::default()
+        };
+
+        drop(update(
+            &mut state,
+            Message::PlaceholderMeasured {
+                epoch: 2,
+                bounds: Some(bounds),
+            },
+        ));
+
+        assert_eq!(state.measured_bounds, None);
+        assert_eq!(state.creation_bounds, None);
+        assert!(!state.webview_ready);
+    }
+
+    #[test]
+    fn terminal_bounds_proof_clears_native_geometry_state() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let mut state = State {
+            bounds_proof: BoundsProof::WaitingForInvalid {
+                epoch: 1,
+                generation: 1,
+            },
+            measured_bounds: Some(bounds),
+            creation_bounds: Some(bounds),
+            applied_bounds: Some(bounds),
+            webview_ready: true,
+            ..State::default()
+        };
+        BOUNDS_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(finish_bounds_proof(
+            &mut state,
+            Err("simulated failure".into()),
+        ));
+
+        assert!(!state.webview_ready);
+        assert_eq!(state.measured_bounds, None);
+        assert_eq!(state.creation_bounds, None);
+        assert_eq!(state.applied_bounds, None);
+    }
+
+    #[test]
+    fn bounds_proof_rejects_synchronization_while_waiting_for_creation() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let mut state = State {
+            bounds_proof: BoundsProof::WaitingForCreation,
+            ..State::default()
+        };
+        BOUNDS_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update(
+            &mut state,
+            Message::WebViewSynchronized {
+                bounds: Some(bounds),
+                result: Ok(()),
+            },
+        ));
+
+        assert_eq!(state.bounds_proof, BoundsProof::Complete);
+        BOUNDS_PROOF_RESULT.with(|result| {
+            assert_eq!(
+                result.borrow().as_ref().unwrap().as_ref().unwrap_err(),
+                "unexpected webview synchronization during bounds proof"
+            );
+        });
     }
 
     #[test]

@@ -112,7 +112,8 @@ declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
 The focus and visibility results prove only that Wry's methods returned `Ok`;
-the reported replacement size proves geometry, and the visual observation
+the reported replacement size proves only its logical size, not placement or
+visual restoration, and the visual observation
 proves the uncoordinated z-order failure.  They do not prove a visually correct
 restored frame after modal dismissal. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. They do
