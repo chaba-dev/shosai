@@ -122,12 +122,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   logical-geometry evidence from one real display transition, not proof of
   visual or backing-pixel correctness.
   A macOS input proof now observes exact text and keydown events in a focused
-  child DOM input.  Its subsequent ~focus_parent~ and Iced window-focus calls
-  return successfully, but a new key does not reach Iced and the proof times
-  out rather than accepting the method return as restoration evidence.
-  Keyboard restoration, shortcut conflicts, IME, visually correct restoration,
-  cross-platform input, accessibility, real-tab routing, and logical locations
-  remain open.
+  child DOM input.  After ~focus_parent~, it confirms through AppKit that the
+  exact Iced/winit parent view is first responder, drains queued child keys, and
+  observes a fresh key in Iced.  The public Wry handoff therefore works on the
+  tested macOS host without the direct AppKit fallback.  Shortcut conflicts,
+  IME, visually correct restoration, cross-platform input, accessibility,
+  repeated real-tab routing, and logical locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.

@@ -19,6 +19,8 @@ use iced::{
     Background, Color, Element, Event, Length, Point, Rectangle, Size, Subscription, Task, event,
     keyboard, window,
 };
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSResponder, NSView};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
@@ -61,6 +63,7 @@ const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xht
 #[cfg(target_os = "linux")]
 static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
+static INPUT_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 thread_local! {
@@ -268,7 +271,10 @@ enum InputProof {
     },
     FocusingParent,
     SettlingParent,
-    WaitingForParentKey,
+    WaitingForParentKey {
+        revision_cutoff: u64,
+    },
+    ParentKeyObserved,
     Complete,
 }
 
@@ -319,19 +325,22 @@ impl InputProof {
         true
     }
 
-    fn begin_parent_key_wait(&mut self) -> bool {
+    fn begin_parent_key_wait(&mut self, revision_cutoff: u64) -> bool {
         if *self != Self::SettlingParent {
             return false;
         }
-        *self = Self::WaitingForParentKey;
+        *self = Self::WaitingForParentKey { revision_cutoff };
         true
     }
 
-    fn observe_parent_key(&mut self) -> bool {
-        if *self != Self::WaitingForParentKey {
+    fn observe_parent_key(&mut self, revision: u64, repeat: bool) -> bool {
+        let Self::WaitingForParentKey { revision_cutoff } = *self else {
+            return false;
+        };
+        if revision <= revision_cutoff || repeat {
             return false;
         }
-        *self = Self::Complete;
+        *self = Self::ParentKeyObserved;
         true
     }
 }
@@ -1063,7 +1072,10 @@ impl operation::Operation<Option<Rectangle>> for PlaceholderBoundsOperation {
 #[derive(Debug, Clone)]
 enum Message {
     WindowEvent(window::Id, window::Event, u64),
-    IcedKeyPressed,
+    IcedKeyPressed {
+        revision: u64,
+        repeat: bool,
+    },
     PlaceholderMeasured {
         epoch: u64,
         bounds: Option<Rectangle>,
@@ -1291,9 +1303,10 @@ fn subscription(_state: &State) -> Subscription<Message> {
     }
     if input_proof_requested() {
         subscriptions.push(event::listen_with(|event, _, _| {
-            if matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. })) {
+            if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = event {
+                let revision = INPUT_KEY_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
                 eprintln!("wry-spike-input-proof event=iced-keydown");
-                Some(Message::IcedKeyPressed)
+                Some(Message::IcedKeyPressed { revision, repeat })
             } else {
                 None
             }
@@ -1771,6 +1784,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         },
         Message::InputParentFocused(result) => match result {
             Ok(()) if state.input_proof.parent_focused(true) => {
+                eprintln!("wry-spike-input-proof phase=parent-focused");
                 state.input_parent_settle_deadline =
                     Some(Instant::now() + INPUT_PROOF_PARENT_SETTLE);
                 state.status = "parent focus requested; draining queued child key events".into();
@@ -1782,10 +1796,19 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("failed to restore parent focus: {error}")),
             ),
         },
-        Message::IcedKeyPressed if state.input_proof.observe_parent_key() => {
+        Message::IcedKeyPressed { revision, repeat }
+            if state.input_proof.observe_parent_key(revision, repeat) =>
+        {
+            eprintln!("wry-spike-input-proof phase=parent-key-observed");
             finish_input_proof(state, Ok(()))
         }
-        Message::IcedKeyPressed => Task::none(),
+        Message::IcedKeyPressed { .. } => {
+            eprintln!(
+                "wry-spike-input-proof phase=ignored-iced-key state={:?}",
+                state.input_proof
+            );
+            Task::none()
+        }
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -1830,8 +1853,11 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
     if state
         .input_parent_settle_deadline
         .is_some_and(|deadline| now >= deadline)
-        && state.input_proof.begin_parent_key_wait()
+        && state
+            .input_proof
+            .begin_parent_key_wait(INPUT_KEY_REVISION.load(Ordering::Acquire))
     {
+        eprintln!("wry-spike-input-proof phase=waiting-for-parent-key");
         state.input_parent_settle_deadline = None;
         state.status = "parent focused; press any new key to prove Iced routing".into();
     }
@@ -1854,8 +1880,8 @@ fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
                     return finish_input_proof(state, Err("parent window is not available".into()));
                 };
                 state.status = "child typing observed; restoring focus to Iced".into();
-                return window::run(id, move |_| {
-                    WEBVIEW.with(|slot| focus_webview_parent(slot.borrow().as_ref()))
+                return window::run(id, move |window| {
+                    WEBVIEW.with(|slot| focus_webview_parent(window, slot.borrow().as_ref()))
                 })
                 .map(Message::InputParentFocused);
             }
@@ -1872,11 +1898,55 @@ fn focus_webview_input(webview: Option<&WebView>) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-fn focus_webview_parent(webview: Option<&WebView>) -> Result<(), String> {
-    webview
-        .ok_or_else(|| "webview is not available".to_string())?
-        .focus_parent()
-        .map_err(|error| error.to_string())
+#[cfg(target_os = "macos")]
+fn focus_webview_parent(
+    parent: &(impl HasWindowHandle + ?Sized),
+    webview: Option<&WebView>,
+) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    webview.focus_parent().map_err(|error| error.to_string())?;
+
+    let raw = parent
+        .window_handle()
+        .map_err(|error| error.to_string())?
+        .as_raw();
+    let RawWindowHandle::AppKit(handle) = raw else {
+        return Err(format!("expected AppKit parent, got {raw:?}"));
+    };
+    // SAFETY: The pointer comes from the live Iced window's borrowed AppKit
+    // handle and is used only for the duration of this window::run callback.
+    let parent_view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+    let parent_responder: &NSResponder = parent_view;
+    let ns_window = parent_view
+        .window()
+        .ok_or_else(|| "Iced parent NSView is not installed in an NSWindow".to_string())?;
+    let wry_selected_parent = ns_window
+        .firstResponder()
+        .as_deref()
+        .is_some_and(|responder| std::ptr::eq(responder, parent_responder));
+    let direct_attempted = !wry_selected_parent;
+    let direct_accepted = !direct_attempted || ns_window.makeFirstResponder(Some(parent_responder));
+    let selected_parent = ns_window
+        .firstResponder()
+        .as_deref()
+        .is_some_and(|responder| std::ptr::eq(responder, parent_responder));
+    eprintln!(
+        "wry-spike-input-proof phase=parent-responder wry_selected={wry_selected_parent} direct_attempted={direct_attempted} direct_accepted={direct_accepted} selected={selected_parent}"
+    );
+    if !direct_accepted || !selected_parent {
+        return Err(format!(
+            "AppKit rejected Iced parent responder handoff: wry_selected={wry_selected_parent}, direct_attempted={direct_attempted}, direct_accepted={direct_accepted}, selected={selected_parent}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_webview_parent(
+    _parent: &(impl HasWindowHandle + ?Sized),
+    _webview: Option<&WebView>,
+) -> Result<(), String> {
+    Err("direct parent responder handoff is only supported on macOS".into())
 }
 
 fn finish_input_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
@@ -3619,12 +3689,42 @@ mod tests {
             proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
             InputAction::FocusParent
         );
-        assert!(!proof.observe_parent_key());
+        assert!(!proof.observe_parent_key(1, false));
         assert!(proof.parent_focused(true));
-        assert!(!proof.observe_parent_key());
-        assert!(proof.begin_parent_key_wait());
-        assert!(proof.observe_parent_key());
-        assert_eq!(proof, InputProof::Complete);
+        assert!(!proof.observe_parent_key(2, false));
+        assert!(proof.begin_parent_key_wait(2));
+        assert!(proof.observe_parent_key(3, false));
+        assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn input_proof_rejects_stale_and_repeated_parent_keys() {
+        let mut proof = InputProof::SettlingParent;
+
+        assert!(proof.begin_parent_key_wait(8));
+        assert!(!proof.observe_parent_key(7, false));
+        assert!(!proof.observe_parent_key(8, false));
+        assert!(!proof.observe_parent_key(9, true));
+        assert!(proof.observe_parent_key(9, false));
+        assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn observed_parent_key_records_terminal_input_success() {
+        let mut state = State {
+            input_proof: InputProof::ParentKeyObserved,
+            webview_generation: 7,
+            ..State::default()
+        };
+        INPUT_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(finish_input_proof(&mut state, Ok(())));
+
+        assert_eq!(state.input_proof, InputProof::Complete);
+        assert_eq!(state.webview_generation, 8);
+        INPUT_PROOF_RESULT.with(|result| {
+            assert_eq!(result.borrow().as_ref().unwrap(), &Ok(()));
+        });
     }
 
     #[test]

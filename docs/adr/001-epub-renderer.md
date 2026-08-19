@@ -116,12 +116,15 @@ It currently proves on macOS arm64 that:
   IPC observations before asking Wry to focus the parent and waiting for a new
   Iced keyboard event. On the 2026-08-19 macOS arm64 host, UI automation typed
   the exact `shosai-input-proof` token and the child reported every keydown and
-  input value. `focus_parent`, followed by Iced's window-focus request, returned
-  successfully but a subsequent automated key produced no Iced keyboard event;
-  the proof correctly timed out in `WaitingForParentKey`. Child keyboard input
-  is therefore viable, but Wry's parent-focus method is not sufficient evidence
-  for keyboard restoration. Shortcut conflicts, IME composition, real tab
-  switching, and a maintainable AppKit responder handoff remain open;
+  input value. After `focus_parent`, AppKit inspection confirmed that the exact
+  Iced/winit `NSView` from the raw parent handle was already the window's first
+  responder, so the direct AppKit fallback was not invoked. After a 250 ms
+  queued-event drain and Iced's window-focus request, a fresh automated key
+  produced an Iced keyboard event and the proof passed. This supersedes the
+  earlier timeout-only inference: the public Wry handoff works on this host;
+  the harness had not established that its post-handoff key was both fresh and
+  processed to terminal completion. Shortcut conflicts, IME composition, and
+  real tab switching remain open;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -147,11 +150,11 @@ size, not placement or visual restoration, and the visual observation
 proves the uncoordinated z-order failure.  They do not prove a visually correct
 restored frame after modal dismissal. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. The
-input proof now shows that keyboard events reach a focused child input, but the
-failed parent-key phase shows that a successful `focus_parent` call does not
-restore Iced keyboard routing on this host. It does not prove that IME events
-route correctly, or that the
-restored visual result matches Iced composition. The scale proof exercises one
+input proof now supplements that method return with AppKit first-responder
+identity and fresh keyboard events on both sides of the handoff. It proves one
+child-to-parent keyboard transfer on this host, but not IME routing, shortcut
+conflicts, repeated real-tab handoffs, or that the restored visual result
+matches Iced composition. The scale proof exercises one
 real 2→1 display transition, but does not establish correct physical-pixel
 rendering across all display arrangements. Clipping, real tab switching, IME,
 and accessibility tests remain open.
