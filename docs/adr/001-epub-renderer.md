@@ -38,6 +38,8 @@ SHOSAI_WRY_SPIKE_INPUT_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_TAB_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_READER_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
@@ -54,13 +56,15 @@ env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_NETWOR
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_READER_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
 Without those backend settings, a native Wayland GTK display or a non-Xlib
 Iced parent is rejected with an explicit diagnostic. This is a feasibility
 boundary, not a compatibility fallback.
 
-It currently proves on macOS arm64 that:
+Current evidence:
 
 - Iced 0.14's public `window::run` callback exposes a parent window handle that
   Wry 0.56.1 can use to build a child `WKWebView`;
@@ -70,6 +74,18 @@ It currently proves on macOS arm64 that:
   every available manifest resource, including spine and navigation XHTML,
   stylesheet, and image bytes, using manifest media types; every protocol
   request is recorded by the harness;
+- an automated reader-integration mode serves only a host-owned XHTML fixture
+  and injects a trusted controller. On the 2026-08-19 Linux/X11 host it verified
+  dark-theme colors and a 24 px reader font, followed a real internal fragment
+  link, highlighted one exact text match with a `mark`, produced multiple CSS
+  columns in paginated mode, restored continuous flow, and retained the same
+  canonical chapter path, fragment, and chapter text offset across the DOM
+  mutation and mode changes. The recorded location was
+  `_spike/reader.xhtml#section-two` at chapter text offset 503; no scroll or
+  pixel coordinate is part of that model. WebKitGTK suppresses initialization
+  scripts when Wry disables JavaScript globally, so this mode enables JavaScript
+  only for the host fixture while its CSP denies page scripts. Ordinary and
+  hostile EPUB pages keep Wry's JavaScript disable setting;
 - an Iced widget operation reports the real placeholder container's logical
   bounds and the child is created in those bounds;
 - the automated lifecycle mode resizes the Iced window, requires a changed
@@ -113,7 +129,7 @@ It currently proves on macOS arm64 that:
   unusable bounds, premature shared synchronization, failed Wry calls, missing
   children, close, and timeout;
 - the macOS input mode serves a harness-owned input page, injects only a
-  trusted host script while author JavaScript remains disabled, focuses the
+  trusted host script while its CSP denies page scripts, focuses the
   child and its DOM input, and requires ordered focus, keydown, and exact-value
   IPC observations before asking Wry to focus the parent and waiting for a new
   Iced keyboard event. On the 2026-08-19 macOS arm64 host, UI automation typed
@@ -137,9 +153,9 @@ It currently proves on macOS arm64 that:
   child-to-parent keyboard handoff. This proves the harness lifecycle and
   fragment restoration sequence, not integration with Shōsai's production tab
   model or arbitrary character-offset restoration;
-- content JavaScript is disabled, navigation is allowlisted to the book
-  protocol, downloads and new windows are denied, and a restrictive CSP is
-  attached to protocol responses;
+- ordinary EPUB content JavaScript is disabled, navigation is allowlisted to
+  the book protocol, downloads and new windows are denied, and a restrictive
+  CSP is attached to protocol responses;
 - the automated hostile-content mode loads remote CSS imports, images, fonts,
   frames, objects, and external/inline scripts against a controlled loopback
   listener, requires the exact hostile resource to be served and finish loading,
@@ -180,7 +196,10 @@ On Linux x86_64, the harness compiles against GTK 3.24.51 and WebKitGTK 4.1
 (2.50.6) in the Nix development shell. Under Xvfb/X11, the same automated
 measured-bounds resize/teardown proof passes and the hostile-content proof
 serves the expected page while recording zero book-initiated network
-connections. The harness installs Wry's documented winit X11 error hook for
+connections. An interactive X11 run also passes the host-owned reader proof for
+theme and font injection, fragment navigation, logical location restoration,
+search highlighting, and continuous/paginated layout. The harness installs
+Wry's documented winit X11 error hook for
 the benign WebKit `GLXBadWindow` error 170 and accepts `BadWindow` only after
 the one-shot harness explicitly begins teardown, when GTK can destroy the XIM
 child before winit's cleanup operations; without those cases, the lifecycle
@@ -252,11 +271,12 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Physical-pixel correctness, clipping, production tabs, IME, other targets |
+| Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
 | Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy and Wuff candidates are pure Rust but not selected for production; no direct native MathML dependency was identified | Remaining dependency size; package smoke tests         |
-| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, explicit table-grid lowering, bounded font admission, and a narrow MathML subset are feasible, but CSS inline/table compatibility plus production font/math policy remain substantial | Estimate native compatibility and accessibility cost   |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, explicit table-grid lowering, bounded font admission, and a narrow MathML subset are feasible, but CSS inline/table compatibility plus production font/math policy remain substantial | Native compatibility and accessibility ownership      |
 
 ## Fixture and measurement matrix
 

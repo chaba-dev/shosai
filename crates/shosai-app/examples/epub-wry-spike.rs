@@ -60,6 +60,11 @@ const TAB_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_TAB_PROOF";
 const TAB_PROOF_TIMEOUT: Duration = Duration::from_secs(120);
 const TAB_PROOF_AWAY_HOLD: Duration = Duration::from_millis(250);
 const TAB_PROOF_SWITCHES: u8 = 2;
+const READER_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_READER_PROOF";
+const READER_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
+const READER_PROOF_PATH: &str = "_spike/reader.xhtml";
+const READER_PROOF_URL: &str = "shosai://book/_spike/reader.xhtml";
+const READER_PROOF_EXPECTED_OFFSET: usize = 503;
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -71,6 +76,7 @@ static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_PROOF_EVENTS: Mutex<Vec<InputProofEvent>> = Mutex::new(Vec::new());
+static READER_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -85,6 +91,7 @@ thread_local! {
     static SCALE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static TAB_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static READER_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -224,14 +231,24 @@ impl SpikeBook {
                 body: SPIKE_CHAPTER.as_bytes().to_vec(),
             },
         );
-        resources.insert(
-            CanonicalEpubPath::new(INPUT_PROOF_PATH).map_err(|error| error.to_string())?,
+        Ok(Self {
+            start_url,
+            resources,
+            requests: Vec::new(),
+            network_proof_page_served: false,
+        })
+    }
+
+    fn from_host_fixture(path: &'static str, body: &'static str) -> Result<Self, String> {
+        let path = CanonicalEpubPath::new(path).map_err(|error| error.to_string())?;
+        let start_url = path.to_protocol_uri();
+        let resources = HashMap::from([(
+            path,
             SpikeResource {
                 content_type: "application/xhtml+xml".into(),
-                body: INPUT_PROOF_CHAPTER.as_bytes().to_vec(),
+                body: body.as_bytes().to_vec(),
             },
-        );
-
+        )]);
         Ok(Self {
             start_url,
             resources,
@@ -255,6 +272,7 @@ struct State {
     scale_proof: ScaleProof,
     input_proof: InputProof,
     tab_proof: TabProof,
+    reader_proof: ReaderProof,
     placeholder_collapsed: bool,
     tab_away: bool,
     webview_generation: u64,
@@ -452,6 +470,61 @@ impl TabProof {
         *self = Self::Complete;
         true
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum ReaderProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    WaitingForResult,
+    Complete,
+}
+
+impl ReaderProof {
+    fn observe_ipc(&self, message: &str) -> Option<Result<(), String>> {
+        if *self != Self::WaitingForResult {
+            return None;
+        }
+        if let Some(evidence) = message.strip_prefix("pass:") {
+            return Some(validate_reader_evidence(evidence));
+        }
+        if let Some(error) = message.strip_prefix("fail:") {
+            return Some(Err(error.to_string()));
+        }
+        None
+    }
+}
+
+fn validate_reader_evidence(evidence: &str) -> Result<(), String> {
+    let mut fields = HashMap::new();
+    for field in evidence.split(';') {
+        let (name, value) = field
+            .split_once('=')
+            .ok_or_else(|| format!("malformed reader evidence field {field:?}"))?;
+        if fields.insert(name, value).is_some() {
+            return Err(format!("duplicate reader evidence field {name:?}"));
+        }
+    }
+    if fields.len() != 5
+        || fields.get("path") != Some(&READER_PROOF_PATH)
+        || fields.get("fragment") != Some(&"section-two")
+        || fields.get("highlight") != Some(&"1")
+        || fields.get("modes") != Some(&"continuous,paginated")
+    {
+        return Err(format!("incomplete reader evidence {evidence:?}"));
+    }
+    let text_offset = fields
+        .get("offset")
+        .ok_or_else(|| format!("reader evidence has no text offset: {evidence:?}"))?
+        .parse::<usize>()
+        .map_err(|_| format!("reader evidence has invalid text offset: {evidence:?}"))?;
+    if text_offset != READER_PROOF_EXPECTED_OFFSET {
+        return Err(format!(
+            "reader evidence text offset {text_offset} did not match {READER_PROOF_EXPECTED_OFFSET}"
+        ));
+    }
+    Ok(())
 }
 
 impl InputProof {
@@ -1359,6 +1432,7 @@ fn main() -> ExitCode {
         scale_proof_requested(),
         input_proof_requested(),
         tab_proof_requested(),
+        reader_proof_requested(),
     ]) {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
@@ -1421,6 +1495,19 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("wry-spike-tab-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    if reader_proof_requested() {
+        return READER_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-reader-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-reader-proof FAIL: proof did not complete");
                 ExitCode::FAILURE
             }
         });
@@ -1500,6 +1587,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
         || scale_proof_requested()
         || input_proof_requested()
         || tab_proof_requested()
+        || reader_proof_requested()
     {
         subscriptions
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
@@ -1531,6 +1619,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || scale_proof_requested()
                 || input_proof_requested()
                 || tab_proof_requested()
+                || reader_proof_requested()
             {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
@@ -1544,6 +1633,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     INPUT_PROOF_TIMEOUT
                 } else if tab_proof_requested() {
                     TAB_PROOF_TIMEOUT
+                } else if reader_proof_requested() {
+                    READER_PROOF_TIMEOUT
                 } else {
                     NETWORK_PROOF_TIMEOUT
                 };
@@ -1569,6 +1660,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.tab_proof = TabProof::WaitingForCreation;
                 state.input_proof = InputProof::WaitingForCreation;
                 INPUT_PROOF_EVENTS.lock().unwrap().clear();
+            }
+            if reader_proof_requested() {
+                state.reader_proof = ReaderProof::WaitingForCreation;
+                READER_PROOF_EVENTS.lock().unwrap().clear();
             }
             if overlay_observation_requested() {
                 state.overlay_active = true;
@@ -1698,6 +1793,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before tab proof completed".into()),
                 );
             }
+            if reader_proof_requested() && state.reader_proof != ReaderProof::Complete {
+                return finish_reader_proof(
+                    state,
+                    Err("parent closed before reader proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             let webview_dropped = teardown_webview();
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
@@ -1732,6 +1833,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 return finish_tab_proof(
                     state,
                     Err("parent closed before tab proof completed".into()),
+                );
+            }
+            if reader_proof_requested() && state.reader_proof != ReaderProof::Complete {
+                return finish_reader_proof(
+                    state,
+                    Err("parent closed before reader proof completed".into()),
                 );
             }
             state.webview_generation = state.webview_generation.wrapping_add(1);
@@ -1839,6 +1946,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || state.scale_proof == ScaleProof::Complete
                 || state.input_proof == InputProof::Complete
                 || state.tab_proof == TabProof::Complete
+                || state.reader_proof == ReaderProof::Complete
                 || state.network_proof_finished =>
         {
             teardown_webview();
@@ -1888,6 +1996,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 if input_proof_requested() {
                     state.input_proof = InputProof::WaitingForReady;
                     state.status = "embedded; waiting for trusted input harness readiness".into();
+                    return Task::none();
+                }
+                if reader_proof_requested() {
+                    state.reader_proof = ReaderProof::WaitingForResult;
+                    state.status = "embedded; waiting for trusted reader integration proof".into();
                     return Task::none();
                 }
                 state.status = if network_proof_requested() {
@@ -1945,6 +2058,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) if tab_proof_requested() => {
                 state.creation_bounds = None;
                 finish_tab_proof(state, Err(format!("webview creation failed: {error}")))
+            }
+            Err(error) if reader_proof_requested() => {
+                state.creation_bounds = None;
+                finish_reader_proof(state, Err(format!("webview creation failed: {error}")))
             }
             Err(error) => {
                 state.creation_bounds = None;
@@ -2140,6 +2257,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::NetworkProofTick(now) if scale_proof_requested() => update_scale_proof(state, now),
         Message::NetworkProofTick(now) if input_proof_requested() => update_input_proof(state, now),
         Message::NetworkProofTick(now) if tab_proof_requested() => update_tab_proof(state, now),
+        Message::NetworkProofTick(now) if reader_proof_requested() => {
+            update_reader_proof(state, now)
+        }
         Message::NetworkProofTick(now) => update_network_proof(state, now),
         #[cfg(target_os = "linux")]
         Message::PumpGtk => {
@@ -2486,6 +2606,45 @@ fn finish_input_proof(state: &mut State, result: Result<(), String>) -> Task<Mes
         );
     }
     INPUT_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
+    state.window.map_or_else(Task::none, window::close)
+}
+
+fn update_reader_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.reader_proof == ReaderProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_reader_proof(
+            state,
+            Err(format!(
+                "timed out during reader phase {:?}",
+                state.reader_proof
+            )),
+        );
+    }
+    let events = std::mem::take(&mut *READER_PROOF_EVENTS.lock().unwrap());
+    for event in events {
+        eprintln!("wry-spike-reader-proof event={event:?}");
+        if let Some(result) = state.reader_proof.observe_ipc(&event) {
+            return finish_reader_proof(state, result);
+        }
+    }
+    Task::none()
+}
+
+fn finish_reader_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if state.reader_proof == ReaderProof::Complete {
+        return Task::none();
+    }
+    state.reader_proof = ReaderProof::Complete;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-reader-proof PASS: theme, font size, fragment navigation, logical location restoration, search highlighting, and continuous/paginated layout observed"
+        );
+    }
+    READER_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
     state.window.map_or_else(Task::none, window::close)
 }
 
@@ -3437,9 +3596,15 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
     let generation = begin_webview_creation();
     window::run(id, move |window| {
         ensure_webview_creation_is_current(generation)?;
-        let mut book = SpikeBook::from_epub_bytes(
-            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
-        )?;
+        let mut book = if keyboard_input_proof_requested() {
+            input_proof_book()?
+        } else if reader_proof_requested() {
+            reader_proof_book()?
+        } else {
+            SpikeBook::from_epub_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+            )?
+        };
         let page_loaded = Arc::new(AtomicBool::new(false));
         let start_url = if network_proof_requested() {
             let monitor = NetworkMonitor::start()?;
@@ -3458,6 +3623,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             TAB_PROOF_URL.to_string()
         } else if input_proof_requested() {
             INPUT_PROOF_URL.to_string()
+        } else if reader_proof_requested() {
+            READER_PROOF_URL.to_string()
         } else if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
             NETWORK_PROOF_URL.to_string()
         } else {
@@ -3484,12 +3651,41 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                         message: request.body().clone(),
                     });
                 })
+        } else if reader_proof_requested() {
+            builder
+                .with_initialization_script(READER_PROOF_SCRIPT)
+                .with_ipc_handler(|request| {
+                    READER_PROOF_EVENTS
+                        .lock()
+                        .unwrap()
+                        .push(request.body().clone());
+                })
         } else {
             builder
         };
+        // WebKitGTK suppresses initialization scripts when JavaScript is
+        // disabled. These two modes load only host-owned fixture XHTML and use
+        // the injected controller; ordinary and hostile EPUB pages keep author
+        // JavaScript disabled.
+        let builder = if input_proof_requested() || reader_proof_requested() {
+            builder
+        } else {
+            builder.with_javascript_disabled()
+        };
+        let proof_navigation_path = if keyboard_input_proof_requested() {
+            Some(INPUT_PROOF_PATH)
+        } else if reader_proof_requested() {
+            Some(READER_PROOF_PATH)
+        } else {
+            None
+        };
         let webview = builder
-            .with_javascript_disabled()
-            .with_navigation_handler(|url| is_allowed_navigation(&url))
+            .with_navigation_handler(move |url| {
+                proof_navigation_path.map_or_else(
+                    || is_allowed_navigation(&url),
+                    |path| is_allowed_proof_navigation(&url, path),
+                )
+            })
             .with_download_started_handler(|_, _| false)
             .with_new_window_req_handler(|_, _| NewWindowResponse::Deny)
             .with_on_page_load_handler(move |event, url| {
@@ -3508,6 +3704,14 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
         creation_generation: generation,
         result,
     })
+}
+
+fn reader_proof_book() -> Result<SpikeBook, String> {
+    SpikeBook::from_host_fixture(READER_PROOF_PATH, READER_PROOF_CHAPTER)
+}
+
+fn input_proof_book() -> Result<SpikeBook, String> {
+    SpikeBook::from_host_fixture(INPUT_PROOF_PATH, INPUT_PROOF_CHAPTER)
 }
 
 fn network_proof_requested() -> bool {
@@ -3556,6 +3760,10 @@ fn tab_proof_requested() -> bool {
 
 fn keyboard_input_proof_requested() -> bool {
     input_proof_requested() || tab_proof_requested()
+}
+
+fn reader_proof_requested() -> bool {
+    std::env::var_os(READER_PROOF_ENV).is_some()
 }
 
 fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
@@ -3621,22 +3829,12 @@ fn parse_scale_proof_target(value: &str) -> Result<Point, String> {
     Ok(Point::new(x, y))
 }
 
-fn validate_proof_mode_selection(modes: [bool; 8]) -> Result<(), String> {
-    let [
-        _,
-        _,
-        overlay,
-        overlay_observation,
-        bounds,
-        scale,
-        input,
-        tab,
-    ] = modes;
-    if (overlay || overlay_observation || bounds || scale || input || tab)
-        && modes.into_iter().filter(|selected| *selected).count() > 1
+fn validate_proof_mode_selection(selected: [bool; 9]) -> Result<(), String> {
+    if selected[2..].iter().any(|selected| *selected)
+        && selected.into_iter().filter(|selected| *selected).count() > 1
     {
         return Err(
-            "macOS overlay, bounds, scale, input, and tab modes cannot be combined with another proof mode"
+            "overlay, bounds, scale, input, tab, and reader modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -3922,6 +4120,15 @@ fn is_allowed_navigation(url: &str) -> bool {
     CanonicalEpubPath::from_protocol_uri(&canonical_url).is_ok()
 }
 
+fn is_allowed_proof_navigation(url: &str, expected_path: &str) -> bool {
+    let canonical_url = url
+        .strip_prefix("http://shosai.book/")
+        .map(|path| format!("shosai://book/{path}"))
+        .unwrap_or_else(|| url.to_string());
+    CanonicalEpubPath::from_protocol_uri(&canonical_url)
+        .is_ok_and(|reference| reference.path.as_str() == expected_path)
+}
+
 fn serve_epub_resource(
     _webview_id: wry::WebViewId<'_>,
     request: Request<Vec<u8>>,
@@ -3963,6 +4170,147 @@ fn serve_epub_resource(
 
 const SPIKE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline' shosai:; img-src shosai: data:; font-src shosai:";
 
+const READER_PROOF_SCRIPT: &str = r#"
+(() => {
+  const post = message => window.ipc.postMessage(message);
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  const nextFrame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+  const textWalker = root => document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const chapterOffset = (root, target, localOffset) => {
+    const walker = textWalker(root);
+    let offset = 0;
+    while (walker.nextNode()) {
+      if (walker.currentNode === target) return offset + localOffset;
+      offset += walker.currentNode.data.length;
+    }
+    throw new Error('logical location target is outside the chapter');
+  };
+  const pointAtOffset = (root, expected) => {
+    const walker = textWalker(root);
+    let offset = 0;
+    while (walker.nextNode()) {
+      const length = walker.currentNode.data.length;
+      if (expected <= offset + length) {
+        return { node: walker.currentNode, offset: expected - offset };
+      }
+      offset += length;
+    }
+    throw new Error('logical location offset is outside the chapter');
+  };
+  const highlightFirst = (root, query) => {
+    const walker = textWalker(root);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const index = node.data.indexOf(query);
+      if (index === -1) continue;
+      const match = node.splitText(index);
+      match.splitText(query.length);
+      const mark = document.createElementNS('http://www.w3.org/1999/xhtml', 'mark');
+      mark.setAttribute('data-search-highlight', 'current');
+      match.parentNode.replaceChild(mark, match);
+      mark.appendChild(match);
+      return mark;
+    }
+    throw new Error('search query was not found');
+  };
+  const colorChannels = value => (value.match(/\d+/g) || []).slice(0, 3).join(',');
+  const currentPath = () => decodeURIComponent(new URL(location.href).pathname.replace(/^\/+/, ''));
+
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const root = document.documentElement;
+      const body = document.body;
+      const reader = document.getElementById('reader');
+      const anchor = document.getElementById('reading-anchor').firstChild;
+      const phrase = 'stable reading anchor';
+      const localOffset = anchor.data.indexOf(phrase);
+      assert(localOffset >= 0, 'reading anchor phrase is missing');
+
+      const style = document.createElementNS('http://www.w3.org/1999/xhtml', 'style');
+      style.id = 'shosai-reader-style';
+      style.textContent = `
+        :root { --reader-font-size: 24px; --reader-bg: #101820; --reader-fg: #f4f1ea; }
+        html { font-size: var(--reader-font-size) !important; }
+        html[data-reader-theme="dark"] body { background: var(--reader-bg) !important; color: var(--reader-fg) !important; }
+        #reader { box-sizing: border-box; line-height: 1.5; }
+        #reader[data-reading-mode="continuous"] { width: auto; height: auto; column-width: auto; overflow-x: visible; overflow-y: auto; }
+        #reader[data-reading-mode="paginated"] { width: 320px; height: 240px; column-width: 280px; column-gap: 40px; overflow-x: auto; overflow-y: hidden; }
+        mark[data-search-highlight="current"] { background: #ffd54f; color: #101820; }
+      `;
+      document.head.appendChild(style);
+      root.setAttribute('data-reader-theme', 'dark');
+      reader.setAttribute('data-reading-mode', 'continuous');
+      await nextFrame();
+
+      const themed = getComputedStyle(body);
+      assert(getComputedStyle(root).fontSize === '24px', 'reader font-size injection was not applied');
+      assert(colorChannels(themed.backgroundColor) === '16,24,32', 'dark reader background was not applied');
+      assert(colorChannels(themed.color) === '244,241,234', 'dark reader foreground was not applied');
+      const continuous = getComputedStyle(reader);
+      assert(continuous.columnWidth === 'auto', 'continuous mode retained columns');
+      assert(continuous.overflowY === 'auto', 'continuous mode is not vertically scrollable');
+
+      document.getElementById('jump-link').click();
+      await nextFrame();
+      assert(decodeURIComponent(location.hash.slice(1)) === 'section-two', 'internal fragment navigation failed');
+      const locationModel = {
+        path: currentPath(),
+        fragment: 'section-two',
+        textOffset: chapterOffset(body, anchor, localOffset),
+      };
+      assert(locationModel.path === '_spike/reader.xhtml', 'logical location path is not canonical');
+
+      const mark = highlightFirst(reader, 'searchable constellation');
+      assert(mark.textContent === 'searchable constellation', 'search highlight changed matched text');
+      assert(reader.querySelectorAll('mark[data-search-highlight="current"]').length === 1, 'search highlight count is not deterministic');
+
+      reader.setAttribute('data-reading-mode', 'paginated');
+      await nextFrame();
+      const paginated = getComputedStyle(reader);
+      assert(paginated.columnWidth !== 'auto', 'paginated mode did not create columns');
+      assert(paginated.overflowX === 'auto' && paginated.overflowY === 'hidden', 'paginated overflow policy was not applied');
+      assert(reader.scrollWidth > reader.clientWidth, 'paginated content did not produce multiple pages');
+
+      location.hash = '';
+      reader.scrollLeft = reader.scrollWidth;
+      assert(currentPath() === locationModel.path, 'logical location belongs to another chapter');
+      const restored = pointAtOffset(body, locationModel.textOffset);
+      assert(restored.node.data.slice(restored.offset, restored.offset + phrase.length) === phrase, 'logical text offset did not resolve to the reading anchor');
+      const range = document.createRange();
+      range.setStart(restored.node, restored.offset);
+      range.setEnd(restored.node, restored.offset + phrase.length);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      location.hash = encodeURIComponent(locationModel.fragment);
+      await nextFrame();
+
+      reader.setAttribute('data-reading-mode', 'continuous');
+      await nextFrame();
+      restored.node.parentElement.scrollIntoView({ block: 'center' });
+      await nextFrame();
+      assert(getComputedStyle(reader).columnWidth === 'auto', 'continuous mode was not restored');
+      assert(selection.rangeCount === 1, 'restored logical text range was lost');
+      const activeRange = selection.getRangeAt(0);
+      const recaptured = {
+        path: currentPath(),
+        fragment: decodeURIComponent(location.hash.slice(1)),
+        textOffset: chapterOffset(body, activeRange.startContainer, activeRange.startOffset),
+      };
+      assert(activeRange.toString() === phrase, 'restored range does not identify the reading anchor');
+      assert(recaptured.path === locationModel.path, 'recaptured chapter path changed');
+      assert(recaptured.fragment === locationModel.fragment, 'recaptured fragment changed');
+      assert(recaptured.textOffset === locationModel.textOffset, 'recaptured logical text offset changed');
+      post(`pass:path=${recaptured.path};fragment=${recaptured.fragment};offset=${recaptured.textOffset};highlight=1;modes=continuous,paginated`);
+    } catch (error) {
+      post(`fail:${error && error.message ? error.message : String(error)}`);
+    }
+  });
+})();
+"#;
+
 const INPUT_PROOF_SCRIPT: &str = r#"
 window.addEventListener('DOMContentLoaded', () => {
   const input = document.getElementById('proof-input');
@@ -3992,6 +4340,42 @@ const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   <input id="proof-input" type="text" autocomplete="off" />
 </body>
 </html>"#;
+
+const READER_PROOF_CHAPTER: &str = r##"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <title>Wry reader integration proof</title>
+  <style>
+    body { margin: 0; font-family: serif; }
+    #reader { padding: 1rem; }
+    section { break-before: column; }
+  </style>
+</head>
+<body>
+  <main id="reader">
+    <h1>Reader integration proof</h1>
+    <p><a id="jump-link" href="#section-two">Jump to the second section</a></p>
+    <section id="section-one">
+      <h2>First section</h2>
+      <p>A searchable constellation appears in this host-owned chapter.</p>
+      <p>Filler text makes the bounded viewport produce more than one native webview column.</p>
+      <p>Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu.</p>
+      <p>One two three four five six seven eight nine ten eleven twelve.</p>
+      <p>Red orange yellow green blue indigo violet silver gold copper.</p>
+    </section>
+    <section id="section-two">
+      <h2>Second section</h2>
+      <p id="reading-anchor">This stable reading anchor survives layout mode changes and search highlighting.</p>
+      <p>North south east west spring summer autumn winter morning evening.</p>
+      <p>Mercury Venus Earth Mars Jupiter Saturn Uranus Neptune.</p>
+      <p>Quartz feldspar mica basalt granite marble sandstone limestone.</p>
+      <p>Final filler paragraph for deterministic paginated overflow behavior.</p>
+    </section>
+  </main>
+</body>
+</html>"##;
 
 const SPIKE_CHAPTER: &str = r#"<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -4271,6 +4655,90 @@ mod tests {
                 .unwrap_err()
                 .contains("only supported on macOS")
         );
+    }
+
+    #[test]
+    fn reader_proof_accepts_only_terminal_result_after_creation() {
+        let waiting = ReaderProof::WaitingForCreation;
+        assert_eq!(waiting.observe_ipc("pass:evidence"), None);
+
+        let proof = ReaderProof::WaitingForResult;
+        assert_eq!(proof.observe_ipc("ready"), None);
+        assert!(proof.observe_ipc("pass:").unwrap().is_err());
+        assert!(
+            proof
+                .observe_ipc("pass:path=_spike/reader.xhtml")
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(
+            proof.observe_ipc(
+                "pass:path=_spike/reader.xhtml;fragment=section-two;offset=503;highlight=1;modes=continuous,paginated"
+            ),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            proof.observe_ipc("fail:fragment navigation failed"),
+            Some(Err("fragment navigation failed".into()))
+        );
+    }
+
+    #[test]
+    fn reader_proof_rejects_incorrect_nonzero_location_offset() {
+        assert!(
+            validate_reader_evidence(
+                "path=_spike/reader.xhtml;fragment=section-two;offset=1;highlight=1;modes=continuous,paginated"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reader_proof_book_and_navigation_are_fixture_isolated() {
+        let book = reader_proof_book().unwrap();
+        assert_eq!(book.resources.len(), 1);
+        assert!(
+            book.resources
+                .contains_key(&CanonicalEpubPath::new(READER_PROOF_PATH).unwrap())
+        );
+        let input_book = input_proof_book().unwrap();
+        assert_eq!(input_book.resources.len(), 1);
+        for (url, path) in [
+            (READER_PROOF_URL, READER_PROOF_PATH),
+            (INPUT_PROOF_URL, INPUT_PROOF_PATH),
+        ] {
+            assert!(is_allowed_proof_navigation(url, path));
+            assert!(is_allowed_proof_navigation(
+                &format!("{url}#section-two"),
+                path
+            ));
+            assert!(is_allowed_proof_navigation(
+                &format!("http://shosai.book/{path}#section-two"),
+                path
+            ));
+            assert!(!is_allowed_proof_navigation(
+                "shosai://book/OEBPS/chapter1.xhtml",
+                path
+            ));
+        }
+    }
+
+    #[test]
+    fn reader_proof_result_is_terminal_and_tears_down_generation() {
+        let mut state = State {
+            reader_proof: ReaderProof::WaitingForResult,
+            webview_generation: 4,
+            ..State::default()
+        };
+        READER_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(finish_reader_proof(&mut state, Ok(())));
+
+        assert_eq!(state.reader_proof, ReaderProof::Complete);
+        assert_eq!(state.webview_generation, 5);
+        READER_PROOF_RESULT.with(|result| {
+            assert_eq!(result.borrow().as_ref().unwrap(), &Ok(()));
+        });
     }
 
     #[test]
@@ -4959,21 +5427,15 @@ mod tests {
 
     #[test]
     fn overlay_modes_reject_conflicting_proofs() {
-        for selected in 2..8 {
-            let mut modes = [false; 8];
+        for selected in 2..9 {
+            let mut modes = [false; 9];
             modes[selected] = true;
             assert!(validate_proof_mode_selection(modes).is_ok());
         }
-        for modes in [
-            [true, false, true, false, false, false, false, false],
-            [false, true, true, false, false, false, false, false],
-            [false, false, true, true, false, false, false, false],
-            [true, false, false, true, false, false, false, false],
-            [false, true, false, false, true, false, false, false],
-            [false, false, false, false, true, true, false, false],
-            [false, false, false, false, false, true, true, false],
-            [false, false, false, false, false, false, true, true],
-        ] {
+        for protected in 2..9 {
+            let mut modes = [false; 9];
+            modes[protected] = true;
+            modes[if protected == 2 { 1 } else { 2 }] = true;
             assert!(validate_proof_mode_selection(modes).is_err());
         }
     }
@@ -5274,6 +5736,28 @@ mod tests {
     }
 
     #[test]
+    fn javascript_enabled_proof_books_do_not_serve_ordinary_epub_content() {
+        for (book, proof_url) in [
+            (reader_proof_book().unwrap(), READER_PROOF_URL),
+            (input_proof_book().unwrap(), INPUT_PROOF_URL),
+        ] {
+            BOOK.with(|slot| *slot.borrow_mut() = Some(book));
+            let fixture = serve_epub_resource(
+                "spike".into(),
+                Request::get(proof_url).body(Vec::new()).unwrap(),
+            );
+            assert_eq!(fixture.status(), 200);
+            let ordinary = serve_epub_resource(
+                "spike".into(),
+                Request::get("shosai://book/OEBPS/chapter1.xhtml")
+                    .body(Vec::new())
+                    .unwrap(),
+            );
+            assert_eq!(ordinary.status(), 404);
+        }
+    }
+
+    #[test]
     fn protocol_serves_epub_chapters_and_manifest_resources_with_csp() {
         install_sample_book();
         BOOK.with(|slot| {
@@ -5334,6 +5818,12 @@ mod tests {
             "application/xhtml+xml"
         );
 
+        let reader = serve_epub_resource(
+            "spike".into(),
+            Request::get(READER_PROOF_URL).body(Vec::new()).unwrap(),
+        );
+        assert_eq!(reader.status(), 404);
+
         let conformance = serve_epub_resource(
             "spike".into(),
             Request::get(NETWORK_PROOF_URL).body(Vec::new()).unwrap(),
@@ -5392,7 +5882,7 @@ mod tests {
 
         BOOK.with(|slot| {
             let slot = slot.borrow();
-            assert_eq!(slot.as_ref().unwrap().requests.len(), 14);
+            assert_eq!(slot.as_ref().unwrap().requests.len(), 15);
         });
     }
 }
