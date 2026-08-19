@@ -143,10 +143,17 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   confirms that the focused child subtree disappears while away and returns
   exactly once in a fresh generation with focus.  It then fails because the
   surrounding Iced control remains absent.  This is a Gate 0 blocker, not
-  positive end-to-end accessibility evidence.  Shortcut conflicts, IME, visually
-  correct restoration, cross-platform input, a viable Iced accessibility tree,
-  screen-reader interaction, production-tab integration, production
-  cross-chapter, and arbitrary character-offset locations remain open.
+  positive end-to-end accessibility evidence.
+  The Linux/X11 input diagnostic now retains early DOM-focus evidence and
+  proves exact text entry in the child.  Wry selected the Iced parent XID on a
+  live XWayland session; under Xvfb, a direct Xlib fallback selected and
+  synchronously rechecked it.  Neither path delivered a subsequent synthetic
+  key to Iced without an explicit pointer click in the Iced-only header, so the
+  click control is not accepted as a successful child-to-parent handoff.
+  Shortcut conflicts, Linux parent activation, clipboard, IME, visually correct
+  restoration, a viable Iced accessibility tree, screen-reader interaction,
+  production-tab integration, production cross-chapter, and arbitrary
+  character-offset locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
