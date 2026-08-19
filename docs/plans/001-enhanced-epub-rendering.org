@@ -94,9 +94,14 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   listener and fails unless it observes zero connections; unit tests cover the
   canonical navigation policy and prove the monitor detects a control
   connection.
-- [ ] Prototype theme/font-size injection, internal fragment links, reading
+- [X] Prototype theme/font-size injection, internal fragment links, reading
   position capture/restore, search highlighting, and continuous/paginated
-  behavior.
+  behavior.  A host-owned automated fixture applies dark-theme colors and a
+  24 px reader font, follows a fragment link, inserts one exact search mark,
+  produces multiple CSS columns, restores continuous flow, and retains a
+  canonical chapter path, fragment, and chapter text offset rather than a
+  browser scroll/pixel position.  The proof passes on Linux/X11; production
+  multi-chapter integration and the remaining target matrix stay separate.
 - [ ] Prove that a child webview can be embedded and resized inside the Iced
   reader on each target, with defined focus/input/event routing, tab lifecycle,
   accessibility-tree behavior, and teardown.  Map browser positions back to
@@ -132,8 +137,8 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   chapter fragment, rejects stale-generation callbacks and IPC, and completes
   a fresh child-to-parent input handoff on all three reader activations.
   Shortcut conflicts, IME, visually correct restoration, cross-platform input,
-  accessibility, production-tab integration, and arbitrary character-offset
-  locations remain open.
+  accessibility, production-tab integration, production cross-chapter, and
+  arbitrary character-offset locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
@@ -194,8 +199,6 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   web-markup/virtual-DOM-out, so a native route still owns the MathML front end,
   OpenType MATH layout, scene integration, selection, and accessibility
   boundaries.
-- [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
-  subset, including accessibility and selection.
 
 ** Decision and Exit Criteria
 
