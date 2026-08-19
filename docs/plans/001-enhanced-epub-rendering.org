@@ -111,6 +111,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   then recreates it at the latest bounds and verifies the
   replacement size; a settled hide followed by an in-place show did not leave
   the Iced proof making progress and is not accepted as restoration evidence.
+  A second macOS proof collapses the placeholder until no usable bounds are
+  reported, hides and destroys only the current child generation, restores the
+  placeholder, and verifies a replacement at the newly measured logical size.
   Focus is only a successful Wry method return, not proof of actual focus,
   visually correct restoration, or keyboard/IME routing; the cross-platform,
   accessibility, real-tab, routing, and logical-location portions remain open.
