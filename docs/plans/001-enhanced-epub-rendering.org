@@ -168,7 +168,17 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   implementation.  This is not a CSS table algorithm: browser intrinsic track
   sizing, anonymous table repair, collapsed borders, painting, accessibility,
   and pagination remain unimplemented.
-- [ ] Render the same font/MathML/mixed-script fixtures and identify
+- [X] Prototype bounded EPUB-local font loading.  A generated test fixture
+  proves ~@font-face~ descriptor/source parsing, canonical stylesheet-relative
+  resolution, local/remote/missing fallback rejection, TTF and CFF OTF
+  admission, WOFF/WOFF2 table-directory preflight and output-bounded decoder
+  callbacks, malformed/oversized rejection, unsupported descriptor fallback,
+  newly loaded family validation, and same-family isolation between per-book
+  cosmic-text databases.  The dev-only bridge does not bound Brotli or
+  transformed-table scratch allocations and does not implement arbitrary
+  CSS-family aliases, production resource budgets, cache lifecycle, complete
+  descriptor matching, or hostile-font/parser hardening.
+- [ ] Render the same MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
   subset, including accessibility and selection.
