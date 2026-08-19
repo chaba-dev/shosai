@@ -669,6 +669,9 @@ pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
 }
 
 #[cfg(test)]
+mod text_layout;
+
+#[cfg(test)]
 mod text_shaping;
 
 #[cfg(test)]

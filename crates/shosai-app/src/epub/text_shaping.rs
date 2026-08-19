@@ -43,7 +43,7 @@ struct ShapingEvidence {
     lines: Vec<LineEvidence>,
 }
 
-fn font_system() -> FontSystem {
+pub(super) fn font_system() -> FontSystem {
     let mut db = Database::new();
     for font in [INTER, INTER_ITALIC, NOTO_ARABIC, NOTO_HEBREW] {
         db.load_font_data(font.to_vec());
@@ -52,11 +52,11 @@ fn font_system() -> FontSystem {
     FontSystem::new_with_locale_and_db("en-US".into(), db)
 }
 
-fn scalar_offset(text: &str, byte: usize) -> usize {
+pub(super) fn scalar_offset(text: &str, byte: usize) -> usize {
     text[..byte].chars().count()
 }
 
-fn source_line_starts(text: &str) -> Vec<usize> {
+pub(super) fn source_line_starts(text: &str) -> Vec<usize> {
     let mut starts = Vec::new();
     let mut final_ending = None;
     for (range, ending) in LineIter::new(text) {
