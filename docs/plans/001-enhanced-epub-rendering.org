@@ -126,11 +126,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   production ~ContentNode~ lowering without changing the current renderer.  ADR
   001 records supported selector/value semantics, the private
   ~lightningcss~/~parcel_selectors~ matcher boundary, licenses, and the remaining
-  production selector, shaping, layout, font, accessibility, pagination, and
-  MathML work.
-- [ ] Evaluate a maintained text shaper behind measurement/shaping interfaces;
-  list separately the required block, inline, table, image, pagination,
-  font-face, selection/accessibility, and MathML components.
+  production selector/shaper integration, layout, font, accessibility,
+  pagination, and MathML work.
+- [X] Evaluate a maintained text shaper behind measurement/shaping interfaces;
+  the test-only ~cosmic-text~ spike proves deterministic advanced shaping,
+  bidi visual order with logical source ranges, Arabic/Hebrew fallback,
+  weight/style selection, and line measurement.  ADR 001 separately records
+  that block, inline, table, image, pagination, EPUB font-face,
+  selection/accessibility, stable locations, and MathML remain unimplemented;
+  the bundled fixtures do not provide CJK or emoji glyph coverage.
 - [ ] Render the same table/font/MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
