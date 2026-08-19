@@ -189,14 +189,14 @@ Scores remain unset until the same fixture and measurement protocol is used.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade prototype passes semantic CSS assertions; table roles are retained, but table layout, font loading, shaping, and MathML rendering remain absent | Combined rendered fixture on every target              |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade and `cosmic-text` shaping prototypes pass semantic assertions; table layout, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
-| Accessibility/selection    | Unknown platform behavior                                                                                     | Not currently modeled                                           | Screen-reader and selection tests                      |
+| Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
-| Packaging cost             | WebKitGTK added on Linux                                                                                      | Dependency set not selected                                     | Binary/runtime/package smoke tests                     |
-| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade boundary is feasible, but a production matcher plus block/inline/table/font/MathML layout remains substantial | Native shaping/layout/math dependency prototypes       |
+| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; other dependencies are not selected | Font and remaining dependency size; package smoke tests |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade and shaping boundaries are feasible, but a production matcher plus block/inline/table/font/MathML layout remains substantial | Native layout/math dependency prototypes               |
 
 ## Fixture and measurement matrix
 
@@ -264,12 +264,55 @@ but keeps its `parcel_selectors::SelectorImpl` private, so the generic
 Production would need either a separately parsed public `parcel_selectors`
 implementation, a maintained DOM/CSS engine, or an explicitly bounded custom
 matcher. `lightningcss` and `parcel_selectors` are MPL-2.0; `roxmltree` is
-MIT/Apache-2.0. The repository already receives MIT/Apache-2.0 `cosmic-text`
+MIT/Apache-2.0. The repository already receives `cosmic-text`
 transitively through Iced, but it supplies shaping rather than CSS, block/table
 layout, pagination, selection/accessibility, or MathML. No current dependency
 fills those remaining layers, so the native route remains a high and potentially
 unbounded implementation/maintenance commitment until follow-up prototypes
 identify acceptable maintained components.
+
+## Native text-shaping spike
+
+A test-only `cosmic-text` 0.15.0 spike shapes fixed strings with an in-memory,
+host-independent font database. The direct dev dependency pins the same version
+already selected transitively by Iced. Semantic tests prove that:
+
+- advanced shaping handles Arabic, Hebrew, and mixed Latin/RTL text, exposes
+  bidi levels and visual positions, and retains each glyph cluster's logical
+  UTF-8 byte range;
+- line-local byte ranges can be rebased to chapter-global byte and Unicode-
+  scalar offsets currently used by EPUB search, including non-ASCII text before
+  a line break, without deriving logical order from visual glyph order; line
+  endings remain explicit unshaped separators;
+- combining marks form a multi-scalar cluster, while CJK and an emoji ZWJ
+  sequence retain complete logical source coverage;
+- a deterministic in-memory fallback set repeatedly selects Inter for Latin and
+  Noto Sans Arabic/Hebrew for every corresponding script cluster with nonzero
+  glyph IDs;
+- the Inter fixture exposes a `wght` axis and regular/bold shaping produces
+  different advances, while italic requests select the italic face;
+- fixed fonts, locale, metrics, and width produce repeatable glyph measurements,
+  wrapping, baselines, and line heights.
+
+The fixtures are the unmodified Inter variable/italic and Noto Sans
+Arabic/Hebrew fonts distributed with `cosmic-text`; their complete SIL OFL 1.1
+notices are checked in beside them. `cosmic-text` itself is MIT OR Apache-2.0.
+The fixtures deliberately lack CJK and emoji fonts, so those cases prove source
+range behavior, not readable glyph coverage or correct emoji composition. A
+production font policy must provide and bound suitable platform or EPUB-local
+fallbacks and test missing/corrupt fonts and per-book cleanup.
+
+This does not make the current paginator shaping-aware. Its scalar-count and
+`0.55em` width heuristics can still split grapheme/ZWJ sequences and cannot use
+these measurements. The spike rebases `LayoutGlyph`'s line-local UTF-8 offsets,
+but production must preserve the normalized chapter/span bases and inserted
+separators used by search; shaping arbitrary DOM substrings cannot reconstruct
+those locations afterward. Stable DOM/chapter locations, hit testing, selection
+geometry, accessibility semantics, inline box construction, block/table/image
+layout, pagination, and MathML remain separate unimplemented components. The
+spike therefore establishes a viable shaping primitive and interface evidence,
+not a production native renderer. The direct test-only `ttf-parser` check used
+to inspect the variable axis is also MIT OR Apache-2.0.
 
 ## Native performance baseline
 
@@ -289,10 +332,10 @@ cost.
    and complete interactive Linux/X11 input/accessibility checks. Decide whether
    lack of a viable Wayland host rejects Wry or justifies a documented backend
    fallback.
-3. Extend the native computed-style evidence with maintained shaping,
-   block/inline/table layout, font loading, selection/accessibility, pagination,
-   and MathML component prototypes, then render the same fixture. Treat the
-   bounded selector matcher as evidence, not a production implementation.
+3. Extend the native computed-style and shaping evidence with block/inline/table
+   layout, EPUB font loading, selection/accessibility, pagination, and MathML
+   component prototypes, then render the same fixture. Treat both test-only
+   prototypes as evidence, not production implementations.
 4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 

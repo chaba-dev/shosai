@@ -5059,6 +5059,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "cosmic-text",
  "fluent-templates",
  "gtk",
  "iced",
@@ -5072,6 +5073,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "tokio",
+ "ttf-parser",
  "unic-langid",
  "winit",
  "wry",
