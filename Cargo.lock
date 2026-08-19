@@ -5060,6 +5060,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "fluent-templates",
+ "gtk",
  "iced",
  "image",
  "objc2 0.6.4",
@@ -5072,7 +5073,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "unic-langid",
+ "winit",
  "wry",
+ "x11-dl",
 ]
 
 [[package]]

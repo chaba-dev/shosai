@@ -80,6 +80,9 @@
             vulkan-loader
             vulkan-headers
 
+            # Optional EPUB Wry spike (GTK 3 and WebKitGTK 4.1 development files)
+            webkitgtk_4_1
+
             # Headless desktop E2E and screenshot verification
             xvfb
             xwininfo
@@ -230,8 +233,14 @@
                 libxrandr
                 libxi
                 vulkan-loader
+                webkitgtk_4_1
               ])
             );
+
+            # WebKitGTK's propagated build environment can exceed GCC collect2's
+            # spawn limit; Clang links the same native Cargo targets directly.
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
           })
           // (pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
             # macOS: DYLD_LIBRARY_PATH for dynamic libraries
