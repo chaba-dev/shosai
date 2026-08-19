@@ -75,6 +75,7 @@ static INPUT_PROOF_EVENTS: Mutex<Vec<InputProofEvent>> = Mutex::new(Vec::new());
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
     static WEBVIEW_CREATION_GENERATION: Cell<u64> = const { Cell::new(0) };
+    static NATIVE_OPERATION_EPOCH: Cell<u64> = const { Cell::new(0) };
     static BOOK: RefCell<Option<SpikeBook>> = const { RefCell::new(None) };
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -2251,6 +2252,7 @@ fn begin_tab_switch(state: &mut State) -> Task<Message> {
             )),
         );
     }
+    let operation_epoch = begin_native_operation_epoch();
     let Some(id) = state.window else {
         return finish_tab_proof(state, Err("parent window is not available".into()));
     };
@@ -2263,6 +2265,7 @@ fn begin_tab_switch(state: &mut State) -> Task<Message> {
     state.status = "switching away from reader tab; hiding native child".into();
     eprintln!("wry-spike-tab-proof phase=hiding generation={generation}");
     window::run(id, move |_| {
+        ensure_native_operation_is_current(operation_epoch)?;
         ensure_webview_creation_is_current(creation_generation)?;
         WEBVIEW.with(|slot| set_webview_visible(slot.borrow().as_ref(), false))
     })
@@ -3740,10 +3743,12 @@ fn synchronize_webview(state: &mut State) -> Task<Message> {
     }
     let bounds = state.measured_bounds;
     let generation = state.webview_generation;
+    let operation_epoch = current_native_operation_epoch();
     let Some(creation_generation) = state.active_creation_generation else {
         return Task::none();
     };
     window::run(id, move |_| {
+        ensure_native_operation_is_current(operation_epoch)?;
         ensure_webview_creation_is_current(creation_generation)?;
         WEBVIEW.with(|slot| synchronize_webview_instance(slot.borrow().as_ref(), bounds))
     })
@@ -3833,6 +3838,28 @@ fn ensure_webview_creation_is_current(generation: u64) -> Result<(), String> {
     })
 }
 
+fn current_native_operation_epoch() -> u64 {
+    NATIVE_OPERATION_EPOCH.with(Cell::get)
+}
+
+fn begin_native_operation_epoch() -> u64 {
+    NATIVE_OPERATION_EPOCH.with(|epoch| {
+        let next = epoch.get().wrapping_add(1);
+        epoch.set(next);
+        next
+    })
+}
+
+fn invalidate_native_operations() {
+    begin_native_operation_epoch();
+}
+
+fn ensure_native_operation_is_current(epoch: u64) -> Result<(), String> {
+    (current_native_operation_epoch() == epoch)
+        .then_some(())
+        .ok_or_else(|| "native webview operation was canceled".to_string())
+}
+
 fn record_terminal_result(slot: &mut Option<Result<(), String>>, result: Result<(), String>) {
     if slot.is_none() {
         *slot = Some(result);
@@ -3874,6 +3901,7 @@ fn webview_bounds(bounds: Rectangle) -> Rect {
 
 fn teardown_webview() -> bool {
     invalidate_webview_creation();
+    invalidate_native_operations();
     #[cfg(test)]
     TEARDOWN_CALLS.with(|calls| calls.set(calls.get() + 1));
     #[cfg(target_os = "linux")]
@@ -5143,6 +5171,18 @@ mod tests {
             ensure_webview_creation_is_current(generation).unwrap_err(),
             "webview creation was canceled"
         );
+    }
+
+    #[test]
+    fn beginning_tab_hide_invalidates_queued_native_operations() {
+        let queued_synchronization = current_native_operation_epoch();
+        let hide = begin_native_operation_epoch();
+
+        assert!(ensure_native_operation_is_current(queued_synchronization).is_err());
+        assert_eq!(ensure_native_operation_is_current(hide), Ok(()));
+
+        invalidate_native_operations();
+        assert!(ensure_native_operation_is_current(hide).is_err());
     }
 
     #[test]
