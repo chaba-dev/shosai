@@ -71,6 +71,8 @@ struct PrototypeReport {
     element_styles: HashMap<String, ComputedStyle>,
     font_face_rules: usize,
     unsupported_selectors: Vec<String>,
+    unsupported_rules: Vec<String>,
+    unsupported_declarations: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +133,12 @@ enum RelativeLength {
     Percent(f32),
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SpecifiedAlignment {
+    Value(Alignment),
+    MatchParent,
+}
+
 impl RelativeLength {
     fn resolve(self, parent_font_size: f32, root_font_size: f32) -> f32 {
         match self {
@@ -149,7 +157,7 @@ struct SpecifiedStyle {
     bold: Slot<bool>,
     italic: Slot<bool>,
     monospace: Slot<bool>,
-    alignment: Slot<Alignment>,
+    alignment: Slot<SpecifiedAlignment>,
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
     margin_left: Slot<RelativeLength>,
@@ -160,12 +168,17 @@ fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, St
     let sheet =
         StyleSheet::parse(css, ParserOptions::default()).map_err(|error| error.to_string())?;
     let mut unsupported_selectors = HashSet::new();
+    let mut unsupported_rules = HashSet::new();
+    let mut unsupported_declarations = HashSet::new();
     let mut font_face_rules = 0;
     inventory_rules(
         &sheet.rules.0,
         &mut unsupported_selectors,
+        &mut unsupported_rules,
+        &mut unsupported_declarations,
         &mut font_face_rules,
     );
+    inventory_inline_declarations(document.root_element(), &mut unsupported_declarations);
 
     let mut element_styles = HashMap::new();
     walk_element(
@@ -177,11 +190,17 @@ fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, St
     );
     let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
     unsupported_selectors.sort();
+    let mut unsupported_rules = unsupported_rules.into_iter().collect::<Vec<_>>();
+    unsupported_rules.sort();
+    let mut unsupported_declarations = unsupported_declarations.into_iter().collect::<Vec<_>>();
+    unsupported_declarations.sort();
 
     Ok(PrototypeReport {
         element_styles,
         font_face_rules,
         unsupported_selectors,
+        unsupported_rules,
+        unsupported_declarations,
     })
 }
 
@@ -266,7 +285,22 @@ fn compute_element_style(
         style.monospace = value;
     }
     if let Some(value) = specified.alignment.value() {
-        style.alignment = value;
+        style.alignment = match value {
+            SpecifiedAlignment::Value(value) => value,
+            SpecifiedAlignment::MatchParent => {
+                parent.map_or(Alignment::Start, |parent| match parent.alignment {
+                    Alignment::Start => match parent.direction {
+                        Direction::Ltr => Alignment::Left,
+                        Direction::Rtl => Alignment::Right,
+                    },
+                    Alignment::End => match parent.direction {
+                        Direction::Ltr => Alignment::Right,
+                        Direction::Rtl => Alignment::Left,
+                    },
+                    value => value,
+                })
+            }
+        };
     }
     if let Some(value) = specified.direction.value() {
         style.direction = value;
@@ -321,14 +355,20 @@ fn apply_declarations(
                 specificity,
                 source_order: *source_order,
             };
-            apply_property(property, priority, specified);
+            if property_supported(property) {
+                apply_property(property, priority, specified);
+            }
         }
     }
 }
 
 fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut SpecifiedStyle) {
     match property {
-        Property::Display(display) => specified.display.offer(priority, css_display(display)),
+        Property::Display(display) => {
+            if let Some(display) = css_display(display) {
+                specified.display.offer(priority, display);
+            }
+        }
         Property::FontSize(FontSize::Length(value)) => {
             if let Some(value) = relative_length(value) {
                 specified.font_size.offer(priority, value);
@@ -362,7 +402,7 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             ),
         ),
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
-            if let Some(value) = relative_length(value) {
+            if let Some(value) = margin_length(value) {
                 specified.margin_left.offer(priority, value);
             }
         }
@@ -373,11 +413,14 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
 fn inventory_rules(
     rules: &[CssRule<'_>],
     unsupported_selectors: &mut HashSet<String>,
+    unsupported_rules: &mut HashSet<String>,
+    unsupported_declarations: &mut HashSet<String>,
     font_face_rules: &mut usize,
 ) {
     for rule in rules {
         match rule {
             CssRule::Style(rule) => {
+                inventory_declarations(&rule.declarations, unsupported_declarations);
                 for selector in &rule.selectors.0 {
                     if !selector_supported(selector) {
                         unsupported_selectors.insert(
@@ -387,10 +430,99 @@ fn inventory_rules(
                         );
                     }
                 }
+                if !rule.rules.0.is_empty() {
+                    unsupported_rules.insert("nested style rules".into());
+                }
             }
             CssRule::FontFace(_) => *font_face_rules += 1,
-            _ => {}
+            rule => {
+                unsupported_rules.insert(unsupported_rule_name(rule).into());
+            }
         }
+    }
+}
+
+fn inventory_declarations(
+    declarations: &DeclarationBlock<'_>,
+    unsupported_declarations: &mut HashSet<String>,
+) {
+    for property in declarations
+        .declarations
+        .iter()
+        .chain(&declarations.important_declarations)
+    {
+        if !property_supported(property) {
+            unsupported_declarations.insert(
+                property
+                    .to_css_string(false, Default::default())
+                    .unwrap_or_else(|_| "<unserializable declaration>".into()),
+            );
+        }
+    }
+}
+
+fn inventory_inline_declarations(
+    root: Node<'_, '_>,
+    unsupported_declarations: &mut HashSet<String>,
+) {
+    for element in root.descendants().filter(Node::is_element) {
+        let Some(inline) = element.attribute("style") else {
+            continue;
+        };
+        match StyleAttribute::parse(inline, ParserOptions::default()) {
+            Ok(attribute) => {
+                inventory_declarations(&attribute.declarations, unsupported_declarations)
+            }
+            Err(_) => {
+                unsupported_declarations.insert("<invalid inline style>".into());
+            }
+        }
+    }
+}
+
+fn unsupported_rule_name(rule: &CssRule<'_>) -> &'static str {
+    match rule {
+        CssRule::Media(_) => "@media",
+        CssRule::Import(_) => "@import",
+        CssRule::Keyframes(_) => "@keyframes",
+        CssRule::FontPaletteValues(_) => "@font-palette-values",
+        CssRule::FontFeatureValues(_) => "@font-feature-values",
+        CssRule::Page(_) => "@page",
+        CssRule::Supports(_) => "@supports",
+        CssRule::CounterStyle(_) => "@counter-style",
+        CssRule::Namespace(_) => "@namespace",
+        CssRule::MozDocument(_) => "@-moz-document",
+        CssRule::Nesting(_) => "@nest",
+        CssRule::NestedDeclarations(_) => "nested declarations",
+        CssRule::Viewport(_) => "@viewport",
+        CssRule::CustomMedia(_) => "@custom-media",
+        CssRule::LayerStatement(_) | CssRule::LayerBlock(_) => "@layer",
+        CssRule::Property(_) => "@property",
+        CssRule::Container(_) => "@container",
+        CssRule::Scope(_) => "@scope",
+        CssRule::StartingStyle(_) => "@starting-style",
+        CssRule::ViewTransition(_) => "@view-transition",
+        CssRule::Ignored => "ignored rule",
+        CssRule::Unknown(_) => "unknown at-rule",
+        CssRule::Custom(_) => "custom at-rule",
+        CssRule::Style(_) | CssRule::FontFace(_) => unreachable!("supported rule"),
+    }
+}
+
+fn property_supported(property: &Property<'_>) -> bool {
+    match property {
+        Property::Display(display) => css_display(display).is_some(),
+        Property::FontSize(FontSize::Length(value)) => relative_length(value).is_some(),
+        Property::FontWeight(FontWeight::Absolute(_)) => true,
+        Property::FontStyle(_)
+        | Property::FontFamily(_)
+        | Property::TextAlign(_)
+        | Property::Direction(_)
+        | Property::WhiteSpace(_) => true,
+        Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            margin_length(value).is_some()
+        }
+        _ => false,
     }
 }
 
@@ -548,45 +680,50 @@ fn apply_ua_text_defaults(tag: &str, style: &mut ComputedStyle) {
     }
 }
 
-fn css_display(display: &Display) -> DisplayRole {
+fn css_display(display: &Display) -> Option<DisplayRole> {
     match display {
         Display::Keyword(keyword) => match keyword {
-            DisplayKeyword::None => DisplayRole::None,
+            DisplayKeyword::None => Some(DisplayRole::None),
             DisplayKeyword::TableRowGroup
             | DisplayKeyword::TableHeaderGroup
-            | DisplayKeyword::TableFooterGroup => DisplayRole::TableRowGroup,
-            DisplayKeyword::TableRow => DisplayRole::TableRow,
-            DisplayKeyword::TableCell => DisplayRole::TableCell,
-            DisplayKeyword::TableCaption => DisplayRole::TableCaption,
-            _ => DisplayRole::Inline,
+            | DisplayKeyword::TableFooterGroup => Some(DisplayRole::TableRowGroup),
+            DisplayKeyword::TableRow => Some(DisplayRole::TableRow),
+            DisplayKeyword::TableCell => Some(DisplayRole::TableCell),
+            DisplayKeyword::TableCaption => Some(DisplayRole::TableCaption),
+            _ => None,
         },
         Display::Pair(pair) => {
             if matches!(pair.inside, DisplayInside::Table) {
-                DisplayRole::Table
-            } else if matches!(pair.outside, DisplayOutside::Block) {
-                DisplayRole::Block
+                Some(DisplayRole::Table)
+            } else if !matches!(pair.inside, DisplayInside::Flow) || pair.is_list_item {
+                None
             } else {
-                DisplayRole::Inline
+                match pair.outside {
+                    DisplayOutside::Block => Some(DisplayRole::Block),
+                    DisplayOutside::Inline => Some(DisplayRole::Inline),
+                    DisplayOutside::RunIn => None,
+                }
             }
         }
     }
 }
 
-fn css_alignment(alignment: &TextAlign) -> Alignment {
+fn css_alignment(alignment: &TextAlign) -> SpecifiedAlignment {
     match alignment {
-        TextAlign::Start | TextAlign::MatchParent => Alignment::Start,
-        TextAlign::End => Alignment::End,
-        TextAlign::Left => Alignment::Left,
-        TextAlign::Right => Alignment::Right,
-        TextAlign::Center => Alignment::Center,
-        TextAlign::Justify | TextAlign::JustifyAll => Alignment::Justify,
+        TextAlign::Start => SpecifiedAlignment::Value(Alignment::Start),
+        TextAlign::End => SpecifiedAlignment::Value(Alignment::End),
+        TextAlign::Left => SpecifiedAlignment::Value(Alignment::Left),
+        TextAlign::Right => SpecifiedAlignment::Value(Alignment::Right),
+        TextAlign::Center => SpecifiedAlignment::Value(Alignment::Center),
+        TextAlign::Justify | TextAlign::JustifyAll => SpecifiedAlignment::Value(Alignment::Justify),
+        TextAlign::MatchParent => SpecifiedAlignment::MatchParent,
     }
 }
 
 fn is_bold(weight: &FontWeight) -> bool {
     match weight {
         FontWeight::Absolute(AbsoluteFontWeight::Weight(value)) => *value >= 600.0,
-        FontWeight::Absolute(AbsoluteFontWeight::Bold) | FontWeight::Bolder => true,
+        FontWeight::Absolute(AbsoluteFontWeight::Bold) => true,
         _ => false,
     }
 }
@@ -617,6 +754,13 @@ fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeL
             Some(RelativeLength::Px(*value * 96.0 / 72.0))
         }
         _ => None,
+    }
+}
+
+fn margin_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
+    match value {
+        DimensionPercentage::Percentage(_) => None,
+        _ => relative_length(value),
     }
 }
 
@@ -655,6 +799,17 @@ mod tests {
             "general sibling selector must match"
         );
         assert_eq!(report.element_styles["hidden"].display, DisplayRole::None);
+        assert_eq!(report.element_styles["margin-percent"].margin_left_px, 0.0);
+        assert_eq!(
+            report.element_styles["display-contents"].display,
+            DisplayRole::Block
+        );
+        assert!(!report.element_styles["bolder-weight"].bold);
+        assert!(report.element_styles["lighter-weight"].bold);
+        assert_eq!(
+            report.element_styles["match-parent-child"].alignment,
+            Alignment::Right
+        );
         assert!((report.element_styles["rem-length"].font_size_px - 32.0).abs() < 0.01);
         assert!((report.element_styles["px-length"].font_size_px - 10.0).abs() < 0.01);
         assert!((report.element_styles["pt-length"].font_size_px - 16.0).abs() < 0.01);
@@ -667,6 +822,10 @@ mod tests {
         assert_eq!(mixed.direction, Direction::Rtl);
         assert!(mixed.italic);
         assert!((mixed.font_size_px - 24.0).abs() < 0.01);
+        assert_eq!(
+            report.element_styles["css-direction-child"].direction,
+            Direction::Rtl
+        );
 
         let title = &report.element_styles["title"];
         assert!(title.bold);
@@ -674,14 +833,46 @@ mod tests {
         assert_eq!(report.element_styles["table"].display, DisplayRole::Table);
         assert_eq!(report.element_styles["row"].display, DisplayRole::TableRow);
         assert_eq!(
+            report.element_styles["body-rows"].display,
+            DisplayRole::TableRowGroup
+        );
+        assert_eq!(
+            report.element_styles["caption"].display,
+            DisplayRole::TableCaption
+        );
+        assert_eq!(
             report.element_styles["heading"].display,
             DisplayRole::TableCell
         );
         assert!(report.element_styles["heading"].bold);
         assert!(report.element_styles["cell"].monospace);
+        assert!(report.element_styles["code"].monospace);
         assert_eq!(
             report.element_styles["equation"].display,
             DisplayRole::Inline
+        );
+
+        let document = roxmltree::Document::parse(XHTML).unwrap();
+        let math = document
+            .descendants()
+            .find(|node| node.attribute("id") == Some("equation"))
+            .unwrap();
+        assert_eq!(
+            math.tag_name().namespace(),
+            Some("http://www.w3.org/1998/Math/MathML")
+        );
+        assert_eq!(
+            math.children()
+                .filter(Node::is_element)
+                .map(|node| node.tag_name().name())
+                .collect::<Vec<_>>(),
+            ["mfrac"]
+        );
+        assert_eq!(
+            math.descendants()
+                .filter(|node| node.is_element() && node.tag_name().name() == "mi")
+                .count(),
+            2
         );
     }
 
@@ -689,6 +880,28 @@ mod tests {
     fn inventory_keeps_unsupported_selector_and_font_work_visible() {
         let report = report();
         assert_eq!(report.font_face_rules, 1);
-        assert_eq!(report.unsupported_selectors, ["p:first-child"]);
+        assert_eq!(report.unsupported_selectors, ["p:nth-child(2)"]);
+        assert_eq!(report.unsupported_rules, ["@layer"]);
+        for value in [
+            "margin-left:25%",
+            "margin-left:50%",
+            "display:contents",
+            "font-weight:bolder",
+            "font-weight:lighter",
+        ] {
+            assert!(
+                report
+                    .unsupported_declarations
+                    .iter()
+                    .any(|declaration| declaration.replace(' ', "") == value),
+                "missing unsupported declaration {value:?}: {:?}",
+                report.unsupported_declarations
+            );
+        }
+        assert_eq!(report.element_styles["lead"].alignment, Alignment::Right);
+        assert_eq!(
+            report.element_styles["layer-target"].alignment,
+            Alignment::Start
+        );
     }
 }
