@@ -199,14 +199,14 @@ Scores remain unset until the same fixture and measurement protocol is used.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, and Taffy block-box prototypes pass semantic assertions; inline construction, table layout, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, and normalized Grid table prototypes pass semantic assertions; CSS inline and table algorithms, EPUB font loading, CJK/emoji font coverage, and MathML rendering remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus/visibility method returns, observed replacement size, lifecycle and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Actual focus/visibility, scale, overlay, clipping, real tabs, IME, other targets |
 | Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
 | Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy candidate is pure Rust but not selected for production | Font and remaining dependency size; package smoke tests |
-| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, and block-leaf measurement boundaries are feasible, but inline construction plus table/font/MathML layout remains substantial | Native table/math dependency prototypes                |
+| Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, and explicit table-grid lowering boundaries are feasible, but CSS inline/table compatibility plus font/MathML layout remains substantial | Native font/math dependency prototypes                 |
 
 ## Fixture and measurement matrix
 
@@ -345,11 +345,13 @@ two private test modules or changing production pagination. Tests prove that:
 - fixed inputs, fonts, viewport, and disabled pixel rounding produce repeatable
   same-process block, line, and glyph geometry on each tested target.
 
-Taffy is MIT-licensed, pure Rust, and the spike enables only its `std`, `alloc`,
-tree, and block-layout features. That path activates ArrayVec 0.7.6
-(MIT OR Apache-2.0) and SlotMap 1.1.1 (Zlib); both versions were already present
-in the workspace lockfile, and notice/package consequences begin only if Taffy
-is promoted from a dev dependency. Serde is not enabled by this feature set.
+Taffy is MIT-licensed, pure Rust, and the block spike enables its `std`, `alloc`,
+tree, and block-layout features. The later table spike also enables Grid. These
+paths activate ArrayVec 0.7.6 (MIT OR Apache-2.0), SlotMap 1.1.1 (Zlib), and,
+for Grid, SmallVec 1.15.1 (MIT OR Apache-2.0); all three versions were already
+present in the workspace lockfile, and notice/package consequences begin only
+if Taffy is promoted from a dev dependency. Serde is not enabled by this
+feature set.
 Taffy's block implementation accepts externally measured leaves and implements
 margin collapse, but it deliberately has no CSS inline formatting context or
 table algorithm. Shōsai would still need to build anonymous inline roots,
@@ -375,6 +377,38 @@ a substantially larger HTML/CSS stack, uses Parley rather than the proven
 `cosmic-text` path, and was not added by this spike. This remains component
 feasibility evidence, not a production layout implementation.
 
+## Native table-layout spike
+
+A redistribution-safe test-only XHTML fixture normalizes one explicit table
+into caption metadata, row groups, headers, occupied row/column coordinates,
+`rowspan`/`colspan`, links, and image source/fallback/intrinsic dimensions. The
+adapter lowers the cells to direct children of a Taffy Grid container and uses
+the bundled `cosmic-text` fonts for cell measurement. Tests prove that:
+
+- caption, header/body/footer group identity, header cells, spans, an internal
+  link, and a nested image remain represented after normalization;
+- explicit Grid placement gives spanning cells the expected combined row and
+  column geometry while constrained text contributes measured row height;
+- the bounded measurement adapter distinguishes whitespace-delimited minimum
+  content from unwrapped maximum content and keeps intrinsic image dimensions;
+  and
+- a 360 px table minimum overflows a 240 px viewport without flattening or
+  discarding cells, leaving scrolling or other presentation to a caller.
+
+This establishes a possible explicit-grid lowering boundary, not browser table
+compatibility. Taffy 0.13.0 states that it does not implement table layout; its
+Grid track sizing differs from CSS automatic/fixed table algorithms, especially
+for intrinsic and spanning-cell width distribution. The fixture uses equal
+explicit tracks and a whitespace-delimited minimum-content approximation. It
+does not implement anonymous table-box repair, `colgroup`, caption placement
+variants, collapsed-border conflict resolution, baseline alignment, writing
+modes, painting, hit testing, selection, accessibility header associations, or
+fragmentation/repeated headers. The adapter is not connected to the computed
+style or production `ContentNode` paths, and its inline image evidence does not
+yet position an image among shaped glyphs. Promoting this route would therefore
+require a documented EPUB table subset or a fuller maintained table algorithm;
+Grid alone cannot justify browser-equivalent fidelity.
+
 ## Native performance baseline
 
 The dated
@@ -393,10 +427,10 @@ cost.
    and complete interactive Linux/X11 input/accessibility checks. Decide whether
    lack of a viable Wayland host rejects Wry or justifies a documented backend
    fallback.
-3. Extend the native component evidence with inline-tree construction, table
-   layout, EPUB font loading, selection/accessibility, pagination, and MathML,
-   then render the same fixture. Treat every test-only prototype as evidence,
-   not a production implementation.
+3. Extend the native component evidence with inline-tree construction, a fuller
+   table compatibility boundary, EPUB font loading, selection/accessibility,
+   pagination, and MathML, then render the same fixture. Treat every test-only
+   prototype as evidence, not a production implementation.
 4. Run the same release performance protocol for Wry and on the other released
    platforms before assigning final comparison scores or choosing a renderer.
 

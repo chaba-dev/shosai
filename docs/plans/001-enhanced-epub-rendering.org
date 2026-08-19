@@ -152,7 +152,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   construction/whitespace, explicit base direction, tables, fragmentation,
   selection/accessibility, cross-target numeric stability, and production
   caching remain separate work.
-- [ ] Render the same table/font/MathML/mixed-script fixtures and identify
+- [X] Prototype normalized native table geometry.  A redistribution-safe XHTML
+  fixture proves explicit caption, row-group/header, ~rowspan~/~colspan~, nested
+  link/image, measured-cell, and narrow-overflow evidence through Taffy's Grid
+  implementation.  This is not a CSS table algorithm: browser intrinsic track
+  sizing, anonymous table repair, collapsed borders, painting, accessibility,
+  and pagination remain unimplemented.
+- [ ] Render the same font/MathML/mixed-script fixtures and identify
   whether maintained permissive dependencies can fill each missing component.
 - [ ] Estimate implementation and long-term compatibility cost for the EPUB CSS
   subset, including accessibility and selection.
