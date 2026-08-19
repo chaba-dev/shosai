@@ -148,11 +148,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   proves exact text entry and synchronous positive DOM-blur evidence in the
   child.  Wry selected the Iced parent XID on a live XWayland session; under
   Xvfb, a direct Xlib fallback selected and synchronously rechecked it.  Neither
-  path delivered a subsequent synthetic key to Iced without an explicit pointer
-  click in the Iced-only header.  The harness now tracks mouse/touch activation
-  throughout parent handoff and rejects a following key, so the click control
-  exits nonzero instead of being mistaken for a successful handoff.
-  Shortcut conflicts, Linux parent activation, clipboard, IME, visually correct
+  path delivered a subsequent untargeted XTest key to Iced.  An XI2 monitor saw
+  the raw event while a second X11 client selecting core key events on the
+  verified parent received nothing; a core key sent directly to that parent did
+  reach Iced without pointer activation.  This proves directly addressed parent
+  routing but leaves physical-key handoff unresolved.  The harness tracks
+  mouse/touch activation throughout parent handoff and rejects a following key,
+  so the pointer-click control exits nonzero instead of being mistaken for a
+  successful handoff.
+  Shortcut conflicts, Linux physical-key handoff, clipboard, IME, visually correct
   restoration, a viable Iced accessibility tree, screen-reader interaction,
   production-tab integration, production cross-chapter, and arbitrary
   character-offset locations remain open.
