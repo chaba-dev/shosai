@@ -19,7 +19,7 @@ use iced::advanced::widget::{self, operation};
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{
     Background, Color, Element, Event, Length, Point, Rectangle, Size, Subscription, Task, event,
-    keyboard, window,
+    keyboard, mouse, touch, window,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSResponder, NSView};
@@ -297,8 +297,23 @@ struct State {
     overlay_restore_deadline: Option<Instant>,
     scale_settle_deadline: Option<Instant>,
     input_parent_settle_deadline: Option<Instant>,
+    input_parent_pointer_activated: bool,
     tab_restore_deadline: Option<Instant>,
     network_proof_finished: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct ChildInputEvidence {
+    focused: bool,
+    keydown: bool,
+    exact_input: bool,
+    blurred: bool,
+}
+
+impl ChildInputEvidence {
+    fn complete(self) -> bool {
+        self.focused && self.keydown && self.exact_input && self.blurred
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -307,14 +322,8 @@ enum InputProof {
     Disabled,
     WaitingForCreation,
     WaitingForReady,
-    FocusingChild {
-        focused: bool,
-        keydown: bool,
-    },
-    WaitingForChildInput {
-        focused: bool,
-        keydown: bool,
-    },
+    FocusingChild(ChildInputEvidence),
+    WaitingForChildInput(ChildInputEvidence),
     FocusingParent,
     SettlingParent,
     FocusingSettledParent,
@@ -792,41 +801,44 @@ fn require_accessibility_tree(snapshot: AccessibilitySnapshot) -> Result<(), Str
 impl InputProof {
     fn observe_ipc(&mut self, message: &str) -> InputAction {
         if *self == Self::WaitingForReady && message == "ready" {
-            *self = Self::FocusingChild {
-                focused: false,
-                keydown: false,
-            };
+            *self = Self::FocusingChild(ChildInputEvidence::default());
             return InputAction::FocusChild;
         }
-        let (focused, keydown, waiting_for_input) = match self {
-            Self::FocusingChild { focused, keydown } => (focused, keydown, false),
-            Self::WaitingForChildInput { focused, keydown } => (focused, keydown, true),
+        let (evidence, waiting_for_input) = match self {
+            Self::FocusingChild(evidence) => (evidence, false),
+            Self::WaitingForChildInput(evidence) => (evidence, true),
             _ => return InputAction::None,
         };
         match message {
-            "focus" => *focused = true,
-            "keydown" => *keydown = true,
-            _ => {}
+            "focus" => evidence.focused = true,
+            "keydown" => evidence.keydown = true,
+            "blurred" => evidence.blurred = true,
+            message if message == format!("input:{INPUT_PROOF_TOKEN}") => {
+                evidence.exact_input = true;
+            }
+            _ => return InputAction::None,
         }
-        if !waiting_for_input {
+        if !waiting_for_input || !evidence.complete() {
             return InputAction::None;
         }
-        if message == format!("input:{INPUT_PROOF_TOKEN}") && *focused && *keydown {
-            *self = Self::FocusingParent;
-            return InputAction::FocusParent;
-        }
-        InputAction::None
+        *self = Self::FocusingParent;
+        InputAction::FocusParent
     }
 
-    fn child_focused(&mut self, succeeded: bool) -> bool {
-        let Self::FocusingChild { focused, keydown } = *self else {
-            return false;
+    fn child_focused(&mut self, succeeded: bool) -> InputAction {
+        let Self::FocusingChild(evidence) = *self else {
+            return InputAction::None;
         };
         if !succeeded {
-            return false;
+            return InputAction::None;
         }
-        *self = Self::WaitingForChildInput { focused, keydown };
-        true
+        if evidence.complete() {
+            *self = Self::FocusingParent;
+            InputAction::FocusParent
+        } else {
+            *self = Self::WaitingForChildInput(evidence);
+            InputAction::None
+        }
     }
 
     fn parent_focused(&mut self, succeeded: bool) -> bool {
@@ -862,6 +874,16 @@ impl InputProof {
         }
         *self = Self::ParentKeyObserved;
         true
+    }
+
+    fn tracks_parent_activation(self) -> bool {
+        matches!(
+            self,
+            Self::FocusingParent
+                | Self::SettlingParent
+                | Self::FocusingSettledParent
+                | Self::WaitingForParentKey { .. }
+        )
     }
 }
 
@@ -1596,6 +1618,7 @@ enum Message {
         revision: u64,
         repeat: bool,
     },
+    IcedPointerPressed,
     PlaceholderMeasured {
         epoch: u64,
         bounds: Option<Rectangle>,
@@ -1908,14 +1931,15 @@ fn subscription(_state: &State) -> Subscription<Message> {
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
     }
     if keyboard_input_proof_requested() {
-        subscriptions.push(event::listen_with(|event, _, _| {
-            if let Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) = event {
+        subscriptions.push(event::listen_with(|event, _, _| match event {
+            Event::Keyboard(keyboard::Event::KeyPressed { repeat, .. }) => {
                 let revision = INPUT_KEY_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
                 eprintln!("wry-spike-input-proof event=iced-keydown");
                 Some(Message::IcedKeyPressed { revision, repeat })
-            } else {
-                None
             }
+            Event::Mouse(mouse::Event::ButtonPressed(_))
+            | Event::Touch(touch::Event::FingerPressed { .. }) => Some(Message::IcedPointerPressed),
+            _ => None,
         }));
     }
     #[cfg(target_os = "linux")]
@@ -2606,12 +2630,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             scale,
         } => update_final_scale(state, generation, event_revision, scale),
         Message::InputChildFocused(result) => match result {
-            Ok(()) if state.input_proof.child_focused(true) => {
-                state.status =
-                    format!("child focused; type {INPUT_PROOF_TOKEN:?} into the webview input");
-                Task::none()
-            }
-            Ok(()) => Task::none(),
+            Ok(()) => match state.input_proof.child_focused(true) {
+                InputAction::FocusParent => request_parent_focus(state),
+                _ => {
+                    state.status =
+                        format!("child focused; type {INPUT_PROOF_TOKEN:?} into the webview input");
+                    Task::none()
+                }
+            },
             Err(error) => finish_keyboard_input_proof(
                 state,
                 Err(format!("failed to focus child input: {error}")),
@@ -2647,9 +2673,21 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("failed to confirm settled parent focus: {error}")),
             ),
         },
+        Message::IcedPointerPressed if state.input_proof.tracks_parent_activation() => {
+            eprintln!("wry-spike-input-proof event=parent-pointer-activation");
+            state.input_parent_pointer_activated = true;
+            Task::none()
+        }
+        Message::IcedPointerPressed => Task::none(),
         Message::IcedKeyPressed { revision, repeat }
             if state.input_proof.observe_parent_key(revision, repeat) =>
         {
+            if state.input_parent_pointer_activated {
+                return finish_keyboard_input_proof(
+                    state,
+                    Err("Iced parent key followed pointer-assisted activation".into()),
+                );
+            }
             eprintln!("wry-spike-input-proof phase=parent-key-observed");
             if tab_proof_requested() {
                 if state.tab_proof.current_round() == Some(TAB_PROOF_SWITCHES) {
@@ -2785,6 +2823,9 @@ fn update_keyboard_input(state: &mut State, now: Instant) -> Task<Message> {
         } else {
             &event.message
         };
+        if let Some(error) = message.strip_prefix("fail:") {
+            return finish_keyboard_input_proof(state, Err(error.to_string()));
+        }
         match state.input_proof.observe_ipc(message) {
             InputAction::None => {}
             InputAction::FocusChild => {
@@ -2800,22 +2841,22 @@ fn update_keyboard_input(state: &mut State, now: Instant) -> Task<Message> {
                 })
                 .map(Message::InputChildFocused);
             }
-            InputAction::FocusParent => {
-                let Some(id) = state.window else {
-                    return finish_keyboard_input_proof(
-                        state,
-                        Err("parent window is not available".into()),
-                    );
-                };
-                state.status = "child typing observed; restoring focus to Iced".into();
-                return window::run(id, move |window| {
-                    WEBVIEW.with(|slot| focus_webview_parent(window, slot.borrow().as_ref()))
-                })
-                .map(Message::InputParentFocused);
-            }
+            InputAction::FocusParent => return request_parent_focus(state),
         }
     }
     Task::none()
+}
+
+fn request_parent_focus(state: &mut State) -> Task<Message> {
+    let Some(id) = state.window else {
+        return finish_keyboard_input_proof(state, Err("parent window is not available".into()));
+    };
+    state.input_parent_pointer_activated = false;
+    state.status = "child typing and blur observed; restoring focus to Iced".into();
+    window::run(id, move |window| {
+        WEBVIEW.with(|slot| focus_webview_parent(window, slot.borrow().as_ref()))
+    })
+    .map(Message::InputParentFocused)
 }
 
 fn finish_keyboard_input_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
@@ -3460,9 +3501,6 @@ fn focus_webview_parent(
     webview: Option<&WebView>,
 ) -> Result<(), String> {
     let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
-    webview
-        .evaluate_script("document.getElementById('proof-input').blur()")
-        .map_err(|error| error.to_string())?;
     webview.focus_parent().map_err(|error| error.to_string())?;
 
     let (wry_selected_parent, direct_attempted) = focus_x11_parent(parent)?;
@@ -5297,7 +5335,17 @@ window.addEventListener('DOMContentLoaded', () => {
   const input = document.getElementById('proof-input');
   input.addEventListener('focus', () => window.ipc.postMessage('focus'));
   input.addEventListener('keydown', () => window.ipc.postMessage('keydown'));
-  input.addEventListener('input', () => window.ipc.postMessage(`input:${input.value}`));
+  input.addEventListener('input', () => {
+    if (input.value === input.dataset.proofToken) {
+      input.blur();
+      if (document.activeElement === input) {
+        window.ipc.postMessage('fail:trusted DOM input remained active after blur');
+        return;
+      }
+      window.ipc.postMessage('blurred');
+    }
+    window.ipc.postMessage(`input:${input.value}`);
+  });
   input.addEventListener('compositionstart', () => window.ipc.postMessage('composition'));
   window.ipc.postMessage(`ready:${location.pathname}${location.hash}`);
 });
@@ -5318,7 +5366,7 @@ const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <body>
   <h1 id="proof-anchor">Wry input routing proof</h1>
   <p>The host focuses this trusted input. Type <code>shosai-input-proof</code>.</p>
-  <input id="proof-input" type="text" aria-label="EPUB proof input" autocomplete="off" />
+  <input id="proof-input" type="text" aria-label="EPUB proof input" autocomplete="off" data-proof-token="shosai-input-proof" />
 </body>
 </html>"#;
 
@@ -5685,6 +5733,7 @@ mod tests {
         );
         let input_book = input_proof_book().unwrap();
         assert_eq!(input_book.resources.len(), 1);
+        assert!(INPUT_PROOF_CHAPTER.contains(&format!("data-proof-token=\"{INPUT_PROOF_TOKEN}\"")));
         for (url, path) in [
             (READER_PROOF_URL, READER_PROOF_PATH),
             (INPUT_PROOF_URL, INPUT_PROOF_PATH),
@@ -5741,18 +5790,15 @@ mod tests {
         assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
         assert_eq!(proof.observe_ipc("ready"), InputAction::FocusChild);
         assert_eq!(proof.observe_ipc("focus"), InputAction::None);
-        assert!(!proof.child_focused(false));
-        assert!(proof.child_focused(true));
+        assert_eq!(proof.child_focused(false), InputAction::None);
+        assert_eq!(proof.child_focused(true), InputAction::None);
         assert_eq!(
             proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
             InputAction::None
         );
         assert_eq!(proof.observe_ipc("focus"), InputAction::None);
         assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
-        assert_eq!(
-            proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
-            InputAction::FocusParent
-        );
+        assert_eq!(proof.observe_ipc("blurred"), InputAction::FocusParent);
         assert!(!proof.observe_parent_key(1, false));
         assert!(proof.parent_focused(true));
         assert!(!proof.observe_parent_key(2, false));
@@ -5761,6 +5807,37 @@ mod tests {
         assert!(proof.settled_parent_focused(2, true));
         assert!(proof.observe_parent_key(3, false));
         assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn input_proof_waits_for_positive_blur_evidence() {
+        let mut proof = InputProof::WaitingForReady;
+
+        assert_eq!(proof.observe_ipc("ready"), InputAction::FocusChild);
+        assert_eq!(proof.child_focused(true), InputAction::None);
+        assert_eq!(proof.observe_ipc("focus"), InputAction::None);
+        assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
+        assert_eq!(
+            proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
+            InputAction::None
+        );
+        assert_eq!(proof.observe_ipc("blurred"), InputAction::FocusParent);
+    }
+
+    #[test]
+    fn input_proof_preserves_exact_input_before_native_focus_callback() {
+        let mut proof = InputProof::WaitingForReady;
+
+        assert_eq!(proof.observe_ipc("ready"), InputAction::FocusChild);
+        assert_eq!(proof.observe_ipc("focus"), InputAction::None);
+        assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
+        assert_eq!(
+            proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
+            InputAction::None
+        );
+        assert_eq!(proof.observe_ipc("blurred"), InputAction::None);
+        assert_eq!(proof.child_focused(true), InputAction::FocusParent);
+        assert_eq!(proof, InputProof::FocusingParent);
     }
 
     #[test]
@@ -5774,6 +5851,32 @@ mod tests {
         assert!(!proof.observe_parent_key(9, true));
         assert!(proof.observe_parent_key(9, false));
         assert_eq!(proof, InputProof::ParentKeyObserved);
+    }
+
+    #[test]
+    fn input_proof_rejects_pointer_assisted_parent_key() {
+        let mut state = State {
+            input_proof: InputProof::WaitingForParentKey { revision_cutoff: 4 },
+            ..State::default()
+        };
+        INPUT_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update(&mut state, Message::IcedPointerPressed));
+        assert!(state.input_parent_pointer_activated);
+        drop(update(
+            &mut state,
+            Message::IcedKeyPressed {
+                revision: 5,
+                repeat: false,
+            },
+        ));
+
+        assert_eq!(state.input_proof, InputProof::Complete);
+        INPUT_PROOF_RESULT.with(|result| {
+            let result = result.borrow();
+            let error = result.as_ref().unwrap().as_ref().unwrap_err();
+            assert!(error.contains("pointer-assisted activation"));
+        });
     }
 
     #[test]
@@ -6136,10 +6239,7 @@ mod tests {
 
         assert_eq!(
             state.input_proof,
-            InputProof::FocusingChild {
-                focused: false,
-                keydown: false,
-            }
+            InputProof::FocusingChild(ChildInputEvidence::default())
         );
     }
 
