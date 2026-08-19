@@ -121,9 +121,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   generation's reported logical size after applying those bounds.  This is
   logical-geometry evidence from one real display transition, not proof of
   visual or backing-pixel correctness.
-  Focus is only a successful Wry method return, not proof of actual focus,
-  visually correct restoration, or keyboard/IME routing; the cross-platform,
-  accessibility, real-tab, routing, and logical-location portions remain open.
+  A macOS input proof now observes exact text and keydown events in a focused
+  child DOM input.  Its subsequent ~focus_parent~ and Iced window-focus calls
+  return successfully, but a new key does not reach Iced and the proof times
+  out rather than accepting the method return as restoration evidence.
+  Keyboard restoration, shortcut conflicts, IME, visually correct restoration,
+  cross-platform input, accessibility, real-tab routing, and logical locations
+  remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.

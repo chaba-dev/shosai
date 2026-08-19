@@ -34,6 +34,8 @@ SHOSAI_WRY_SPIKE_BOUNDS_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_SCALE_PROOF=1 SHOSAI_WRY_SPIKE_SCALE_TARGET=-1800,100 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_INPUT_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
@@ -108,6 +110,18 @@ It currently proves on macOS arm64 that:
   unconfirmed scale values, stale generations and measurement epochs,
   unusable bounds, premature shared synchronization, failed Wry calls, missing
   children, close, and timeout;
+- the macOS input mode serves a harness-owned input page, injects only a
+  trusted host script while author JavaScript remains disabled, focuses the
+  child and its DOM input, and requires ordered focus, keydown, and exact-value
+  IPC observations before asking Wry to focus the parent and waiting for a new
+  Iced keyboard event. On the 2026-08-19 macOS arm64 host, UI automation typed
+  the exact `shosai-input-proof` token and the child reported every keydown and
+  input value. `focus_parent`, followed by Iced's window-focus request, returned
+  successfully but a subsequent automated key produced no Iced keyboard event;
+  the proof correctly timed out in `WaitingForParentKey`. Child keyboard input
+  is therefore viable, but Wry's parent-focus method is not sufficient evidence
+  for keyboard restoration. Shortcut conflicts, IME composition, real tab
+  switching, and a maintainable AppKit responder handoff remain open;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -125,15 +139,18 @@ book resources are served with their exact manifest media types, including
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
-The focus, visibility, and scale-bound updates prove only that Wry's methods
-returned `Ok`; queried scale factors and reported child sizes prove only the
+The visibility and scale-bound updates prove only that Wry's methods returned
+`Ok`; queried scale factors and reported child sizes prove only the
 observed window scale and logical geometry, not backing-pixel placement or
 visual correctness. The reported replacement size proves only its logical
 size, not placement or visual restoration, and the visual observation
 proves the uncoordinated z-order failure.  They do not prove a visually correct
 restored frame after modal dismissal. Wry's macOS
-implementation does not expose AppKit's boolean first-responder result. They do
-not prove that focus changed, keyboard/IME events route correctly, or that the
+implementation does not expose AppKit's boolean first-responder result. The
+input proof now shows that keyboard events reach a focused child input, but the
+failed parent-key phase shows that a successful `focus_parent` call does not
+restore Iced keyboard routing on this host. It does not prove that IME events
+route correctly, or that the
 restored visual result matches Iced composition. The scale proof exercises one
 real 2→1 display transition, but does not establish correct physical-pixel
 rendering across all display arrangements. Clipping, real tab switching, IME,

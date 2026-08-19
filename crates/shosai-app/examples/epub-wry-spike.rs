@@ -8,15 +8,16 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{self, operation};
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{
-    Background, Color, Element, Length, Point, Rectangle, Size, Subscription, Task, window,
+    Background, Color, Element, Event, Length, Point, Rectangle, Size, Subscription, Task, event,
+    keyboard, window,
 };
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
@@ -45,6 +46,12 @@ const SCALE_PROOF_TARGET_ENV: &str = "SHOSAI_WRY_SPIKE_SCALE_TARGET";
 const SCALE_PROOF_TIMEOUT: Duration = Duration::from_secs(20);
 const SCALE_PROOF_INITIAL_SETTLE: Duration = Duration::from_secs(1);
 const SCALE_PROOF_SETTLE: Duration = Duration::from_millis(100);
+const INPUT_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_INPUT_PROOF";
+const INPUT_PROOF_TIMEOUT: Duration = Duration::from_secs(60);
+const INPUT_PROOF_PARENT_SETTLE: Duration = Duration::from_millis(250);
+const INPUT_PROOF_TOKEN: &str = "shosai-input-proof";
+const INPUT_PROOF_PATH: &str = "_spike/input.xhtml";
+const INPUT_PROOF_URL: &str = "shosai://book/_spike/input.xhtml";
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -54,6 +61,7 @@ const NETWORK_PROOF_URL_ALIAS: &str = "http://shosai.book/_spike/conformance.xht
 #[cfg(target_os = "linux")]
 static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
+static INPUT_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 thread_local! {
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -65,6 +73,7 @@ thread_local! {
     static OVERLAY_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static BOUNDS_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static SCALE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -204,6 +213,13 @@ impl SpikeBook {
                 body: SPIKE_CHAPTER.as_bytes().to_vec(),
             },
         );
+        resources.insert(
+            CanonicalEpubPath::new(INPUT_PROOF_PATH).map_err(|error| error.to_string())?,
+            SpikeResource {
+                content_type: "application/xhtml+xml".into(),
+                body: INPUT_PROOF_CHAPTER.as_bytes().to_vec(),
+            },
+        );
 
         Ok(Self {
             start_url,
@@ -226,6 +242,7 @@ struct State {
     overlay_active: bool,
     bounds_proof: BoundsProof,
     scale_proof: ScaleProof,
+    input_proof: InputProof,
     placeholder_collapsed: bool,
     webview_generation: u64,
     measurement_epoch: u64,
@@ -234,7 +251,89 @@ struct State {
     network_proof_deadline: Option<Instant>,
     overlay_restore_deadline: Option<Instant>,
     scale_settle_deadline: Option<Instant>,
+    input_parent_settle_deadline: Option<Instant>,
     network_proof_finished: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum InputProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    WaitingForReady,
+    FocusingChild,
+    WaitingForChildInput {
+        focused: bool,
+        keydown: bool,
+    },
+    FocusingParent,
+    SettlingParent,
+    WaitingForParentKey,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InputAction {
+    None,
+    FocusChild,
+    FocusParent,
+}
+
+impl InputProof {
+    fn observe_ipc(&mut self, message: &str) -> InputAction {
+        if *self == Self::WaitingForReady && message == "ready" {
+            *self = Self::FocusingChild;
+            return InputAction::FocusChild;
+        }
+        let Self::WaitingForChildInput { focused, keydown } = self else {
+            return InputAction::None;
+        };
+        match message {
+            "focus" => *focused = true,
+            "keydown" => *keydown = true,
+            _ => {}
+        }
+        if message == format!("input:{INPUT_PROOF_TOKEN}") && *focused && *keydown {
+            *self = Self::FocusingParent;
+            return InputAction::FocusParent;
+        }
+        InputAction::None
+    }
+
+    fn child_focused(&mut self, succeeded: bool) -> bool {
+        if *self != Self::FocusingChild || !succeeded {
+            return false;
+        }
+        *self = Self::WaitingForChildInput {
+            focused: false,
+            keydown: false,
+        };
+        true
+    }
+
+    fn parent_focused(&mut self, succeeded: bool) -> bool {
+        if *self != Self::FocusingParent || !succeeded {
+            return false;
+        }
+        *self = Self::SettlingParent;
+        true
+    }
+
+    fn begin_parent_key_wait(&mut self) -> bool {
+        if *self != Self::SettlingParent {
+            return false;
+        }
+        *self = Self::WaitingForParentKey;
+        true
+    }
+
+    fn observe_parent_key(&mut self) -> bool {
+        if *self != Self::WaitingForParentKey {
+            return false;
+        }
+        *self = Self::Complete;
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -964,6 +1063,7 @@ impl operation::Operation<Option<Rectangle>> for PlaceholderBoundsOperation {
 #[derive(Debug, Clone)]
 enum Message {
     WindowEvent(window::Id, window::Event, u64),
+    IcedKeyPressed,
     PlaceholderMeasured {
         epoch: u64,
         bounds: Option<Rectangle>,
@@ -1018,6 +1118,8 @@ enum Message {
         event_revision: u64,
         scale: f32,
     },
+    InputChildFocused(Result<(), String>),
+    InputParentFocused(Result<(), String>),
     FocusWebView,
     NetworkProofTick(Instant),
     #[cfg(target_os = "linux")]
@@ -1042,6 +1144,12 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
+    if let Err(error) =
+        validate_input_proof_platform(input_proof_env_requested(), cfg!(target_os = "macos"))
+    {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = validate_proof_mode_selection(
         network_proof_requested(),
         lifecycle_proof_requested(),
@@ -1049,6 +1157,7 @@ fn main() -> ExitCode {
         overlay_observation_requested(),
         bounds_proof_requested(),
         scale_proof_requested(),
+        input_proof_requested(),
     ) {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
@@ -1085,6 +1194,19 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("wry-spike-network-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    if input_proof_requested() {
+        return INPUT_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-input-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-input-proof FAIL: proof did not complete");
                 ExitCode::FAILURE
             }
         });
@@ -1162,9 +1284,20 @@ fn subscription(_state: &State) -> Subscription<Message> {
         || overlay_proof_requested()
         || bounds_proof_requested()
         || scale_proof_requested()
+        || input_proof_requested()
     {
         subscriptions
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
+    }
+    if input_proof_requested() {
+        subscriptions.push(event::listen_with(|event, _, _| {
+            if matches!(event, Event::Keyboard(keyboard::Event::KeyPressed { .. })) {
+                eprintln!("wry-spike-input-proof event=iced-keydown");
+                Some(Message::IcedKeyPressed)
+            } else {
+                None
+            }
+        }));
     }
     #[cfg(target_os = "linux")]
     subscriptions.push(iced::time::every(GTK_PUMP_INTERVAL).map(|_| Message::PumpGtk));
@@ -1180,6 +1313,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || overlay_proof_requested()
                 || bounds_proof_requested()
                 || scale_proof_requested()
+                || input_proof_requested()
             {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
@@ -1189,6 +1323,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     BOUNDS_PROOF_TIMEOUT
                 } else if scale_proof_requested() {
                     SCALE_PROOF_TIMEOUT
+                } else if input_proof_requested() {
+                    INPUT_PROOF_TIMEOUT
                 } else {
                     NETWORK_PROOF_TIMEOUT
                 };
@@ -1205,6 +1341,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             if scale_proof_requested() {
                 state.scale_proof = ScaleProof::WaitingForCreation;
+            }
+            if input_proof_requested() {
+                state.input_proof = InputProof::WaitingForCreation;
+                INPUT_PROOF_EVENTS.lock().unwrap().clear();
             }
             if overlay_observation_requested() {
                 state.overlay_active = true;
@@ -1322,6 +1462,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before scale proof completed".into()),
                 );
             }
+            if input_proof_requested() && state.input_proof != InputProof::Complete {
+                return finish_input_proof(
+                    state,
+                    Err("parent closed before input proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             let webview_dropped = teardown_webview();
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
@@ -1344,6 +1490,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 return finish_scale_proof(
                     state,
                     Err("parent closed before scale proof completed".into()),
+                );
+            }
+            if input_proof_requested() && state.input_proof != InputProof::Complete {
+                return finish_input_proof(
+                    state,
+                    Err("parent closed before input proof completed".into()),
                 );
             }
             state.webview_generation = state.webview_generation.wrapping_add(1);
@@ -1409,6 +1561,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || state.overlay_proof == OverlayProof::Complete
                 || state.bounds_proof == BoundsProof::Complete
                 || state.scale_proof == ScaleProof::Complete
+                || state.input_proof == InputProof::Complete
                 || state.network_proof_finished =>
         {
             teardown_webview();
@@ -1435,6 +1588,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 if scale_proof_requested() {
                     return begin_scale_proof(state);
+                }
+                if input_proof_requested() {
+                    state.input_proof = InputProof::WaitingForReady;
+                    state.status = "embedded; waiting for trusted input harness readiness".into();
+                    return Task::none();
                 }
                 state.status = if network_proof_requested() {
                     "embedded; waiting for hostile page to finish loading".into()
@@ -1483,6 +1641,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) if scale_proof_requested() => {
                 state.creation_bounds = None;
                 finish_scale_proof(state, Err(format!("webview creation failed: {error}")))
+            }
+            Err(error) if input_proof_requested() => {
+                state.creation_bounds = None;
+                finish_input_proof(state, Err(format!("webview creation failed: {error}")))
             }
             Err(error) => {
                 state.creation_bounds = None;
@@ -1596,6 +1758,34 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             event_revision,
             scale,
         } => update_final_scale(state, generation, event_revision, scale),
+        Message::InputChildFocused(result) => match result {
+            Ok(()) if state.input_proof.child_focused(true) => {
+                state.status =
+                    format!("child focused; type {INPUT_PROOF_TOKEN:?} into the webview input");
+                Task::none()
+            }
+            Ok(()) => Task::none(),
+            Err(error) => {
+                finish_input_proof(state, Err(format!("failed to focus child input: {error}")))
+            }
+        },
+        Message::InputParentFocused(result) => match result {
+            Ok(()) if state.input_proof.parent_focused(true) => {
+                state.input_parent_settle_deadline =
+                    Some(Instant::now() + INPUT_PROOF_PARENT_SETTLE);
+                state.status = "parent focus requested; draining queued child key events".into();
+                state.window.map_or_else(Task::none, window::gain_focus)
+            }
+            Ok(()) => Task::none(),
+            Err(error) => finish_input_proof(
+                state,
+                Err(format!("failed to restore parent focus: {error}")),
+            ),
+        },
+        Message::IcedKeyPressed if state.input_proof.observe_parent_key() => {
+            finish_input_proof(state, Ok(()))
+        }
+        Message::IcedKeyPressed => Task::none(),
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -1614,6 +1804,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             update_bounds_proof(state, now)
         }
         Message::NetworkProofTick(now) if scale_proof_requested() => update_scale_proof(state, now),
+        Message::NetworkProofTick(now) if input_proof_requested() => update_input_proof(state, now),
         Message::NetworkProofTick(now) => update_network_proof(state, now),
         #[cfg(target_os = "linux")]
         Message::PumpGtk => {
@@ -1621,6 +1812,88 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Task::none()
         }
     }
+}
+
+fn update_input_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.input_proof == InputProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_input_proof(
+            state,
+            Err(format!(
+                "timed out during input phase {:?}",
+                state.input_proof
+            )),
+        );
+    }
+    if state
+        .input_parent_settle_deadline
+        .is_some_and(|deadline| now >= deadline)
+        && state.input_proof.begin_parent_key_wait()
+    {
+        state.input_parent_settle_deadline = None;
+        state.status = "parent focused; press any new key to prove Iced routing".into();
+    }
+    let events = std::mem::take(&mut *INPUT_PROOF_EVENTS.lock().unwrap());
+    for event in events {
+        match state.input_proof.observe_ipc(&event) {
+            InputAction::None => {}
+            InputAction::FocusChild => {
+                let Some(id) = state.window else {
+                    return finish_input_proof(state, Err("parent window is not available".into()));
+                };
+                state.status = "trusted page ready; focusing child input".into();
+                return window::run(id, move |_| {
+                    WEBVIEW.with(|slot| focus_webview_input(slot.borrow().as_ref()))
+                })
+                .map(Message::InputChildFocused);
+            }
+            InputAction::FocusParent => {
+                let Some(id) = state.window else {
+                    return finish_input_proof(state, Err("parent window is not available".into()));
+                };
+                state.status = "child typing observed; restoring focus to Iced".into();
+                return window::run(id, move |_| {
+                    WEBVIEW.with(|slot| focus_webview_parent(slot.borrow().as_ref()))
+                })
+                .map(Message::InputParentFocused);
+            }
+        }
+    }
+    Task::none()
+}
+
+fn focus_webview_input(webview: Option<&WebView>) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    webview.focus().map_err(|error| error.to_string())?;
+    webview
+        .evaluate_script("document.getElementById('proof-input').focus()")
+        .map_err(|error| error.to_string())
+}
+
+fn focus_webview_parent(webview: Option<&WebView>) -> Result<(), String> {
+    webview
+        .ok_or_else(|| "webview is not available".to_string())?
+        .focus_parent()
+        .map_err(|error| error.to_string())
+}
+
+fn finish_input_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if state.input_proof == InputProof::Complete {
+        return Task::none();
+    }
+    state.input_proof = InputProof::Complete;
+    state.input_parent_settle_deadline = None;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-input-proof PASS: child focus, DOM focus, keyboard input, parent focus restoration, and Iced keyboard routing observed"
+        );
+    }
+    INPUT_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn update_lifecycle_proof(state: &mut State, now: Instant) -> Task<Message> {
@@ -2569,6 +2842,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                 });
             });
             NETWORK_PROOF_URL.to_string()
+        } else if input_proof_requested() {
+            INPUT_PROOF_URL.to_string()
         } else if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
             NETWORK_PROOF_URL.to_string()
         } else {
@@ -2581,10 +2856,24 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             .as_raw();
         ensure_supported_parent_handle(raw)?;
         let parent = ParentHandle(raw);
-        let webview = WebViewBuilder::new()
+        let builder = WebViewBuilder::new()
             .with_bounds(webview_bounds(bounds))
             .with_custom_protocol("shosai".into(), serve_epub_resource)
-            .with_url(&start_url)
+            .with_url(&start_url);
+        let builder = if input_proof_requested() {
+            builder
+                .with_initialization_script(INPUT_PROOF_SCRIPT)
+                .with_ipc_handler(|request| {
+                    eprintln!("wry-spike-input-proof event={:?}", request.body());
+                    INPUT_PROOF_EVENTS
+                        .lock()
+                        .unwrap()
+                        .push(request.body().clone());
+                })
+        } else {
+            builder
+        };
+        let webview = builder
             .with_javascript_disabled()
             .with_navigation_handler(|url| is_allowed_navigation(&url))
             .with_download_started_handler(|_, _| false)
@@ -2631,9 +2920,24 @@ fn scale_proof_requested() -> bool {
     cfg!(target_os = "macos") && scale_proof_env_requested()
 }
 
+fn input_proof_env_requested() -> bool {
+    std::env::var_os(INPUT_PROOF_ENV).is_some()
+}
+
+fn input_proof_requested() -> bool {
+    cfg!(target_os = "macos") && input_proof_env_requested()
+}
+
 fn validate_scale_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
     if requested && !is_macos {
         return Err("SHOSAI_WRY_SPIKE_SCALE_PROOF is only supported on macOS".into());
+    }
+    Ok(())
+}
+
+fn validate_input_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
+    if requested && !is_macos {
+        return Err("SHOSAI_WRY_SPIKE_INPUT_PROOF is only supported on macOS".into());
     }
     Ok(())
 }
@@ -2687,8 +2991,9 @@ fn validate_proof_mode_selection(
     overlay_observation: bool,
     bounds: bool,
     scale: bool,
+    input: bool,
 ) -> Result<(), String> {
-    if (overlay || overlay_observation || bounds || scale)
+    if (overlay || overlay_observation || bounds || scale || input)
         && [
             network,
             lifecycle,
@@ -2696,6 +3001,7 @@ fn validate_proof_mode_selection(
             overlay_observation,
             bounds,
             scale,
+            input,
         ]
         .into_iter()
         .filter(|selected| *selected)
@@ -2703,7 +3009,7 @@ fn validate_proof_mode_selection(
             > 1
     {
         return Err(
-            "macOS overlay, bounds, and scale modes cannot be combined with another proof mode"
+            "macOS overlay, bounds, scale, and input modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -2996,6 +3302,36 @@ fn serve_epub_resource(
 
 const SPIKE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline' shosai:; img-src shosai: data:; font-src shosai:";
 
+const INPUT_PROOF_SCRIPT: &str = r#"
+window.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('proof-input');
+  input.addEventListener('focus', () => window.ipc.postMessage('focus'));
+  input.addEventListener('keydown', () => window.ipc.postMessage('keydown'));
+  input.addEventListener('input', () => window.ipc.postMessage(`input:${input.value}`));
+  input.addEventListener('compositionstart', () => window.ipc.postMessage('composition'));
+  window.ipc.postMessage('ready');
+});
+"#;
+
+const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 42rem; margin: 3rem auto; line-height: 1.5; }
+    input { box-sizing: border-box; font: inherit; padding: .6rem; width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>Wry input routing proof</h1>
+  <p>The host focuses this trusted input. Type <code>shosai-input-proof</code>.</p>
+  <input id="proof-input" type="text" autocomplete="off" />
+</body>
+</html>"#;
+
 const SPIKE_CHAPTER: &str = r#"<!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -3252,6 +3588,43 @@ mod tests {
                 .unwrap_err()
                 .contains("only supported on macOS")
         );
+    }
+
+    #[test]
+    fn input_proof_request_is_rejected_on_unsupported_platforms() {
+        assert_eq!(validate_input_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_input_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_input_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on macOS")
+        );
+    }
+
+    #[test]
+    fn input_proof_requires_child_and_parent_keyboard_routing_in_order() {
+        let mut proof = InputProof::WaitingForReady;
+
+        assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
+        assert_eq!(proof.observe_ipc("ready"), InputAction::FocusChild);
+        assert!(!proof.child_focused(false));
+        assert!(proof.child_focused(true));
+        assert_eq!(
+            proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
+            InputAction::None
+        );
+        assert_eq!(proof.observe_ipc("focus"), InputAction::None);
+        assert_eq!(proof.observe_ipc("keydown"), InputAction::None);
+        assert_eq!(
+            proof.observe_ipc(&format!("input:{INPUT_PROOF_TOKEN}")),
+            InputAction::FocusParent
+        );
+        assert!(!proof.observe_parent_key());
+        assert!(proof.parent_focused(true));
+        assert!(!proof.observe_parent_key());
+        assert!(proof.begin_parent_key_wait());
+        assert!(proof.observe_parent_key());
+        assert_eq!(proof, InputProof::Complete);
     }
 
     #[test]
@@ -3784,16 +4157,42 @@ mod tests {
 
     #[test]
     fn overlay_modes_reject_conflicting_proofs() {
-        assert!(validate_proof_mode_selection(false, false, true, false, false, false).is_ok());
-        assert!(validate_proof_mode_selection(false, false, false, true, false, false).is_ok());
-        assert!(validate_proof_mode_selection(false, false, false, false, true, false).is_ok());
-        assert!(validate_proof_mode_selection(false, false, false, false, false, true).is_ok());
-        assert!(validate_proof_mode_selection(true, false, true, false, false, false).is_err());
-        assert!(validate_proof_mode_selection(false, true, true, false, false, false).is_err());
-        assert!(validate_proof_mode_selection(false, false, true, true, false, false).is_err());
-        assert!(validate_proof_mode_selection(true, false, false, true, false, false).is_err());
-        assert!(validate_proof_mode_selection(false, true, false, false, true, false).is_err());
-        assert!(validate_proof_mode_selection(false, false, false, false, true, true).is_err());
+        assert!(
+            validate_proof_mode_selection(false, false, true, false, false, false, false).is_ok()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, true, false, false, false).is_ok()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, false, true, false, false).is_ok()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, false, false, true, false).is_ok()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, false, false, false, true).is_ok()
+        );
+        assert!(
+            validate_proof_mode_selection(true, false, true, false, false, false, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(false, true, true, false, false, false, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, true, true, false, false, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(true, false, false, true, false, false, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(false, true, false, false, true, false, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, false, true, true, false).is_err()
+        );
+        assert!(
+            validate_proof_mode_selection(false, false, false, false, false, true, true).is_err()
+        );
     }
 
     #[test]
