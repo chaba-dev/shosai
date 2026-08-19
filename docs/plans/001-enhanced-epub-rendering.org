@@ -104,8 +104,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   harness now creates and resizes the child from actual Iced placeholder bounds
   and has an automated parent-resize/child-update/focus/visibility/
   destroy-recreate/teardown proof, including an observed replacement size.
+  A macOS overlay spike also confirms that the child ~WKWebView~ renders above
+  an intersecting Iced modal, so overlay activation must hide the child.  Its
+  automated proof hides only the current generation, holds and dismisses the
+  modal, tracks changed placeholder bounds without re-showing the hidden child,
+  then recreates it at the latest bounds and verifies the
+  replacement size; a settled hide followed by an in-place show did not leave
+  the Iced proof making progress and is not accepted as restoration evidence.
   Focus is only a successful Wry method return, not proof of actual focus,
-  visual composition, or keyboard/IME routing; the cross-platform,
+  visually correct restoration, or keyboard/IME routing; the cross-platform,
   accessibility, real-tab, routing, and logical-location portions remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process

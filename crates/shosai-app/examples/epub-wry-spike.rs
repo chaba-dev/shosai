@@ -14,8 +14,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use iced::advanced::widget::{self, operation};
-use iced::widget::{button, column, container, row, text};
-use iced::{Element, Length, Rectangle, Size, Subscription, Task, window};
+use iced::widget::{button, column, container, row, stack, text};
+use iced::{Background, Color, Element, Length, Rectangle, Size, Subscription, Task, window};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::http::{Request, Response};
@@ -31,6 +31,11 @@ const LIFECYCLE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF";
 const LIFECYCLE_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const LIFECYCLE_WINDOW_WIDTH: f32 = 1040.0;
 const LIFECYCLE_WINDOW_HEIGHT: f32 = 760.0;
+const OVERLAY_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_OVERLAY_PROOF";
+const OVERLAY_OBSERVATION_ENV: &str = "SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION";
+const OVERLAY_PROOF_HOLD: Duration = Duration::from_secs(1);
+const OVERLAY_DISMISS_SETTLE: Duration = Duration::from_millis(100);
+const OVERLAY_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,6 +52,7 @@ thread_local! {
     static NETWORK_PROOF: RefCell<Option<NetworkProof>> = const { RefCell::new(None) };
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static LIFECYCLE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static OVERLAY_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -204,11 +210,110 @@ struct State {
     applied_bounds: Option<Rectangle>,
     webview_ready: bool,
     lifecycle_proof: LifecycleProof,
+    overlay_proof: OverlayProof,
+    overlay_active: bool,
+    webview_generation: u64,
     measurement_epoch: u64,
     proof_timeout: Option<Instant>,
     status: String,
     network_proof_deadline: Option<Instant>,
+    overlay_restore_deadline: Option<Instant>,
     network_proof_finished: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum OverlayProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    Hiding {
+        bounds: Rectangle,
+        generation: u64,
+    },
+    Hidden {
+        bounds: Rectangle,
+        generation: u64,
+    },
+    Dismissing {
+        bounds: Rectangle,
+        generation: u64,
+    },
+    Recreating {
+        bounds: Rectangle,
+    },
+    Complete,
+}
+
+impl OverlayProof {
+    fn begin_hiding(&mut self, bounds: Rectangle, generation: u64) -> bool {
+        if *self != Self::WaitingForCreation {
+            return false;
+        }
+        *self = Self::Hiding { bounds, generation };
+        true
+    }
+
+    fn observe_hidden(&mut self, generation: u64, succeeded: bool) -> bool {
+        let Self::Hiding {
+            bounds,
+            generation: expected_generation,
+        } = *self
+        else {
+            return false;
+        };
+        if generation != expected_generation || !succeeded {
+            return false;
+        }
+        *self = Self::Hidden { bounds, generation };
+        true
+    }
+
+    fn begin_dismissing(&mut self) -> bool {
+        let Self::Hidden { bounds, generation } = *self else {
+            return false;
+        };
+        *self = Self::Dismissing { bounds, generation };
+        true
+    }
+
+    fn begin_recreating(&mut self) -> Option<Rectangle> {
+        let Self::Dismissing { bounds, .. } = *self else {
+            return None;
+        };
+        *self = Self::Recreating { bounds };
+        Some(bounds)
+    }
+
+    fn expects_replacement_verification(&self, bounds: Rectangle) -> bool {
+        matches!(self, Self::Recreating { bounds: expected } if *expected == bounds)
+    }
+
+    fn blocks_geometry_synchronization(&self) -> bool {
+        matches!(
+            self,
+            Self::Hiding { .. } | Self::Hidden { .. } | Self::Dismissing { .. }
+        )
+    }
+
+    fn update_bounds_while_hidden(&mut self, updated: Rectangle) -> bool {
+        match self {
+            Self::Hiding { bounds, .. }
+            | Self::Hidden { bounds, .. }
+            | Self::Dismissing { bounds, .. } => {
+                *bounds = updated;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn complete(&mut self) -> bool {
+        if *self == Self::Complete {
+            return false;
+        }
+        *self = Self::Complete;
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -330,6 +435,15 @@ enum Message {
     },
     LifecycleInteractionsCompleted(Result<(), String>),
     LifecycleReplacementVerified(Result<(), String>),
+    OverlayHidden {
+        generation: u64,
+        result: Result<(), String>,
+    },
+    OverlayReplacementVerified {
+        generation: u64,
+        bounds: Rectangle,
+        result: Result<(), String>,
+    },
     FocusWebView,
     NetworkProofTick(Instant),
     #[cfg(target_os = "linux")]
@@ -348,6 +462,15 @@ impl HasWindowHandle for ParentHandle {
 }
 
 fn main() -> ExitCode {
+    if let Err(error) = validate_proof_mode_selection(
+        network_proof_requested(),
+        lifecycle_proof_requested(),
+        overlay_proof_requested(),
+        overlay_observation_requested(),
+    ) {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = initialize_platform() {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
@@ -388,6 +511,19 @@ fn main() -> ExitCode {
             }
         });
     }
+    if overlay_proof_requested() {
+        return OVERLAY_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-overlay-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-overlay-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
     ExitCode::SUCCESS
 }
 
@@ -404,7 +540,7 @@ fn boot() -> (State, Task<Message>) {
 fn subscription(_state: &State) -> Subscription<Message> {
     let events = window::events().map(|(id, event)| Message::WindowEvent(id, event));
     let mut subscriptions = vec![events];
-    if network_proof_requested() || lifecycle_proof_requested() {
+    if network_proof_requested() || lifecycle_proof_requested() || overlay_proof_requested() {
         subscriptions
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
     }
@@ -417,9 +553,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::WindowEvent(id, window::Event::Opened { .. }) => {
             state.window = Some(id);
-            if network_proof_requested() || lifecycle_proof_requested() {
+            if network_proof_requested() || lifecycle_proof_requested() || overlay_proof_requested()
+            {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
+                } else if overlay_proof_requested() {
+                    OVERLAY_PROOF_TIMEOUT
                 } else {
                     NETWORK_PROOF_TIMEOUT
                 };
@@ -427,6 +566,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             if lifecycle_proof_requested() {
                 state.lifecycle_proof = LifecycleProof::WaitingForCreation;
+            }
+            if overlay_proof_requested() {
+                state.overlay_proof = OverlayProof::WaitingForCreation;
+            }
+            if overlay_observation_requested() {
+                state.overlay_active = true;
             }
             state.status = "measuring Iced reader placeholder".into();
             measure_placeholder(state.measurement_epoch)
@@ -442,17 +587,41 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             measure_placeholder(state.measurement_epoch)
         }
         Message::WindowEvent(id, window::Event::CloseRequested) if state.window == Some(id) => {
+            if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
+                return finish_overlay_proof(
+                    state,
+                    Err("parent closed before overlay proof completed".into()),
+                );
+            }
+            state.webview_generation = state.webview_generation.wrapping_add(1);
             let webview_dropped = teardown_webview();
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
             window::close(id)
         }
         Message::WindowEvent(id, window::Event::Closed) if state.window == Some(id) => {
+            if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
+                return finish_overlay_proof(
+                    state,
+                    Err("parent closed before overlay proof completed".into()),
+                );
+            }
+            state.webview_generation = state.webview_generation.wrapping_add(1);
             teardown_webview();
             Task::none()
         }
         Message::WindowEvent(_, _) => Task::none(),
         Message::PlaceholderMeasured { epoch, bounds } => {
             state.measured_bounds = bounds.and_then(usable_bounds);
+            if overlay_proof_requested() && state.overlay_proof.blocks_geometry_synchronization() {
+                let Some(bounds) = state.measured_bounds else {
+                    return finish_overlay_proof(
+                        state,
+                        Err("placeholder became unusable while the Iced modal was active".into()),
+                    );
+                };
+                state.overlay_proof.update_bounds_while_hidden(bounds);
+                return Task::none();
+            }
             if lifecycle_proof_requested() {
                 let should_synchronize =
                     matches!(state.lifecycle_proof, LifecycleProof::WaitingForCreation)
@@ -478,9 +647,15 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::WebViewCreated(result) => match result {
             Ok(()) => {
                 state.webview_ready = true;
+                state.webview_generation = state.webview_generation.wrapping_add(1);
                 state.applied_bounds = state.creation_bounds.take();
                 if let LifecycleProof::Recreating { expected } = state.lifecycle_proof {
                     return verify_lifecycle_replacement(state, expected);
+                }
+                if state.applied_bounds.is_some_and(|bounds| {
+                    state.overlay_proof.expects_replacement_verification(bounds)
+                }) {
+                    return verify_overlay_replacement(state);
                 }
                 state.status = if network_proof_requested() {
                     "embedded; waiting for hostile page to finish loading".into()
@@ -502,6 +677,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             Size::new(LIFECYCLE_WINDOW_WIDTH, LIFECYCLE_WINDOW_HEIGHT),
                         )
                     })
+                } else if overlay_proof_requested() {
+                    begin_overlay_proof(state)
                 } else {
                     synchronize_webview(state)
                 }
@@ -514,6 +691,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.creation_bounds = None;
                 finish_lifecycle_proof(state, Err(format!("webview creation failed: {error}")))
             }
+            Err(error) if overlay_proof_requested() => {
+                state.creation_bounds = None;
+                finish_overlay_proof(state, Err(format!("webview creation failed: {error}")))
+            }
             Err(error) => {
                 state.creation_bounds = None;
                 state.status = format!("webview creation failed: {error}");
@@ -521,6 +702,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         },
         Message::WebViewSynchronized { bounds, result } => {
+            if overlay_proof_requested() && state.overlay_proof.blocks_geometry_synchronization() {
+                return finish_overlay_proof(
+                    state,
+                    Err(
+                        "unexpected webview synchronization while the Iced modal was active".into(),
+                    ),
+                );
+            }
             if lifecycle_proof_requested()
                 && state.lifecycle_proof.expects_synchronization(bounds)
                 && let Err(error) = &result
@@ -558,6 +747,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("replacement verification failed: {error}")),
             ),
         },
+        Message::OverlayHidden { generation, result } => {
+            update_overlay_hidden(state, generation, result)
+        }
+        Message::OverlayReplacementVerified {
+            generation,
+            bounds,
+            result,
+        } => update_overlay_replacement(state, generation, bounds, result),
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -568,6 +765,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::NetworkProofTick(now) if lifecycle_proof_requested() => {
             update_lifecycle_proof(state, now)
+        }
+        Message::NetworkProofTick(now) if overlay_proof_requested() => {
+            update_overlay_proof(state, now)
         }
         Message::NetworkProofTick(now) => update_network_proof(state, now),
         #[cfg(target_os = "linux")]
@@ -592,6 +792,172 @@ fn update_lifecycle_proof(state: &mut State, now: Instant) -> Task<Message> {
         );
     }
     measure_placeholder(state.measurement_epoch)
+}
+
+fn begin_overlay_proof(state: &mut State) -> Task<Message> {
+    let Some(bounds) = state.applied_bounds else {
+        return finish_overlay_proof(
+            state,
+            Err("webview was created without measured bounds".into()),
+        );
+    };
+    let generation = state.webview_generation;
+    if !state.overlay_proof.begin_hiding(bounds, generation) {
+        return Task::none();
+    }
+    let Some(id) = state.window else {
+        return finish_overlay_proof(state, Err("parent window is not available".into()));
+    };
+
+    state.overlay_active = true;
+    state.status = "Iced modal active; hiding native child webview".into();
+    eprintln!("wry-spike-overlay-proof phase=hiding generation={generation}");
+    window::run(id, move |_| {
+        WEBVIEW.with(|slot| set_webview_visible(slot.borrow().as_ref(), false))
+    })
+    .map(move |result| Message::OverlayHidden { generation, result })
+}
+
+fn update_overlay_hidden(
+    state: &mut State,
+    generation: u64,
+    result: Result<(), String>,
+) -> Task<Message> {
+    if generation != state.webview_generation {
+        return Task::none();
+    }
+
+    if !matches!(
+        state.overlay_proof,
+        OverlayProof::Hiding {
+            generation: expected,
+            ..
+        } if expected == generation
+    ) {
+        return Task::none();
+    }
+    if let Err(error) = result {
+        return finish_overlay_proof(state, Err(format!("webview hide failed: {error}")));
+    }
+    if state.overlay_proof.observe_hidden(generation, true) {
+        state.overlay_restore_deadline = Some(Instant::now() + OVERLAY_PROOF_HOLD);
+        state.status = "Iced modal active; native child hidden".into();
+        eprintln!("wry-spike-overlay-proof phase=hidden generation={generation}");
+    }
+    Task::none()
+}
+
+fn verify_overlay_replacement(state: &State) -> Task<Message> {
+    let OverlayProof::Recreating { bounds } = state.overlay_proof else {
+        return Task::none();
+    };
+    let Some(id) = state.window else {
+        return Task::done(Message::OverlayReplacementVerified {
+            generation: state.webview_generation,
+            bounds,
+            result: Err("parent window is not available".into()),
+        });
+    };
+    let generation = state.webview_generation;
+    window::run(id, move |_| {
+        WEBVIEW.with(|slot| verify_webview_size(slot.borrow().as_ref(), bounds))
+    })
+    .map(move |result| Message::OverlayReplacementVerified {
+        generation,
+        bounds,
+        result,
+    })
+}
+
+fn update_overlay_replacement(
+    state: &mut State,
+    generation: u64,
+    bounds: Rectangle,
+    result: Result<(), String>,
+) -> Task<Message> {
+    if generation != state.webview_generation
+        || state.applied_bounds != Some(bounds)
+        || !state.overlay_proof.expects_replacement_verification(bounds)
+    {
+        return Task::none();
+    }
+    match result {
+        Ok(()) => finish_overlay_proof(state, Ok(())),
+        Err(error) => finish_overlay_proof(
+            state,
+            Err(format!("overlay replacement verification failed: {error}")),
+        ),
+    }
+}
+
+fn update_overlay_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.overlay_proof == OverlayProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_overlay_proof(
+            state,
+            Err(format!(
+                "timed out during overlay phase {:?}",
+                state.overlay_proof
+            )),
+        );
+    }
+    if matches!(state.overlay_proof, OverlayProof::Hidden { .. })
+        && state
+            .overlay_restore_deadline
+            .is_some_and(|deadline| now >= deadline)
+    {
+        if state.overlay_proof.begin_dismissing() {
+            state.overlay_active = false;
+            state.overlay_restore_deadline = Some(now + OVERLAY_DISMISS_SETTLE);
+            state.status = "Iced modal dismissed; waiting to restore native child".into();
+        }
+        return Task::none();
+    }
+    if matches!(state.overlay_proof, OverlayProof::Dismissing { .. })
+        && state
+            .overlay_restore_deadline
+            .is_some_and(|deadline| now >= deadline)
+    {
+        let Some(bounds) = state.overlay_proof.begin_recreating() else {
+            return Task::none();
+        };
+        let Some(id) = state.window else {
+            return finish_overlay_proof(state, Err("parent window is not available".into()));
+        };
+        if !teardown_webview() {
+            return finish_overlay_proof(
+                state,
+                Err("webview was missing before overlay replacement".into()),
+            );
+        }
+        state.webview_ready = false;
+        state.applied_bounds = None;
+        state.creation_bounds = Some(bounds);
+        state.status = "Iced modal dismissed; recreating native child at saved bounds".into();
+        eprintln!("wry-spike-overlay-proof phase=recreating");
+        return create_webview(id, bounds);
+    }
+    Task::none()
+}
+
+fn finish_overlay_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if !state.overlay_proof.complete() {
+        return Task::none();
+    }
+    state.overlay_active = false;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-overlay-proof PASS: child hide, Iced modal hold, replacement at saved bounds, and teardown completed"
+        );
+    }
+    OVERLAY_PROOF_RESULT.with(|slot| {
+        record_terminal_result(&mut slot.borrow_mut(), result);
+    });
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn exercise_lifecycle_interactions(state: &State, expected: Rectangle) -> Task<Message> {
@@ -736,7 +1102,7 @@ fn view(state: &State) -> Element<'_, Message> {
     ]
     .spacing(20);
 
-    column![
+    let reader: Element<'_, Message> = column![
         container(column![controls, text(&state.status)].spacing(8))
             .height(HEADER_HEIGHT)
             .padding([20, PADDING as u16]),
@@ -746,7 +1112,39 @@ fn view(state: &State) -> Element<'_, Message> {
             .height(Length::Fill)
             .center(Length::Fill),
     ]
-    .into()
+    .into();
+
+    if !state.overlay_active {
+        return reader;
+    }
+
+    let modal = container(
+        container(
+            column![
+                text("Iced modal overlay").size(28),
+                text("The native child webview must be hidden while this layer is active."),
+            ]
+            .spacing(12),
+        )
+        .padding(28)
+        .style(|_| container::Style {
+            background: Some(Background::Color(Color::from_rgb8(245, 245, 245))),
+            text_color: Some(Color::BLACK),
+            ..container::Style::default()
+        }),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .center(Length::Fill)
+    .style(|_| container::Style {
+        background: Some(Background::Color(Color::from_rgba8(20, 24, 32, 0.82))),
+        ..container::Style::default()
+    });
+
+    stack([reader, modal.into()])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn measure_placeholder(epoch: u64) -> Task<Message> {
@@ -818,6 +1216,32 @@ fn network_proof_requested() -> bool {
 
 fn lifecycle_proof_requested() -> bool {
     std::env::var_os(LIFECYCLE_PROOF_ENV).is_some()
+}
+
+fn overlay_proof_requested() -> bool {
+    cfg!(target_os = "macos") && std::env::var_os(OVERLAY_PROOF_ENV).is_some()
+}
+
+fn overlay_observation_requested() -> bool {
+    cfg!(target_os = "macos") && std::env::var_os(OVERLAY_OBSERVATION_ENV).is_some()
+}
+
+fn validate_proof_mode_selection(
+    network: bool,
+    lifecycle: bool,
+    overlay: bool,
+    overlay_observation: bool,
+) -> Result<(), String> {
+    if (overlay || overlay_observation)
+        && [network, lifecycle, overlay, overlay_observation]
+            .into_iter()
+            .filter(|selected| *selected)
+            .count()
+            > 1
+    {
+        return Err("macOS overlay modes cannot be combined with another proof mode".into());
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -943,6 +1367,13 @@ fn synchronize_webview_instance(
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+fn set_webview_visible(webview: Option<&WebView>, visible: bool) -> Result<(), String> {
+    webview
+        .ok_or_else(|| "webview is not available".to_string())?
+        .set_visible(visible)
+        .map_err(|error| error.to_string())
 }
 
 fn exercise_webview_interactions(
@@ -1314,6 +1745,199 @@ mod tests {
         assert_eq!(proof, LifecycleProof::Complete);
         assert!(!proof.observe_synchronization(Some(expected), true));
         assert!(!proof.complete());
+    }
+
+    #[test]
+    fn overlay_proof_requires_current_successful_hide_before_advancing() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut proof = OverlayProof::WaitingForCreation;
+
+        assert!(proof.begin_hiding(bounds, 7));
+        assert!(!proof.observe_hidden(6, true));
+        assert!(!proof.observe_hidden(7, false));
+        assert_eq!(
+            proof,
+            OverlayProof::Hiding {
+                bounds,
+                generation: 7
+            }
+        );
+        assert!(proof.observe_hidden(7, true));
+        assert_eq!(
+            proof,
+            OverlayProof::Hidden {
+                bounds,
+                generation: 7
+            }
+        );
+    }
+
+    #[test]
+    fn overlay_proof_recreates_only_after_dismissal() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut proof = OverlayProof::Hidden {
+            bounds,
+            generation: 11,
+        };
+
+        assert!(proof.begin_dismissing());
+        assert_eq!(proof.begin_recreating(), Some(bounds));
+        assert!(proof.expects_replacement_verification(bounds));
+        assert!(!proof.expects_replacement_verification(Rectangle {
+            width: 1.0,
+            ..bounds
+        }));
+    }
+
+    #[test]
+    fn active_overlay_phases_block_geometry_synchronization() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        for mut proof in [
+            OverlayProof::Hiding {
+                bounds,
+                generation: 1,
+            },
+            OverlayProof::Hidden {
+                bounds,
+                generation: 1,
+            },
+            OverlayProof::Dismissing {
+                bounds,
+                generation: 1,
+            },
+        ] {
+            assert!(proof.blocks_geometry_synchronization());
+            let updated = Rectangle {
+                width: 1.0,
+                ..bounds
+            };
+            assert!(proof.update_bounds_while_hidden(updated));
+            assert!(matches!(
+                proof,
+                OverlayProof::Hiding { bounds, .. }
+                    | OverlayProof::Hidden { bounds, .. }
+                    | OverlayProof::Dismissing { bounds, .. }
+                    if bounds == updated
+            ));
+        }
+        let mut recreating = OverlayProof::Recreating { bounds };
+        assert!(!recreating.blocks_geometry_synchronization());
+        assert!(!recreating.update_bounds_while_hidden(Rectangle {
+            width: 1.0,
+            ..bounds
+        }));
+    }
+
+    #[test]
+    fn overlay_replacement_rejects_stale_generation_and_bounds() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut state = State {
+            overlay_proof: OverlayProof::Recreating { bounds },
+            applied_bounds: Some(bounds),
+            webview_generation: 4,
+            ..State::default()
+        };
+
+        drop(update_overlay_replacement(&mut state, 3, bounds, Ok(())));
+        drop(update_overlay_replacement(
+            &mut state,
+            4,
+            Rectangle {
+                width: 1.0,
+                ..bounds
+            },
+            Ok(()),
+        ));
+
+        assert_eq!(state.overlay_proof, OverlayProof::Recreating { bounds });
+    }
+
+    #[test]
+    fn overlay_modes_reject_conflicting_proofs() {
+        assert!(validate_proof_mode_selection(false, false, true, false).is_ok());
+        assert!(validate_proof_mode_selection(false, false, false, true).is_ok());
+        assert!(validate_proof_mode_selection(true, false, true, false).is_err());
+        assert!(validate_proof_mode_selection(false, true, true, false).is_err());
+        assert!(validate_proof_mode_selection(false, false, true, true).is_err());
+        assert!(validate_proof_mode_selection(true, false, false, true).is_err());
+    }
+
+    #[test]
+    fn stale_overlay_callbacks_cannot_change_a_replacement_webview() {
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut state = State {
+            overlay_proof: OverlayProof::Hiding {
+                bounds,
+                generation: 2,
+            },
+            overlay_active: true,
+            webview_generation: 3,
+            ..State::default()
+        };
+
+        drop(update_overlay_hidden(&mut state, 2, Ok(())));
+
+        assert_eq!(
+            state.overlay_proof,
+            OverlayProof::Hiding {
+                bounds,
+                generation: 2
+            }
+        );
+        assert!(state.overlay_active);
+    }
+
+    #[test]
+    fn parent_close_invalidates_queued_overlay_callbacks() {
+        let id = window::Id::unique();
+        let mut state = State {
+            window: Some(id),
+            webview_generation: 9,
+            ..State::default()
+        };
+
+        drop(update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        ));
+
+        assert_eq!(state.webview_generation, 10);
+    }
+
+    #[test]
+    fn overlay_hide_fails_when_webview_is_missing() {
+        assert_eq!(
+            set_webview_visible(None, false).unwrap_err(),
+            "webview is not available"
+        );
+    }
+
+    #[test]
+    fn overlay_recreation_fails_when_hidden_webview_is_missing() {
+        let now = Instant::now();
+        let bounds = Rectangle::new((0.0, 100.0).into(), (900.0, 600.0).into());
+        let mut state = State {
+            window: Some(window::Id::unique()),
+            overlay_proof: OverlayProof::Dismissing {
+                bounds,
+                generation: 1,
+            },
+            overlay_restore_deadline: Some(now),
+            webview_generation: 1,
+            ..State::default()
+        };
+        OVERLAY_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+        WEBVIEW.with(|webview| *webview.borrow_mut() = None);
+
+        drop(update_overlay_proof(&mut state, now));
+
+        assert_eq!(state.overlay_proof, OverlayProof::Complete);
+        OVERLAY_PROOF_RESULT.with(|result| {
+            assert_eq!(
+                result.borrow().as_ref().unwrap().as_ref().unwrap_err(),
+                "webview was missing before overlay replacement"
+            );
+        });
     }
 
     #[test]

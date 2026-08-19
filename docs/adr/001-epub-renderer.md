@@ -28,6 +28,10 @@ SHOSAI_WRY_SPIKE_NETWORK_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_OVERLAY_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 cargo test -p shosai-app --example epub-wry-spike --features epub-wry-spike
 ```
 
@@ -67,6 +71,20 @@ It currently proves on macOS arm64 that:
   checks the replacement's reported logical size before final teardown and
   parent close; it exits nonzero if any observable step fails or the sequence
   does not complete within ten seconds;
+- a macOS visual observation mode places a full-window Iced `Stack` modal over
+  the reader without coordinating the native child.  The chapter remains
+  visible above the modal and completely obscures the modal where their bounds
+  intersect, confirming that Iced draw order cannot cover the child `WKWebView`;
+- the automated macOS overlay mode activates the same modal, requires the
+  current child generation's Wry hide call to return `Ok`, holds the modal for
+  one second, dismisses it, then destroys the hidden child and recreates it at
+  the latest measured logical bounds without re-showing the hidden child during
+  intermediate geometry events. It checks the replacement's reported logical
+  size before final teardown and rejects stale generation callbacks, missing
+  child state, failed calls, and timeouts.  Destroy/recreate is deliberate: in
+  the spike, showing a child again after a settled hide returned from Wry but
+  left Iced without subsequent proof progress; an in-place visibility restore is
+  therefore not treated as viable evidence;
 - content JavaScript is disabled, navigation is allowlisted to the book
   protocol, downloads and new windows are denied, and a restrictive CSP is
   attached to protocol responses;
@@ -84,12 +102,15 @@ book resources are served with their exact manifest media types, including
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
-The focus results prove only that Wry's methods returned `Ok`; Wry's macOS
+The focus and visibility results prove only that Wry's methods returned `Ok`;
+the reported replacement size proves geometry, and the visual observation
+proves the uncoordinated z-order failure.  They do not prove a visually correct
+restored frame after modal dismissal. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. They do
 not prove that focus changed, keyboard/IME events route correctly, or that the
-visual result matches Iced composition. The harness also implements
+restored visual result matches Iced composition. The harness also implements
 remeasurement on scale-factor events and hiding for unusable bounds; those paths
-are not yet exercised evidence and remain open alongside overlay, clipping,
+are not yet exercised evidence and remain open alongside clipping,
 real tab switching, IME, and accessibility tests. Ordinary close cleanup is
 exercised separately on macOS: with Iced's automatic close exit disabled, UI
 automation clicked the native close button and the handler recorded that it
