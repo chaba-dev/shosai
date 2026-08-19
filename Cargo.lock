@@ -5073,6 +5073,7 @@ dependencies = [
  "sys-locale",
  "tempfile",
  "tokio",
+ "ttf-parser",
  "unic-langid",
  "winit",
  "wry",
