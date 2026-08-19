@@ -1,0 +1,10 @@
+@font-face {
+  font-family: "Shosai EPUB Fixture";
+  src:
+    local("Forbidden system font"),
+    url("https://example.invalid/remote.woff2") format("woff2"),
+    url("../fonts/missing.woff2") format("woff2"),
+    url("../fonts/book-a.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+}

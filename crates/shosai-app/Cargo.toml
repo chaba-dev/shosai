@@ -40,8 +40,12 @@ winit = { version = "0.30.13", optional = true }
 x11-dl = { version = "2.21.0", optional = true }
 
 [dev-dependencies]
+brotli-decompressor = "=5.0.3"
 cosmic-text = "=0.15.0"
+flate2 = "=1.1.9"
+lightningcss = { version = "=1.0.0-alpha.71", default-features = false }
 roxmltree = "0.21.1"
 taffy = { version = "=0.13.0", default-features = false, features = ["std", "alloc", "taffy_tree", "block_layout", "grid"] }
 tempfile = "3.27.0"
 ttf-parser = "=0.25.1"
+wuff = { version = "=0.2.8", default-features = false }
