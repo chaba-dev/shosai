@@ -7,6 +7,8 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::net::TcpListener;
+#[cfg(target_os = "macos")]
+use std::process::Command;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -65,6 +67,8 @@ const READER_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const READER_PROOF_PATH: &str = "_spike/reader.xhtml";
 const READER_PROOF_URL: &str = "shosai://book/_spike/reader.xhtml";
 const READER_PROOF_EXPECTED_OFFSET: usize = 503;
+const ACCESSIBILITY_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF";
+const ACCESSIBILITY_PROOF_TIMEOUT: Duration = Duration::from_secs(30);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -92,6 +96,7 @@ thread_local! {
     static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static TAB_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static READER_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static ACCESSIBILITY_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     #[cfg(test)]
     static TEARDOWN_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -273,6 +278,10 @@ struct State {
     input_proof: InputProof,
     tab_proof: TabProof,
     reader_proof: ReaderProof,
+    accessibility_proof: AccessibilityProof,
+    accessibility_observation_pending: bool,
+    accessibility_last_error: Option<String>,
+    accessibility_parent_reachable: bool,
     placeholder_collapsed: bool,
     tab_away: bool,
     webview_generation: u64,
@@ -522,6 +531,251 @@ fn validate_reader_evidence(evidence: &str) -> Result<(), String> {
     if text_offset != READER_PROOF_EXPECTED_OFFSET {
         return Err(format!(
             "reader evidence text offset {text_offset} did not match {READER_PROOF_EXPECTED_OFFSET}"
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct AccessibilitySnapshot {
+    web_area_count: usize,
+    input_count: usize,
+    parent_control_count: usize,
+    input_focused: bool,
+    parent_control_focused: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccessibilityAction {
+    None,
+    FocusChild,
+    FocusParent,
+    HideChild,
+    RestoreReader,
+    FocusReplacement,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum AccessibilityProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    WaitingForInitialTree {
+        generation: u64,
+    },
+    WaitingForInitialFocus {
+        generation: u64,
+    },
+    WaitingForParentFocus {
+        generation: u64,
+    },
+    Hiding {
+        generation: u64,
+    },
+    WaitingForAwayMeasurement {
+        generation: u64,
+        epoch: u64,
+    },
+    WaitingForAwayTree {
+        generation: u64,
+    },
+    ReadyToRestore {
+        generation: u64,
+    },
+    WaitingForMeasurement {
+        generation: u64,
+        epoch: u64,
+    },
+    WaitingForReplacement {
+        original_generation: u64,
+        expected: Rectangle,
+    },
+    WaitingForReplacementTree {
+        generation: u64,
+    },
+    WaitingForReplacementFocus {
+        generation: u64,
+    },
+    Complete,
+}
+
+impl AccessibilityProof {
+    fn begin(&mut self, generation: u64) -> bool {
+        if *self != Self::WaitingForCreation {
+            return false;
+        }
+        *self = Self::WaitingForInitialTree { generation };
+        true
+    }
+
+    fn observe_snapshot(
+        &mut self,
+        generation: u64,
+        snapshot: AccessibilitySnapshot,
+    ) -> Result<AccessibilityAction, String> {
+        let expected_generation = match *self {
+            Self::WaitingForInitialTree { generation }
+            | Self::WaitingForInitialFocus { generation }
+            | Self::WaitingForParentFocus { generation }
+            | Self::WaitingForAwayTree { generation }
+            | Self::WaitingForReplacementTree { generation }
+            | Self::WaitingForReplacementFocus { generation } => generation,
+            _ => return Ok(AccessibilityAction::None),
+        };
+        if generation != expected_generation {
+            return Ok(AccessibilityAction::None);
+        }
+
+        match *self {
+            Self::WaitingForInitialTree { .. } => {
+                require_accessibility_tree(snapshot)?;
+                *self = Self::WaitingForInitialFocus { generation };
+                Ok(AccessibilityAction::FocusChild)
+            }
+            Self::WaitingForInitialFocus { .. } => {
+                require_accessibility_tree(snapshot)?;
+                if !snapshot.input_focused {
+                    return Err("embedded input did not receive accessibility focus".into());
+                }
+                if snapshot.parent_control_count == 1 {
+                    *self = Self::WaitingForParentFocus { generation };
+                    Ok(AccessibilityAction::FocusParent)
+                } else {
+                    *self = Self::Hiding { generation };
+                    Ok(AccessibilityAction::HideChild)
+                }
+            }
+            Self::WaitingForParentFocus { .. } => {
+                require_accessibility_tree(snapshot)?;
+                if !snapshot.parent_control_focused {
+                    return Err("Iced control did not receive accessibility focus".into());
+                }
+                *self = Self::Hiding { generation };
+                Ok(AccessibilityAction::HideChild)
+            }
+            Self::WaitingForAwayTree { .. } => {
+                if snapshot.web_area_count != 0 || snapshot.input_count != 0 {
+                    return Err(format!(
+                        "destroyed child remained in the accessibility tree: {snapshot:?}"
+                    ));
+                }
+                if snapshot.parent_control_count > 1 {
+                    return Err(format!(
+                        "expected at most one Iced control while away, observed {snapshot:?}"
+                    ));
+                }
+                *self = Self::ReadyToRestore { generation };
+                Ok(AccessibilityAction::RestoreReader)
+            }
+            Self::WaitingForReplacementTree { .. } => {
+                require_accessibility_tree(snapshot)?;
+                *self = Self::WaitingForReplacementFocus { generation };
+                Ok(AccessibilityAction::FocusReplacement)
+            }
+            Self::WaitingForReplacementFocus { .. } => {
+                require_accessibility_tree(snapshot)?;
+                if !snapshot.input_focused {
+                    return Err("recreated input did not receive accessibility focus".into());
+                }
+                Ok(AccessibilityAction::Complete)
+            }
+            _ => Ok(AccessibilityAction::None),
+        }
+    }
+
+    fn observe_hidden(&mut self, generation: u64, away_generation: u64, epoch: u64) -> bool {
+        if *self != (Self::Hiding { generation }) {
+            return false;
+        }
+        *self = Self::WaitingForAwayMeasurement {
+            generation: away_generation,
+            epoch,
+        };
+        true
+    }
+
+    fn observe_away_measurement(&mut self, epoch: u64, bounds: Option<Rectangle>) -> Option<bool> {
+        let Self::WaitingForAwayMeasurement {
+            generation,
+            epoch: expected_epoch,
+        } = *self
+        else {
+            return None;
+        };
+        if epoch != expected_epoch {
+            return None;
+        }
+        if bounds.is_some() {
+            return Some(false);
+        }
+        *self = Self::WaitingForAwayTree { generation };
+        Some(true)
+    }
+
+    fn begin_restore(&mut self, epoch: u64) -> bool {
+        let Self::ReadyToRestore { generation } = *self else {
+            return false;
+        };
+        *self = Self::WaitingForMeasurement { generation, epoch };
+        true
+    }
+
+    fn observe_measurement(&mut self, epoch: u64, bounds: Option<Rectangle>) -> Option<Rectangle> {
+        let Self::WaitingForMeasurement {
+            generation,
+            epoch: expected_epoch,
+        } = *self
+        else {
+            return None;
+        };
+        if epoch != expected_epoch {
+            return None;
+        }
+        let bounds = bounds.and_then(usable_bounds)?;
+        *self = Self::WaitingForReplacement {
+            original_generation: generation,
+            expected: bounds,
+        };
+        Some(bounds)
+    }
+
+    fn observe_replacement(&mut self, generation: u64, bounds: Rectangle) -> Result<bool, String> {
+        let Self::WaitingForReplacement {
+            original_generation,
+            expected,
+        } = *self
+        else {
+            return Ok(false);
+        };
+        if bounds != expected {
+            return Err(format!(
+                "recreated child bounds {bounds:?} did not match {expected:?}"
+            ));
+        }
+        if generation == original_generation {
+            return Err("accessibility proof reused the destroyed child generation".into());
+        }
+        *self = Self::WaitingForReplacementTree { generation };
+        Ok(true)
+    }
+
+    fn complete(&mut self) -> bool {
+        if *self == Self::Complete {
+            return false;
+        }
+        *self = Self::Complete;
+        true
+    }
+}
+
+fn require_accessibility_tree(snapshot: AccessibilitySnapshot) -> Result<(), String> {
+    if snapshot.web_area_count != 1
+        || snapshot.input_count != 1
+        || snapshot.parent_control_count > 1
+    {
+        return Err(format!(
+            "expected exactly one web area and proof input, and at most one Iced control; observed {snapshot:?}"
         ));
     }
     Ok(())
@@ -1387,6 +1641,18 @@ enum Message {
         bounds: Rectangle,
         result: Result<(), String>,
     },
+    AccessibilityObserved {
+        generation: u64,
+        result: Result<AccessibilitySnapshot, String>,
+    },
+    AccessibilityChildHidden {
+        generation: u64,
+        result: Result<(), String>,
+    },
+    AccessibilityFocusRequested {
+        generation: u64,
+        result: Result<(), String>,
+    },
     FocusWebView,
     NetworkProofTick(Instant),
     #[cfg(target_os = "linux")]
@@ -1423,6 +1689,13 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
+    if let Err(error) = validate_accessibility_proof_platform(
+        accessibility_proof_env_requested(),
+        cfg!(target_os = "macos"),
+    ) {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = validate_proof_mode_selection([
         network_proof_requested(),
         lifecycle_proof_requested(),
@@ -1433,6 +1706,7 @@ fn main() -> ExitCode {
         input_proof_requested(),
         tab_proof_requested(),
         reader_proof_requested(),
+        accessibility_proof_requested(),
     ]) {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
@@ -1508,6 +1782,19 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("wry-spike-reader-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    if accessibility_proof_requested() {
+        return ACCESSIBILITY_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-accessibility-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-accessibility-proof FAIL: proof did not complete");
                 ExitCode::FAILURE
             }
         });
@@ -1588,6 +1875,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
         || input_proof_requested()
         || tab_proof_requested()
         || reader_proof_requested()
+        || accessibility_proof_requested()
     {
         subscriptions
             .push(iced::time::every(Duration::from_millis(100)).map(Message::NetworkProofTick));
@@ -1620,6 +1908,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || input_proof_requested()
                 || tab_proof_requested()
                 || reader_proof_requested()
+                || accessibility_proof_requested()
             {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
@@ -1635,6 +1924,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     TAB_PROOF_TIMEOUT
                 } else if reader_proof_requested() {
                     READER_PROOF_TIMEOUT
+                } else if accessibility_proof_requested() {
+                    ACCESSIBILITY_PROOF_TIMEOUT
                 } else {
                     NETWORK_PROOF_TIMEOUT
                 };
@@ -1664,6 +1955,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if reader_proof_requested() {
                 state.reader_proof = ReaderProof::WaitingForCreation;
                 READER_PROOF_EVENTS.lock().unwrap().clear();
+            }
+            if accessibility_proof_requested() {
+                state.accessibility_proof = AccessibilityProof::WaitingForCreation;
             }
             if overlay_observation_requested() {
                 state.overlay_active = true;
@@ -1799,6 +2093,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before reader proof completed".into()),
                 );
             }
+            if accessibility_proof_requested()
+                && state.accessibility_proof != AccessibilityProof::Complete
+            {
+                return finish_accessibility_proof(
+                    state,
+                    Err("parent closed before accessibility proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             let webview_dropped = teardown_webview();
             eprintln!("wry-spike-close-request teardown webview_dropped={webview_dropped}");
@@ -1841,6 +2143,14 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before reader proof completed".into()),
                 );
             }
+            if accessibility_proof_requested()
+                && state.accessibility_proof != AccessibilityProof::Complete
+            {
+                return finish_accessibility_proof(
+                    state,
+                    Err("parent closed before accessibility proof completed".into()),
+                );
+            }
             state.webview_generation = state.webview_generation.wrapping_add(1);
             teardown_webview();
             Task::none()
@@ -1855,7 +2165,64 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::PlaceholderMeasured { .. } if state.tab_proof == TabProof::Complete => {
             Task::none()
         }
+        Message::PlaceholderMeasured { .. }
+            if state.accessibility_proof == AccessibilityProof::Complete =>
+        {
+            Task::none()
+        }
         Message::PlaceholderMeasured { epoch, bounds } => {
+            if accessibility_proof_requested() {
+                if matches!(
+                    state.accessibility_proof,
+                    AccessibilityProof::WaitingForAwayMeasurement { .. }
+                ) {
+                    return match state
+                        .accessibility_proof
+                        .observe_away_measurement(epoch, bounds)
+                    {
+                        Some(true) => {
+                            state.status =
+                                "alternate Iced tab active; checking accessibility tree".into();
+                            Task::none()
+                        }
+                        Some(false) => finish_accessibility_proof(
+                            state,
+                            Err("reader placeholder remained in the alternate tab".into()),
+                        ),
+                        None => Task::none(),
+                    };
+                }
+                if matches!(
+                    state.accessibility_proof,
+                    AccessibilityProof::WaitingForMeasurement { .. }
+                ) {
+                    let Some(bounds) = state.accessibility_proof.observe_measurement(epoch, bounds)
+                    else {
+                        return Task::none();
+                    };
+                    let Some(id) = state.window else {
+                        return finish_accessibility_proof(
+                            state,
+                            Err("parent window is not available".into()),
+                        );
+                    };
+                    state.creation_bounds = Some(bounds);
+                    state.status = "reader restored; recreating accessible native child".into();
+                    return create_webview(id, bounds);
+                }
+                if !matches!(
+                    state.accessibility_proof,
+                    AccessibilityProof::Disabled
+                        | AccessibilityProof::WaitingForCreation
+                        | AccessibilityProof::WaitingForInitialTree { .. }
+                        | AccessibilityProof::WaitingForInitialFocus { .. }
+                        | AccessibilityProof::WaitingForParentFocus { .. }
+                        | AccessibilityProof::WaitingForReplacementTree { .. }
+                        | AccessibilityProof::WaitingForReplacementFocus { .. }
+                ) {
+                    return Task::none();
+                }
+            }
             if tab_proof_requested()
                 && matches!(state.tab_proof, TabProof::WaitingForAwayMeasurement { .. })
             {
@@ -1947,6 +2314,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || state.input_proof == InputProof::Complete
                 || state.tab_proof == TabProof::Complete
                 || state.reader_proof == ReaderProof::Complete
+                || state.accessibility_proof == AccessibilityProof::Complete
                 || state.network_proof_finished =>
         {
             teardown_webview();
@@ -1992,6 +2360,30 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     if matches!(state.tab_proof, TabProof::Recreating { .. }) {
                         return verify_tab_replacement(state);
                     }
+                }
+                if accessibility_proof_requested() {
+                    if state.accessibility_proof.begin(state.webview_generation) {
+                        state.status = "embedded; waiting for macOS accessibility tree".into();
+                        return Task::none();
+                    }
+                    let Some(bounds) = state.applied_bounds else {
+                        return finish_accessibility_proof(
+                            state,
+                            Err("recreated webview had no applied bounds".into()),
+                        );
+                    };
+                    return match state
+                        .accessibility_proof
+                        .observe_replacement(state.webview_generation, bounds)
+                    {
+                        Ok(true) => {
+                            state.status =
+                                "native child recreated; waiting for accessibility tree".into();
+                            Task::none()
+                        }
+                        Ok(false) => Task::none(),
+                        Err(error) => finish_accessibility_proof(state, Err(error)),
+                    };
                 }
                 if input_proof_requested() {
                     state.input_proof = InputProof::WaitingForReady;
@@ -2062,6 +2454,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) if reader_proof_requested() => {
                 state.creation_bounds = None;
                 finish_reader_proof(state, Err(format!("webview creation failed: {error}")))
+            }
+            Err(error) if accessibility_proof_requested() => {
+                state.creation_bounds = None;
+                finish_accessibility_proof(state, Err(format!("webview creation failed: {error}")))
             }
             Err(error) => {
                 state.creation_bounds = None;
@@ -2237,6 +2633,24 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             bounds,
             result,
         } => update_tab_replacement(state, generation, bounds, result),
+        Message::AccessibilityObserved { generation, result } => {
+            update_accessibility_observation(state, generation, result)
+        }
+        Message::AccessibilityChildHidden { generation, result } => {
+            update_accessibility_hidden(state, generation, result)
+        }
+        Message::AccessibilityFocusRequested { generation, result } => {
+            if generation != state.webview_generation {
+                Task::none()
+            } else if let Err(error) = result {
+                finish_accessibility_proof(
+                    state,
+                    Err(format!("failed to move accessibility focus: {error}")),
+                )
+            } else {
+                Task::none()
+            }
+        }
         Message::FocusWebView => {
             WEBVIEW.with(|slot| {
                 if let Some(webview) = slot.borrow().as_ref() {
@@ -2259,6 +2673,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::NetworkProofTick(now) if tab_proof_requested() => update_tab_proof(state, now),
         Message::NetworkProofTick(now) if reader_proof_requested() => {
             update_reader_proof(state, now)
+        }
+        Message::NetworkProofTick(now) if accessibility_proof_requested() => {
+            update_accessibility_proof(state, now)
         }
         Message::NetworkProofTick(now) => update_network_proof(state, now),
         #[cfg(target_os = "linux")]
@@ -2532,6 +2949,362 @@ fn finish_tab_proof(state: &mut State, result: Result<(), String>) -> Task<Messa
     TAB_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
     state.window.map_or_else(Task::none, window::close)
 }
+
+fn update_accessibility_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.accessibility_proof == AccessibilityProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        let detail = state
+            .accessibility_last_error
+            .as_deref()
+            .unwrap_or("no accessibility observation completed");
+        return finish_accessibility_proof(
+            state,
+            Err(format!(
+                "timed out during accessibility phase {:?}: {detail}",
+                state.accessibility_proof
+            )),
+        );
+    }
+    if matches!(
+        state.accessibility_proof,
+        AccessibilityProof::WaitingForAwayMeasurement { .. }
+            | AccessibilityProof::WaitingForMeasurement { .. }
+    ) {
+        return measure_placeholder(state.measurement_epoch);
+    }
+    if state.accessibility_observation_pending {
+        return Task::none();
+    }
+    let generation = match state.accessibility_proof {
+        AccessibilityProof::WaitingForInitialTree { generation }
+        | AccessibilityProof::WaitingForInitialFocus { generation }
+        | AccessibilityProof::WaitingForParentFocus { generation }
+        | AccessibilityProof::WaitingForAwayTree { generation }
+        | AccessibilityProof::WaitingForReplacementTree { generation }
+        | AccessibilityProof::WaitingForReplacementFocus { generation } => generation,
+        _ => return Task::none(),
+    };
+    if state.window.is_none() {
+        return finish_accessibility_proof(state, Err("parent window is not available".into()));
+    }
+    state.accessibility_observation_pending = true;
+    Task::perform(
+        async {
+            tokio::task::spawn_blocking(accessibility_snapshot)
+                .await
+                .map_err(|error| format!("accessibility query worker failed: {error}"))?
+        },
+        move |result| Message::AccessibilityObserved { generation, result },
+    )
+}
+
+fn update_accessibility_observation(
+    state: &mut State,
+    generation: u64,
+    result: Result<AccessibilitySnapshot, String>,
+) -> Task<Message> {
+    state.accessibility_observation_pending = false;
+    if generation != state.webview_generation {
+        return Task::none();
+    }
+    let snapshot = match result {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            state.accessibility_last_error = Some(error);
+            return Task::none();
+        }
+    };
+    eprintln!(
+        "wry-spike-accessibility-proof phase={:?} generation={generation} snapshot={snapshot:?}",
+        state.accessibility_proof
+    );
+    if matches!(
+        state.accessibility_proof,
+        AccessibilityProof::WaitingForInitialTree { .. }
+    ) && snapshot.web_area_count == 1
+        && snapshot.input_count == 1
+    {
+        state.accessibility_parent_reachable = snapshot.parent_control_count == 1;
+    }
+    if matches!(
+        state.accessibility_proof,
+        AccessibilityProof::WaitingForAwayTree { .. }
+            | AccessibilityProof::WaitingForReplacementTree { .. }
+            | AccessibilityProof::WaitingForReplacementFocus { .. }
+    ) && snapshot.parent_control_count != usize::from(state.accessibility_parent_reachable)
+    {
+        state.accessibility_last_error = Some(format!(
+            "Iced control reachability changed during the proof: {snapshot:?}"
+        ));
+        return Task::none();
+    }
+    let action = match state
+        .accessibility_proof
+        .observe_snapshot(generation, snapshot)
+    {
+        Ok(action) => {
+            state.accessibility_last_error = None;
+            action
+        }
+        Err(error) => {
+            state.accessibility_last_error = Some(error);
+            return Task::none();
+        }
+    };
+    match action {
+        AccessibilityAction::None => Task::none(),
+        AccessibilityAction::FocusChild | AccessibilityAction::FocusReplacement => {
+            let Some(id) = state.window else {
+                return finish_accessibility_proof(
+                    state,
+                    Err("parent window is not available".into()),
+                );
+            };
+            window::run(id, move |_| {
+                WEBVIEW.with(|slot| focus_webview_input(slot.borrow().as_ref()))
+            })
+            .map(move |result| Message::AccessibilityFocusRequested { generation, result })
+        }
+        AccessibilityAction::FocusParent => {
+            if state.window.is_none() {
+                return finish_accessibility_proof(
+                    state,
+                    Err("parent window is not available".into()),
+                );
+            }
+            Task::perform(
+                async {
+                    tokio::task::spawn_blocking(focus_accessibility_parent)
+                        .await
+                        .map_err(|error| format!("accessibility focus worker failed: {error}"))?
+                },
+                move |result| Message::AccessibilityFocusRequested { generation, result },
+            )
+        }
+        AccessibilityAction::HideChild => begin_accessibility_hide(state, generation),
+        AccessibilityAction::RestoreReader => {
+            let epoch = state.measurement_epoch.wrapping_add(1);
+            if !state.accessibility_proof.begin_restore(epoch) {
+                return Task::none();
+            }
+            state.tab_away = false;
+            state.measurement_epoch = epoch;
+            state.status = "restoring reader and measuring a fresh placeholder".into();
+            measure_placeholder(epoch)
+        }
+        AccessibilityAction::Complete => {
+            if state.accessibility_parent_reachable {
+                finish_accessibility_proof(state, Ok(()))
+            } else {
+                finish_accessibility_proof(
+                    state,
+                    Err(
+                        "WebKit accessibility lifecycle passed, but Iced controls were absent from the macOS accessibility tree"
+                            .into(),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+fn begin_accessibility_hide(state: &mut State, generation: u64) -> Task<Message> {
+    let operation_epoch = begin_native_operation_epoch();
+    let Some(id) = state.window else {
+        return finish_accessibility_proof(state, Err("parent window is not available".into()));
+    };
+    let Some(creation_generation) = state.active_creation_generation else {
+        return finish_accessibility_proof(
+            state,
+            Err("native child generation is not available".into()),
+        );
+    };
+    state.status = "hiding accessible native child before switching tabs".into();
+    window::run(id, move |_| {
+        ensure_native_operation_is_current(operation_epoch)?;
+        ensure_webview_creation_is_current(creation_generation)?;
+        WEBVIEW.with(|slot| set_webview_visible(slot.borrow().as_ref(), false))
+    })
+    .map(move |result| Message::AccessibilityChildHidden { generation, result })
+}
+
+fn update_accessibility_hidden(
+    state: &mut State,
+    generation: u64,
+    result: Result<(), String>,
+) -> Task<Message> {
+    if generation != state.webview_generation {
+        return Task::none();
+    }
+    if let Err(error) = result {
+        return finish_accessibility_proof(state, Err(format!("webview hide failed: {error}")));
+    }
+    if !teardown_webview() {
+        return finish_accessibility_proof(state, Err("webview was missing after hide".into()));
+    }
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    let epoch = state.measurement_epoch.wrapping_add(1);
+    if !state
+        .accessibility_proof
+        .observe_hidden(generation, state.webview_generation, epoch)
+    {
+        return Task::none();
+    }
+    state.active_creation_generation = None;
+    state.webview_ready = false;
+    state.applied_bounds = None;
+    state.measured_bounds = None;
+    state.tab_away = true;
+    state.measurement_epoch = epoch;
+    state.status = "alternate Iced tab active; verifying reader removal".into();
+    measure_placeholder(epoch)
+}
+
+fn finish_accessibility_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if !state.accessibility_proof.complete() {
+        return Task::none();
+    }
+    state.accessibility_observation_pending = false;
+    state.accessibility_last_error = None;
+    state.accessibility_parent_reachable = false;
+    state.tab_away = false;
+    state.webview_ready = false;
+    state.measured_bounds = None;
+    state.creation_bounds = None;
+    state.applied_bounds = None;
+    state.active_creation_generation = None;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-accessibility-proof PASS: child, parent, removal, and single recreated-child accessibility states verified"
+        );
+    }
+    ACCESSIBILITY_PROOF_RESULT.with(|slot| {
+        record_terminal_result(&mut slot.borrow_mut(), result);
+    });
+    state.window.map_or_else(Task::none, window::close)
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_snapshot() -> Result<AccessibilitySnapshot, String> {
+    let output = run_accessibility_script(ACCESSIBILITY_SNAPSHOT_SCRIPT)?;
+    let values = output
+        .trim()
+        .split(',')
+        .map(|value| value.parse::<usize>().map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let [
+        web_area_count,
+        input_count,
+        parent_control_count,
+        input_focused,
+        parent_control_focused,
+    ] = values.as_slice()
+    else {
+        return Err(format!(
+            "unexpected accessibility snapshot output {:?}",
+            output.trim()
+        ));
+    };
+    Ok(AccessibilitySnapshot {
+        web_area_count: *web_area_count,
+        input_count: *input_count,
+        parent_control_count: *parent_control_count,
+        input_focused: *input_focused == 1,
+        parent_control_focused: *parent_control_focused == 1,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn accessibility_snapshot() -> Result<AccessibilitySnapshot, String> {
+    Err("accessibility inspection is only supported on macOS".into())
+}
+
+#[cfg(target_os = "macos")]
+fn focus_accessibility_parent() -> Result<(), String> {
+    if run_accessibility_script(ACCESSIBILITY_FOCUS_PARENT_SCRIPT)?.trim() != "focused" {
+        return Err("Iced accessibility control was not found".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn focus_accessibility_parent() -> Result<(), String> {
+    Err("accessibility focus is only supported on macOS".into())
+}
+
+#[cfg(target_os = "macos")]
+fn run_accessibility_script(script: &str) -> Result<String, String> {
+    let output = Command::new("osascript")
+        .args(["-e", script, &std::process::id().to_string()])
+        .output()
+        .map_err(|error| format!("failed to start System Events query: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "System Events query failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+const ACCESSIBILITY_SNAPSHOT_SCRIPT: &str = r#"
+on run argv
+  set targetPid to item 1 of argv as integer
+  set webAreas to 0
+  set proofInputs to 0
+  set parentControls to 0
+  set inputFocused to 0
+  set parentFocused to 0
+  tell application "System Events"
+    tell first process whose unix id is targetPid
+      set elements to entire contents of window 1
+      repeat with element in elements
+        try
+          set elementRole to role of element as text
+          set elementDescription to description of element as text
+          set elementName to name of element as text
+          set elementFocused to value of attribute "AXFocused" of element
+          if elementRole is "AXWebArea" then set webAreas to webAreas + 1
+          if elementRole is "AXTextField" and (elementDescription is "EPUB proof input" or elementName is "EPUB proof input") then
+            set proofInputs to proofInputs + 1
+            if elementFocused then set inputFocused to 1
+          end if
+          if elementRole is "AXButton" and (elementDescription is "Focus webview" or elementName is "Focus webview") then
+            set parentControls to parentControls + 1
+            if elementFocused then set parentFocused to 1
+          end if
+        end try
+      end repeat
+    end tell
+  end tell
+  return (webAreas as text) & "," & (proofInputs as text) & "," & (parentControls as text) & "," & (inputFocused as text) & "," & (parentFocused as text)
+end run
+"#;
+
+#[cfg(target_os = "macos")]
+const ACCESSIBILITY_FOCUS_PARENT_SCRIPT: &str = r#"
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    tell first process whose unix id is targetPid
+      repeat with element in entire contents of window 1
+        try
+          if role of element is "AXButton" and (description of element is "Focus webview" or name of element is "Focus webview") then
+            set value of attribute "AXFocused" of element to true
+            return "focused"
+          end if
+        end try
+      end repeat
+    end tell
+  end tell
+  return "missing"
+end run
+"#;
 
 fn focus_webview_input(webview: Option<&WebView>) -> Result<(), String> {
     let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
@@ -3619,7 +4392,7 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                 });
             });
             NETWORK_PROOF_URL.to_string()
-        } else if tab_proof_requested() {
+        } else if tab_proof_requested() || accessibility_proof_requested() {
             TAB_PROOF_URL.to_string()
         } else if input_proof_requested() {
             INPUT_PROOF_URL.to_string()
@@ -3758,6 +4531,14 @@ fn tab_proof_requested() -> bool {
     cfg!(target_os = "macos") && tab_proof_env_requested()
 }
 
+fn accessibility_proof_env_requested() -> bool {
+    std::env::var_os(ACCESSIBILITY_PROOF_ENV).is_some()
+}
+
+fn accessibility_proof_requested() -> bool {
+    cfg!(target_os = "macos") && accessibility_proof_env_requested()
+}
+
 fn keyboard_input_proof_requested() -> bool {
     input_proof_requested() || tab_proof_requested()
 }
@@ -3783,6 +4564,13 @@ fn validate_input_proof_platform(requested: bool, is_macos: bool) -> Result<(), 
 fn validate_tab_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
     if requested && !is_macos {
         return Err("SHOSAI_WRY_SPIKE_TAB_PROOF is only supported on macOS".into());
+    }
+    Ok(())
+}
+
+fn validate_accessibility_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
+    if requested && !is_macos {
+        return Err("SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF is only supported on macOS".into());
     }
     Ok(())
 }
@@ -3829,12 +4617,12 @@ fn parse_scale_proof_target(value: &str) -> Result<Point, String> {
     Ok(Point::new(x, y))
 }
 
-fn validate_proof_mode_selection(selected: [bool; 9]) -> Result<(), String> {
-    if selected[2..].iter().any(|selected| *selected)
-        && selected.into_iter().filter(|selected| *selected).count() > 1
+fn validate_proof_mode_selection<const N: usize>(modes: [bool; N]) -> Result<(), String> {
+    if modes.iter().skip(2).any(|selected| *selected)
+        && modes.into_iter().filter(|selected| *selected).count() > 1
     {
         return Err(
-            "overlay, bounds, scale, input, tab, and reader modes cannot be combined with another proof mode"
+            "overlay, bounds, scale, input, tab, reader, and accessibility modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -4337,7 +5125,7 @@ const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <body>
   <h1 id="proof-anchor">Wry input routing proof</h1>
   <p>The host focuses this trusted input. Type <code>shosai-input-proof</code>.</p>
-  <input id="proof-input" type="text" autocomplete="off" />
+  <input id="proof-input" type="text" aria-label="EPUB proof input" autocomplete="off" />
 </body>
 </html>"#;
 
@@ -4742,6 +5530,17 @@ mod tests {
     }
 
     #[test]
+    fn accessibility_proof_request_is_rejected_on_unsupported_platforms() {
+        assert_eq!(validate_accessibility_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_accessibility_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_accessibility_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on macOS")
+        );
+    }
+
+    #[test]
     fn input_proof_requires_child_and_parent_keyboard_routing_in_order() {
         let mut proof = InputProof::WaitingForReady;
 
@@ -4809,6 +5608,185 @@ mod tests {
         assert_eq!(proof.observe_measurement(9, Some(bounds)), Some(bounds));
         assert!(proof.observe_replacement(bounds));
         assert_eq!(proof.current_round(), Some(TAB_PROOF_SWITCHES));
+    }
+
+    #[test]
+    fn accessibility_proof_requires_child_parent_and_recreated_child_focus() {
+        let bounds = Rectangle::new((0.0, 112.0).into(), (900.0, 588.0).into());
+        let tree = AccessibilitySnapshot {
+            web_area_count: 1,
+            input_count: 1,
+            parent_control_count: 1,
+            ..AccessibilitySnapshot::default()
+        };
+        let mut proof = AccessibilityProof::WaitingForCreation;
+
+        assert!(proof.begin(4));
+        assert_eq!(
+            proof.observe_snapshot(4, tree).unwrap(),
+            AccessibilityAction::FocusChild
+        );
+        assert_eq!(
+            proof
+                .observe_snapshot(
+                    4,
+                    AccessibilitySnapshot {
+                        input_focused: true,
+                        ..tree
+                    }
+                )
+                .unwrap(),
+            AccessibilityAction::FocusParent
+        );
+        assert_eq!(
+            proof
+                .observe_snapshot(
+                    4,
+                    AccessibilitySnapshot {
+                        parent_control_focused: true,
+                        ..tree
+                    }
+                )
+                .unwrap(),
+            AccessibilityAction::HideChild
+        );
+        assert!(proof.observe_hidden(4, 5, 8));
+        assert_eq!(proof.observe_away_measurement(7, None), None);
+        assert_eq!(proof.observe_away_measurement(8, Some(bounds)), Some(false));
+        assert_eq!(proof.observe_away_measurement(8, None), Some(true));
+        assert_eq!(
+            proof
+                .observe_snapshot(
+                    5,
+                    AccessibilitySnapshot {
+                        parent_control_count: 1,
+                        ..AccessibilitySnapshot::default()
+                    }
+                )
+                .unwrap(),
+            AccessibilityAction::RestoreReader
+        );
+        assert!(proof.begin_restore(9));
+        assert_eq!(proof.observe_measurement(8, Some(bounds)), None);
+        assert_eq!(proof.observe_measurement(9, Some(bounds)), Some(bounds));
+        assert!(proof.observe_replacement(6, bounds).unwrap());
+        assert_eq!(
+            proof.observe_snapshot(6, tree).unwrap(),
+            AccessibilityAction::FocusReplacement
+        );
+        assert_eq!(
+            proof
+                .observe_snapshot(
+                    6,
+                    AccessibilitySnapshot {
+                        input_focused: true,
+                        ..tree
+                    }
+                )
+                .unwrap(),
+            AccessibilityAction::Complete
+        );
+        assert_eq!(
+            proof,
+            AccessibilityProof::WaitingForReplacementFocus { generation: 6 }
+        );
+        assert!(proof.complete());
+        assert_eq!(proof, AccessibilityProof::Complete);
+    }
+
+    #[test]
+    fn accessibility_proof_rejects_missing_duplicate_and_away_child_elements() {
+        let mut proof = AccessibilityProof::WaitingForCreation;
+        assert!(proof.begin(4));
+        assert!(
+            proof
+                .observe_snapshot(
+                    4,
+                    AccessibilitySnapshot {
+                        web_area_count: 1,
+                        parent_control_count: 1,
+                        ..AccessibilitySnapshot::default()
+                    }
+                )
+                .unwrap_err()
+                .contains("exactly one")
+        );
+
+        proof = AccessibilityProof::WaitingForReplacementTree { generation: 6 };
+        assert!(
+            proof
+                .observe_snapshot(
+                    6,
+                    AccessibilitySnapshot {
+                        web_area_count: 2,
+                        input_count: 1,
+                        parent_control_count: 1,
+                        ..AccessibilitySnapshot::default()
+                    }
+                )
+                .unwrap_err()
+                .contains("exactly one")
+        );
+
+        proof = AccessibilityProof::WaitingForAwayTree { generation: 5 };
+        assert!(
+            proof
+                .observe_snapshot(
+                    5,
+                    AccessibilitySnapshot {
+                        web_area_count: 1,
+                        parent_control_count: 1,
+                        ..AccessibilitySnapshot::default()
+                    }
+                )
+                .unwrap_err()
+                .contains("remained")
+        );
+    }
+
+    #[test]
+    fn accessibility_proof_ignores_stale_generation_observations() {
+        let mut proof = AccessibilityProof::WaitingForReplacementTree { generation: 6 };
+
+        assert_eq!(
+            proof
+                .observe_snapshot(5, AccessibilitySnapshot::default())
+                .unwrap(),
+            AccessibilityAction::None
+        );
+        assert_eq!(
+            proof,
+            AccessibilityProof::WaitingForReplacementTree { generation: 6 }
+        );
+    }
+
+    #[test]
+    fn accessibility_proof_continues_webkit_lifecycle_when_iced_is_unreachable() {
+        let tree = AccessibilitySnapshot {
+            web_area_count: 1,
+            input_count: 1,
+            ..AccessibilitySnapshot::default()
+        };
+        let mut proof = AccessibilityProof::WaitingForCreation;
+
+        assert!(proof.begin(4));
+        assert_eq!(
+            proof.observe_snapshot(4, tree).unwrap(),
+            AccessibilityAction::FocusChild
+        );
+        assert_eq!(
+            proof
+                .observe_snapshot(
+                    4,
+                    AccessibilitySnapshot {
+                        input_focused: true,
+                        ..tree
+                    }
+                )
+                .unwrap(),
+            AccessibilityAction::HideChild
+        );
+        assert_eq!(proof, AccessibilityProof::Hiding { generation: 4 });
     }
 
     #[test]

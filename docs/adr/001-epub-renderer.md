@@ -153,9 +153,24 @@ Current evidence:
   child-to-parent keyboard handoff. This proves the harness lifecycle and
   fragment restoration sequence, not integration with Shōsai's production tab
   model or arbitrary character-offset restoration;
-- ordinary EPUB content JavaScript is disabled, navigation is allowlisted to
-  the book protocol, downloads and new windows are denied, and a restrictive
-  CSP is attached to protocol responses;
+- a macOS System Events accessibility snapshot on the 2026-08-19 host found
+  exactly one `AXWebArea` and the harness-owned `AXTextField` labeled
+  `EPUB proof input` inside the child WebKit tree. The same window exposed its
+  native title-bar controls but did not expose the Iced `Focus webview` button
+  or any other Iced application control. This is a Gate 0 blocker: WebKit's
+  subtree is not enough when the surrounding reader controls are absent. The
+  `SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF` mode codifies the expected child,
+  parent, removal, replacement, generation, and focus sequence through a
+  System Events query. With Accessibility permission enabled, the full mode
+  confirmed the initial input received accessibility focus, the WebKit web area
+  and input both disappeared after teardown, and exactly one fresh web area and
+  input returned in generation 3 with input focus. It then exited nonzero
+  because the Iced control was absent in every snapshot. Running the mode
+  requires the invoking application to have macOS Accessibility permission;
+  that permission is an observation prerequisite, not a product requirement;
+- ordinary EPUB content JavaScript is disabled, navigation is allowlisted to the book
+  protocol, downloads and new windows are denied, and a restrictive CSP is
+  attached to protocol responses;
 - the automated hostile-content mode loads remote CSS imports, images, fonts,
   frames, objects, and external/inline scripts against a controlled loopback
   listener, requires the exact hostile resource to be served and finish loading,
@@ -185,8 +200,8 @@ prove IME routing, shortcut conflicts, production-tab integration, arbitrary
 character-offset restoration, or that the restored visual result matches Iced
 composition. The scale proof exercises one
 real 2→1 display transition, but does not establish correct physical-pixel
-rendering across all display arrangements. Clipping, production tabs, IME, and
-accessibility tests remain open.
+rendering across all display arrangements. Clipping, production tabs, IME,
+screen-reader interaction, and a viable Iced accessibility tree remain open.
 Ordinary close cleanup is
 exercised separately on macOS: with Iced's automatic close exit disabled, UI
 automation clicked the native close button and the handler recorded that it
@@ -272,7 +287,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
 | Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, and lifecycle teardown proven on headless Linux/X11; still outside widget composition | Natural widget composition                                      | Physical-pixel correctness, clipping, production tabs, IME, other targets |
 | Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
-| Accessibility/selection    | Unknown platform behavior                                                                                     | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Hit-testing, screen-reader, and selection tests        |
+| Accessibility/selection    | WebKit exposes the proof web area and labeled input on macOS, but the surrounding Iced controls are absent from the same accessibility tree; selection is untested | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Resolve the Iced blocker, then screen-reader, hit-testing, and selection tests |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
 | Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy and Wuff candidates are pure Rust but not selected for production; no direct native MathML dependency was identified | Remaining dependency size; package smoke tests         |

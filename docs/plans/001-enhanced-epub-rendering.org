@@ -136,9 +136,17 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   remeasures and recreates a new generation, restores the same canonical
   chapter fragment, rejects stale-generation callbacks and IPC, and completes
   a fresh child-to-parent input handoff on all three reader activations.
-  Shortcut conflicts, IME, visually correct restoration, cross-platform input,
-  accessibility, production-tab integration, production cross-chapter, and
-  arbitrary character-offset locations remain open.
+  A macOS System Events snapshot finds one WebKit web area and the labeled DOM
+  proof input, but no Iced application control in the same window accessibility
+  tree.  The accessibility proof mode codifies child/input count, focus,
+  removal, fresh-generation replacement, and Iced-control requirements and
+  confirms that the focused child subtree disappears while away and returns
+  exactly once in a fresh generation with focus.  It then fails because the
+  surrounding Iced control remains absent.  This is a Gate 0 blocker, not
+  positive end-to-end accessibility evidence.  Shortcut conflicts, IME, visually
+  correct restoration, cross-platform input, a viable Iced accessibility tree,
+  screen-reader interaction, production-tab integration, production
+  cross-chapter, and arbitrary character-offset locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
