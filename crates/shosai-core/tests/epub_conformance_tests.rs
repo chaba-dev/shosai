@@ -1,9 +1,11 @@
 use std::io::Read;
 use std::path::PathBuf;
+use std::process::Command;
 
 use roxmltree::{Document, Node};
+use sha2::{Digest, Sha256};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
 
 const FIXTURE_IDS: &[&str] = &[
     "nested-image",
@@ -69,6 +71,14 @@ fn elements_named<'a, 'input>(
     document
         .descendants()
         .filter(move |node| node.is_element() && node.tag_name().name() == name)
+}
+
+fn has_class(node: Node<'_, '_>, expected: &str) -> bool {
+    node.attribute("class").is_some_and(|classes| {
+        classes
+            .split_ascii_whitespace()
+            .any(|class| class == expected)
+    })
 }
 
 #[test]
@@ -145,8 +155,13 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
     assert!(
         by_id(&cascade, "inherited")
             .parent()
-            .is_some_and(|parent| parent.attribute("class") == Some("inherited"))
+            .is_some_and(|parent| has_class(parent, "inherited"))
     );
+    assert!(has_class(by_id(&cascade, "inherited"), "inherited"));
+    assert!(has_class(by_id(&cascade, "source-order"), "source-order"));
+    let first_source_order = css.find(".source-order { color: #111111; }").unwrap();
+    let winning_source_order = css.find(".source-order { color: #222222; }").unwrap();
+    assert!(first_source_order < winning_source_order);
 
     let table_doc = open("table");
     let table = chapter_document(&table_doc, 0);
@@ -200,14 +215,30 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
         Some(b"not a font".as_slice())
     );
     let font_css = std::str::from_utf8(fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
-    assert!(font_css.contains("font-weight: 700"));
-    assert!(font_css.contains("font-style: italic"));
+    assert!(
+        font_css.contains("src: url('../Fonts/book-a.ttf') format('truetype'); font-weight: 700;")
+    );
+    assert!(
+        font_css
+            .contains("src: url('../Fonts/book-a.ttf') format('truetype'); font-style: italic;")
+    );
+    let font_chapter = chapter_document(&fonts, 0);
+    assert!(has_class(by_id(&font_chapter, "bold-font"), "bold"));
+    assert!(has_class(by_id(&font_chapter, "italic-font"), "italic"));
+    assert!(font_css.contains(".bold { font-family: FixtureTtf; font-weight: 700; }"));
+    assert!(font_css.contains(".italic { font-family: FixtureTtf; font-style: italic; }"));
 
     let isolated_fonts = open("fonts-isolation");
-    assert!(isolated_fonts.resource("OEBPS/Fonts/book-b.ttf").is_some());
+    let book_a = fonts.resource("OEBPS/Fonts/book-a.ttf").unwrap();
+    let book_b = isolated_fonts.resource("OEBPS/Fonts/book-b.ttf").unwrap();
+    assert_ne!(book_a, book_b);
     let isolated_css =
         std::str::from_utf8(isolated_fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
     assert!(isolated_css.contains("font-family: FixtureTtf"));
+    assert!(isolated_css.contains("src: url('../Fonts/book-b.ttf') format('truetype')"));
+    assert!(!isolated_css.contains("book-a.ttf"));
+    let isolated_chapter = chapter_document(&isolated_fonts, 0);
+    assert!(has_class(by_id(&isolated_chapter, "isolated-font"), "ttf"));
 
     let math = open("mathml");
     let chapter = chapter_document(&math, 0);
@@ -423,11 +454,14 @@ fn conformance_book_combines_fidelity_cases_without_external_inputs() {
 
 #[test]
 fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
-    let hashes = std::fs::read_to_string(fixture_dir().join("SHA256SUMS")).unwrap();
-    let names = hashes
+    let hash_bytes = std::fs::read(fixture_dir().join("SHA256SUMS")).unwrap();
+    assert!(!hash_bytes.contains(&b'\r'), "SHA256SUMS must be LF-only");
+    let hashes = std::str::from_utf8(&hash_bytes).unwrap();
+    let records = hashes
         .lines()
-        .map(|line| line.split_once("  ").expect("invalid SHA256SUMS line").1)
+        .map(|line| line.split_once("  ").expect("invalid SHA256SUMS line"))
         .collect::<Vec<_>>();
+    let names = records.iter().map(|(_, name)| *name).collect::<Vec<_>>();
     let expected = FIXTURE_IDS
         .iter()
         .copied()
@@ -435,5 +469,82 @@ fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
         .map(|id| format!("{id}.epub"))
         .collect::<Vec<_>>();
     assert_eq!(names, expected);
-    assert!(fixture_dir().join("generate.py").exists());
+
+    let mut checked_in_epubs = std::fs::read_dir(fixture_dir())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "epub")
+        })
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    checked_in_epubs.sort();
+    let mut expected_sorted = expected.clone();
+    expected_sorted.sort();
+    assert_eq!(checked_in_epubs, expected_sorted);
+
+    for (expected_digest, name) in records {
+        let bytes = std::fs::read(fixture_dir().join(name)).unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(&bytes)), expected_digest);
+
+        let mut archive = ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut names = Vec::with_capacity(archive.len());
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index).unwrap();
+            assert_eq!(entry.compression(), CompressionMethod::Stored, "{name}");
+            let modified = entry.last_modified().unwrap();
+            assert_eq!(
+                (
+                    modified.year(),
+                    modified.month(),
+                    modified.day(),
+                    modified.hour(),
+                    modified.minute(),
+                    modified.second(),
+                ),
+                (1980, 1, 1, 0, 0, 0),
+                "{name}: {}",
+                entry.name()
+            );
+            names.push(entry.name().to_owned());
+        }
+        assert_eq!(names.first().map(String::as_str), Some("mimetype"));
+        assert!(names[1..].windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+
+    let generated = tempfile::tempdir().unwrap();
+    let generator = fixture_dir().join("generate.py");
+    let mut generated_ok = false;
+    for python in ["python3", "python"] {
+        match Command::new(python)
+            .arg(&generator)
+            .arg("--output")
+            .arg(generated.path())
+            .status()
+        {
+            Ok(status) => {
+                assert!(status.success(), "{python} fixture generation failed");
+                generated_ok = true;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("failed to run {python}: {error}"),
+        }
+    }
+    assert!(
+        generated_ok,
+        "Python is required to verify fixture generation"
+    );
+    assert_eq!(
+        std::fs::read(generated.path().join("SHA256SUMS")).unwrap(),
+        std::fs::read(fixture_dir().join("SHA256SUMS")).unwrap()
+    );
+    for name in expected {
+        assert_eq!(
+            std::fs::read(generated.path().join(&name)).unwrap(),
+            std::fs::read(fixture_dir().join(&name)).unwrap(),
+            "generated {name} drifted"
+        );
+    }
 }

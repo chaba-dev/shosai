@@ -65,7 +65,8 @@ section > p.inherited { text-decoration: underline; }
     cascade = chapter(
         "CSS cascade",
         """<main class="chapter" id="cascade"><p id="specific" class="important" style="font-weight: 700">Specificity</p>
-<section class="inherited"><p id="inherited">Inherited style</p></section>
+<section class="inherited"><p id="inherited" class="inherited">Inherited and child-selector styles</p></section>
+<p id="source-order" class="source-order">Later source-order rule wins</p>
 <p class="hidden">Hidden sentinel</p><p id="relative">Relative lengths</p></main>""",
         '<link rel="stylesheet" type="text/css" href="../Styles/book.css"/>',
     )
@@ -82,6 +83,7 @@ section > p.inherited { text-decoration: underline; }
         "Embedded fonts",
         """<main id="fonts"><p class="woff">WOFF AB</p><p class="woff2">WOFF2 AB</p>
 <p class="ttf">TTF AB</p><p class="otf">OTF AB</p><p class="missing">Missing font fallback</p>
+<p id="bold-font" class="ttf bold">Bold TTF AB</p><p id="italic-font" class="ttf italic">Italic TTF AB</p>
 <p class="corrupt">Corrupt font fallback</p></main>""",
         '<link rel="stylesheet" type="text/css" href="../Styles/fonts.css"/>',
     )
@@ -169,6 +171,8 @@ section > p.inherited { text-decoration: underline; }
 @font-face { font-family: CorruptFixture; src: url('../Fonts/corrupt.woff2') format('woff2'); }
 .woff { font-family: FixtureWoff; } .woff2 { font-family: FixtureWoff2; }
 .ttf { font-family: FixtureTtf; } .otf { font-family: FixtureOtf; }
+.bold { font-family: FixtureTtf; font-weight: 700; }
+.italic { font-family: FixtureTtf; font-style: italic; }
 .missing { font-family: MissingFixture, serif; } .corrupt { font-family: CorruptFixture, serif; }
 """
     font_resources = {
@@ -188,7 +192,7 @@ section > p.inherited { text-decoration: underline; }
     }
     isolation_font = chapter(
         "Isolated embedded font",
-        '<main id="fonts-isolation"><p class="ttf">Book B AB</p></main>',
+        '<main id="fonts-isolation"><p id="isolated-font" class="ttf">Book B AB</p></main>',
         '<link rel="stylesheet" type="text/css" href="../Styles/fonts.css"/>',
     )
     missing_spine = chapter("Missing spine resource", "<p>This file is intentionally absent.</p>")
