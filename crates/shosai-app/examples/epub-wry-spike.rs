@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::ExitCode;
 #[cfg(any(target_os = "macos", test))]
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -85,6 +85,8 @@ const ACCESSIBILITY_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF";
 const ACCESSIBILITY_PROOF_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(any(target_os = "macos", test))]
 const ACCESSIBILITY_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(any(target_os = "macos", test))]
+const SUBPROCESS_TERMINATION_TIMEOUT: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -338,6 +340,10 @@ struct VisualCapture {
 impl VisualCapture {
     fn marker_visible(self) -> bool {
         self.marker_pixels >= 100 && self.marker_bounds.is_some()
+    }
+
+    fn marker_absent(self) -> bool {
+        self.marker_pixels == 0 && self.marker_bounds.is_none()
     }
 
     fn marker_matches(self, other: Self) -> bool {
@@ -3685,35 +3691,128 @@ fn run_command_with_timeout(
     operation: &str,
 ) -> Result<Output, String> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|error| format!("failed to start {operation}: {error}"))?;
+    supervise_process(
+        ChildProcess(child),
+        timeout,
+        SUBPROCESS_TERMINATION_TIMEOUT,
+        operation,
+    )
+}
+
+#[cfg(any(target_os = "macos", test))]
+trait SupervisedProcess {
+    type Output;
+
+    fn try_wait(&mut self) -> std::io::Result<bool>;
+    fn kill(&mut self) -> std::io::Result<()>;
+    fn collect(self) -> std::io::Result<Self::Output>;
+}
+
+#[cfg(any(target_os = "macos", test))]
+struct ChildProcess(Child);
+
+#[cfg(any(target_os = "macos", test))]
+impl SupervisedProcess for ChildProcess {
+    type Output = Output;
+
+    fn try_wait(&mut self) -> std::io::Result<bool> {
+        self.0.try_wait().map(|status| status.is_some())
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.0.kill()
+    }
+
+    fn collect(self) -> std::io::Result<Self::Output> {
+        self.0.wait_with_output()
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn supervise_process<P: SupervisedProcess>(
+    mut process: P,
+    timeout: Duration,
+    termination_timeout: Duration,
+    operation: &str,
+) -> Result<P::Output, String> {
     let deadline = Instant::now() + timeout;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
+        match process.try_wait() {
+            Ok(true) => {
+                return process
+                    .collect()
                     .map_err(|error| format!("failed to collect {operation}: {error}"));
             }
-            Ok(None) => {}
+            Ok(false) => {}
             Err(error) => {
-                return Err(format!("failed to wait for {operation}: {error}"));
+                return terminate_process(
+                    process,
+                    termination_timeout,
+                    format!("failed to wait for {operation}: {error}"),
+                );
             }
         }
         let now = Instant::now();
         if now >= deadline {
-            let kill_error = child.kill().err();
-            let reap_error = child.wait_with_output().err();
-            return Err(match (kill_error, reap_error) {
-                (None, None) => format!("{operation} timed out after {timeout:?}"),
-                (kill_error, reap_error) => format!(
-                    "{operation} timed out after {timeout:?}; kill error: {kill_error:?}; reap error: {reap_error:?}"
-                ),
-            });
+            return terminate_process(
+                process,
+                termination_timeout,
+                format!("{operation} timed out after {timeout:?}"),
+            );
         }
         thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn terminate_process<P: SupervisedProcess>(
+    mut process: P,
+    timeout: Duration,
+    failure: String,
+) -> Result<P::Output, String> {
+    let kill_error = process.kill().err();
+    let deadline = Instant::now() + timeout;
+    let mut wait_error = None;
+    loop {
+        match process.try_wait() {
+            Ok(true) => {
+                let reap_error = process.collect().err();
+                return Err(format_termination_failure(
+                    failure, kill_error, wait_error, reap_error,
+                ));
+            }
+            Ok(false) => {}
+            Err(error) => wait_error = Some(error),
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(format_termination_failure(
+                format!("{failure}; termination remained unconfirmed after {timeout:?}"),
+                kill_error,
+                wait_error,
+                None,
+            ));
+        }
+        thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn format_termination_failure(
+    failure: String,
+    kill_error: Option<std::io::Error>,
+    wait_error: Option<std::io::Error>,
+    reap_error: Option<std::io::Error>,
+) -> String {
+    if kill_error.is_none() && wait_error.is_none() && reap_error.is_none() {
+        return failure;
+    }
+    format!(
+        "{failure}; kill error: {kill_error:?}; wait error: {wait_error:?}; reap error: {reap_error:?}"
+    )
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -4630,7 +4729,7 @@ fn update_visual_capture(
                 } if expected == generation
             ) =>
         {
-            if capture.marker_visible() {
+            if !capture.marker_absent() {
                 return finish_overlay_proof(
                     state,
                     Err(format!(
@@ -4714,23 +4813,41 @@ fn capture_visual_snapshot(bounds: Rectangle) -> Result<VisualCapture, String> {
     let mut command = Command::new("/usr/sbin/screencapture");
     command.args(["-x", "-o", &format!("-l{window_id}"), "-t", "png"]);
     command.arg(&path);
-    let output =
-        run_command_with_timeout(command, ACCESSIBILITY_QUERY_TIMEOUT, "macOS screen capture")?;
-    if !output.status.success() {
-        let _ = std::fs::remove_file(&path);
-        return Err(format!(
-            "macOS screen capture failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    with_temporary_file_cleanup(&path, || {
+        let output =
+            run_command_with_timeout(command, ACCESSIBILITY_QUERY_TIMEOUT, "macOS screen capture")?;
+        if !output.status.success() {
+            return Err(format!(
+                "macOS screen capture failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let image = image::open(&path)
+            .map_err(|error| error.to_string())?
+            .to_rgba8();
+        analyze_visual_capture(&image, width, height, bounds)
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn with_temporary_file_cleanup<T>(
+    path: &std::path::Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let result = operation();
+    let cleanup = match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove temporary capture {}: {error}",
+            path.display()
+        )),
+    };
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(format!("{error}; {cleanup_error}")),
     }
-    let image = image::open(&path).map(|image| image.to_rgba8());
-    let _ = std::fs::remove_file(&path);
-    analyze_visual_capture(
-        &image.map_err(|error| error.to_string())?,
-        width,
-        height,
-        bounds,
-    )
 }
 
 #[cfg(target_os = "macos")]
@@ -6696,8 +6813,43 @@ mod tests {
 
     #[test]
     fn visual_capture_rejects_surviving_hidden_marker() {
-        assert!(!visual_capture(None, 0).marker_visible());
-        assert!(visual_capture(Some([50, 60, 149, 139]), 8_000).marker_visible());
+        assert!(visual_capture(None, 0).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 1, 1]), 1).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 10, 10]), 99).marker_absent());
+        assert!(!visual_capture(Some([50, 60, 149, 139]), 8_000).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 1, 1]), 0).marker_absent());
+    }
+
+    #[test]
+    fn temporary_capture_is_removed_after_operation_failure() {
+        let path = std::env::temp_dir().join(format!(
+            "shosai-visual-cleanup-test-{}-{:?}.png",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let error = with_temporary_file_cleanup(&path, || {
+            std::fs::write(&path, b"partial capture").unwrap();
+            Err::<(), _>("capture timed out".into())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "capture timed out");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn temporary_capture_cleanup_failure_is_reported() {
+        let path = std::env::temp_dir().join(format!(
+            "shosai-visual-cleanup-directory-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+
+        let error = with_temporary_file_cleanup(&path, || Ok(())).unwrap_err();
+
+        std::fs::remove_dir(&path).unwrap();
+        assert!(error.contains("failed to remove temporary capture"));
     }
 
     #[test]
@@ -7155,6 +7307,93 @@ mod tests {
 
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[derive(Clone, Copy)]
+    enum MockWait {
+        Error,
+        Running,
+        Exited,
+    }
+
+    struct MockProcess {
+        waits: std::collections::VecDeque<MockWait>,
+        fallback: MockWait,
+        kill_fails: bool,
+        lifecycle: Arc<Mutex<(bool, bool)>>,
+    }
+
+    impl SupervisedProcess for MockProcess {
+        type Output = ();
+
+        fn try_wait(&mut self) -> std::io::Result<bool> {
+            match self.waits.pop_front().unwrap_or(self.fallback) {
+                MockWait::Error => Err(std::io::Error::other("simulated wait failure")),
+                MockWait::Running => Ok(false),
+                MockWait::Exited => Ok(true),
+            }
+        }
+
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.lifecycle.lock().unwrap().0 = true;
+            if self.kill_fails {
+                Err(std::io::Error::other("simulated kill failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn collect(self) -> std::io::Result<Self::Output> {
+            self.lifecycle.lock().unwrap().1 = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn subprocess_wait_errors_still_kill_and_reap_the_child() {
+        let lifecycle = Arc::new(Mutex::new((false, false)));
+        let process = MockProcess {
+            waits: [MockWait::Error, MockWait::Exited].into(),
+            fallback: MockWait::Exited,
+            kill_fails: false,
+            lifecycle: Arc::clone(&lifecycle),
+        };
+
+        let error = supervise_process(
+            process,
+            Duration::from_secs(1),
+            Duration::from_millis(50),
+            "mock query",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("failed to wait for mock query"));
+        assert_eq!(*lifecycle.lock().unwrap(), (true, true));
+    }
+
+    #[test]
+    fn subprocess_kill_failure_does_not_create_an_unbounded_wait() {
+        let lifecycle = Arc::new(Mutex::new((false, false)));
+        let process = MockProcess {
+            waits: [MockWait::Error].into(),
+            fallback: MockWait::Running,
+            kill_fails: true,
+            lifecycle: Arc::clone(&lifecycle),
+        };
+        let started = Instant::now();
+
+        let error = supervise_process(
+            process,
+            Duration::from_secs(1),
+            Duration::from_millis(20),
+            "mock query",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("termination remained unconfirmed"));
+        assert!(error.contains("simulated kill failure"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(*lifecycle.lock().unwrap(), (true, false));
     }
 
     #[test]

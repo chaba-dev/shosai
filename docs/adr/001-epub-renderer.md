@@ -126,7 +126,8 @@ Current evidence:
   bounds and count to match within two pixels and one percent. It also requires
   unchanged capture dimensions and integral backing scale, ignores stale child
   generations, bounds every System Events/Core Graphics/screen-capture
-  subprocess, and removes temporary captures. On the 2026-08-20 macOS arm64
+  subprocess, requires exact-zero hidden marker evidence, and fails if temporary
+  capture cleanup cannot complete. On the 2026-08-20 macOS arm64
   host, the rotated 2× DELL U2720QM run captured a 3364×5954 backing-pixel
   window. Initial and restored marker bounds were both
   `[841,1699]-[2522,4535]` with 4,771,834 marker pixels; the hidden capture had
