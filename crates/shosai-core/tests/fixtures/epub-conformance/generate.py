@@ -46,7 +46,7 @@ p { color: #303030; }
 .chapter .important { color: #2468ac !important; }
 .chapter p.important { color: #13579b; }
 .inherited { font-style: italic; }
-section > p.inherited { text-decoration: underline; }
+section.inherited > p { text-decoration: underline; }
 .source-order { color: #111111; }
 .source-order { color: #222222; }
 .hidden { display: none; }
@@ -65,7 +65,7 @@ section > p.inherited { text-decoration: underline; }
     cascade = chapter(
         "CSS cascade",
         """<main class="chapter" id="cascade"><p id="specific" class="important" style="font-weight: 700">Specificity</p>
-<section class="inherited"><p id="inherited" class="inherited">Inherited and child-selector styles</p></section>
+<section class="inherited"><p id="inherited">Inherited and child-selector styles</p></section>
 <p id="source-order" class="source-order">Later source-order rule wins</p>
 <p class="hidden">Hidden sentinel</p><p id="relative">Relative lengths</p></main>""",
         '<link rel="stylesheet" type="text/css" href="../Styles/book.css"/>',

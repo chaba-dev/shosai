@@ -32,6 +32,14 @@ fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/epub-conformance")
 }
 
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("shosai-core must be inside the workspace crates directory")
+        .to_path_buf()
+}
+
 fn fixture_path(id: &str) -> PathBuf {
     fixture_dir().join(format!("{id}.epub"))
 }
@@ -147,7 +155,7 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
         ".inherited { font-style: italic; }",
         ".source-order { color: #111111; }",
         ".source-order { color: #222222; }",
-        "section > p.inherited",
+        "section.inherited > p",
         "display: none",
     ] {
         assert!(css.contains(marker), "cascade CSS is missing {marker}");
@@ -157,7 +165,7 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
             .parent()
             .is_some_and(|parent| has_class(parent, "inherited"))
     );
-    assert!(has_class(by_id(&cascade, "inherited"), "inherited"));
+    assert!(!has_class(by_id(&cascade, "inherited"), "inherited"));
     assert!(has_class(by_id(&cascade, "source-order"), "source-order"));
     let first_source_order = css.find(".source-order { color: #111111; }").unwrap();
     let winning_source_order = css.find(".source-order { color: #222222; }").unwrap();
@@ -364,6 +372,26 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
         assert_eq!(resolved.path.as_str(), "OEBPS/Text/chapter-2.xhtml");
         assert_eq!(resolved.fragment.as_deref(), Some("target"));
     }
+    for (id, href) in [
+        ("encoded-traversal", "%2e%2e/secret.xhtml"),
+        ("query", "sibling.xhtml?query=blocked#target"),
+        ("foreign", "https://example.invalid/outside.xhtml"),
+    ] {
+        assert_eq!(by_id(&chapter, id).attribute("href"), Some(href));
+        assert!(CanonicalEpubPath::resolve("OEBPS/Text", href).is_err());
+    }
+    let absolute = by_id(&chapter, "absolute").attribute("href").unwrap();
+    assert_eq!(absolute, "/outside.xhtml");
+    let absolute = CanonicalEpubPath::resolve("OEBPS/Text", absolute).unwrap();
+    assert_eq!(absolute.path.as_str(), "outside.xhtml");
+    assert!(canonical.resource(absolute.path.as_str()).is_none());
+    let case_variant = by_id(&chapter, "case-variant").attribute("src").unwrap();
+    assert_eq!(case_variant, "../Images/PIXEL.png");
+    let case_variant = CanonicalEpubPath::resolve("OEBPS/Text", case_variant).unwrap();
+    assert_eq!(case_variant.path.as_str(), "OEBPS/Images/PIXEL.png");
+    assert!(canonical.resource(case_variant.path.as_str()).is_none());
+    let lowercase = CanonicalEpubPath::resolve("OEBPS/Text", "../Images/pixel.png").unwrap();
+    assert!(canonical.resource(lowercase.path.as_str()).is_some());
     assert!(
         chapter_document(&canonical, 1)
             .descendants()
@@ -372,17 +400,37 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
 
     let remote = open("remote-content");
     let chapter = chapter_document(&remote, 0);
-    for name in ["img", "iframe", "object", "script", "form"] {
+    for (name, attribute, expected) in [
+        ("img", "src", "https://example.invalid/image.png"),
+        ("iframe", "src", "https://example.invalid/frame"),
+        ("object", "data", "https://example.invalid/object"),
+        ("script", "src", "https://example.invalid/script.js"),
+        ("form", "action", "https://example.invalid/post"),
+    ] {
+        let mut elements = elements_named(&chapter, name);
         assert_eq!(
-            elements_named(&chapter, name).count(),
-            1,
-            "missing hostile {name}"
+            elements.next().and_then(|node| node.attribute(attribute)),
+            Some(expected),
+            "hostile {name} {attribute} drifted"
+        );
+        assert!(
+            elements.next().is_none(),
+            "unexpected second hostile {name}"
         );
     }
     let remote_css =
         std::str::from_utf8(remote.resource("OEBPS/Styles/remote.css").unwrap()).unwrap();
     assert!(remote_css.contains("@import url('https://example.invalid/import.css')"));
     assert!(remote_css.contains("https://example.invalid/font.woff2"));
+    assert!(remote_css.contains("background: url('https://example.invalid/background.png')"));
+    assert!(elements_named(&chapter, "a").any(|node| {
+        node.attribute("download") == Some("book.bin")
+            && node.attribute("href") == Some("https://example.invalid/download")
+    }));
+    assert!(elements_named(&chapter, "a").any(|node| {
+        node.attribute("target") == Some("_blank")
+            && node.attribute("href") == Some("https://example.invalid/popup")
+    }));
     assert_eq!(
         by_id(&chapter, "redirect").attribute("href"),
         Some("https://example.invalid/redirect")
@@ -399,7 +447,10 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
         limits.resource("OEBPS/Fonts/corrupt.ttf"),
         Some(b"malformed font sentinel".as_slice())
     );
-    assert!(limits.resource("OEBPS/Fonts/oversized.ttf").is_some());
+    assert_eq!(
+        limits.resource("OEBPS/Fonts/oversized.ttf").unwrap().len(),
+        1024 * 1024
+    );
 }
 
 #[test]
@@ -547,4 +598,15 @@ fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
             "generated {name} drifted"
         );
     }
+}
+
+#[test]
+fn repository_attributes_preserve_fixture_bytes() {
+    let attributes = std::fs::read_to_string(repository_root().join(".gitattributes")).unwrap();
+    assert!(attributes.lines().any(|line| {
+        line == "crates/shosai-core/tests/fixtures/epub-conformance/SHA256SUMS text eol=lf"
+    }));
+    assert!(attributes.lines().any(|line| {
+        line == "crates/shosai-core/tests/fixtures/epub-conformance/*.epub binary"
+    }));
 }
