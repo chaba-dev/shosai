@@ -1949,6 +1949,16 @@ fn subscription(_state: &State) -> Subscription<Message> {
 
 fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
+        Message::WindowEvent(_, window::Event::Focused, _) if keyboard_input_proof_requested() => {
+            eprintln!("wry-spike-input-proof event=iced-window-focused");
+            Task::none()
+        }
+        Message::WindowEvent(_, window::Event::Unfocused, _)
+            if keyboard_input_proof_requested() =>
+        {
+            eprintln!("wry-spike-input-proof event=iced-window-unfocused");
+            Task::none()
+        }
         Message::WindowEvent(id, window::Event::Opened { .. }, _) => {
             state.window = Some(id);
             if network_proof_requested()

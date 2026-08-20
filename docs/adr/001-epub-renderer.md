@@ -232,18 +232,24 @@ and checks the X input-focus window against Iced's raw Xlib parent. On the live
 XWayland session, Wry selected that parent XID without the direct Xlib fallback;
 under Xvfb it did not, so the harness set and synchronously rechecked the Iced
 XID directly. In both environments, an untargeted synthetic post-handoff key
-did not produce an Iced keyboard event. The initial Xvfb control produced an
-Iced key only after an explicit pointer click in the Iced-only header. The
-harness now observes mouse/touch presses throughout parent handoff and rejects
-a subsequent key as pointer-assisted; rerunning that control exits nonzero
-rather than printing a successful handoff. This proves child focus and exact
-text entry, closes two focus-evidence ordering races, and shows that merely
-returning `Ok` or selecting the top-level XID is insufficient evidence of
-seamless Linux child-to-parent keyboard routing.
+did not produce an Iced keyboard event. An XI2 root monitor observed the XTest
+raw event, but a separate X11 client selecting core key events on the verified
+parent received nothing. A core key event sent directly to that same parent was
+received by Iced and completed the proof without pointer activation. This
+separates XTest delivery from Iced routing: winit handles a key delivered to the
+parent, while the untargeted synthetic control does not establish where a
+physical key would be delivered. The initial Xvfb control produced an Iced key
+only after an explicit pointer click in the Iced-only header. The harness
+observes mouse/touch presses throughout parent handoff and rejects a subsequent
+key as pointer-assisted; rerunning that control exits nonzero rather than
+printing a successful handoff. This proves child focus and exact text entry,
+closes two focus-evidence ordering races, and shows that merely returning `Ok`
+or selecting the top-level XID is insufficient evidence of seamless Linux
+child-to-parent physical-key routing.
 These Linux runs therefore prove X11 child lifecycle, resource policy, and
-child keyboard input, but not parent focus restoration, shortcuts, IME,
-accessibility, visual fidelity, hardware scaling, Linux arm64, or native
-Wayland behavior.
+child keyboard input. They also prove parent routing for a directly addressed
+core key, but not physical-key focus restoration, shortcuts, IME, accessibility,
+visual fidelity, hardware scaling, Linux arm64, or native Wayland behavior.
 
 ## Integration findings
 
@@ -308,7 +314,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
-| Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, and exact text input proven on Linux/X11, but parent keyboard routing still requires a pointer-activation control; still outside widget composition | Natural widget composition                                      | Linux parent handoff, physical-pixel correctness, clipping, production tabs, IME, other targets |
+| Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, exact text input, and directly addressed parent key routing proven on Linux/X11, but physical-key handoff remains unproven because untargeted XTest delivery fails before the parent; still outside widget composition | Natural widget composition                                      | Linux physical-key handoff, physical-pixel correctness, clipping, production tabs, IME, other targets |
 | Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
 | Accessibility/selection    | WebKit exposes the proof web area and labeled input on macOS, but the surrounding Iced controls are absent from the same accessibility tree; selection is untested | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Resolve the Iced blocker, then screen-reader, hit-testing, and selection tests |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
@@ -642,10 +648,10 @@ cost.
    overlays, repeated harness tab-state input handoffs, and ordinary close
    teardown are already proven separately.
 2. Run the same child and hostile-content spikes on Windows and Linux arm64.
-   Resolve or reject the Linux/X11 parent-focus path that currently needs a
-   pointer-activation control, then complete clipboard, IME, and accessibility
-   checks. Decide whether that result and the lack of a viable Wayland host
-   reject Wry or justify a documented backend fallback.
+   Confirm or reject the Linux/X11 physical-key handoff that untargeted XTest
+   cannot exercise, then complete clipboard, IME, and accessibility checks.
+   Decide whether that result and the lack of a viable Wayland host reject Wry
+   or justify a documented backend fallback.
 3. Extend the native component evidence with inline-tree construction, a fuller
    table compatibility boundary, production font integration,
    selection/accessibility, pagination, and MathML, then render the same fixture.
