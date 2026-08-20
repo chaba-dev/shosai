@@ -156,7 +156,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   mouse/touch activation throughout parent handoff and rejects a following key,
   so the pointer-click control exits nonzero instead of being mistaken for a
   successful handoff.
-  Shortcut conflicts, Linux physical-key handoff, clipboard, IME, visually correct
+  A Linux/X11 clipboard proof enables Wry clipboard access only on a host-owned
+  fixture.  Iced writes and reads back an exact parent token, which WebKit pastes
+  exactly.  WebKit then copies an exact child token that a separate GTK process
+  can read while the harness pumps GTK, but Iced's own synchronous X11 clipboard
+  read returns no text after its selection conversion times out because the same
+  UI thread must service WebKitGTK's response.  The proof intentionally exits
+  nonzero on that result; bidirectional clipboard interoperability requires a
+  custom asynchronous bridge or rejects this integration.
+  Shortcut conflicts, Linux physical-key handoff, IME, visually correct
   restoration, a viable Iced accessibility tree, screen-reader interaction,
   production-tab integration, production cross-chapter, and arbitrary
   character-offset locations remain open.

@@ -36,6 +36,8 @@ SHOSAI_WRY_SPIKE_SCALE_PROOF=1 SHOSAI_WRY_SPIKE_SCALE_TARGET=-1800,100 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_INPUT_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_CLIPBOARD_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_TAB_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_READER_PROOF=1 \
@@ -57,6 +59,8 @@ env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_NETWOR
 env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_INPUT_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_CLIPBOARD_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET GDK_BACKEND=x11 SHOSAI_WRY_SPIKE_READER_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
@@ -251,6 +255,22 @@ child keyboard input. They also prove parent routing for a directly addressed
 core key, but not physical-key focus restoration, shortcuts, IME, accessibility,
 visual fidelity, hardware scaling, Linux arm64, or native Wayland behavior.
 
+The Linux clipboard mode enables Wry's clipboard setting only for a host-owned
+fixture and verifies exact tokens in both directions. Under Xvfb, Iced writes
+`shosai-parent-clipboard`, reads it back through its clipboard backend, and the
+WebKit child pastes the exact token. The child then copies
+`shosai-child-clipboard`; a separate GTK process reads that exact token while
+the harness continues pumping GTK. However, Iced's own read of the child-owned
+clipboard returns no text after its synchronous selection conversion times out,
+and the proof exits nonzero with the unexpected `None` result. Iced performs
+that conversion on the UI thread, while the WebKitGTK selection owner in the
+same process needs that thread's GTK loop to answer. The external-reader control
+and the positive opposite direction separate valid WebKit copy ownership from
+this same-process event-loop deadlock. Standard bidirectional clipboard
+interoperability is therefore blocked without a custom asynchronous GTK
+clipboard bridge or another integration change; the failing proof intentionally
+records that Gate 0 result.
+
 ## Integration findings
 
 Iced has no supported native-child widget abstraction. A production Wry route
@@ -314,7 +334,7 @@ Scores remain unset until the same fixture and measurement protocol is used.
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
-| Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, exact text input, and directly addressed parent key routing proven on Linux/X11, but physical-key handoff remains unproven because untargeted XTest delivery fails before the parent; still outside widget composition | Natural widget composition                                      | Linux physical-key handoff, physical-pixel correctness, clipping, production tabs, IME, other targets |
+| Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, exact text input, and directly addressed parent key routing proven on Linux/X11, but physical-key handoff remains unproven and child-to-Iced clipboard reads deadlock without a custom bridge; still outside widget composition | Natural widget composition                                      | Linux physical-key handoff, clipboard bridge decision, physical-pixel correctness, clipping, production tabs, IME, other targets |
 | Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
 | Accessibility/selection    | WebKit exposes the proof web area and labeled input on macOS, but the surrounding Iced controls are absent from the same accessibility tree; selection is untested | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Resolve the Iced blocker, then screen-reader, hit-testing, and selection tests |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
@@ -649,9 +669,10 @@ cost.
    teardown are already proven separately.
 2. Run the same child and hostile-content spikes on Windows and Linux arm64.
    Confirm or reject the Linux/X11 physical-key handoff that untargeted XTest
-   cannot exercise, then complete clipboard, IME, and accessibility checks.
-   Decide whether that result and the lack of a viable Wayland host reject Wry
-   or justify a documented backend fallback.
+   cannot exercise, decide whether the blocked child-to-Iced clipboard path
+   justifies a custom bridge, then complete IME and accessibility checks. Decide
+   whether those results and the lack of a viable Wayland host reject Wry or
+   justify a documented backend fallback.
 3. Extend the native component evidence with inline-tree construction, a fuller
    table compatibility boundary, production font integration,
    selection/accessibility, pagination, and MathML, then render the same fixture.
