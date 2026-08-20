@@ -1,6 +1,6 @@
 # EPUB conformance fixtures
 
-These complete EPUB 3 test containers provide shared, backend-neutral inputs
+These EPUB 3 test containers provide shared, backend-neutral inputs
 for the native and Wry renderer evaluations. Some intentionally contain
 malformed markup, corrupt resources, or hostile references and are not expected
 to pass EPUBCheck. They contain only generated text, a tiny generated PNG, and
@@ -20,6 +20,13 @@ reproducible without depending on a particular zlib implementation. The
 `--large-resource-bytes` and `--compress-stress-resource` can produce a
 temporary compressed variant for testing specific size and compression-ratio
 limits. Stress variants are not expected to match the checked-in hashes.
+
+The checked-in matrix contains thirteen books expected to open and two archives
+expected to fail at a declared parser boundary (a missing spine resource and a
+duplicate ZIP entry). It supplies semantic source oracles and representative
+negative shapes; it does not yet claim every threshold permutation in ADR 001.
+Entry-count overflow, XML byte/depth ceilings, and decoded raster/font limits
+will use temporary variants tied to the configured production budgets.
 
 The fixture-contract tests assert source semantics, not renderer-specific pixel
 output. A backend must preserve those semantics before screenshots can count as

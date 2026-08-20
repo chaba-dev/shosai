@@ -1,13 +1,16 @@
+use std::io::Read;
 use std::path::PathBuf;
 
 use roxmltree::{Document, Node};
 use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
+use zip::ZipArchive;
 
 const FIXTURE_IDS: &[&str] = &[
     "nested-image",
     "css-cascade",
     "table",
     "fonts",
+    "fonts-isolation",
     "mathml",
     "bidi",
     "links",
@@ -16,6 +19,11 @@ const FIXTURE_IDS: &[&str] = &[
     "remote-content",
     "resource-limits",
     "conformance",
+];
+
+const REJECTION_FIXTURES: &[(&str, &str)] = &[
+    ("missing-spine-resource", "failed to read chapter"),
+    ("duplicate-entries", "duplicate EPUB archive entry"),
 ];
 
 fn fixture_dir() -> PathBuf {
@@ -28,6 +36,18 @@ fn fixture_path(id: &str) -> PathBuf {
 
 fn open(id: &str) -> EpubDoc {
     EpubDoc::open(fixture_path(id)).unwrap_or_else(|error| panic!("{id}: {error:#}"))
+}
+
+fn archive_entry(id: &str, path: &str) -> String {
+    let file = std::fs::File::open(fixture_path(id)).unwrap();
+    let mut archive = ZipArchive::new(file).unwrap();
+    let mut content = String::new();
+    archive
+        .by_name(path)
+        .unwrap()
+        .read_to_string(&mut content)
+        .unwrap();
+    content
 }
 
 fn chapter_document(doc: &EpubDoc, index: usize) -> Document<'_> {
@@ -115,6 +135,9 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
         "!important",
         ".chapter p.important",
         ".inherited { font-style: italic; }",
+        ".source-order { color: #111111; }",
+        ".source-order { color: #222222; }",
+        "section > p.inherited",
         "display: none",
     ] {
         assert!(css.contains(marker), "cascade CSS is missing {marker}");
@@ -176,6 +199,15 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
         fonts.resource("OEBPS/Fonts/corrupt.woff2"),
         Some(b"not a font".as_slice())
     );
+    let font_css = std::str::from_utf8(fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
+    assert!(font_css.contains("font-weight: 700"));
+    assert!(font_css.contains("font-style: italic"));
+
+    let isolated_fonts = open("fonts-isolation");
+    assert!(isolated_fonts.resource("OEBPS/Fonts/book-b.ttf").is_some());
+    let isolated_css =
+        std::str::from_utf8(isolated_fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
+    assert!(isolated_css.contains("font-family: FixtureTtf"));
 
     let math = open("mathml");
     let chapter = chapter_document(&math, 0);
@@ -193,6 +225,7 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
         );
     }
     assert!(elements_named(&chapter, "annotation").any(|node| node.text() == Some("\\pi")));
+    assert!(elements_named(&chapter, "mo").any(|node| node.text() == Some("+")));
 }
 
 #[test]
@@ -211,7 +244,7 @@ fn bidi_and_link_fixtures_retain_logical_source_contracts() {
     let expected = [
         ("same", "#local"),
         ("cross", "chapter-2.xhtml#target"),
-        ("encoded", "chapter-2.xhtml#percent%20target"),
+        ("encoded", "chapter%2D2.xhtml#percent-target"),
         ("https", "https://example.invalid/book"),
         ("mail", "mailto:reader@example.invalid"),
         ("unsupported", "custom:blocked"),
@@ -219,6 +252,10 @@ fn bidi_and_link_fixtures_retain_logical_source_contracts() {
     for (id, href) in expected {
         assert_eq!(by_id(&chapter, id).attribute("href"), Some(href));
     }
+    let encoded = by_id(&chapter, "encoded").attribute("href").unwrap();
+    let resolved = CanonicalEpubPath::resolve("OEBPS/Text", encoded).unwrap();
+    assert_eq!(resolved.path.as_str(), "OEBPS/Text/chapter-2.xhtml");
+    assert_eq!(resolved.fragment.as_deref(), Some("percent-target"));
     let targets = chapter_document(&links, 1);
     assert!(
         targets
@@ -228,8 +265,39 @@ fn bidi_and_link_fixtures_retain_logical_source_contracts() {
     assert!(
         targets
             .descendants()
-            .any(|node| node.attribute("id") == Some("percent target"))
+            .any(|node| node.attribute("id") == resolved.fragment.as_deref())
     );
+}
+
+#[test]
+fn epub3_manifest_declares_content_properties() {
+    for (fixture, href, expected) in [
+        ("mathml", "Text/chapter-1.xhtml", &["mathml"][..]),
+        (
+            "remote-content",
+            "Text/chapter-1.xhtml",
+            &["remote-resources", "scripted"][..],
+        ),
+        ("conformance", "Text/chapter-5.xhtml", &["mathml"][..]),
+    ] {
+        let opf = archive_entry(fixture, "OEBPS/package.opf");
+        let document = Document::parse(&opf).unwrap();
+        let item = document
+            .descendants()
+            .find(|node| node.tag_name().name() == "item" && node.attribute("href") == Some(href))
+            .unwrap_or_else(|| panic!("{fixture} is missing manifest item {href}"));
+        let properties = item
+            .attribute("properties")
+            .unwrap_or("")
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>();
+        for property in expected {
+            assert!(
+                properties.contains(property),
+                "{fixture}:{href} is missing EPUB property {property}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -243,6 +311,8 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
             .filter_map(|node| node.text())
             .any(|text| text.contains("Readable sibling"))
     );
+    assert!(malformed.resource("OEBPS/Styles/malformed.css").is_some());
+    assert!(by_id(&readable, "deep-nesting").descendants().count() >= 16);
 
     let canonical = open("canonical-paths");
     let chapter = chapter_document(&canonical, 0);
@@ -281,6 +351,11 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
     let remote_css =
         std::str::from_utf8(remote.resource("OEBPS/Styles/remote.css").unwrap()).unwrap();
     assert!(remote_css.contains("@import url('https://example.invalid/import.css')"));
+    assert!(remote_css.contains("https://example.invalid/font.woff2"));
+    assert_eq!(
+        by_id(&chapter, "redirect").attribute("href"),
+        Some("https://example.invalid/redirect")
+    );
 
     let limits = open("resource-limits");
     assert_eq!(
@@ -293,6 +368,20 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
         limits.resource("OEBPS/Fonts/corrupt.ttf"),
         Some(b"malformed font sentinel".as_slice())
     );
+    assert!(limits.resource("OEBPS/Fonts/oversized.ttf").is_some());
+}
+
+#[test]
+fn invalid_archive_fixtures_fail_at_the_declared_boundary() {
+    for (fixture, message) in REJECTION_FIXTURES {
+        let error = EpubDoc::open(fixture_path(fixture))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(message),
+            "{fixture} failed with unexpected error: {error}"
+        );
+    }
 }
 
 #[test]
@@ -326,6 +415,10 @@ fn conformance_book_combines_fidelity_cases_without_external_inputs() {
         by_id(&links, "cross").attribute("href"),
         Some("chapter-8.xhtml#target")
     );
+    let encoded = by_id(&links, "encoded").attribute("href").unwrap();
+    let resolved = CanonicalEpubPath::resolve("OEBPS/Text", encoded).unwrap();
+    assert_eq!(resolved.path.as_str(), "OEBPS/Text/chapter-8.xhtml");
+    assert_eq!(resolved.fragment.as_deref(), Some("percent-target"));
 }
 
 #[test]
@@ -337,6 +430,8 @@ fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
         .collect::<Vec<_>>();
     let expected = FIXTURE_IDS
         .iter()
+        .copied()
+        .chain(REJECTION_FIXTURES.iter().map(|(id, _)| *id))
         .map(|id| format!("{id}.epub"))
         .collect::<Vec<_>>();
     assert_eq!(names, expected);

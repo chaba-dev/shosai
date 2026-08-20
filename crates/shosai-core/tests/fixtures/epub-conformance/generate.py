@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import warnings
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
@@ -45,6 +46,9 @@ p { color: #303030; }
 .chapter .important { color: #2468ac !important; }
 .chapter p.important { color: #13579b; }
 .inherited { font-style: italic; }
+section > p.inherited { text-decoration: underline; }
+.source-order { color: #111111; }
+.source-order { color: #222222; }
 .hidden { display: none; }
 """
     nested_image = chapter(
@@ -86,6 +90,7 @@ p { color: #303030; }
         """<main id="math"><p>Inline <m:math id="fraction" alttext="one half"><m:mfrac><m:mn>1</m:mn><m:mn>2</m:mn></m:mfrac></m:math>.</p>
 <m:math id="display-root" display="block" alttext="cube root of x"><m:mroot><m:mi>x</m:mi><m:mn>3</m:mn></m:mroot></m:math>
 <m:math id="scripts"><m:msubsup><m:mi>x</m:mi><m:mn>1</m:mn><m:mn>2</m:mn></m:msubsup></m:math>
+<m:math id="operator"><m:mi>x</m:mi><m:mo>+</m:mo><m:mn>1</m:mn></m:math>
 <m:math id="matrix" display="block"><m:mtable><m:mtr><m:mtd><m:mn>1</m:mn></m:mtd><m:mtd><m:mn>0</m:mn></m:mtd></m:mtr></m:mtable></m:math>
 <m:math id="annotated"><m:semantics><m:mi>π</m:mi><m:annotation encoding="application/x-tex">\\pi</m:annotation></m:semantics></m:math>
 <m:math id="malformed-fallback" alttext="malformed fraction"><m:mfrac><m:mn>1</m:mn></m:mfrac></m:math></main>""",
@@ -101,24 +106,31 @@ p { color: #303030; }
         "Links",
         """<main id="links"><h1 id="local">Links</h1><a id="same" href="#local">Same chapter</a>
 <a id="cross" href="chapter-2.xhtml#target">Cross chapter</a>
-<a id="encoded" href="chapter-2.xhtml#percent%20target">Encoded fragment</a>
+<a id="encoded" href="chapter%2D2.xhtml#percent-target">Encoded path</a>
 <a id="https" href="https://example.invalid/book">HTTPS</a><a id="http" href="http://example.invalid/book">HTTP</a>
 <a id="mail" href="mailto:reader@example.invalid">Mail</a><a id="unsupported" href="custom:blocked">Unsupported</a></main>""",
     )
     conformance_links = (
         links[0],
-        links[1].replace(b"chapter-2.xhtml", b"chapter-8.xhtml"),
+        links[1]
+        .replace(b"chapter-2.xhtml", b"chapter-8.xhtml")
+        .replace(b"chapter%2D2.xhtml", b"chapter%2D8.xhtml"),
     )
     links_second = chapter(
         "Link targets",
-        '<main><h1 id="target">Cross target</h1><p id="percent target">Percent target</p></main>',
+        '<main><h1 id="target">Cross target</h1><p id="percent-target">Percent target</p></main>',
     )
     malformed_bad = (
         "Malformed chapter",
         b'<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>Unclosed sentinel</body></html>',
     )
+    deep_nesting = (
+        '<div id="deep-nesting">' + "<div>" * 16 + "Deep sentinel" + "</div>" * 16 + "</div>"
+    )
     malformed_good = chapter(
-        "Readable sibling", '<main id="readable-sibling"><p>Readable sibling sentinel</p></main>'
+        "Readable sibling",
+        f'<main id="readable-sibling"><p>Readable sibling sentinel</p>{deep_nesting}</main>',
+        '<link rel="stylesheet" type="text/css" href="../Styles/malformed.css"/>',
     )
     canonical = chapter(
         "Canonical paths",
@@ -136,7 +148,8 @@ p { color: #303030; }
 <iframe src="https://example.invalid/frame"></iframe><object data="https://example.invalid/object"></object>
 <script src="https://example.invalid/script.js"></script><form action="https://example.invalid/post"><button>Submit</button></form>
 <a download="book.bin" href="https://example.invalid/download">Download</a>
-<a target="_blank" href="https://example.invalid/popup">Popup</a></main>""",
+<a target="_blank" href="https://example.invalid/popup">Popup</a>
+<a id="redirect" href="https://example.invalid/redirect">Redirect</a></main>""",
         '<link rel="stylesheet" type="text/css" href="../Styles/remote.css"/>',
     )
     limits = chapter(
@@ -150,6 +163,8 @@ p { color: #303030; }
 @font-face { font-family: FixtureWoff2; src: url('../Fonts/book-a.woff2') format('woff2'); }
 @font-face { font-family: FixtureTtf; src: url('../Fonts/book-a.ttf') format('truetype'); }
 @font-face { font-family: FixtureOtf; src: url('../Fonts/book-a.otf') format('opentype'); }
+@font-face { font-family: FixtureTtf; src: url('../Fonts/book-a.ttf') format('truetype'); font-weight: 700; }
+@font-face { font-family: FixtureTtf; src: url('../Fonts/book-a.ttf') format('truetype'); font-style: italic; }
 @font-face { font-family: MissingFixture; src: url('../Fonts/missing.woff2') format('woff2'); }
 @font-face { font-family: CorruptFixture; src: url('../Fonts/corrupt.woff2') format('woff2'); }
 .woff { font-family: FixtureWoff; } .woff2 { font-family: FixtureWoff2; }
@@ -164,6 +179,20 @@ p { color: #303030; }
         "Fonts/book-a.otf": resource("font/otf", (FONT_ROOT / "book-a.otf").read_bytes()),
         "Fonts/corrupt.woff2": resource("font/woff2", b"not a font"),
     }
+    isolation_resources = {
+        "Styles/fonts.css": resource(
+            "text/css",
+            "@font-face { font-family: FixtureTtf; src: url('../Fonts/book-b.ttf') format('truetype'); } .ttf { font-family: FixtureTtf; }",
+        ),
+        "Fonts/book-b.ttf": resource("font/ttf", (FONT_ROOT / "book-b.ttf").read_bytes()),
+    }
+    isolation_font = chapter(
+        "Isolated embedded font",
+        '<main id="fonts-isolation"><p class="ttf">Book B AB</p></main>',
+        '<link rel="stylesheet" type="text/css" href="../Styles/fonts.css"/>',
+    )
+    missing_spine = chapter("Missing spine resource", "<p>This file is intentionally absent.</p>")
+    duplicate = chapter("Duplicate archive entry", "<p>Duplicate path sentinel.</p>")
     cases = {
         "nested-image": {"chapters": [nested_image], "resources": image_resources},
         "css-cascade": {
@@ -172,20 +201,29 @@ p { color: #303030; }
         },
         "table": {"chapters": [table], "resources": image_resources},
         "fonts": {"chapters": [fonts], "resources": font_resources},
-        "mathml": {"chapters": [mathml]},
+        "fonts-isolation": {"chapters": [isolation_font], "resources": isolation_resources},
+        "mathml": {"chapters": [mathml], "chapter_properties": {1: ["mathml"]}},
         "bidi": {"chapters": [bidi]},
         "links": {"chapters": [links, links_second]},
-        "malformed-markup": {"chapters": [malformed_bad, malformed_good]},
+        "malformed-markup": {
+            "chapters": [malformed_bad, malformed_good],
+            "resources": {
+                "Styles/malformed.css": resource(
+                    "text/css", "p { color: red; broken declaration } @media ( {"
+                )
+            },
+        },
         "canonical-paths": {
             "chapters": [canonical, links_second],
             "resources": image_resources,
         },
         "remote-content": {
             "chapters": [remote],
+            "chapter_properties": {1: ["remote-resources", "scripted"]},
             "resources": {
                 "Styles/remote.css": resource(
                     "text/css",
-                    "@import url('https://example.invalid/import.css'); body { background: url('https://example.invalid/background.png'); }",
+                    "@import url('https://example.invalid/import.css'); @font-face { font-family: Remote; src: url('https://example.invalid/font.woff2'); } body { background: url('https://example.invalid/background.png'); }",
                 )
             },
         },
@@ -199,6 +237,7 @@ p { color: #303030; }
                     "image/svg+xml", '<svg xmlns="http://www.w3.org/2000/svg" width="100000" height="100000"><rect width="100%" height="100%"/></svg>'
                 ),
                 "Fonts/corrupt.ttf": resource("font/ttf", b"malformed font sentinel"),
+                "Fonts/oversized.ttf": resource("font/ttf", b"F" * large_resource_bytes),
                 "Data/compression.txt": resource("text/plain", b"A" * large_resource_bytes),
             },
         },
@@ -214,9 +253,18 @@ p { color: #303030; }
             conformance_links,
             links_second,
         ],
+        "chapter_properties": {5: ["mathml"]},
         "resources": image_resources
         | {"Styles/book.css": resource("text/css", css)}
         | font_resources,
+    }
+    cases["missing-spine-resource"] = {
+        "chapters": [missing_spine],
+        "omit_chapter_files": {1},
+    }
+    cases["duplicate-entries"] = {
+        "chapters": [duplicate],
+        "duplicate_entry": "OEBPS/Text/chapter-1.xhtml",
     }
     return cases
 
@@ -247,12 +295,15 @@ def write_book(
     for index, (title, content) in enumerate(chapters, 1):
         name = f"Text/chapter-{index}.xhtml"
         item_id = f"chapter-{index}"
+        properties = " ".join(spec.get("chapter_properties", {}).get(index, []))
+        properties_attribute = f' properties="{properties}"' if properties else ""
         manifest.append(
-            f'<item id="{item_id}" href="{name}" media-type="application/xhtml+xml"/>'
+            f'<item id="{item_id}" href="{name}" media-type="application/xhtml+xml"{properties_attribute}/>'
         )
         spine.append(f'<itemref idref="{item_id}"/>')
         nav_items.append(f'<li><a href="{name}">{title}</a></li>')
-        files[f"OEBPS/{name}"] = content
+        if index not in spec.get("omit_chapter_files", set()):
+            files[f"OEBPS/{name}"] = content
     for name, (media_type, content) in sorted(resources.items()):
         manifest.append(
             f'<item id="{media_id(name)}" href="{name}" media-type="{media_type}"/>'
@@ -291,6 +342,10 @@ def write_book(
                 else ZIP_STORED
             )
             archive.writestr(zip_info(name, compression), content)
+        if duplicate_entry := spec.get("duplicate_entry"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                archive.writestr(zip_info(duplicate_entry), files[duplicate_entry])
 
 
 def main() -> None:
