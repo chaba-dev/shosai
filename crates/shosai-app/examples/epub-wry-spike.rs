@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use iced::advanced::widget::{self, operation};
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{
-    Background, Color, Element, Event, Length, Point, Rectangle, Size, Subscription, Task, event,
-    keyboard, mouse, touch, window,
+    Background, Color, Element, Event, Length, Point, Rectangle, Size, Subscription, Task,
+    clipboard, event, keyboard, mouse, touch, window,
 };
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{NSResponder, NSView};
@@ -58,6 +58,12 @@ const INPUT_PROOF_PARENT_SETTLE: Duration = Duration::from_millis(250);
 const INPUT_PROOF_TOKEN: &str = "shosai-input-proof";
 const INPUT_PROOF_PATH: &str = "_spike/input.xhtml";
 const INPUT_PROOF_URL: &str = "shosai://book/_spike/input.xhtml";
+const CLIPBOARD_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_CLIPBOARD_PROOF";
+const CLIPBOARD_PROOF_TIMEOUT: Duration = Duration::from_secs(20);
+const CLIPBOARD_PROOF_PATH: &str = "_spike/clipboard.xhtml";
+const CLIPBOARD_PROOF_URL: &str = "shosai://book/_spike/clipboard.xhtml";
+const CLIPBOARD_CHILD_TOKEN: &str = "shosai-child-clipboard";
+const CLIPBOARD_PARENT_TOKEN: &str = "shosai-parent-clipboard";
 const TAB_PROOF_URL: &str = "shosai://book/_spike/input.xhtml#proof-anchor";
 const TAB_PROOF_READY: &str = "ready:/_spike/input.xhtml#proof-anchor";
 const TAB_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_TAB_PROOF";
@@ -84,6 +90,7 @@ static X11_TEARDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 static SCALE_EVENT_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
 static INPUT_PROOF_EVENTS: Mutex<Vec<InputProofEvent>> = Mutex::new(Vec::new());
+static CLIPBOARD_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static READER_PROOF_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 thread_local! {
@@ -98,6 +105,7 @@ thread_local! {
     static BOUNDS_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static SCALE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static CLIPBOARD_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static TAB_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static READER_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static ACCESSIBILITY_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -280,6 +288,7 @@ struct State {
     bounds_proof: BoundsProof,
     scale_proof: ScaleProof,
     input_proof: InputProof,
+    clipboard_proof: ClipboardProof,
     tab_proof: TabProof,
     reader_proof: ReaderProof,
     accessibility_proof: AccessibilityProof,
@@ -339,6 +348,27 @@ enum InputAction {
     None,
     FocusChild,
     FocusParent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum ClipboardProof {
+    #[default]
+    Disabled,
+    WaitingForCreation,
+    WaitingForReady,
+    WaitingForChildCopy,
+    WaitingForParentRead,
+    WaitingForParentWrite,
+    WaitingForChildPaste,
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClipboardAction {
+    None,
+    WriteParent,
+    CopyChild,
+    ReadParent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -884,6 +914,59 @@ impl InputProof {
                 | Self::FocusingSettledParent
                 | Self::WaitingForParentKey { .. }
         )
+    }
+}
+
+impl ClipboardProof {
+    fn observe_ipc(&mut self, message: &str) -> ClipboardAction {
+        match (*self, message) {
+            (Self::WaitingForReady, "ready") => {
+                *self = Self::WaitingForParentWrite;
+                ClipboardAction::WriteParent
+            }
+            (Self::WaitingForChildPaste, message)
+                if message == format!("pasted:{CLIPBOARD_PARENT_TOKEN}") =>
+            {
+                *self = Self::WaitingForChildCopy;
+                ClipboardAction::CopyChild
+            }
+            (Self::WaitingForChildCopy, message)
+                if message == format!("copied:{CLIPBOARD_CHILD_TOKEN}") =>
+            {
+                *self = Self::WaitingForParentRead;
+                ClipboardAction::ReadParent
+            }
+            _ => ClipboardAction::None,
+        }
+    }
+
+    fn observe_parent_read(&mut self, contents: Option<&str>) -> Result<(), String> {
+        if *self != Self::WaitingForParentRead {
+            return Err(format!(
+                "unexpected parent clipboard read in phase {self:?}"
+            ));
+        }
+        if contents != Some(CLIPBOARD_CHILD_TOKEN) {
+            return Err(format!(
+                "Iced read unexpected child clipboard contents {contents:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    fn observe_parent_write(&mut self, contents: Option<&str>) -> Result<(), String> {
+        if *self != Self::WaitingForParentWrite {
+            return Err(format!(
+                "unexpected parent clipboard write in phase {self:?}"
+            ));
+        }
+        if contents != Some(CLIPBOARD_PARENT_TOKEN) {
+            return Err(format!(
+                "Iced wrote unexpected parent clipboard contents {contents:?}"
+            ));
+        }
+        *self = Self::WaitingForChildPaste;
+        Ok(())
     }
 }
 
@@ -1680,6 +1763,10 @@ enum Message {
     InputChildFocused(Result<(), String>),
     InputParentFocused(Result<(), String>),
     InputSettledParentFocused(Result<(), String>),
+    ClipboardChildCopyRequested(Result<(), String>),
+    ClipboardParentRead(Option<String>),
+    ClipboardParentWritten(Option<String>),
+    ClipboardChildPasteRequested(Result<(), String>),
     TabChildHidden {
         generation: u64,
         result: Result<(), String>,
@@ -1733,6 +1820,13 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
+    if let Err(error) = validate_clipboard_proof_platform(
+        clipboard_proof_env_requested(),
+        cfg!(target_os = "linux"),
+    ) {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) =
         validate_tab_proof_platform(tab_proof_env_requested(), cfg!(target_os = "macos"))
     {
@@ -1754,6 +1848,7 @@ fn main() -> ExitCode {
         bounds_proof_requested(),
         scale_proof_requested(),
         input_proof_requested(),
+        clipboard_proof_requested(),
         tab_proof_requested(),
         reader_proof_requested(),
         accessibility_proof_requested(),
@@ -1806,6 +1901,19 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("wry-spike-input-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
+    if clipboard_proof_requested() {
+        return CLIPBOARD_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-clipboard-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-clipboard-proof FAIL: proof did not complete");
                 ExitCode::FAILURE
             }
         });
@@ -1923,6 +2031,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
         || bounds_proof_requested()
         || scale_proof_requested()
         || input_proof_requested()
+        || clipboard_proof_requested()
         || tab_proof_requested()
         || reader_proof_requested()
         || accessibility_proof_requested()
@@ -1967,6 +2076,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || bounds_proof_requested()
                 || scale_proof_requested()
                 || input_proof_requested()
+                || clipboard_proof_requested()
                 || tab_proof_requested()
                 || reader_proof_requested()
                 || accessibility_proof_requested()
@@ -1981,6 +2091,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     SCALE_PROOF_TIMEOUT
                 } else if input_proof_requested() {
                     INPUT_PROOF_TIMEOUT
+                } else if clipboard_proof_requested() {
+                    CLIPBOARD_PROOF_TIMEOUT
                 } else if tab_proof_requested() {
                     TAB_PROOF_TIMEOUT
                 } else if reader_proof_requested() {
@@ -2007,6 +2119,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if input_proof_requested() {
                 state.input_proof = InputProof::WaitingForCreation;
                 INPUT_PROOF_EVENTS.lock().unwrap().clear();
+            }
+            if clipboard_proof_requested() {
+                state.clipboard_proof = ClipboardProof::WaitingForCreation;
+                CLIPBOARD_PROOF_EVENTS.lock().unwrap().clear();
             }
             if tab_proof_requested() {
                 state.tab_proof = TabProof::WaitingForCreation;
@@ -2142,6 +2258,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("parent closed before input proof completed".into()),
                 );
             }
+            if clipboard_proof_requested() && state.clipboard_proof != ClipboardProof::Complete {
+                return finish_clipboard_proof(
+                    state,
+                    Err("parent closed before clipboard proof completed".into()),
+                );
+            }
             if tab_proof_requested() && state.tab_proof != TabProof::Complete {
                 return finish_tab_proof(
                     state,
@@ -2190,6 +2312,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 return finish_input_proof(
                     state,
                     Err("parent closed before input proof completed".into()),
+                );
+            }
+            if clipboard_proof_requested() && state.clipboard_proof != ClipboardProof::Complete {
+                return finish_clipboard_proof(
+                    state,
+                    Err("parent closed before clipboard proof completed".into()),
                 );
             }
             if tab_proof_requested() && state.tab_proof != TabProof::Complete {
@@ -2373,6 +2501,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 || state.bounds_proof == BoundsProof::Complete
                 || state.scale_proof == ScaleProof::Complete
                 || state.input_proof == InputProof::Complete
+                || state.clipboard_proof == ClipboardProof::Complete
                 || state.tab_proof == TabProof::Complete
                 || state.reader_proof == ReaderProof::Complete
                 || state.accessibility_proof == AccessibilityProof::Complete
@@ -2451,6 +2580,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.status = "embedded; waiting for trusted input harness readiness".into();
                     return Task::none();
                 }
+                if clipboard_proof_requested() {
+                    state.clipboard_proof = ClipboardProof::WaitingForReady;
+                    state.status =
+                        "embedded; waiting for trusted clipboard harness readiness".into();
+                    return Task::none();
+                }
                 if reader_proof_requested() {
                     state.reader_proof = ReaderProof::WaitingForResult;
                     state.status = "embedded; waiting for trusted reader integration proof".into();
@@ -2507,6 +2642,10 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) if input_proof_requested() => {
                 state.creation_bounds = None;
                 finish_input_proof(state, Err(format!("webview creation failed: {error}")))
+            }
+            Err(error) if clipboard_proof_requested() => {
+                state.creation_bounds = None;
+                finish_clipboard_proof(state, Err(format!("webview creation failed: {error}")))
             }
             Err(error) if tab_proof_requested() => {
                 state.creation_bounds = None;
@@ -2683,6 +2822,44 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(format!("failed to confirm settled parent focus: {error}")),
             ),
         },
+        Message::ClipboardChildCopyRequested(Ok(())) => Task::none(),
+        Message::ClipboardChildCopyRequested(Err(error)) => finish_clipboard_proof(
+            state,
+            Err(format!("failed to request child clipboard copy: {error}")),
+        ),
+        Message::ClipboardParentRead(contents) => {
+            if let Err(error) = state
+                .clipboard_proof
+                .observe_parent_read(contents.as_deref())
+            {
+                return finish_clipboard_proof(state, Err(error));
+            }
+            finish_clipboard_proof(state, Ok(()))
+        }
+        Message::ClipboardParentWritten(contents) => {
+            if let Err(error) = state
+                .clipboard_proof
+                .observe_parent_write(contents.as_deref())
+            {
+                return finish_clipboard_proof(state, Err(error));
+            }
+            let Some(id) = state.window else {
+                return finish_clipboard_proof(
+                    state,
+                    Err("parent window is not available for child paste".into()),
+                );
+            };
+            state.status = "Iced wrote parent clipboard; requesting child paste".into();
+            window::run(id, move |_| {
+                WEBVIEW.with(|slot| request_child_clipboard_paste(slot.borrow().as_ref()))
+            })
+            .map(Message::ClipboardChildPasteRequested)
+        }
+        Message::ClipboardChildPasteRequested(Ok(())) => Task::none(),
+        Message::ClipboardChildPasteRequested(Err(error)) => finish_clipboard_proof(
+            state,
+            Err(format!("failed to request child clipboard paste: {error}")),
+        ),
         Message::IcedPointerPressed if state.input_proof.tracks_parent_activation() => {
             eprintln!("wry-spike-input-proof event=parent-pointer-activation");
             state.input_parent_pointer_activated = true;
@@ -2761,6 +2938,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         }
         Message::NetworkProofTick(now) if scale_proof_requested() => update_scale_proof(state, now),
         Message::NetworkProofTick(now) if input_proof_requested() => update_input_proof(state, now),
+        Message::NetworkProofTick(now) if clipboard_proof_requested() => {
+            update_clipboard_proof(state, now)
+        }
         Message::NetworkProofTick(now) if tab_proof_requested() => update_tab_proof(state, now),
         Message::NetworkProofTick(now) if reader_proof_requested() => {
             update_reader_proof(state, now)
@@ -2875,6 +3055,70 @@ fn finish_keyboard_input_proof(state: &mut State, result: Result<(), String>) ->
     } else {
         finish_input_proof(state, result)
     }
+}
+
+fn update_clipboard_proof(state: &mut State, now: Instant) -> Task<Message> {
+    if state.clipboard_proof == ClipboardProof::Complete {
+        return Task::none();
+    }
+    if state.proof_timeout.is_some_and(|deadline| now >= deadline) {
+        return finish_clipboard_proof(
+            state,
+            Err(format!(
+                "timed out during clipboard phase {:?}",
+                state.clipboard_proof
+            )),
+        );
+    }
+    let events = std::mem::take(&mut *CLIPBOARD_PROOF_EVENTS.lock().unwrap());
+    for event in events {
+        eprintln!("wry-spike-clipboard-proof event={event:?}");
+        if let Some(error) = event.strip_prefix("fail:") {
+            return finish_clipboard_proof(state, Err(error.to_string()));
+        }
+        match state.clipboard_proof.observe_ipc(&event) {
+            ClipboardAction::None => {}
+            ClipboardAction::WriteParent => {
+                state.status = "trusted page ready; writing parent clipboard token".into();
+                return clipboard::write(CLIPBOARD_PARENT_TOKEN.to_string())
+                    .chain(clipboard::read().map(Message::ClipboardParentWritten));
+            }
+            ClipboardAction::CopyChild => {
+                let Some(id) = state.window else {
+                    return finish_clipboard_proof(
+                        state,
+                        Err("parent window is not available for child copy".into()),
+                    );
+                };
+                state.status = "trusted page ready; copying child token".into();
+                return window::run(id, move |_| {
+                    WEBVIEW.with(|slot| request_child_clipboard_copy(slot.borrow().as_ref()))
+                })
+                .map(Message::ClipboardChildCopyRequested);
+            }
+            ClipboardAction::ReadParent => {
+                state.status = "child copied token; reading through Iced".into();
+                return clipboard::read().map(Message::ClipboardParentRead);
+            }
+        }
+    }
+    Task::none()
+}
+
+fn finish_clipboard_proof(state: &mut State, result: Result<(), String>) -> Task<Message> {
+    if state.clipboard_proof == ClipboardProof::Complete {
+        return Task::none();
+    }
+    state.clipboard_proof = ClipboardProof::Complete;
+    state.webview_generation = state.webview_generation.wrapping_add(1);
+    teardown_webview();
+    if result.is_ok() {
+        eprintln!(
+            "wry-spike-clipboard-proof PASS: child copy reached Iced and Iced copy reached child"
+        );
+    }
+    CLIPBOARD_PROOF_RESULT.with(|slot| record_terminal_result(&mut slot.borrow_mut(), result));
+    state.window.map_or_else(Task::none, window::close)
 }
 
 fn begin_tab_switch(state: &mut State) -> Task<Message> {
@@ -3459,6 +3703,20 @@ fn focus_webview_input(webview: Option<&WebView>) -> Result<(), String> {
     webview.focus().map_err(|error| error.to_string())?;
     webview
         .evaluate_script("document.getElementById('proof-input').focus()")
+        .map_err(|error| error.to_string())
+}
+
+fn request_child_clipboard_copy(webview: Option<&WebView>) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    webview
+        .evaluate_script("window.shosaiClipboardProof.copyChild()")
+        .map_err(|error| error.to_string())
+}
+
+fn request_child_clipboard_paste(webview: Option<&WebView>) -> Result<(), String> {
+    let webview = webview.ok_or_else(|| "webview is not available".to_string())?;
+    webview
+        .evaluate_script("window.shosaiClipboardProof.pasteParent()")
         .map_err(|error| error.to_string())
 }
 
@@ -4607,6 +4865,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
         ensure_webview_creation_is_current(generation)?;
         let mut book = if keyboard_input_proof_requested() || accessibility_proof_requested() {
             input_proof_book()?
+        } else if clipboard_proof_requested() {
+            clipboard_proof_book()?
         } else if reader_proof_requested() {
             reader_proof_book()?
         } else {
@@ -4632,6 +4892,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             TAB_PROOF_URL.to_string()
         } else if input_proof_requested() {
             INPUT_PROOF_URL.to_string()
+        } else if clipboard_proof_requested() {
+            CLIPBOARD_PROOF_URL.to_string()
         } else if reader_proof_requested() {
             READER_PROOF_URL.to_string()
         } else if std::env::var("SHOSAI_WRY_SPIKE_PAGE").as_deref() == Ok("conformance") {
@@ -4660,6 +4922,16 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                         message: request.body().clone(),
                     });
                 })
+        } else if clipboard_proof_requested() {
+            builder
+                .with_clipboard(true)
+                .with_initialization_script(CLIPBOARD_PROOF_SCRIPT)
+                .with_ipc_handler(|request| {
+                    CLIPBOARD_PROOF_EVENTS
+                        .lock()
+                        .unwrap()
+                        .push(request.body().clone());
+                })
         } else if reader_proof_requested() {
             builder
                 .with_initialization_script(READER_PROOF_SCRIPT)
@@ -4673,17 +4945,20 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             builder
         };
         // WebKitGTK suppresses initialization scripts when JavaScript is
-        // disabled. These two modes load only host-owned fixture XHTML and use
+        // disabled. These modes load only host-owned fixture XHTML and use
         // the injected controller; ordinary and hostile EPUB pages keep author
         // JavaScript disabled.
-        let builder = if input_proof_requested() || reader_proof_requested() {
-            builder
-        } else {
-            builder.with_javascript_disabled()
-        };
+        let builder =
+            if input_proof_requested() || clipboard_proof_requested() || reader_proof_requested() {
+                builder
+            } else {
+                builder.with_javascript_disabled()
+            };
         let proof_navigation_path =
             if keyboard_input_proof_requested() || accessibility_proof_requested() {
                 Some(INPUT_PROOF_PATH)
+            } else if clipboard_proof_requested() {
+                Some(CLIPBOARD_PROOF_PATH)
             } else if reader_proof_requested() {
                 Some(READER_PROOF_PATH)
             } else {
@@ -4724,6 +4999,10 @@ fn input_proof_book() -> Result<SpikeBook, String> {
     SpikeBook::from_host_fixture(INPUT_PROOF_PATH, INPUT_PROOF_CHAPTER)
 }
 
+fn clipboard_proof_book() -> Result<SpikeBook, String> {
+    SpikeBook::from_host_fixture(CLIPBOARD_PROOF_PATH, CLIPBOARD_PROOF_CHAPTER)
+}
+
 fn network_proof_requested() -> bool {
     std::env::var_os(NETWORK_PROOF_ENV).is_some()
 }
@@ -4758,6 +5037,14 @@ fn input_proof_env_requested() -> bool {
 
 fn input_proof_requested() -> bool {
     cfg!(any(target_os = "macos", target_os = "linux")) && input_proof_env_requested()
+}
+
+fn clipboard_proof_env_requested() -> bool {
+    std::env::var_os(CLIPBOARD_PROOF_ENV).is_some()
+}
+
+fn clipboard_proof_requested() -> bool {
+    cfg!(target_os = "linux") && clipboard_proof_env_requested()
 }
 
 fn tab_proof_env_requested() -> bool {
@@ -4798,6 +5085,13 @@ fn validate_input_proof_platform(
 ) -> Result<(), String> {
     if requested && !is_macos && !is_linux {
         return Err("SHOSAI_WRY_SPIKE_INPUT_PROOF is only supported on macOS and Linux/X11".into());
+    }
+    Ok(())
+}
+
+fn validate_clipboard_proof_platform(requested: bool, is_linux: bool) -> Result<(), String> {
+    if requested && !is_linux {
+        return Err("SHOSAI_WRY_SPIKE_CLIPBOARD_PROOF is only supported on Linux/X11".into());
     }
     Ok(())
 }
@@ -4863,7 +5157,7 @@ fn validate_proof_mode_selection<const N: usize>(modes: [bool; N]) -> Result<(),
         && modes.into_iter().filter(|selected| *selected).count() > 1
     {
         return Err(
-            "overlay, bounds, scale, input, tab, reader, and accessibility modes cannot be combined with another proof mode"
+            "overlay, bounds, scale, input, clipboard, tab, reader, and accessibility modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -5380,6 +5674,56 @@ const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 </body>
 </html>"#;
 
+const CLIPBOARD_PROOF_SCRIPT: &str = r#"
+window.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('clipboard-input');
+  const post = message => window.ipc.postMessage(message);
+  window.shosaiClipboardProof = {
+    copyChild() {
+      input.value = input.dataset.childToken;
+      input.focus();
+      input.select();
+      post('copy-started');
+      if (!document.execCommand('copy')) {
+        post('fail:WebKit rejected child clipboard copy');
+        return;
+      }
+      post(`copied:${input.value}`);
+    },
+    pasteParent() {
+      input.value = '';
+      input.focus();
+      post('paste-started');
+      if (!document.execCommand('paste')) {
+        post('fail:WebKit rejected parent clipboard paste');
+        return;
+      }
+      post(`pasted:${input.value}`);
+    },
+  };
+  post('ready');
+});
+"#;
+
+const CLIPBOARD_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 42rem; margin: 3rem auto; line-height: 1.5; }
+    input { box-sizing: border-box; font: inherit; padding: .6rem; width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>Wry clipboard interoperability proof</h1>
+  <p>The host verifies text transfer in both directions between WebKit and Iced.</p>
+  <input id="clipboard-input" type="text" aria-label="EPUB clipboard proof input" data-child-token="shosai-child-clipboard" />
+</body>
+</html>"#;
+
 const READER_PROOF_CHAPTER: &str = r##"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -5684,6 +6028,75 @@ mod tests {
                 .unwrap_err()
                 .contains("only supported on macOS and Linux/X11")
         );
+    }
+
+    #[test]
+    fn clipboard_proof_request_accepts_linux_only() {
+        assert_eq!(validate_clipboard_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_clipboard_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_clipboard_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on Linux/X11")
+        );
+    }
+
+    #[test]
+    fn clipboard_proof_requires_bidirectional_exact_text() {
+        let mut proof = ClipboardProof::WaitingForReady;
+
+        assert_eq!(proof.observe_ipc("ready"), ClipboardAction::WriteParent);
+        assert_eq!(proof, ClipboardProof::WaitingForParentWrite);
+        assert!(proof.observe_parent_write(Some("wrong")).is_err());
+        assert!(
+            proof
+                .observe_parent_write(Some(CLIPBOARD_PARENT_TOKEN))
+                .is_ok()
+        );
+        assert_eq!(proof.observe_ipc("pasted:wrong"), ClipboardAction::None);
+        assert_eq!(
+            proof.observe_ipc(&format!("pasted:{CLIPBOARD_PARENT_TOKEN}")),
+            ClipboardAction::CopyChild
+        );
+        assert_eq!(proof.observe_ipc("copied:wrong"), ClipboardAction::None);
+        assert_eq!(
+            proof.observe_ipc(&format!("copied:{CLIPBOARD_CHILD_TOKEN}")),
+            ClipboardAction::ReadParent
+        );
+        assert!(proof.observe_parent_read(None).is_err());
+        assert!(
+            proof
+                .observe_parent_read(Some(CLIPBOARD_CHILD_TOKEN))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn clipboard_proof_parent_read_timeout_is_terminal() {
+        let now = Instant::now();
+        let mut state = State {
+            clipboard_proof: ClipboardProof::WaitingForParentRead,
+            proof_timeout: Some(now),
+            webview_generation: 4,
+            ..State::default()
+        };
+        CLIPBOARD_PROOF_RESULT.with(|result| *result.borrow_mut() = None);
+
+        drop(update_clipboard_proof(&mut state, now));
+
+        assert_eq!(state.clipboard_proof, ClipboardProof::Complete);
+        assert_eq!(state.webview_generation, 5);
+        CLIPBOARD_PROOF_RESULT.with(|result| {
+            let result = result.borrow();
+            assert!(
+                result
+                    .as_ref()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("WaitingForParentRead")
+            );
+        });
     }
 
     #[test]
@@ -6845,13 +7258,13 @@ mod tests {
 
     #[test]
     fn overlay_modes_reject_conflicting_proofs() {
-        for selected in 2..9 {
-            let mut modes = [false; 9];
+        for selected in 2..10 {
+            let mut modes = [false; 10];
             modes[selected] = true;
             assert!(validate_proof_mode_selection(modes).is_ok());
         }
-        for protected in 2..9 {
-            let mut modes = [false; 9];
+        for protected in 2..10 {
+            let mut modes = [false; 10];
             modes[protected] = true;
             modes[if protected == 2 { 1 } else { 2 }] = true;
             assert!(validate_proof_mode_selection(modes).is_err());
@@ -7158,6 +7571,7 @@ mod tests {
         for (book, proof_url) in [
             (reader_proof_book().unwrap(), READER_PROOF_URL),
             (input_proof_book().unwrap(), INPUT_PROOF_URL),
+            (clipboard_proof_book().unwrap(), CLIPBOARD_PROOF_URL),
         ] {
             BOOK.with(|slot| *slot.borrow_mut() = Some(book));
             let fixture = serve_epub_resource(
