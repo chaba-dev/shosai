@@ -116,6 +116,14 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   then recreates it at the latest bounds and verifies the
   replacement size; a settled hide followed by an in-place show did not leave
   the Iced proof making progress and is not accepted as restoration evidence.
+  A composited-window capture proof now supplements those logical checks with
+  an exact-color host fixture.  On the rotated 2× macOS display it observed the
+  same 4,771,834 marker pixels at backing-pixel bounds
+  ~[841,1699]-[2522,4535]~ before hide and after recreate, and zero marker pixels
+  while the Iced modal was active.  Capture dimensions were 3364×5954.  This
+  proves visual restoration for that arrangement only; the 1× external,
+  ordinary 2× external, and built-in Retina runs remain open, so the checklist
+  is not complete.
   A second macOS proof collapses the placeholder until no usable bounds are
   reported, requires the current generation's Wry hide call to return ~Ok~,
   drops that child, restores the placeholder, and compares the replacement
@@ -164,10 +172,10 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   UI thread must service WebKitGTK's response.  The proof intentionally exits
   nonzero on that result; bidirectional clipboard interoperability requires a
   custom asynchronous bridge or rejects this integration.
-  Shortcut conflicts, Linux physical-key handoff, IME, visually correct
-  restoration, a viable Iced accessibility tree, screen-reader interaction,
-  production-tab integration, production cross-chapter, and arbitrary
-  character-offset locations remain open.
+  Shortcut conflicts, Linux physical-key handoff, IME, the remaining
+  visual-restoration display matrix, a viable Iced accessibility tree,
+  screen-reader interaction, production-tab integration, production
+  cross-chapter, and arbitrary character-offset locations remain open.
 - [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
   isolation, and ~wry~/platform license notices.
