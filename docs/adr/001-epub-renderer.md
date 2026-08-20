@@ -30,6 +30,8 @@ SHOSAI_WRY_SPIKE_LIFECYCLE_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_OVERLAY_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
+SHOSAI_WRY_SPIKE_VISUAL_PROOF=1 \
+  cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_BOUNDS_PROOF=1 \
   cargo run -p shosai-app --example epub-wry-spike --features epub-wry-spike
 SHOSAI_WRY_SPIKE_SCALE_PROOF=1 SHOSAI_WRY_SPIKE_SCALE_TARGET=-1800,100 \
@@ -115,6 +117,24 @@ Current evidence:
   the spike, showing a child again after a settled hide returned from Wry but
   left Iced without subsequent proof progress; an in-place visibility restore is
   therefore not treated as viable evidence;
+- an automated macOS visual-restoration mode captures the composited Iced/Wry
+  window through its current Core Graphics window number rather than an
+  unobscured desktop region. A host-owned XHTML fixture renders an exact
+  `#2468ac` marker; the proof requires that marker in the initial capture,
+  requires zero matching pixels after hiding the current child under the Iced
+  modal, recreates the child, and requires the restored marker's backing-pixel
+  bounds and count to match within two pixels and one percent. It also requires
+  unchanged capture dimensions and integral backing scale, ignores stale child
+  generations, bounds every System Events/Core Graphics/screen-capture
+  subprocess, requires exact-zero hidden marker evidence, and fails if temporary
+  capture cleanup cannot complete. On the 2026-08-20 macOS arm64
+  host, the rotated 2× DELL U2720QM run captured a 3364×5954 backing-pixel
+  window. Initial and restored marker bounds were both
+  `[841,1699]-[2522,4535]` with 4,771,834 marker pixels; the hidden capture had
+  zero marker pixels. This establishes visually correct restoration for that
+  arrangement only. The available 1× external, ordinary 2× external, and
+  built-in Retina arrangements have not yet run this proof, so the broader
+  physical-pixel/display matrix remains open;
 - the automated macOS bounds mode collapses the Iced placeholder to zero
   height and requires the widget operation to report no usable placeholder,
   requires the current child generation's hide call to return `Ok`, destroys
@@ -191,13 +211,13 @@ book resources are served with their exact manifest media types, including
 declared as `text/html` because it is harness-owned rather than an EPUB manifest
 resource.
 
-The visibility and scale-bound updates prove only that Wry's methods returned
-`Ok`; queried scale factors and reported child sizes prove only the
-observed window scale and logical geometry, not backing-pixel placement or
-visual correctness. The reported replacement size proves only its logical
-size, not placement or visual restoration, and the visual observation
-proves the uncoordinated z-order failure.  They do not prove a visually correct
-restored frame after modal dismissal. Wry's macOS
+The visibility and scale-bound updates alone prove only that Wry's methods
+returned `Ok`; queried scale factors and reported child sizes prove only the
+observed window scale and logical geometry. The visual-restoration proof now
+establishes matching backing-pixel placement across one hide/recreate cycle on
+one rotated 2× arrangement, while the visual observation proves the
+uncoordinated z-order failure. It does not establish the remaining display
+matrix. Wry's macOS
 implementation does not expose AppKit's boolean first-responder result. The
 input and tab proofs now supplement that method return with AppKit
 first-responder identity, generation-bound IPC, and fresh keyboard events on

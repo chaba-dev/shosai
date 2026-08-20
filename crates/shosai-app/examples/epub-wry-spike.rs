@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::net::TcpListener;
 use std::process::ExitCode;
 #[cfg(any(target_os = "macos", test))]
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -45,6 +45,12 @@ const OVERLAY_OBSERVATION_ENV: &str = "SHOSAI_WRY_SPIKE_OVERLAY_OBSERVATION";
 const OVERLAY_PROOF_HOLD: Duration = Duration::from_secs(1);
 const OVERLAY_DISMISS_SETTLE: Duration = Duration::from_millis(100);
 const OVERLAY_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
+const VISUAL_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_VISUAL_PROOF";
+const VISUAL_PROOF_TIMEOUT: Duration = Duration::from_secs(20);
+const VISUAL_CAPTURE_SETTLE: Duration = Duration::from_secs(1);
+const VISUAL_PROOF_PATH: &str = "_spike/visual.xhtml";
+const VISUAL_PROOF_URL: &str = "shosai://book/_spike/visual.xhtml";
+const VISUAL_MARKER_RGB: [u8; 3] = [0x24, 0x68, 0xac];
 const BOUNDS_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_BOUNDS_PROOF";
 const BOUNDS_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
 const SCALE_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_SCALE_PROOF";
@@ -79,6 +85,8 @@ const ACCESSIBILITY_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_ACCESSIBILITY_PROOF";
 const ACCESSIBILITY_PROOF_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(any(target_os = "macos", test))]
 const ACCESSIBILITY_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(any(target_os = "macos", test))]
+const SUBPROCESS_TERMINATION_TIMEOUT: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_ENV: &str = "SHOSAI_WRY_SPIKE_NETWORK_PROOF";
 const NETWORK_PROOF_GRACE: Duration = Duration::from_secs(1);
 const NETWORK_PROOF_TIMEOUT: Duration = Duration::from_secs(10);
@@ -102,6 +110,7 @@ thread_local! {
     static NETWORK_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static LIFECYCLE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static OVERLAY_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
+    static VISUAL_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static BOUNDS_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static SCALE_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
     static INPUT_PROOF_RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -285,6 +294,7 @@ struct State {
     lifecycle_proof: LifecycleProof,
     overlay_proof: OverlayProof,
     overlay_active: bool,
+    visual_initial_capture: Option<VisualCapture>,
     bounds_proof: BoundsProof,
     scale_proof: ScaleProof,
     input_proof: InputProof,
@@ -309,6 +319,47 @@ struct State {
     input_parent_pointer_activated: bool,
     tab_restore_deadline: Option<Instant>,
     network_proof_finished: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisualCapturePhase {
+    Initial,
+    Hidden,
+    Restored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct VisualCapture {
+    pixel_width: u32,
+    pixel_height: u32,
+    backing_scale: f32,
+    marker_pixels: usize,
+    marker_bounds: Option<[u32; 4]>,
+}
+
+impl VisualCapture {
+    fn marker_visible(self) -> bool {
+        self.marker_pixels >= 100 && self.marker_bounds.is_some()
+    }
+
+    fn marker_absent(self) -> bool {
+        self.marker_pixels == 0 && self.marker_bounds.is_none()
+    }
+
+    fn marker_matches(self, other: Self) -> bool {
+        let Some(first) = self.marker_bounds else {
+            return false;
+        };
+        let Some(second) = other.marker_bounds else {
+            return false;
+        };
+        first
+            .into_iter()
+            .zip(second)
+            .all(|(left, right)| left.abs_diff(right) <= 2)
+            && self.marker_pixels.abs_diff(other.marker_pixels)
+                <= (self.marker_pixels.max(other.marker_pixels) / 100).max(4)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -1726,6 +1777,11 @@ enum Message {
         bounds: Rectangle,
         result: Result<(), String>,
     },
+    VisualCaptured {
+        generation: u64,
+        phase: VisualCapturePhase,
+        result: Result<VisualCapture, String>,
+    },
     BoundsChildHidden {
         generation: u64,
         result: Result<(), String>,
@@ -1840,10 +1896,17 @@ fn main() -> ExitCode {
         eprintln!("EPUB Wry spike failed: {error}");
         return ExitCode::FAILURE;
     }
+    if let Err(error) =
+        validate_visual_proof_platform(visual_proof_env_requested(), cfg!(target_os = "macos"))
+    {
+        eprintln!("EPUB Wry spike failed: {error}");
+        return ExitCode::FAILURE;
+    }
     if let Err(error) = validate_proof_mode_selection([
         network_proof_requested(),
         lifecycle_proof_requested(),
         overlay_proof_requested(),
+        visual_proof_requested(),
         overlay_observation_requested(),
         bounds_proof_requested(),
         scale_proof_requested(),
@@ -1983,6 +2046,19 @@ fn main() -> ExitCode {
             }
         });
     }
+    if visual_proof_requested() {
+        return VISUAL_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
+            Some(Ok(())) => ExitCode::SUCCESS,
+            Some(Err(error)) => {
+                eprintln!("wry-spike-visual-proof FAIL: {error}");
+                ExitCode::FAILURE
+            }
+            None => {
+                eprintln!("wry-spike-visual-proof FAIL: proof did not complete");
+                ExitCode::FAILURE
+            }
+        });
+    }
     if bounds_proof_requested() {
         return BOUNDS_PROOF_RESULT.with(|result| match result.borrow_mut().take() {
             Some(Ok(())) => ExitCode::SUCCESS,
@@ -2027,7 +2103,7 @@ fn subscription(_state: &State) -> Subscription<Message> {
     let mut subscriptions = vec![events];
     if network_proof_requested()
         || lifecycle_proof_requested()
-        || overlay_proof_requested()
+        || overlay_lifecycle_proof_requested()
         || bounds_proof_requested()
         || scale_proof_requested()
         || input_proof_requested()
@@ -2072,7 +2148,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             state.window = Some(id);
             if network_proof_requested()
                 || lifecycle_proof_requested()
-                || overlay_proof_requested()
+                || overlay_lifecycle_proof_requested()
                 || bounds_proof_requested()
                 || scale_proof_requested()
                 || input_proof_requested()
@@ -2083,8 +2159,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 let timeout = if lifecycle_proof_requested() {
                     LIFECYCLE_PROOF_TIMEOUT
-                } else if overlay_proof_requested() {
-                    OVERLAY_PROOF_TIMEOUT
+                } else if overlay_lifecycle_proof_requested() {
+                    if visual_proof_requested() {
+                        VISUAL_PROOF_TIMEOUT
+                    } else {
+                        OVERLAY_PROOF_TIMEOUT
+                    }
                 } else if bounds_proof_requested() {
                     BOUNDS_PROOF_TIMEOUT
                 } else if scale_proof_requested() {
@@ -2107,7 +2187,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             if lifecycle_proof_requested() {
                 state.lifecycle_proof = LifecycleProof::WaitingForCreation;
             }
-            if overlay_proof_requested() {
+            if overlay_lifecycle_proof_requested() {
                 state.overlay_proof = OverlayProof::WaitingForCreation;
             }
             if bounds_proof_requested() {
@@ -2234,7 +2314,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             measure_placeholder(state.measurement_epoch)
         }
         Message::WindowEvent(id, window::Event::CloseRequested, _) if state.window == Some(id) => {
-            if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
+            if overlay_lifecycle_proof_requested() && state.overlay_proof != OverlayProof::Complete
+            {
                 return finish_overlay_proof(
                     state,
                     Err("parent closed before overlay proof completed".into()),
@@ -2290,7 +2371,8 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             window::close(id)
         }
         Message::WindowEvent(id, window::Event::Closed, _) if state.window == Some(id) => {
-            if overlay_proof_requested() && state.overlay_proof != OverlayProof::Complete {
+            if overlay_lifecycle_proof_requested() && state.overlay_proof != OverlayProof::Complete
+            {
                 return finish_overlay_proof(
                     state,
                     Err("parent closed before overlay proof completed".into()),
@@ -2470,7 +2552,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 return update_bounds_measurement(state, epoch, bounds);
             }
-            if overlay_proof_requested() && state.overlay_proof.blocks_geometry_synchronization() {
+            if overlay_lifecycle_proof_requested()
+                && state.overlay_proof.blocks_geometry_synchronization()
+            {
                 let Some(bounds) = state.measured_bounds else {
                     return finish_overlay_proof(
                         state,
@@ -2611,8 +2695,12 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                             Size::new(LIFECYCLE_WINDOW_WIDTH, LIFECYCLE_WINDOW_HEIGHT),
                         )
                     })
-                } else if overlay_proof_requested() {
-                    begin_overlay_proof(state)
+                } else if overlay_lifecycle_proof_requested() {
+                    if visual_proof_requested() {
+                        request_visual_capture(state, VisualCapturePhase::Initial)
+                    } else {
+                        begin_overlay_proof(state)
+                    }
                 } else if bounds_proof_requested() {
                     begin_bounds_proof(state)
                 } else {
@@ -2627,7 +2715,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.creation_bounds = None;
                 finish_lifecycle_proof(state, Err(format!("webview creation failed: {error}")))
             }
-            Err(error) if overlay_proof_requested() => {
+            Err(error) if overlay_lifecycle_proof_requested() => {
                 state.creation_bounds = None;
                 finish_overlay_proof(state, Err(format!("webview creation failed: {error}")))
             }
@@ -2682,7 +2770,9 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err("unexpected webview synchronization during bounds proof".into()),
                 );
             }
-            if overlay_proof_requested() && state.overlay_proof.blocks_geometry_synchronization() {
+            if overlay_lifecycle_proof_requested()
+                && state.overlay_proof.blocks_geometry_synchronization()
+            {
                 return finish_overlay_proof(
                     state,
                     Err(
@@ -2746,6 +2836,11 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
             bounds,
             result,
         } => update_overlay_replacement(state, generation, bounds, result),
+        Message::VisualCaptured {
+            generation,
+            phase,
+            result,
+        } => update_visual_capture(state, generation, phase, result),
         Message::BoundsChildHidden { generation, result } => {
             update_bounds_hidden(state, generation, result)
         }
@@ -2930,7 +3025,7 @@ fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::NetworkProofTick(now) if lifecycle_proof_requested() => {
             update_lifecycle_proof(state, now)
         }
-        Message::NetworkProofTick(now) if overlay_proof_requested() => {
+        Message::NetworkProofTick(now) if overlay_lifecycle_proof_requested() => {
             update_overlay_proof(state, now)
         }
         Message::NetworkProofTick(now) if bounds_proof_requested() => {
@@ -3579,7 +3674,7 @@ fn run_accessibility_script_with_timeout(
 ) -> Result<String, String> {
     let mut command = Command::new("osascript");
     command.args(["-e", script, &std::process::id().to_string()]);
-    let output = run_accessibility_command_with_timeout(command, timeout)?;
+    let output = run_command_with_timeout(command, timeout, "System Events query")?;
     if !output.status.success() {
         return Err(format!(
             "System Events query failed: {}",
@@ -3590,40 +3685,134 @@ fn run_accessibility_script_with_timeout(
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn run_accessibility_command_with_timeout(
+fn run_command_with_timeout(
     mut command: Command,
     timeout: Duration,
+    operation: &str,
 ) -> Result<Output, String> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
+    let child = command
         .spawn()
-        .map_err(|error| format!("failed to start System Events query: {error}"))?;
+        .map_err(|error| format!("failed to start {operation}: {error}"))?;
+    supervise_process(
+        ChildProcess(child),
+        timeout,
+        SUBPROCESS_TERMINATION_TIMEOUT,
+        operation,
+    )
+}
+
+#[cfg(any(target_os = "macos", test))]
+trait SupervisedProcess {
+    type Output;
+
+    fn try_wait(&mut self) -> std::io::Result<bool>;
+    fn kill(&mut self) -> std::io::Result<()>;
+    fn collect(self) -> std::io::Result<Self::Output>;
+}
+
+#[cfg(any(target_os = "macos", test))]
+struct ChildProcess(Child);
+
+#[cfg(any(target_os = "macos", test))]
+impl SupervisedProcess for ChildProcess {
+    type Output = Output;
+
+    fn try_wait(&mut self) -> std::io::Result<bool> {
+        self.0.try_wait().map(|status| status.is_some())
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.0.kill()
+    }
+
+    fn collect(self) -> std::io::Result<Self::Output> {
+        self.0.wait_with_output()
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn supervise_process<P: SupervisedProcess>(
+    mut process: P,
+    timeout: Duration,
+    termination_timeout: Duration,
+    operation: &str,
+) -> Result<P::Output, String> {
     let deadline = Instant::now() + timeout;
     loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|error| format!("failed to collect System Events query: {error}"));
+        match process.try_wait() {
+            Ok(true) => {
+                return process
+                    .collect()
+                    .map_err(|error| format!("failed to collect {operation}: {error}"));
             }
-            Ok(None) => {}
+            Ok(false) => {}
             Err(error) => {
-                return Err(format!("failed to wait for System Events query: {error}"));
+                return terminate_process(
+                    process,
+                    termination_timeout,
+                    format!("failed to wait for {operation}: {error}"),
+                );
             }
         }
         let now = Instant::now();
         if now >= deadline {
-            let kill_error = child.kill().err();
-            let reap_error = child.wait_with_output().err();
-            return Err(match (kill_error, reap_error) {
-                (None, None) => format!("System Events query timed out after {timeout:?}"),
-                (kill_error, reap_error) => format!(
-                    "System Events query timed out after {timeout:?}; kill error: {kill_error:?}; reap error: {reap_error:?}"
-                ),
-            });
+            return terminate_process(
+                process,
+                termination_timeout,
+                format!("{operation} timed out after {timeout:?}"),
+            );
         }
         thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
     }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn terminate_process<P: SupervisedProcess>(
+    mut process: P,
+    timeout: Duration,
+    failure: String,
+) -> Result<P::Output, String> {
+    let kill_error = process.kill().err();
+    let deadline = Instant::now() + timeout;
+    let mut wait_error = None;
+    loop {
+        match process.try_wait() {
+            Ok(true) => {
+                let reap_error = process.collect().err();
+                return Err(format_termination_failure(
+                    failure, kill_error, wait_error, reap_error,
+                ));
+            }
+            Ok(false) => {}
+            Err(error) => wait_error = Some(error),
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(format_termination_failure(
+                format!("{failure}; termination remained unconfirmed after {timeout:?}"),
+                kill_error,
+                wait_error,
+                None,
+            ));
+        }
+        thread::sleep(Duration::from_millis(10).min(deadline.saturating_duration_since(now)));
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn format_termination_failure(
+    failure: String,
+    kill_error: Option<std::io::Error>,
+    wait_error: Option<std::io::Error>,
+    reap_error: Option<std::io::Error>,
+) -> String {
+    if kill_error.is_none() && wait_error.is_none() && reap_error.is_none() {
+        return failure;
+    }
+    format!(
+        "{failure}; kill error: {kill_error:?}; wait error: {wait_error:?}; reap error: {reap_error:?}"
+    )
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -4474,6 +4663,318 @@ fn finish_bounds_proof(state: &mut State, result: Result<(), String>) -> Task<Me
     state.window.map_or_else(Task::none, window::close)
 }
 
+fn request_visual_capture(state: &State, phase: VisualCapturePhase) -> Task<Message> {
+    let Some(bounds) = state.applied_bounds else {
+        return Task::done(Message::VisualCaptured {
+            generation: state.webview_generation,
+            phase,
+            result: Err("visual capture requires applied child bounds".into()),
+        });
+    };
+    let generation = state.webview_generation;
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                thread::sleep(VISUAL_CAPTURE_SETTLE);
+                capture_visual_snapshot(bounds)
+            })
+            .await
+            .map_err(|error| format!("visual capture worker failed: {error}"))?
+        },
+        move |result| Message::VisualCaptured {
+            generation,
+            phase,
+            result,
+        },
+    )
+}
+
+fn update_visual_capture(
+    state: &mut State,
+    generation: u64,
+    phase: VisualCapturePhase,
+    result: Result<VisualCapture, String>,
+) -> Task<Message> {
+    if !visual_capture_is_current(
+        visual_proof_requested(),
+        state.webview_generation,
+        generation,
+    ) {
+        return Task::none();
+    }
+    let capture = match result {
+        Ok(capture) => capture,
+        Err(error) => return finish_overlay_proof(state, Err(error)),
+    };
+    eprintln!("wry-spike-visual-proof phase={phase:?} generation={generation} capture={capture:?}");
+    match phase {
+        VisualCapturePhase::Initial if state.overlay_proof == OverlayProof::WaitingForCreation => {
+            if !capture.marker_visible() {
+                return finish_overlay_proof(
+                    state,
+                    Err(format!(
+                        "initial capture did not contain the visual marker: {capture:?}"
+                    )),
+                );
+            }
+            state.visual_initial_capture = Some(capture);
+            begin_overlay_proof(state)
+        }
+        VisualCapturePhase::Hidden
+            if matches!(
+                state.overlay_proof,
+                OverlayProof::Hidden {
+                    generation: expected,
+                    ..
+                } if expected == generation
+            ) =>
+        {
+            if !capture.marker_absent() {
+                return finish_overlay_proof(
+                    state,
+                    Err(format!(
+                        "hidden child marker remained visible through the Iced modal: {capture:?}"
+                    )),
+                );
+            }
+            state.overlay_restore_deadline = Some(Instant::now() + OVERLAY_PROOF_HOLD);
+            Task::none()
+        }
+        VisualCapturePhase::Restored
+            if matches!(state.overlay_proof, OverlayProof::Recreating { .. }) =>
+        {
+            let Some(initial) = state.visual_initial_capture else {
+                return finish_overlay_proof(
+                    state,
+                    Err("visual proof lost its initial capture".into()),
+                );
+            };
+            if !capture.marker_visible() {
+                return finish_overlay_proof(
+                    state,
+                    Err(format!(
+                        "restored capture did not contain the visual marker: {capture:?}"
+                    )),
+                );
+            }
+            if capture.pixel_width != initial.pixel_width
+                || capture.pixel_height != initial.pixel_height
+                || (capture.backing_scale - initial.backing_scale).abs() > f32::EPSILON
+                || !capture.marker_matches(initial)
+            {
+                return finish_overlay_proof(
+                    state,
+                    Err(format!(
+                        "restored physical geometry changed from {initial:?} to {capture:?}"
+                    )),
+                );
+            }
+            finish_overlay_proof(state, Ok(()))
+        }
+        _ => Task::none(),
+    }
+}
+
+fn visual_capture_is_current(requested: bool, current: u64, captured: u64) -> bool {
+    requested && captured == current
+}
+
+#[cfg(target_os = "macos")]
+fn capture_visual_snapshot(bounds: Rectangle) -> Result<VisualCapture, String> {
+    let window = run_accessibility_script(VISUAL_WINDOW_BOUNDS_SCRIPT)?;
+    let values = window
+        .trim()
+        .split(',')
+        .map(|value| value.parse::<i32>().map_err(|error| error.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    let [x, y, width, height] = values.as_slice() else {
+        return Err(format!(
+            "unexpected visual window bounds output {:?}",
+            window.trim()
+        ));
+    };
+    let (width, height) = (
+        u32::try_from(*width).map_err(|_| "visual window width was not positive")?,
+        u32::try_from(*height).map_err(|_| "visual window height was not positive")?,
+    );
+    if width == 0 || height == 0 {
+        return Err("visual window bounds were empty".into());
+    }
+    let window_id = visual_window_id()?;
+    let path = std::env::temp_dir().join(format!(
+        "shosai-wry-visual-{}-{}.png",
+        std::process::id(),
+        current_native_operation_epoch()
+    ));
+    let region = format!("{x},{y},{width},{height}");
+    eprintln!(
+        "wry-spike-visual-proof window-id={window_id} window-region={region} child-bounds={bounds:?}"
+    );
+    let mut command = Command::new("/usr/sbin/screencapture");
+    command.args(["-x", "-o", &format!("-l{window_id}"), "-t", "png"]);
+    command.arg(&path);
+    with_temporary_file_cleanup(&path, || {
+        let output =
+            run_command_with_timeout(command, ACCESSIBILITY_QUERY_TIMEOUT, "macOS screen capture")?;
+        if !output.status.success() {
+            return Err(format!(
+                "macOS screen capture failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let image = image::open(&path)
+            .map_err(|error| error.to_string())?
+            .to_rgba8();
+        analyze_visual_capture(&image, width, height, bounds)
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn with_temporary_file_cleanup<T>(
+    path: &std::path::Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let result = operation();
+    let cleanup = match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove temporary capture {}: {error}",
+            path.display()
+        )),
+    };
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(cleanup_error)) => Err(format!("{error}; {cleanup_error}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn visual_window_id() -> Result<u32, String> {
+    let mut command = Command::new("osascript");
+    command.args([
+        "-l",
+        "JavaScript",
+        "-e",
+        VISUAL_WINDOW_ID_SCRIPT,
+        &std::process::id().to_string(),
+    ]);
+    let output = run_command_with_timeout(
+        command,
+        ACCESSIBILITY_QUERY_TIMEOUT,
+        "Core Graphics window query",
+    )?;
+    if !output.status.success() {
+        return Err(format!(
+            "Core Graphics window query failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|error| error.to_string())?
+        .trim()
+        .parse::<u32>()
+        .map_err(|error| format!("invalid Core Graphics window number: {error}"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_visual_snapshot(_bounds: Rectangle) -> Result<VisualCapture, String> {
+    Err("visual capture is only supported on macOS".into())
+}
+
+fn analyze_visual_capture(
+    image: &image::RgbaImage,
+    window_width: u32,
+    window_height: u32,
+    _bounds: Rectangle,
+) -> Result<VisualCapture, String> {
+    let scale_x = image.width() as f32 / window_width as f32;
+    let scale_y = image.height() as f32 / window_height as f32;
+    if !scale_x.is_finite()
+        || scale_x < 1.0
+        || (scale_x - scale_y).abs() > 0.01
+        || (scale_x - scale_x.round()).abs() > 0.01
+    {
+        return Err(format!(
+            "capture dimensions {}x{} do not represent an integral backing scale for {window_width}x{window_height}",
+            image.width(),
+            image.height()
+        ));
+    }
+    let mut marker_pixels = 0usize;
+    let mut marker_bounds: Option<[u32; 4]> = None;
+    for y in 0..image.height() {
+        for x in 0..image.width() {
+            let pixel = image.get_pixel(x, y).0;
+            if pixel[..3]
+                .iter()
+                .zip(VISUAL_MARKER_RGB)
+                .all(|(actual, expected)| actual.abs_diff(expected) <= 12)
+            {
+                marker_pixels += 1;
+                marker_bounds = Some(match marker_bounds {
+                    Some([min_x, min_y, max_x, max_y]) => {
+                        [min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y)]
+                    }
+                    None => [x, y, x, y],
+                });
+            }
+        }
+    }
+    Ok(VisualCapture {
+        pixel_width: image.width(),
+        pixel_height: image.height(),
+        backing_scale: scale_x,
+        marker_pixels,
+        marker_bounds,
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+const VISUAL_WINDOW_BOUNDS_SCRIPT: &str = r#"
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    tell first process whose unix id is targetPid
+      set frontmost to true
+      perform action "AXRaise" of window 1
+      delay 0.5
+      tell window 1
+        set windowPosition to position
+        set windowSize to size
+        return (item 1 of windowPosition as text) & "," & (item 2 of windowPosition as text) & "," & (item 1 of windowSize as text) & "," & (item 2 of windowSize as text)
+      end tell
+    end tell
+  end tell
+end run
+"#;
+
+#[cfg(target_os = "macos")]
+const VISUAL_WINDOW_ID_SCRIPT: &str = r#"
+ObjC.import("CoreGraphics");
+function run(argv) {
+  const targetPid = Number(argv[0]);
+  const windows = ObjC.castRefToObject(
+    $.CGWindowListCopyWindowInfo($.kCGWindowListOptionAll, $.kCGNullWindowID)
+  ).js.map(ObjC.deepUnwrap);
+  const matches = windows.filter(window =>
+    window.kCGWindowOwnerPID === targetPid &&
+    window.kCGWindowLayer === 0 &&
+    window.kCGWindowIsOnscreen === true &&
+    window.kCGWindowBounds.Width > 0 &&
+    window.kCGWindowBounds.Height > 0
+  ).sort((left, right) =>
+    right.kCGWindowBounds.Width * right.kCGWindowBounds.Height -
+    left.kCGWindowBounds.Width * left.kCGWindowBounds.Height
+  );
+  if (matches.length === 0) {
+    throw new Error(`expected an on-screen Shōsai window for pid ${targetPid}`);
+  }
+  return String(matches[0].kCGWindowNumber);
+}
+"#;
+
 fn begin_overlay_proof(state: &mut State) -> Task<Message> {
     let Some(bounds) = state.applied_bounds else {
         return finish_overlay_proof(
@@ -4520,9 +5021,12 @@ fn update_overlay_hidden(
         return finish_overlay_proof(state, Err(format!("webview hide failed: {error}")));
     }
     if state.overlay_proof.observe_hidden(generation, true) {
-        state.overlay_restore_deadline = Some(Instant::now() + OVERLAY_PROOF_HOLD);
         state.status = "Iced modal active; native child hidden".into();
         eprintln!("wry-spike-overlay-proof phase=hidden generation={generation}");
+        if visual_proof_requested() {
+            return request_visual_capture(state, VisualCapturePhase::Hidden);
+        }
+        state.overlay_restore_deadline = Some(Instant::now() + OVERLAY_PROOF_HOLD);
     }
     Task::none()
 }
@@ -4562,6 +5066,9 @@ fn update_overlay_replacement(
         return Task::none();
     }
     match result {
+        Ok(()) if visual_proof_requested() => {
+            request_visual_capture(state, VisualCapturePhase::Restored)
+        }
         Ok(()) => finish_overlay_proof(state, Ok(())),
         Err(error) => finish_overlay_proof(
             state,
@@ -4627,16 +5134,27 @@ fn finish_overlay_proof(state: &mut State, result: Result<(), String>) -> Task<M
         return Task::none();
     }
     state.overlay_active = false;
+    state.visual_initial_capture = None;
     state.webview_generation = state.webview_generation.wrapping_add(1);
     teardown_webview();
-    if result.is_ok() {
+    if result.is_ok() && visual_proof_requested() {
+        eprintln!(
+            "wry-spike-visual-proof PASS: physical backing scale, expected child pixels, hidden modal pixels, and restored replacement pixels verified"
+        );
+    } else if result.is_ok() {
         eprintln!(
             "wry-spike-overlay-proof PASS: child hide, Iced modal hold, replacement at saved bounds, and teardown completed"
         );
     }
-    OVERLAY_PROOF_RESULT.with(|slot| {
-        record_terminal_result(&mut slot.borrow_mut(), result);
-    });
+    if visual_proof_requested() {
+        VISUAL_PROOF_RESULT.with(|slot| {
+            record_terminal_result(&mut slot.borrow_mut(), result);
+        });
+    } else {
+        OVERLAY_PROOF_RESULT.with(|slot| {
+            record_terminal_result(&mut slot.borrow_mut(), result);
+        });
+    }
     state.window.map_or_else(Task::none, window::close)
 }
 
@@ -4863,7 +5381,9 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
     let generation = begin_webview_creation();
     window::run(id, move |window| {
         ensure_webview_creation_is_current(generation)?;
-        let mut book = if keyboard_input_proof_requested() || accessibility_proof_requested() {
+        let mut book = if visual_proof_requested() {
+            visual_proof_book()?
+        } else if keyboard_input_proof_requested() || accessibility_proof_requested() {
             input_proof_book()?
         } else if clipboard_proof_requested() {
             clipboard_proof_book()?
@@ -4888,6 +5408,8 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
                 });
             });
             NETWORK_PROOF_URL.to_string()
+        } else if visual_proof_requested() {
+            VISUAL_PROOF_URL.to_string()
         } else if tab_proof_requested() || accessibility_proof_requested() {
             TAB_PROOF_URL.to_string()
         } else if input_proof_requested() {
@@ -4954,16 +5476,17 @@ fn create_webview(id: window::Id, bounds: Rectangle) -> Task<Message> {
             } else {
                 builder.with_javascript_disabled()
             };
-        let proof_navigation_path =
-            if keyboard_input_proof_requested() || accessibility_proof_requested() {
-                Some(INPUT_PROOF_PATH)
-            } else if clipboard_proof_requested() {
-                Some(CLIPBOARD_PROOF_PATH)
-            } else if reader_proof_requested() {
-                Some(READER_PROOF_PATH)
-            } else {
-                None
-            };
+        let proof_navigation_path = if visual_proof_requested() {
+            Some(VISUAL_PROOF_PATH)
+        } else if keyboard_input_proof_requested() || accessibility_proof_requested() {
+            Some(INPUT_PROOF_PATH)
+        } else if clipboard_proof_requested() {
+            Some(CLIPBOARD_PROOF_PATH)
+        } else if reader_proof_requested() {
+            Some(READER_PROOF_PATH)
+        } else {
+            None
+        };
         let webview = builder
             .with_navigation_handler(move |url| {
                 proof_navigation_path.map_or_else(
@@ -5003,6 +5526,10 @@ fn clipboard_proof_book() -> Result<SpikeBook, String> {
     SpikeBook::from_host_fixture(CLIPBOARD_PROOF_PATH, CLIPBOARD_PROOF_CHAPTER)
 }
 
+fn visual_proof_book() -> Result<SpikeBook, String> {
+    SpikeBook::from_host_fixture(VISUAL_PROOF_PATH, VISUAL_PROOF_CHAPTER)
+}
+
 fn network_proof_requested() -> bool {
     std::env::var_os(NETWORK_PROOF_ENV).is_some()
 }
@@ -5013,6 +5540,18 @@ fn lifecycle_proof_requested() -> bool {
 
 fn overlay_proof_requested() -> bool {
     cfg!(target_os = "macos") && std::env::var_os(OVERLAY_PROOF_ENV).is_some()
+}
+
+fn visual_proof_env_requested() -> bool {
+    std::env::var_os(VISUAL_PROOF_ENV).is_some()
+}
+
+fn visual_proof_requested() -> bool {
+    cfg!(target_os = "macos") && visual_proof_env_requested()
+}
+
+fn overlay_lifecycle_proof_requested() -> bool {
+    overlay_proof_requested() || visual_proof_requested()
 }
 
 fn overlay_observation_requested() -> bool {
@@ -5110,6 +5649,13 @@ fn validate_accessibility_proof_platform(requested: bool, is_macos: bool) -> Res
     Ok(())
 }
 
+fn validate_visual_proof_platform(requested: bool, is_macos: bool) -> Result<(), String> {
+    if requested && !is_macos {
+        return Err("SHOSAI_WRY_SPIKE_VISUAL_PROOF is only supported on macOS".into());
+    }
+    Ok(())
+}
+
 fn map_window_event(id: window::Id, event: window::Event) -> Message {
     let tracked = scale_proof_env_requested()
         && matches!(
@@ -5157,7 +5703,7 @@ fn validate_proof_mode_selection<const N: usize>(modes: [bool; N]) -> Result<(),
         && modes.into_iter().filter(|selected| *selected).count() > 1
     {
         return Err(
-            "overlay, bounds, scale, input, clipboard, tab, reader, and accessibility modes cannot be combined with another proof mode"
+            "overlay, visual, bounds, scale, input, clipboard, tab, reader, and accessibility modes cannot be combined with another proof mode"
                 .into(),
         );
     }
@@ -5654,6 +6200,21 @@ window.addEventListener('DOMContentLoaded', () => {
   window.ipc.postMessage(`ready:${location.pathname}${location.hash}`);
 });
 "#;
+
+const VISUAL_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #101820; }
+    body { display: grid; place-items: center; }
+    #marker { width: 50%; height: 50%; background: #2468ac; }
+  </style>
+</head>
+<body><div id="marker" aria-label="visual restoration marker"></div></body>
+</html>"#;
 
 const INPUT_PROOF_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -6207,6 +6768,115 @@ mod tests {
     }
 
     #[test]
+    fn visual_proof_request_is_rejected_on_unsupported_platforms() {
+        assert_eq!(validate_visual_proof_platform(false, false), Ok(()));
+        assert_eq!(validate_visual_proof_platform(true, true), Ok(()));
+        assert!(
+            validate_visual_proof_platform(true, false)
+                .unwrap_err()
+                .contains("only supported on macOS")
+        );
+    }
+
+    fn visual_capture(marker_bounds: Option<[u32; 4]>, marker_pixels: usize) -> VisualCapture {
+        VisualCapture {
+            pixel_width: 200,
+            pixel_height: 200,
+            backing_scale: 2.0,
+            marker_pixels,
+            marker_bounds,
+        }
+    }
+
+    #[test]
+    fn visual_capture_detects_marker_bounds_and_physical_scale() {
+        let mut image = image::RgbaImage::from_pixel(200, 200, image::Rgba([16, 24, 32, 255]));
+        for y in 60..140 {
+            for x in 50..150 {
+                image.put_pixel(x, y, image::Rgba([0x24, 0x68, 0xac, 255]));
+            }
+        }
+
+        let capture = analyze_visual_capture(
+            &image,
+            100,
+            100,
+            Rectangle::new((0.0, 20.0).into(), (100.0, 80.0).into()),
+        )
+        .unwrap();
+
+        assert_eq!(capture.backing_scale, 2.0);
+        assert_eq!(capture.marker_pixels, 8_000);
+        assert_eq!(capture.marker_bounds, Some([50, 60, 149, 139]));
+        assert!(capture.marker_visible());
+    }
+
+    #[test]
+    fn visual_capture_rejects_surviving_hidden_marker() {
+        assert!(visual_capture(None, 0).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 1, 1]), 1).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 10, 10]), 99).marker_absent());
+        assert!(!visual_capture(Some([50, 60, 149, 139]), 8_000).marker_absent());
+        assert!(!visual_capture(Some([1, 1, 1, 1]), 0).marker_absent());
+    }
+
+    #[test]
+    fn temporary_capture_is_removed_after_operation_failure() {
+        let path = std::env::temp_dir().join(format!(
+            "shosai-visual-cleanup-test-{}-{:?}.png",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let error = with_temporary_file_cleanup(&path, || {
+            std::fs::write(&path, b"partial capture").unwrap();
+            Err::<(), _>("capture timed out".into())
+        })
+        .unwrap_err();
+
+        assert_eq!(error, "capture timed out");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn temporary_capture_cleanup_failure_is_reported() {
+        let path = std::env::temp_dir().join(format!(
+            "shosai-visual-cleanup-directory-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+
+        let error = with_temporary_file_cleanup(&path, || Ok(())).unwrap_err();
+
+        std::fs::remove_dir(&path).unwrap();
+        assert!(error.contains("failed to remove temporary capture"));
+    }
+
+    #[test]
+    fn visual_restoration_requires_stable_backing_pixel_geometry() {
+        let initial = visual_capture(Some([50, 60, 149, 139]), 8_000);
+        assert!(initial.marker_matches(initial));
+        assert!(visual_capture(Some([51, 59, 150, 140]), 8_020).marker_matches(initial));
+        assert!(!visual_capture(Some([53, 60, 152, 139]), 8_000).marker_matches(initial));
+        assert!(!visual_capture(Some([50, 60, 149, 139]), 7_000).marker_matches(initial));
+    }
+
+    #[test]
+    fn stale_visual_capture_generations_are_ignored() {
+        assert!(visual_capture_is_current(true, 4, 4));
+        assert!(!visual_capture_is_current(true, 4, 3));
+        assert!(!visual_capture_is_current(false, 4, 4));
+    }
+
+    #[test]
+    fn visual_fixture_uses_the_expected_internal_path_and_marker() {
+        let book = visual_proof_book().unwrap();
+        assert!(VISUAL_PROOF_CHAPTER.contains("#2468ac"));
+        assert_eq!(book.start_url, VISUAL_PROOF_URL);
+        assert_eq!(VISUAL_PROOF_URL, "shosai://book/_spike/visual.xhtml");
+    }
+
+    #[test]
     fn input_proof_requires_child_and_parent_keyboard_routing_in_order() {
         let mut proof = InputProof::WaitingForReady;
 
@@ -6637,6 +7307,93 @@ mod tests {
 
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[derive(Clone, Copy)]
+    enum MockWait {
+        Error,
+        Running,
+        Exited,
+    }
+
+    struct MockProcess {
+        waits: std::collections::VecDeque<MockWait>,
+        fallback: MockWait,
+        kill_fails: bool,
+        lifecycle: Arc<Mutex<(bool, bool)>>,
+    }
+
+    impl SupervisedProcess for MockProcess {
+        type Output = ();
+
+        fn try_wait(&mut self) -> std::io::Result<bool> {
+            match self.waits.pop_front().unwrap_or(self.fallback) {
+                MockWait::Error => Err(std::io::Error::other("simulated wait failure")),
+                MockWait::Running => Ok(false),
+                MockWait::Exited => Ok(true),
+            }
+        }
+
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.lifecycle.lock().unwrap().0 = true;
+            if self.kill_fails {
+                Err(std::io::Error::other("simulated kill failure"))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn collect(self) -> std::io::Result<Self::Output> {
+            self.lifecycle.lock().unwrap().1 = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn subprocess_wait_errors_still_kill_and_reap_the_child() {
+        let lifecycle = Arc::new(Mutex::new((false, false)));
+        let process = MockProcess {
+            waits: [MockWait::Error, MockWait::Exited].into(),
+            fallback: MockWait::Exited,
+            kill_fails: false,
+            lifecycle: Arc::clone(&lifecycle),
+        };
+
+        let error = supervise_process(
+            process,
+            Duration::from_secs(1),
+            Duration::from_millis(50),
+            "mock query",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("failed to wait for mock query"));
+        assert_eq!(*lifecycle.lock().unwrap(), (true, true));
+    }
+
+    #[test]
+    fn subprocess_kill_failure_does_not_create_an_unbounded_wait() {
+        let lifecycle = Arc::new(Mutex::new((false, false)));
+        let process = MockProcess {
+            waits: [MockWait::Error].into(),
+            fallback: MockWait::Running,
+            kill_fails: true,
+            lifecycle: Arc::clone(&lifecycle),
+        };
+        let started = Instant::now();
+
+        let error = supervise_process(
+            process,
+            Duration::from_secs(1),
+            Duration::from_millis(20),
+            "mock query",
+        )
+        .unwrap_err();
+
+        assert!(error.contains("termination remained unconfirmed"));
+        assert!(error.contains("simulated kill failure"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(*lifecycle.lock().unwrap(), (true, false));
     }
 
     #[test]
@@ -7258,13 +8015,13 @@ mod tests {
 
     #[test]
     fn overlay_modes_reject_conflicting_proofs() {
-        for selected in 2..10 {
-            let mut modes = [false; 10];
+        for selected in 2..12 {
+            let mut modes = [false; 12];
             modes[selected] = true;
             assert!(validate_proof_mode_selection(modes).is_ok());
         }
-        for protected in 2..10 {
-            let mut modes = [false; 10];
+        for protected in 2..12 {
+            let mut modes = [false; 12];
             modes[protected] = true;
             modes[if protected == 2 { 1 } else { 2 }] = true;
             assert!(validate_proof_mode_selection(modes).is_err());
