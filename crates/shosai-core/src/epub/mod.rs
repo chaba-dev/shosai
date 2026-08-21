@@ -7,6 +7,7 @@
 //! - CSS stylesheets, images, fonts, and other resources
 
 mod parser;
+mod presentation;
 pub mod render;
 mod resource;
 pub mod style;
@@ -18,5 +19,6 @@ mod limits;
 
 pub use limits::EpubLimits;
 pub use parser::EpubDoc;
+pub use presentation::{EpubChapterPresentation, EpubPresentation};
 pub use resource::{CanonicalEpubPath, EpubReference};
 pub use types::*;

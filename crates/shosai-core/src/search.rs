@@ -54,22 +54,10 @@ pub fn search_epub(doc: &EpubDoc, query: &str) -> Vec<SearchMatch> {
 
 /// Extract searchable plain text from every EPUB chapter.
 pub fn extract_epub_text(doc: &EpubDoc) -> Vec<String> {
-    doc.content
-        .chapters
+    doc.presentation()
+        .chapters()
         .iter()
-        .map(|chapter| {
-            let base_path = chapter
-                .path
-                .rsplit_once('/')
-                .map(|(dir, _)| dir)
-                .unwrap_or("");
-            let nodes = crate::epub::render::parse_chapter_xhtml(
-                &chapter.content,
-                base_path,
-                &doc.content.styles,
-            );
-            extract_text_from_nodes(&nodes)
-        })
+        .map(|chapter| chapter.search_text().to_string())
         .collect()
 }
 

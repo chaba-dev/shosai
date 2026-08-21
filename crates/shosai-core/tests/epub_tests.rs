@@ -21,6 +21,35 @@ fn test_chapter_count() {
 }
 
 #[test]
+fn test_chapter_presentation_is_parsed_once_and_shared_with_search() {
+    let doc = EpubDoc::open(fixture_path("sample.epub")).unwrap();
+
+    let first = doc
+        .presentation()
+        .chapter(0)
+        .expect("chapter presentation should exist");
+    let repeated = doc
+        .presentation()
+        .chapter(0)
+        .expect("chapter presentation should remain cached");
+
+    assert!(std::ptr::eq(first, repeated));
+    assert!(!first.nodes().is_empty());
+    assert_eq!(
+        first.search_text(),
+        shosai_core::search::extract_text_from_nodes(first.nodes())
+    );
+    assert_eq!(
+        shosai_core::search::extract_epub_text(&doc),
+        doc.presentation()
+            .chapters()
+            .iter()
+            .map(|chapter| chapter.search_text().to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_metadata_title() {
     let doc = EpubDoc::open(fixture_path("sample.epub")).unwrap();
     let meta = doc.metadata();
