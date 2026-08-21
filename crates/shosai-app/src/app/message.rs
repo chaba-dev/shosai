@@ -7,7 +7,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::BookPage;
 use shosai_core::search::SearchMatch;
 
-use super::{ContinuousRequest, InitializedState, PageCacheKey};
+use super::{ContinuousRequest, EpubPage, InitializedState, PageCacheKey};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -34,6 +34,7 @@ pub enum Message {
         tab_id: u64,
         activation: u64,
         page: usize,
+        epub_offset: Option<usize>,
     },
     ContinuousItemVisibility {
         tab_id: u64,
@@ -128,6 +129,13 @@ pub enum Message {
     CloseSearch,
 
     // Background page rendering
+    EpubPaginated {
+        tab_id: u64,
+        generation: u64,
+        chapter: usize,
+        offset: usize,
+        pages: Vec<EpubPage>,
+    },
     PageRendered {
         tab_id: u64,
         generation: u64,

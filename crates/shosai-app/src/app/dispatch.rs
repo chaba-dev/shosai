@@ -197,16 +197,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && state.active_tab_id == Some(tab_id)
                 && state.continuous_activation == activation
             {
+                let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
                 return iced::advanced::widget::operate(ContinuousItemOperation::resolve(
-                    tab_id,
-                    activation,
-                    state.total_pages,
+                    continuous_measured_items(state, tab_id, activation),
+                    continuous_scroll_id(tab_id, activation),
                     offset,
                 ))
-                .map(move |(page, _, _)| Message::ContinuousItemResolved {
-                    tab_id,
-                    activation,
-                    page,
+                .map(move |(page, epub_offset, _, _)| {
+                    Message::ContinuousItemResolved {
+                        tab_id,
+                        activation,
+                        page,
+                        epub_offset: is_epub.then_some(epub_offset),
+                    }
                 });
             }
         }
@@ -215,16 +218,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             tab_id,
             activation,
             page,
+            epub_offset,
         } => {
             if state.reading_mode == ReadingMode::Continuous
                 && state.active_tab_id == Some(tab_id)
                 && state.continuous_activation == activation
                 && page < state.total_pages
-                && page != state.current_page
+                && (page != state.current_page
+                    || epub_offset.is_some_and(|offset| offset != state.epub_offset))
             {
                 state.current_page = page;
                 state.epub_page = 0;
-                state.epub_offset = 0;
+                state.epub_offset = epub_offset.unwrap_or(0);
                 state.page_input = (page + 1).to_string();
                 save_reading_state(state);
                 update_bookmark_status(state);
@@ -761,6 +766,29 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 refresh_pdf_search_highlights_if_changed(state, &previous_highlights),
                 scroll_to_current_page(state),
             ]);
+        }
+
+        Message::EpubPaginated {
+            tab_id,
+            generation,
+            chapter,
+            offset,
+            pages,
+        } => {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+                state.epub_pages = Arc::new(pages);
+                if state.epub_pages.is_empty() {
+                    state.epub_page = 0;
+                    state.error = Some(AppError::EpubEmpty);
+                } else {
+                    let requested_page = epub_page_for_location(state, chapter, offset);
+                    state.epub_page = requested_page.min(state.epub_pages.len() - 1);
+                    state.current_page = state.epub_pages[state.epub_page].chapter;
+                    state.epub_offset = offset;
+                    state.page_input = (state.epub_page + 1).to_string();
+                    state.error = None;
+                }
+            }
         }
 
         Message::PageRendered {
