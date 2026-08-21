@@ -346,6 +346,25 @@ enum ReadingMode {
     Continuous,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EpubLayoutKey {
+    width: u32,
+    height: u32,
+    font_size: u32,
+    line_spacing: u32,
+}
+
+impl EpubLayoutKey {
+    fn new(page_size: Size, font_size: f32, line_spacing: f32) -> Self {
+        Self {
+            width: page_size.width.to_bits(),
+            height: page_size.height.to_bits(),
+            font_size: font_size.to_bits(),
+            line_spacing: line_spacing.to_bits(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
@@ -362,6 +381,7 @@ struct ReaderTab {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Arc<Vec<EpubPage>>,
+    epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
@@ -446,6 +466,7 @@ pub struct State {
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Arc<Vec<EpubPage>>,
+    epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
@@ -576,6 +597,7 @@ pub fn boot() -> (State, Task<Message>) {
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_pages: Arc::new(Vec::new()),
+        epub_layout_key: None,
         epub_page: 0,
         epub_offset: 0,
         continuous_pages: Vec::new(),
@@ -776,6 +798,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         page_cache: state.page_cache.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_pages: state.epub_pages.clone(),
+        epub_layout_key: state.epub_layout_key,
         epub_page: state.epub_page,
         epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
@@ -819,6 +842,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.page_cache = tab.page_cache;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_pages = tab.epub_pages;
+    state.epub_layout_key = tab.epub_layout_key;
     state.epub_page = tab.epub_page;
     state.epub_offset = tab.epub_offset;
     state.continuous_pages = tab.continuous_pages;
@@ -888,8 +912,13 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
         } else {
             scroll_to_current_page(state)
         }
-    } else if state.rendered_page.is_some() || matches!(state.document, Some(OpenDocument::Epub(_)))
-    {
+    } else if matches!(state.document, Some(OpenDocument::Epub(_))) {
+        if state.epub_layout_key == Some(epub_layout_key(state)) {
+            Task::none()
+        } else {
+            refresh_content(state)
+        }
+    } else if state.rendered_page.is_some() {
         Task::none()
     } else {
         refresh_content(state)
@@ -921,6 +950,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_facing_page_handle = None;
         state.epub_image_handles.clear();
         state.epub_pages = Arc::new(Vec::new());
+        state.epub_layout_key = None;
         state.epub_page = 0;
         state.epub_offset = 0;
         state.continuous_pages.clear();
@@ -1007,6 +1037,7 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.page_cache.clear();
     state.epub_image_handles.clear();
     state.epub_pages = Arc::new(Vec::new());
+    state.epub_layout_key = None;
     state.epub_page = 0;
     state.epub_offset = 0;
     state.continuous_pages.clear();
@@ -1296,6 +1327,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         }
         Some(OpenDocument::Epub(doc)) => {
             let page_size = epub_page_size(state);
+            let layout_key = epub_layout_key(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
@@ -1314,6 +1346,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 tab_id,
                 generation,
                 Arc::clone(doc),
+                layout_key,
                 state.font_size,
                 state.line_spacing,
                 page_size,
@@ -1400,6 +1433,31 @@ fn epub_page_size(state: &State) -> Size {
     )
 }
 
+fn epub_layout_key(state: &State) -> EpubLayoutKey {
+    EpubLayoutKey::new(epub_page_size(state), state.font_size, state.line_spacing)
+}
+
+fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
+    let available_size = available_reader_size_with_panels(
+        state,
+        tab.show_bookmarks_panel,
+        tab.show_search_bar,
+        tab.show_reader_settings,
+        tab.show_reader_more,
+    );
+    let uses_spread = tab.reading_mode == ReadingMode::Paginated
+        && matches!(tab.document, OpenDocument::Epub(_))
+        && available_size.width >= MIN_TWO_PAGE_WIDTH;
+    let page_size = crate::epub::page_size(
+        available_size,
+        uses_spread,
+        PAGE_GUTTER,
+        tab.font_size,
+        tab.line_spacing,
+    );
+    EpubLayoutKey::new(page_size, tab.font_size, tab.line_spacing)
+}
+
 fn epub_spread_start(state: &State, page: usize) -> usize {
     crate::epub::spread_start(page, state.epub_pages.len(), epub_uses_spread(state))
 }
@@ -1448,6 +1506,7 @@ fn paginate_epub_task(
     tab_id: u64,
     generation: u64,
     document: Arc<EpubDoc>,
+    layout_key: EpubLayoutKey,
     font_size: f32,
     line_spacing: f32,
     page_size: Size,
@@ -1463,6 +1522,7 @@ fn paginate_epub_task(
         move |pages| Message::EpubPaginated {
             tab_id,
             generation,
+            layout_key,
             pages: Arc::new(pages),
         },
     )
@@ -1801,24 +1861,36 @@ fn uses_page_spreads(state: &State) -> bool {
 }
 
 fn available_reader_size(state: &State) -> Size {
+    available_reader_size_with_panels(
+        state,
+        state.show_bookmarks_panel,
+        state.show_search_bar,
+        state.show_reader_settings,
+        state.show_reader_more,
+    )
+}
+
+fn available_reader_size_with_panels(
+    state: &State,
+    show_bookmarks_panel: bool,
+    show_search_bar: bool,
+    show_reader_settings: bool,
+    show_reader_more: bool,
+) -> Size {
     let window_size = state.performance.window_size().unwrap_or(state.window_size);
     let compact = uses_compact_reader_layout(window_size.width);
-    let bookmarks_width = if state.show_bookmarks_panel {
+    let bookmarks_width = if show_bookmarks_panel {
         BOOKMARKS_PANEL_WIDTH
     } else {
         0.0
     };
-    let search_height = if state.show_search_bar {
+    let search_height = if show_search_bar {
         reader_search_height(compact)
     } else {
         0.0
     };
-    let settings_height = if state.show_reader_settings {
-        62.0
-    } else {
-        0.0
-    };
-    let more_height = if state.show_reader_more {
+    let settings_height = if show_reader_settings { 62.0 } else { 0.0 };
+    let more_height = if show_reader_more {
         reader_more_height(compact)
     } else {
         0.0
@@ -4869,11 +4941,13 @@ mod tests {
             state.line_spacing,
             epub_page_size(state),
         );
+        let layout_key = epub_layout_key(state);
         let _ = update(
             state,
             Message::EpubPaginated {
                 tab_id: state.active_tab_id.unwrap(),
                 generation: state.render_generation,
+                layout_key,
                 pages: Arc::new(pages),
             },
         );
@@ -6514,12 +6588,14 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.render_generation = 2;
         let current = Arc::clone(&state.epub_pages);
+        let layout_key = epub_layout_key(&state);
 
         let _ = update(
             &mut state,
             Message::EpubPaginated {
                 tab_id: 1,
                 generation: 1,
+                layout_key,
                 pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,
@@ -6541,12 +6617,14 @@ mod tests {
         state.render_generation = 2;
         state.current_page = 1;
         state.epub_offset = 25;
+        let layout_key = epub_layout_key(&state);
 
         let _ = update(
             &mut state,
             Message::EpubPaginated {
                 tab_id: 1,
                 generation: 2,
+                layout_key,
                 pages: Arc::new(vec![
                     EpubPage {
                         chapter: 0,
@@ -6581,15 +6659,18 @@ mod tests {
         state.active_tab_id = Some(2);
         state.file_path = Some(PathBuf::from("second.epub"));
         state.document = Some(document);
+        state.show_bookmarks_panel = true;
         let second = capture_reader_tab(&state).unwrap();
         state.tabs = vec![first, second];
         state.active_tab = Some(1);
+        let layout_key = epub_layout_key_for_tab(&state, &state.tabs[0]);
 
         let _ = update(
             &mut state,
             Message::EpubPaginated {
                 tab_id: 1,
                 generation: 4,
+                layout_key,
                 pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,
@@ -6599,6 +6680,47 @@ mod tests {
         );
 
         assert_eq!(state.tabs[0].epub_pages.len(), 1);
+    }
+
+    #[test]
+    fn inactive_epub_rejects_pagination_from_obsolete_window_geometry() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let document = OpenDocument::Epub(Arc::new(epub));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.render_generation = 4;
+        state.window_size = Size::new(700.0, 600.0);
+        let obsolete_layout = epub_layout_key(&state);
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.document = Some(document);
+        state.show_bookmarks_panel = true;
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+        state.window_size = Size::new(1_000.0, 600.0);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 4,
+                layout_key: obsolete_layout,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert!(state.tabs[0].epub_pages.is_empty());
+        assert!(update(&mut state, Message::SelectTab(0)).units() > 0);
     }
 
     #[test]

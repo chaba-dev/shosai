@@ -776,10 +776,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::EpubPaginated {
             tab_id,
             generation,
+            layout_key,
             pages,
         } => {
-            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+            if state.active_tab_id == Some(tab_id)
+                && generation == state.render_generation
+                && layout_key == epub_layout_key(state)
+            {
                 state.epub_pages = pages;
+                state.epub_layout_key = Some(layout_key);
                 if state.epub_pages.is_empty() {
                     state.epub_page = 0;
                     state.error = Some(AppError::EpubEmpty);
@@ -791,19 +796,23 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.error = None;
                     update_bookmark_status(state);
                 }
-            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
-                && generation == tab.render_generation
-            {
-                tab.epub_pages = pages;
-                if tab.epub_pages.is_empty() {
-                    tab.epub_page = 0;
-                    tab.error = Some(AppError::EpubEmpty);
-                } else {
-                    tab.epub_page =
-                        epub_page_for_pages(&tab.epub_pages, tab.current_page, tab.epub_offset)
-                            .min(tab.epub_pages.len() - 1);
-                    tab.page_input = (tab.epub_page + 1).to_string();
-                    tab.error = None;
+            } else if let Some(index) = state.tabs.iter().position(|tab| tab.id == tab_id) {
+                let accepts_layout = generation == state.tabs[index].render_generation
+                    && layout_key == epub_layout_key_for_tab(state, &state.tabs[index]);
+                if accepts_layout {
+                    let tab = &mut state.tabs[index];
+                    tab.epub_pages = pages;
+                    tab.epub_layout_key = Some(layout_key);
+                    if tab.epub_pages.is_empty() {
+                        tab.epub_page = 0;
+                        tab.error = Some(AppError::EpubEmpty);
+                    } else {
+                        tab.epub_page =
+                            epub_page_for_pages(&tab.epub_pages, tab.current_page, tab.epub_offset)
+                                .min(tab.epub_pages.len() - 1);
+                        tab.page_input = (tab.epub_page + 1).to_string();
+                        tab.error = None;
+                    }
                 }
             }
         }

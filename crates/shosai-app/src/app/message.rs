@@ -7,7 +7,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::BookPage;
 use shosai_core::search::SearchMatch;
 
-use super::{ContinuousRequest, EpubPage, InitializedState, PageCacheKey};
+use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -132,6 +132,7 @@ pub enum Message {
     EpubPaginated {
         tab_id: u64,
         generation: u64,
+        layout_key: EpubLayoutKey,
         pages: Arc<Vec<EpubPage>>,
     },
     PageRendered {
