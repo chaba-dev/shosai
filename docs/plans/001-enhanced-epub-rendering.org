@@ -327,9 +327,16 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 - Extend ~crates/shosai-core/tests/epub_tests.rs~ and unit tests in
   ~epub/render.rs~ / ~epub/style.rs~ for parsing, resolution, cascade, and limits.
-- Add generated, redistribution-safe EPUB fixtures under
+- [X] Add the first generated, redistribution-safe EPUB fixture set under
   ~crates/shosai-core/tests/fixtures/~ with source/build scripts or clear
   provenance.  Keep each feature isolated plus one combined conformance book.
+  Thirteen deterministic books plus two expected-rejection archives now cover
+  the fidelity source oracles and representative malformed/hostile inputs,
+  including an opt-in compressed stress variant.  Shared semantic contract
+  tests pass on macOS arm64 and Linux x86_64 without invoking either renderer.
+  This does not complete the full ADR matrix: threshold-specific excess-entry,
+  XML depth/byte, and decoded image/font variants remain part of resource
+  hardening once production budgets exist.
 - Add app tests near the existing EPUB tests in ~crates/shosai-app/src/app.rs~
   for stable locations, pagination, links, image/font caches, and fallback.
 - Add an instrumented page-turn benchmark or performance harness that separates
