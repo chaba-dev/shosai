@@ -1295,7 +1295,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
-            let anchor = (state.current_page, state.epub_offset);
             let page_size = epub_page_size(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
@@ -1315,7 +1314,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 tab_id,
                 generation,
                 Arc::clone(doc),
-                anchor,
                 state.font_size,
                 state.line_spacing,
                 page_size,
@@ -1450,7 +1448,6 @@ fn paginate_epub_task(
     tab_id: u64,
     generation: u64,
     document: Arc<EpubDoc>,
-    location: (usize, usize),
     font_size: f32,
     line_spacing: f32,
     page_size: Size,
@@ -1466,9 +1463,7 @@ fn paginate_epub_task(
         move |pages| Message::EpubPaginated {
             tab_id,
             generation,
-            chapter: location.0,
-            offset: location.1,
-            pages,
+            pages: Arc::new(pages),
         },
     )
 }
@@ -2400,8 +2395,11 @@ fn navigate_to_current_search_result(
 }
 
 fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize {
-    state
-        .epub_pages
+    epub_page_for_pages(&state.epub_pages, chapter, offset)
+}
+
+fn epub_page_for_pages(pages: &[EpubPage], chapter: usize, offset: usize) -> usize {
+    pages
         .iter()
         .enumerate()
         .filter(|(_, page)| {
@@ -2413,12 +2411,7 @@ fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize
         })
         .map(|(index, _)| index)
         .next_back()
-        .or_else(|| {
-            state
-                .epub_pages
-                .iter()
-                .position(|page| page.chapter == chapter)
-        })
+        .or_else(|| pages.iter().position(|page| page.chapter == chapter))
         .unwrap_or(0)
 }
 
@@ -4881,9 +4874,7 @@ mod tests {
             Message::EpubPaginated {
                 tab_id: state.active_tab_id.unwrap(),
                 generation: state.render_generation,
-                chapter: state.current_page,
-                offset: state.epub_offset,
-                pages,
+                pages: Arc::new(pages),
             },
         );
     }
@@ -6529,17 +6520,99 @@ mod tests {
             Message::EpubPaginated {
                 tab_id: 1,
                 generation: 1,
-                chapter: 0,
-                offset: 0,
-                pages: vec![EpubPage {
+                pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,
                     nodes: Vec::new(),
-                }],
+                }]),
             },
         );
 
         assert!(Arc::ptr_eq(&state.epub_pages, &current));
+    }
+
+    #[test]
+    fn epub_pagination_preserves_navigation_that_happened_while_it_ran() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.render_generation = 2;
+        state.current_page = 1;
+        state.epub_offset = 25;
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 2,
+                pages: Arc::new(vec![
+                    EpubPage {
+                        chapter: 0,
+                        title: None,
+                        nodes: Vec::new(),
+                    },
+                    EpubPage {
+                        chapter: 1,
+                        title: None,
+                        nodes: Vec::new(),
+                    },
+                ]),
+            },
+        );
+
+        assert_eq!((state.current_page, state.epub_offset), (1, 25));
+        assert_eq!(state.epub_page, 1);
+    }
+
+    #[test]
+    fn epub_pagination_completes_for_an_inactive_tab() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let document = OpenDocument::Epub(Arc::new(epub));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.render_generation = 4;
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.document = Some(document);
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 4,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert_eq!(state.tabs[0].epub_pages.len(), 1);
+    }
+
+    #[test]
+    fn epub_bookmark_navigation_sets_location_before_initial_pagination() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.total_pages = 2;
+
+        let _ = update(&mut state, Message::GoToBookmark(1, Some(9)));
+
+        assert_eq!((state.current_page, state.epub_offset), (1, 9));
     }
 
     #[test]

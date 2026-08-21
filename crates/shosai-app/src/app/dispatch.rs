@@ -578,9 +578,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::GoToBookmark(page, location_offset) => {
             if uses_paginated_epub_layout(state) {
-                state.epub_page = epub_page_for_location(state, page, location_offset.unwrap_or(0));
-                sync_epub_location(state);
+                state.current_page = page;
                 state.epub_offset = location_offset.unwrap_or(0);
+                state.epub_page =
+                    epub_page_for_location(state, state.current_page, state.epub_offset);
+                if !state.epub_pages.is_empty() {
+                    state.page_input = (state.epub_page + 1).to_string();
+                }
+                update_bookmark_status(state);
                 save_reading_state(state);
                 return Task::none();
             }
@@ -771,22 +776,34 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::EpubPaginated {
             tab_id,
             generation,
-            chapter,
-            offset,
             pages,
         } => {
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
-                state.epub_pages = Arc::new(pages);
+                state.epub_pages = pages;
                 if state.epub_pages.is_empty() {
                     state.epub_page = 0;
                     state.error = Some(AppError::EpubEmpty);
                 } else {
-                    let requested_page = epub_page_for_location(state, chapter, offset);
+                    let requested_page =
+                        epub_page_for_location(state, state.current_page, state.epub_offset);
                     state.epub_page = requested_page.min(state.epub_pages.len() - 1);
-                    state.current_page = state.epub_pages[state.epub_page].chapter;
-                    state.epub_offset = offset;
                     state.page_input = (state.epub_page + 1).to_string();
                     state.error = None;
+                    update_bookmark_status(state);
+                }
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                && generation == tab.render_generation
+            {
+                tab.epub_pages = pages;
+                if tab.epub_pages.is_empty() {
+                    tab.epub_page = 0;
+                    tab.error = Some(AppError::EpubEmpty);
+                } else {
+                    tab.epub_page =
+                        epub_page_for_pages(&tab.epub_pages, tab.current_page, tab.epub_offset)
+                            .min(tab.epub_pages.len() - 1);
+                    tab.page_input = (tab.epub_page + 1).to_string();
+                    tab.error = None;
                 }
             }
         }

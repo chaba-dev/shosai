@@ -132,9 +132,7 @@ pub enum Message {
     EpubPaginated {
         tab_id: u64,
         generation: u64,
-        chapter: usize,
-        offset: usize,
-        pages: Vec<EpubPage>,
+        pages: Arc<Vec<EpubPage>>,
     },
     PageRendered {
         tab_id: u64,
