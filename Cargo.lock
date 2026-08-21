@@ -5122,6 +5122,7 @@ dependencies = [
  "natord",
  "pdfium-render",
  "percent-encoding",
+ "quick-xml",
  "roxmltree 0.21.1",
  "sha2",
  "sqlx",

@@ -1,14 +1,18 @@
 //! EPUB parsing: ZIP extraction, container.xml, OPF, and content loading.
 
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use zip::ZipArchive;
 
-use super::CanonicalEpubPath;
+use super::limits::{
+    resource_read_limit, validate_declared_resource_size, validate_resource, validate_xml_shape,
+};
 use super::types::*;
+use super::{CanonicalEpubPath, EpubLimits};
 use crate::document::DocumentMetadata;
 
 const MAX_ARCHIVE_ENTRIES: usize = u16::MAX as usize;
@@ -22,31 +26,59 @@ pub struct EpubDoc {
 impl EpubDoc {
     /// Open an EPUB file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_limits(path, EpubLimits::default())
+    }
+
+    /// Open an EPUB file with explicit resource admission limits.
+    pub fn open_with_limits(path: impl AsRef<Path>, limits: EpubLimits) -> Result<Self> {
         let path = path.as_ref();
-        let data =
-            std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-        Self::from_bytes(data)
+        let file =
+            File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let declared_bytes = file
+            .metadata()
+            .with_context(|| format!("failed to inspect {}", path.display()))?
+            .len();
+        validate_input_size(declared_bytes, &limits)?;
+        let capacity = usize::try_from(declared_bytes)
+            .unwrap_or(usize::MAX)
+            .min(usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX));
+        let mut data = Vec::with_capacity(capacity);
+        file.take(limits.max_input_bytes.saturating_add(1))
+            .read_to_end(&mut data)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        validate_input_size(data.len() as u64, &limits)?;
+        Self::from_bytes_with_limits(data, limits)
     }
 
     /// Open an EPUB from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        Self::from_bytes_inner(data, false)
+        Self::from_bytes_with_limits(data, EpubLimits::default())
+    }
+
+    /// Open an EPUB from raw bytes with explicit resource admission limits.
+    pub fn from_bytes_with_limits(data: Vec<u8>, limits: EpubLimits) -> Result<Self> {
+        Self::from_bytes_inner(data, false, limits)
     }
 
     /// Open an EPUB while retaining non-spine content documents for the renderer spike.
     #[doc(hidden)]
     pub fn from_bytes_for_renderer_spike(data: Vec<u8>) -> Result<Self> {
-        Self::from_bytes_inner(data, true)
+        Self::from_bytes_inner(data, true, EpubLimits::default())
     }
 
-    fn from_bytes_inner(data: Vec<u8>, include_non_spine_content: bool) -> Result<Self> {
-        let declared_entries = declared_archive_entry_count(&data)?;
+    fn from_bytes_inner(
+        data: Vec<u8>,
+        include_non_spine_content: bool,
+        limits: EpubLimits,
+    ) -> Result<Self> {
+        validate_input_size(data.len() as u64, &limits)?;
+        let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
         let cursor = Cursor::new(data);
         let mut archive = ZipArchive::new(cursor).context("failed to open EPUB as ZIP archive")?;
-        validate_archive_entries(&mut archive, declared_entries)?;
+        validate_archive_entries(&mut archive, declared_entries, &limits)?;
 
         // 1. Parse container.xml to find the OPF path.
-        let opf_path = parse_container(&mut archive)?;
+        let opf_path = parse_container(&mut archive, &limits)?;
 
         // The OPF directory is used as a base for resolving relative paths.
         let opf_dir = opf_path
@@ -54,15 +86,15 @@ impl EpubDoc {
             .map_or_else(String::new, |(directory, _)| directory.to_string());
 
         // 2. Parse the OPF file.
-        let opf_xml = read_archive_entry(&mut archive, &opf_path)
+        let opf_xml = read_archive_entry(&mut archive, &opf_path, &limits)
             .with_context(|| format!("failed to read OPF file: {opf_path}"))?;
         let (metadata, manifest, spine_ids) = parse_opf(&opf_xml, &opf_dir)?;
 
         // 3. Try to parse the TOC (NCX or nav document).
-        let toc = parse_toc(&mut archive, &manifest, &opf_dir);
+        let toc = parse_toc(&mut archive, &manifest, &opf_dir, &limits)?;
 
         // 4. Load chapters (spine items) in reading order.
-        let chapters = load_chapters(&mut archive, &spine_ids, &manifest, &toc)?;
+        let chapters = load_chapters(&mut archive, &spine_ids, &manifest, &toc, &limits)?;
 
         // 5. Load resources (images, CSS, fonts).
         let chapter_paths = chapters
@@ -74,6 +106,7 @@ impl EpubDoc {
             &manifest,
             &chapter_paths,
             include_non_spine_content,
+            &limits,
         )?;
 
         // 6. Parse CSS stylesheets into a class → style map.
@@ -156,35 +189,69 @@ impl EpubDoc {
 // ---------------------------------------------------------------------------
 
 /// Read a file from the ZIP archive as a UTF-8 string.
-fn read_archive_entry(archive: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> Result<String> {
-    let mut file = archive
-        .by_name(name)
-        .with_context(|| format!("entry not found in archive: {name}"))?;
-    let mut buf = String::new();
-    file.read_to_string(&mut buf)
-        .with_context(|| format!("failed to read archive entry: {name}"))?;
-    Ok(buf)
+fn read_archive_entry(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    name: &str,
+    limits: &EpubLimits,
+) -> Result<String> {
+    let bytes = read_archive_bytes_bounded(archive, name, limits.max_xml_bytes)?;
+    let text = String::from_utf8(bytes)
+        .with_context(|| format!("archive entry is not UTF-8 XML: {name}"))?;
+    validate_xml_shape(&text, name, limits)?;
+    Ok(text)
 }
 
 /// Read a file from the ZIP archive as raw bytes.
-fn read_archive_bytes(archive: &mut ZipArchive<Cursor<Vec<u8>>>, name: &str) -> Result<Vec<u8>> {
-    let mut file = archive
+fn read_archive_bytes_bounded(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    name: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>> {
+    let file = archive
         .by_name(name)
         .with_context(|| format!("entry not found in archive: {name}"))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
+    if file.size() > max_bytes {
+        anyhow::bail!(
+            "EPUB archive entry exceeds byte limit: {name} ({} > {max_bytes})",
+            file.size()
+        );
+    }
+    let capacity = usize::try_from(file.size())
+        .unwrap_or(usize::MAX)
+        .min(usize::try_from(max_bytes).unwrap_or(usize::MAX));
+    let mut buf = Vec::with_capacity(capacity);
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut buf)
         .with_context(|| format!("failed to read archive entry: {name}"))?;
+    if buf.len() as u64 > max_bytes {
+        anyhow::bail!(
+            "EPUB archive entry exceeds byte limit while reading: {name} ({} > {max_bytes})",
+            buf.len()
+        );
+    }
     Ok(buf)
+}
+
+fn validate_input_size(bytes: u64, limits: &EpubLimits) -> Result<()> {
+    if bytes > limits.max_input_bytes {
+        anyhow::bail!(
+            "EPUB input exceeds archive byte limit: {bytes} > {}",
+            limits.max_input_bytes
+        );
+    }
+    Ok(())
 }
 
 fn validate_archive_entries(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     declared_entries: usize,
+    limits: &EpubLimits,
 ) -> Result<()> {
     if archive.len() != declared_entries {
         anyhow::bail!("duplicate EPUB archive entry");
     }
     let mut paths = HashSet::new();
+    let mut total_uncompressed = 0_u64;
     for index in 0..archive.len() {
         let file = archive
             .by_index(index)
@@ -197,11 +264,51 @@ fn validate_archive_entries(
         if !paths.insert(path) {
             anyhow::bail!("duplicate EPUB archive entry: {}", file.name());
         }
+        if file.size() > limits.max_entry_bytes {
+            anyhow::bail!(
+                "EPUB archive entry exceeds byte limit: {} ({} > {})",
+                file.name(),
+                file.size(),
+                limits.max_entry_bytes
+            );
+        }
+        if is_xml_archive_path(file.name()) && file.size() > limits.max_xml_bytes {
+            anyhow::bail!(
+                "EPUB XML entry exceeds byte limit: {} ({} > {})",
+                file.name(),
+                file.size(),
+                limits.max_xml_bytes
+            );
+        }
+        total_uncompressed = total_uncompressed
+            .checked_add(file.size())
+            .context("EPUB aggregate uncompressed byte count overflowed")?;
+        if total_uncompressed > limits.max_total_uncompressed_bytes {
+            anyhow::bail!(
+                "EPUB archive exceeds aggregate uncompressed byte limit: {total_uncompressed} > {}",
+                limits.max_total_uncompressed_bytes
+            );
+        }
+        if file.size() >= limits.compression_ratio_min_bytes
+            && (file.compressed_size() == 0
+                || file.size()
+                    > file
+                        .compressed_size()
+                        .saturating_mul(limits.max_compression_ratio))
+        {
+            anyhow::bail!(
+                "EPUB archive entry exceeds compression ratio limit: {} ({} compressed, {} uncompressed, max {}:1)",
+                file.name(),
+                file.compressed_size(),
+                file.size(),
+                limits.max_compression_ratio
+            );
+        }
     }
     Ok(())
 }
 
-fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
+fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<usize> {
     const EOCD_SIGNATURE: &[u8] = b"PK\x05\x06";
     const ZIP64_LOCATOR_SIGNATURE: &[u8] = b"PK\x06\x07";
     const ZIP64_EOCD_SIGNATURE: &[u8] = b"PK\x06\x06";
@@ -223,7 +330,7 @@ fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
         .context("invalid EPUB ZIP footer")?;
     let entries = read_u16(data, entries_offset).context("invalid EPUB ZIP footer")?;
     if entries != u16::MAX {
-        return bounded_archive_entry_count(u64::from(entries));
+        return bounded_archive_entry_count(u64::from(entries), configured_max);
     }
 
     let locator_offset = eocd_offset
@@ -245,14 +352,26 @@ fn declared_archive_entry_count(data: &[u8]) -> Result<usize> {
         .context("invalid EPUB ZIP64 footer")?;
     bounded_archive_entry_count(
         read_u64(data, entry_count_offset).context("invalid EPUB ZIP64 footer")?,
+        configured_max,
     )
 }
 
-fn bounded_archive_entry_count(entries: u64) -> Result<usize> {
-    if entries > MAX_ARCHIVE_ENTRIES as u64 {
+fn bounded_archive_entry_count(entries: u64, configured_max: usize) -> Result<usize> {
+    let max_entries = configured_max.min(MAX_ARCHIVE_ENTRIES);
+    if entries > max_entries as u64 {
         anyhow::bail!("EPUB archive has too many entries: {entries}");
     }
     usize::try_from(entries).context("EPUB ZIP64 entry count is too large")
+}
+
+fn is_xml_archive_path(path: &str) -> bool {
+    let extension = path.rsplit_once('.').map(|(_, extension)| extension);
+    extension.is_some_and(|extension| {
+        matches!(
+            extension.to_ascii_lowercase().as_str(),
+            "xml" | "opf" | "ncx" | "xhtml" | "html" | "svg"
+        )
+    })
 }
 
 fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
@@ -272,8 +391,11 @@ fn get_bytes(data: &[u8], offset: usize, length: usize) -> Option<&[u8]> {
 }
 
 /// Parse META-INF/container.xml to find the OPF file path.
-fn parse_container(archive: &mut ZipArchive<Cursor<Vec<u8>>>) -> Result<String> {
-    let xml = read_archive_entry(archive, "META-INF/container.xml")
+fn parse_container(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    limits: &EpubLimits,
+) -> Result<String> {
+    let xml = read_archive_entry(archive, "META-INF/container.xml", limits)
         .context("EPUB missing META-INF/container.xml")?;
 
     let doc = roxmltree::Document::parse(&xml).context("failed to parse container.xml")?;
@@ -396,28 +518,37 @@ fn parse_toc(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     manifest: &HashMap<String, ManifestItem>,
     opf_dir: &str,
-) -> Vec<TocEntry> {
+    limits: &EpubLimits,
+) -> Result<Vec<TocEntry>> {
     // Try NCX first (EPUB 2).
     if let Some(ncx_item) = manifest
         .values()
         .find(|item| item.media_type == "application/x-dtbncx+xml")
-        && let Ok(xml) = read_archive_entry(archive, &ncx_item.href)
-        && let Ok(entries) = parse_ncx_toc(&xml, opf_dir)
     {
-        return entries;
+        let exists = archive.by_name(&ncx_item.href).is_ok();
+        if exists {
+            let xml = read_archive_entry(archive, &ncx_item.href, limits)?;
+            if let Ok(entries) = parse_ncx_toc(&xml, opf_dir) {
+                return Ok(entries);
+            }
+        }
     }
 
     // Try EPUB 3 nav document.
     if let Some(nav_item) = manifest
         .values()
         .find(|item| item.media_type == "application/xhtml+xml" && item.id.contains("nav"))
-        && let Ok(xml) = read_archive_entry(archive, &nav_item.href)
-        && let Ok(entries) = parse_nav_toc(&xml, opf_dir)
     {
-        return entries;
+        let exists = archive.by_name(&nav_item.href).is_ok();
+        if exists {
+            let xml = read_archive_entry(archive, &nav_item.href, limits)?;
+            if let Ok(entries) = parse_nav_toc(&xml, opf_dir) {
+                return Ok(entries);
+            }
+        }
     }
 
-    Vec::new()
+    Ok(Vec::new())
 }
 
 /// Parse an NCX (EPUB 2) table of contents.
@@ -528,6 +659,7 @@ fn load_chapters(
     spine_ids: &[String],
     manifest: &HashMap<String, ManifestItem>,
     toc: &[TocEntry],
+    limits: &EpubLimits,
 ) -> Result<Vec<Chapter>> {
     // Build a map from (path without fragment) -> TOC title for quick lookup.
     let mut toc_titles: HashMap<String, String> = HashMap::new();
@@ -554,7 +686,7 @@ fn load_chapters(
             continue;
         }
 
-        let content = read_archive_entry(archive, &item.href)
+        let content = read_archive_entry(archive, &item.href, limits)
             .with_context(|| format!("failed to read chapter: {}", item.href))?;
 
         let title = toc_titles.get(&item.href).cloned();
@@ -576,6 +708,7 @@ fn load_resources(
     manifest: &HashMap<String, ManifestItem>,
     chapter_paths: &HashSet<&str>,
     include_non_spine_content: bool,
+    limits: &EpubLimits,
 ) -> Result<HashMap<CanonicalEpubPath, StoredEpubResource>> {
     let mut resources = HashMap::new();
 
@@ -590,16 +723,26 @@ fn load_resources(
             continue;
         }
 
-        // Best effort: skip resources we can't read (e.g. missing from archive).
-        if let Ok(data) = read_archive_bytes(archive, &item.href) {
-            resources.insert(
-                CanonicalEpubPath::new(&item.href)?,
-                StoredEpubResource {
-                    media_type: item.media_type.clone(),
-                    bytes: data,
-                },
-            );
-        }
+        // Missing resources retain the existing deterministic fallback. Present resources that
+        // violate admission limits fail with their canonical path before backend allocation.
+        let declared_size = match archive.by_name(&item.href) {
+            Ok(file) => file.size(),
+            Err(_) => continue,
+        };
+        validate_declared_resource_size(&item.href, &item.media_type, declared_size, limits)?;
+        let data = read_archive_bytes_bounded(
+            archive,
+            &item.href,
+            resource_read_limit(&item.media_type, limits),
+        )?;
+        validate_resource(&item.href, &item.media_type, &data, limits)?;
+        resources.insert(
+            CanonicalEpubPath::new(&item.href)?,
+            StoredEpubResource {
+                media_type: item.media_type.clone(),
+                bytes: data,
+            },
+        );
     }
 
     Ok(resources)
@@ -675,8 +818,9 @@ mod tests {
 
     #[test]
     fn epub_rejects_zip64_entry_counts_above_the_archive_limit() {
-        let error = declared_archive_entry_count(&zip64_footer(u64::from(u16::MAX) + 1))
-            .expect_err("oversized ZIP64 entry count must fail before ZIP parsing");
+        let error =
+            declared_archive_entry_count(&zip64_footer(u64::from(u16::MAX) + 1), usize::MAX)
+                .expect_err("oversized ZIP64 entry count must fail before ZIP parsing");
 
         assert!(
             error.to_string().contains("too many entries"),

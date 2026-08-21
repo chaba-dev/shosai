@@ -1,10 +1,10 @@
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use roxmltree::{Document, Node};
 use sha2::{Digest, Sha256};
-use shosai_core::epub::{CanonicalEpubPath, EpubDoc};
+use shosai_core::epub::{CanonicalEpubPath, EpubDoc, EpubLimits};
 use zip::{CompressionMethod, ZipArchive};
 
 const FIXTURE_IDS: &[&str] = &[
@@ -23,10 +23,28 @@ const FIXTURE_IDS: &[&str] = &[
     "conformance",
 ];
 
+const OPEN_FIXTURE_IDS: &[&str] = &[
+    "nested-image",
+    "css-cascade",
+    "table",
+    "fonts",
+    "fonts-isolation",
+    "mathml",
+    "bidi",
+    "links",
+    "malformed-markup",
+    "canonical-paths",
+    "remote-content",
+    "conformance",
+];
+
 const REJECTION_FIXTURES: &[(&str, &str)] = &[
+    ("resource-limits", "huge.svg"),
     ("missing-spine-resource", "failed to read chapter"),
     ("duplicate-entries", "duplicate EPUB archive entry"),
 ];
+
+const EXTRA_FIXTURE_IDS: &[&str] = &["missing-spine-resource", "duplicate-entries"];
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/epub-conformance")
@@ -48,18 +66,43 @@ fn open(id: &str) -> EpubDoc {
     EpubDoc::open(fixture_path(id)).unwrap_or_else(|error| panic!("{id}: {error:#}"))
 }
 
+fn generate_fixtures(output: &Path, extra_args: &[&str]) {
+    let generator = fixture_dir().join("generate.py");
+    for python in ["python3", "python"] {
+        match Command::new(python)
+            .arg(&generator)
+            .arg("--output")
+            .arg(output)
+            .args(extra_args)
+            .status()
+        {
+            Ok(status) => {
+                assert!(status.success(), "{python} fixture generation failed");
+                return;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("failed to run {python}: {error}"),
+        }
+    }
+    panic!("Python is required to verify fixture generation");
+}
+
 fn resource_bytes<'a>(doc: &'a EpubDoc, path: &str) -> Option<&'a [u8]> {
     doc.resource(path).map(|resource| resource.bytes())
 }
 
 fn archive_entry(id: &str, path: &str) -> String {
+    String::from_utf8(archive_bytes(id, path)).unwrap()
+}
+
+fn archive_bytes(id: &str, path: &str) -> Vec<u8> {
     let file = std::fs::File::open(fixture_path(id)).unwrap();
     let mut archive = ZipArchive::new(file).unwrap();
-    let mut content = String::new();
+    let mut content = Vec::new();
     archive
         .by_name(path)
         .unwrap()
-        .read_to_string(&mut content)
+        .read_to_end(&mut content)
         .unwrap();
     content
 }
@@ -95,7 +138,7 @@ fn has_class(node: Node<'_, '_>, expected: &str) -> bool {
 
 #[test]
 fn complete_fixture_matrix_opens_with_stable_metadata() {
-    for id in FIXTURE_IDS {
+    for id in OPEN_FIXTURE_IDS {
         let doc = open(id);
         assert!(doc.chapter_count() > 0, "{id} has no spine chapters");
         assert_eq!(
@@ -441,24 +484,16 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
         Some("https://example.invalid/redirect")
     );
 
-    let limits = open("resource-limits");
-    assert_eq!(
-        resource_bytes(&limits, "OEBPS/Data/compression.txt")
-            .unwrap()
-            .len(),
-        1024 * 1024
-    );
-    let svg =
-        std::str::from_utf8(resource_bytes(&limits, "OEBPS/Images/huge.svg").unwrap()).unwrap();
+    let compression = archive_bytes("resource-limits", "OEBPS/Data/compression.txt");
+    assert_eq!(compression.len(), 1024 * 1024);
+    let svg = archive_entry("resource-limits", "OEBPS/Images/huge.svg");
     assert!(svg.contains("width=\"100000\" height=\"100000\""));
     assert_eq!(
-        resource_bytes(&limits, "OEBPS/Fonts/corrupt.ttf"),
-        Some(b"malformed font sentinel".as_slice())
+        archive_bytes("resource-limits", "OEBPS/Fonts/corrupt.ttf"),
+        b"malformed font sentinel"
     );
     assert_eq!(
-        resource_bytes(&limits, "OEBPS/Fonts/oversized.ttf")
-            .unwrap()
-            .len(),
+        archive_bytes("resource-limits", "OEBPS/Fonts/oversized.ttf").len(),
         1024 * 1024
     );
 }
@@ -474,6 +509,170 @@ fn invalid_archive_fixtures_fail_at_the_declared_boundary() {
             "{fixture} failed with unexpected error: {error}"
         );
     }
+}
+
+#[test]
+fn configurable_limits_reject_before_unbounded_resource_reads() {
+    let nested_bytes = std::fs::read(fixture_path("nested-image")).unwrap();
+
+    let limits = EpubLimits {
+        max_input_bytes: nested_bytes.len() as u64 - 1,
+        ..EpubLimits::default()
+    };
+    let error = EpubDoc::from_bytes_with_limits(nested_bytes.clone(), limits).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("input exceeds archive byte limit")
+    );
+
+    for (limits, expected) in [
+        (
+            EpubLimits {
+                max_archive_entries: 1,
+                ..EpubLimits::default()
+            },
+            "too many entries",
+        ),
+        (
+            EpubLimits {
+                max_entry_bytes: 100,
+                ..EpubLimits::default()
+            },
+            "archive entry exceeds byte limit",
+        ),
+        (
+            EpubLimits {
+                max_total_uncompressed_bytes: 512,
+                ..EpubLimits::default()
+            },
+            "aggregate uncompressed byte limit",
+        ),
+        (
+            EpubLimits {
+                max_xml_bytes: 128,
+                ..EpubLimits::default()
+            },
+            "XML entry exceeds byte limit",
+        ),
+    ] {
+        let error = EpubDoc::from_bytes_with_limits(nested_bytes.clone(), limits).unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?}, got {error:#}"
+        );
+    }
+
+    let depth_limits = EpubLimits {
+        max_xml_depth: 8,
+        ..EpubLimits::default()
+    };
+    let error =
+        EpubDoc::open_with_limits(fixture_path("malformed-markup"), depth_limits).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("chapter-2.xhtml") && message.contains("depth limit"),
+        "unexpected depth limit error: {message}"
+    );
+
+    let text_limits = EpubLimits {
+        max_xml_text_bytes: 8,
+        ..EpubLimits::default()
+    };
+    let error = EpubDoc::open_with_limits(fixture_path("links"), text_limits).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("text limit"),
+        "unexpected text limit error: {message}"
+    );
+
+    let toc_limits = EpubLimits {
+        max_xml_depth: 4,
+        ..EpubLimits::default()
+    };
+    let error = EpubDoc::open_with_limits(fixture_path("links"), toc_limits).unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("nav.xhtml") && message.contains("depth limit"),
+        "unexpected TOC limit error: {message}"
+    );
+
+    let font_limits = EpubLimits {
+        max_font_bytes: 512 * 1024,
+        max_image_dimension: u32::MAX,
+        max_image_pixels: u64::MAX,
+        max_decoded_image_bytes: u64::MAX,
+        ..EpubLimits::default()
+    };
+    let error =
+        EpubDoc::open_with_limits(fixture_path("resource-limits"), font_limits).unwrap_err();
+    assert!(
+        error.to_string().contains("oversized.ttf")
+            && error
+                .to_string()
+                .contains("font resource exceeds byte limit"),
+        "unexpected font limit error: {error:#}"
+    );
+
+    for (limits, expected) in [
+        (
+            EpubLimits {
+                max_image_dimension: 99_999,
+                max_image_pixels: u64::MAX,
+                max_decoded_image_bytes: u64::MAX,
+                ..EpubLimits::default()
+            },
+            "dimension limit",
+        ),
+        (
+            EpubLimits {
+                max_image_dimension: u32::MAX,
+                max_image_pixels: 9_999_999_999,
+                max_decoded_image_bytes: u64::MAX,
+                ..EpubLimits::default()
+            },
+            "pixel limit",
+        ),
+        (
+            EpubLimits {
+                max_image_dimension: u32::MAX,
+                max_image_pixels: u64::MAX,
+                max_decoded_image_bytes: 39_999_999_999,
+                ..EpubLimits::default()
+            },
+            "decoded byte limit",
+        ),
+    ] {
+        let error = EpubDoc::open_with_limits(fixture_path("resource-limits"), limits).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("huge.svg") && message.contains(expected),
+            "unexpected image limit error: {message}"
+        );
+    }
+
+    let relaxed = EpubLimits {
+        max_image_dimension: 100_000,
+        max_image_pixels: 10_000_000_000,
+        max_decoded_image_bytes: 40_000_000_000,
+        ..EpubLimits::default()
+    };
+    let doc = EpubDoc::open_with_limits(fixture_path("resource-limits"), relaxed).unwrap();
+    assert!(doc.resource("OEBPS/Images/huge.svg").is_some());
+    assert!(doc.resource("OEBPS/Fonts/oversized.ttf").is_some());
+}
+
+#[test]
+fn compressed_stress_fixture_exceeds_default_ratio_limit() {
+    let generated = tempfile::tempdir().unwrap();
+    generate_fixtures(generated.path(), &["--compress-stress-resource"]);
+
+    let error = EpubDoc::open(generated.path().join("resource-limits.epub")).unwrap_err();
+    assert!(
+        error.to_string().contains("compression.txt")
+            && error.to_string().contains("compression ratio limit"),
+        "unexpected compression limit error: {error:#}"
+    );
 }
 
 #[test]
@@ -526,7 +725,7 @@ fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
     let expected = FIXTURE_IDS
         .iter()
         .copied()
-        .chain(REJECTION_FIXTURES.iter().map(|(id, _)| *id))
+        .chain(EXTRA_FIXTURE_IDS.iter().copied())
         .map(|id| format!("{id}.epub"))
         .collect::<Vec<_>>();
     assert_eq!(names, expected);
@@ -575,28 +774,7 @@ fn generated_hash_manifest_covers_exactly_the_fixture_matrix() {
     }
 
     let generated = tempfile::tempdir().unwrap();
-    let generator = fixture_dir().join("generate.py");
-    let mut generated_ok = false;
-    for python in ["python3", "python"] {
-        match Command::new(python)
-            .arg(&generator)
-            .arg("--output")
-            .arg(generated.path())
-            .status()
-        {
-            Ok(status) => {
-                assert!(status.success(), "{python} fixture generation failed");
-                generated_ok = true;
-                break;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("failed to run {python}: {error}"),
-        }
-    }
-    assert!(
-        generated_ok,
-        "Python is required to verify fixture generation"
-    );
+    generate_fixtures(generated.path(), &[]);
     assert_eq!(
         std::fs::read(generated.path().join("SHA256SUMS")).unwrap(),
         std::fs::read(fixture_dir().join("SHA256SUMS")).unwrap()
