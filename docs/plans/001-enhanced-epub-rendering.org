@@ -27,14 +27,20 @@ boundaries.
   not implement selector matching, the cascade, inheritance, layout, or
   ~@font-face~.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
-  ~NodeStyle~.  Tables and MathML have no fidelity-preserving model.
+  ~NodeStyle~.  Each ~EpubDoc~ parses that model once into an immutable chapter
+  presentation shared by search, pagination, and continuous rendering.  Tables
+  and MathML have no fidelity-preserving model.
 - ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
-  ~app.rs~ reparses all chapters on layout refresh and directly creates Iced
-  widgets for both reader modes.  Shared admission checks image dimensions and
-  estimated RGBA size, but backend-specific decode allocations remain a release
-  boundary.  Ordinary paginated turns reuse ~epub_pages~, resolve bookmark state
-  from the loaded bookmark cache, and queue/coalesce reading-state writes off
-  the UI thread.
+  ~app.rs~ derives paginated layout and directly creates Iced widgets for both
+  reader modes from the shared chapter presentation.  Pagination runs on a
+  blocking worker, rejects stale layout generations, and shares completed page
+  storage across reader tabs.  Continuous layout measures chapter node ranges
+  so scrolling, search, relayout, and mode changes retain chapter/character
+  anchors instead of reparsing XHTML.  Shared admission checks image dimensions
+  and estimated RGBA size, but backend-specific decode allocations remain a
+  release boundary.  Ordinary paginated turns reuse ~epub_pages~, resolve
+  bookmark state from the loaded bookmark cache, and queue/coalesce
+  reading-state writes off the UI thread.
   The writer is flushed before shutdown.  Release app-action-to-present
   measurements are recorded in ADR 001; the remaining Iced widget rebuild is
   included in those measurements.  Internal-link fragments are ignored;
@@ -273,9 +279,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   font/image classification, and fail-closed raster/SVG dimension checks before
   resources are exposed through ~EpubResource~; missing resources retain
   fallback behavior.
-- [ ] Separate chapter parsing/computed presentation from
+- [X] Separate chapter parsing/computed presentation from
   ~crates/shosai-app/src/app.rs~ so search, pagination, and both view modes use
-  one cached chapter representation and stable locations.
+  one cached chapter representation and stable locations.  ~EpubPresentation~
+  owns immutable parsed nodes and matching search text in spine order; source
+  content is exposed read-only.  App state retains only shared asynchronous
+  layout derivatives and chapter/character anchors, including measured
+  character ranges in continuous mode.
 - [ ] Define fallback behavior for unsupported CSS, fonts, and MathML, with
   diagnostics that identify the chapter/resource but do not abort the book.
 
