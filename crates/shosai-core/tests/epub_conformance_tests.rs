@@ -220,7 +220,11 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
     let paragraph = |text: &str| {
         rendered.iter().find_map(|node| match node {
             shosai_core::epub::render::ContentNode::Paragraph(spans, _)
-                if spans.iter().map(|span| span.text.as_str()).collect::<String>() == text =>
+                if spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>()
+                    == text =>
             {
                 Some(spans)
             }

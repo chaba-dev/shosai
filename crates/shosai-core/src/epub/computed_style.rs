@@ -279,12 +279,13 @@ fn compute_element_style(
     let mut style = inherited.clone();
     style.display = ua_display(tag);
     style.margin_left_px = 0.0;
-    style.text_indent_px = 0.0;
     apply_ua_text_defaults(tag, &mut style);
-    if element.attribute("dir") == Some("rtl") {
-        style.direction = Direction::Rtl;
-    } else if element.attribute("dir") == Some("ltr") {
-        style.direction = Direction::Ltr;
+    if let Some(direction) = element.attribute("dir") {
+        if direction.eq_ignore_ascii_case("rtl") {
+            style.direction = Direction::Rtl;
+        } else if direction.eq_ignore_ascii_case("ltr") {
+            style.direction = Direction::Ltr;
+        }
     }
 
     let mut specified = SpecifiedStyle::default();
@@ -390,10 +391,7 @@ fn screen_media_matches(media: &MediaList<'_>) -> bool {
             (
                 None | Some(Qualifier::Only),
                 MediaType::All | MediaType::Screen
-            ) | (
-                Some(Qualifier::Not),
-                MediaType::Print | MediaType::Custom(_)
-            )
+            ) | (Some(Qualifier::Not), MediaType::Print)
         )
     })
 }
@@ -474,7 +472,7 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             }
         }
         Property::TextIndent(indent) => {
-            if let Some(value) = relative_length(&indent.value) {
+            if let Some(value) = margin_length(&indent.value) {
                 specified.text_indent.offer(priority, value);
             }
         }
@@ -605,7 +603,7 @@ fn property_supported(property: &Property<'_>) -> bool {
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
             margin_length(value).is_some()
         }
-        Property::TextIndent(indent) => relative_length(&indent.value).is_some(),
+        Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         _ => false,
     }
 }
@@ -690,9 +688,9 @@ fn component_matches(component: &Component<'_>, element: Node<'_, '_>) -> bool {
                 .any(|value| value == class.0.as_ref())
         }),
         Component::Root => parent_element(element).is_none(),
-        Component::Empty => !element.children().any(|child| {
-            child.is_element() || child.text().is_some_and(|text| !text.trim().is_empty())
-        }),
+        Component::Empty => !element
+            .children()
+            .any(|child| child.is_element() || child.text().is_some_and(|text| !text.is_empty())),
         Component::Negation(selectors) => selectors
             .iter()
             .all(|selector| !selector_matches(selector, element)),
@@ -748,13 +746,17 @@ fn apply_ua_text_defaults(tag: &str, style: &mut ComputedStyle) {
         }
         "h2" => {
             style.bold = true;
-            style.font_size_px *= 1.5;
+            style.font_size_px *= 1.6;
         }
         "h3" => {
             style.bold = true;
-            style.font_size_px *= 1.17;
+            style.font_size_px *= 1.3;
         }
-        "h4" | "h5" | "h6" | "strong" | "b" | "th" => style.bold = true,
+        "h4" => {
+            style.bold = true;
+            style.font_size_px *= 1.1;
+        }
+        "h5" | "h6" | "strong" | "b" | "th" => style.bold = true,
         "em" | "i" | "cite" => style.italic = true,
         "code" | "kbd" | "pre" | "samp" | "tt" => {
             style.monospace = true;
@@ -1002,5 +1004,42 @@ mod tests {
 
         assert_eq!(report.element_styles["target"].alignment, Alignment::Center);
         assert!(report.unsupported_rules.is_empty());
+    }
+
+    #[test]
+    fn text_indent_inherits_but_unsupported_percentages_do_not_guess_a_width() {
+        let xhtml = r#"<html><body>
+            <section id="parent"><p id="child">Child</p></section>
+            <p id="percentage">Percentage</p>
+        </body></html>"#;
+        let css = "#parent { text-indent: 2em; } #percentage { text-indent: 25%; }";
+
+        let report = compute_document_styles(xhtml, css).unwrap();
+
+        assert_eq!(report.element_styles["parent"].text_indent_px, 32.0);
+        assert_eq!(report.element_styles["child"].text_indent_px, 32.0);
+        assert_eq!(report.element_styles["percentage"].text_indent_px, 0.0);
+        assert!(
+            report
+                .unsupported_declarations
+                .iter()
+                .any(|declaration| declaration.replace(' ', "") == "text-indent:25%")
+        );
+    }
+
+    #[test]
+    fn empty_and_direction_follow_xhtml_selector_and_attribute_semantics() {
+        let xhtml = r#"<html><body>
+            <p id="truly-empty"></p>
+            <p id="whitespace"> </p>
+            <p id="rtl" dir="RTL">Direction</p>
+        </body></html>"#;
+        let css = ":empty { font-weight: bold; }";
+
+        let report = compute_document_styles(xhtml, css).unwrap();
+
+        assert!(report.element_styles["truly-empty"].bold);
+        assert!(!report.element_styles["whitespace"].bold);
+        assert_eq!(report.element_styles["rtl"].direction, Direction::Rtl);
     }
 }

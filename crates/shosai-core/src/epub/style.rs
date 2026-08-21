@@ -63,8 +63,7 @@ impl EpubStyles {
                         continue;
                     };
                     if let Some(source) = self.sources.get(&reference.path) {
-                        css.push_str(source);
-                        css.push('\n');
+                        append_stylesheet(&mut css, source, element.attribute("media"));
                     }
                 }
                 "style" => {
@@ -76,8 +75,7 @@ impl EpubStyles {
                         },
                     );
                     if let Some(source) = normalized_css(&source) {
-                        css.push_str(&source);
-                        css.push('\n');
+                        append_stylesheet(&mut css, &source, element.attribute("media"));
                     }
                 }
                 _ => {}
@@ -97,6 +95,34 @@ impl EpubStyles {
     }
 }
 
+fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) {
+    if let Some(media) = media.filter(|media| !media.trim().is_empty()) {
+        let Some(media) = normalized_media(media) else {
+            return;
+        };
+        target.push_str("@media ");
+        target.push_str(&media);
+        target.push('{');
+        target.push_str(source);
+        target.push_str("}\n");
+    } else {
+        target.push_str(source);
+        target.push('\n');
+    }
+}
+
+fn normalized_media(source: &str) -> Option<String> {
+    let wrapper = format!("@media {source} {{}}");
+    let sheet = StyleSheet::parse(&wrapper, ParserOptions::default()).ok()?;
+    let [CssRule::Media(rule)] = sheet.rules.0.as_slice() else {
+        return None;
+    };
+    if !rule.rules.0.is_empty() {
+        return None;
+    }
+    rule.query.to_css_string(Default::default()).ok()
+}
+
 fn normalized_css(source: &str) -> Option<String> {
     let sheet = StyleSheet::parse(source, ParserOptions::default()).ok()?;
     let mut normalized = String::new();
@@ -111,6 +137,9 @@ fn normalized_css(source: &str) -> Option<String> {
 }
 
 fn is_stylesheet_link(element: Node<'_, '_>) -> bool {
+    if element.attribute("disabled").is_some() {
+        return false;
+    }
     element.attribute("rel").is_some_and(|relations| {
         let relations = relations.split_ascii_whitespace().collect::<Vec<_>>();
         relations
@@ -146,6 +175,33 @@ mod tests {
         let bold = css.find("font-weight: bold").unwrap();
         let normal = css.find("font-style: normal").unwrap();
         assert!(italic < bold && bold < normal);
+    }
+
+    #[test]
+    fn document_styles_preserve_media_without_accepting_css_injection() {
+        let styles = EpubStyles::parse([
+            ("OEBPS/Styles/print.css", ".target { display: none; }"),
+            (
+                "OEBPS/Styles/injected.css",
+                ".target { font-weight: normal; }",
+            ),
+        ]);
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="../Styles/print.css" media="print"/>
+                <style media="screen">.target { font-weight: bold; }</style>
+                <link rel="stylesheet" href="../Styles/injected.css"
+                      media="screen} .target { display: none }"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+
+        let css = styles.document_css(&document, "OEBPS/Text");
+        assert!(css.contains("@media print"));
+        assert!(css.contains("@media screen"));
+        assert!(css.contains("font-weight: bold"));
+        assert!(!css.contains("font-weight: normal"));
+        assert_eq!(css.matches("display: none").count(), 1);
     }
 
     #[test]

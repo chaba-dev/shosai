@@ -1,8 +1,8 @@
 //! Simplified XHTML → content model renderer for EPUB chapters.
 //!
 //! Parses EPUB chapter XHTML into a flat list of [`ContentNode`] values that
-//! the GUI layer can map to native widgets. Complex CSS is intentionally
-//! ignored; only structural HTML elements are interpreted.
+//! the GUI layer can map to native widgets. A bounded native CSS cascade maps
+//! supported computed styles onto block and inline presentation values.
 
 /// A styled span of inline text.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +98,12 @@ pub fn parse_chapter_xhtml(
         .descendants()
         .find(|n| n.tag_name().name() == "body")
         .unwrap_or(doc.root());
+    if computed_styles
+        .get(body)
+        .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
+    {
+        return Vec::new();
+    }
 
     parse_block_children(body, base_path, &computed_styles)
 }
@@ -147,7 +153,7 @@ fn parse_block_children(
             && css_style.monospace
             && css_style.preserve_whitespace
         {
-            let code = collect_text_content(&child);
+            let code = collect_visible_text_content(&child, styles);
             if !code.trim().is_empty() {
                 nodes.push(ContentNode::CodeBlock {
                     code: code.trim().to_string(),
@@ -160,12 +166,12 @@ fn parse_block_children(
         let node_style = css_to_node_style(css_style, child.tag_name().name());
 
         match child.tag_name().name() {
-            "h1" => push_heading(&mut nodes, &child, 1, &node_style),
-            "h2" => push_heading(&mut nodes, &child, 2, &node_style),
-            "h3" => push_heading(&mut nodes, &child, 3, &node_style),
-            "h4" => push_heading(&mut nodes, &child, 4, &node_style),
-            "h5" => push_heading(&mut nodes, &child, 5, &node_style),
-            "h6" => push_heading(&mut nodes, &child, 6, &node_style),
+            "h1" => push_heading(&mut nodes, &child, 1, &node_style, styles),
+            "h2" => push_heading(&mut nodes, &child, 2, &node_style, styles),
+            "h3" => push_heading(&mut nodes, &child, 3, &node_style, styles),
+            "h4" => push_heading(&mut nodes, &child, 4, &node_style, styles),
+            "h5" => push_heading(&mut nodes, &child, 5, &node_style, styles),
+            "h6" => push_heading(&mut nodes, &child, 6, &node_style, styles),
 
             "p" => {
                 let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
@@ -204,7 +210,7 @@ fn parse_block_children(
 
             "pre" => {
                 let language = extract_language_hint(&child);
-                let code = collect_text_content(&child);
+                let code = collect_visible_text_content(&child, styles);
                 if !code.trim().is_empty() {
                     nodes.push(ContentNode::CodeBlock {
                         code: code.trim().to_string(),
@@ -215,7 +221,7 @@ fn parse_block_children(
 
             "code" => {
                 let language = extract_language_hint(&child);
-                let code = collect_text_content(&child);
+                let code = collect_visible_text_content(&child, styles);
                 if !code.trim().is_empty() {
                     nodes.push(ContentNode::CodeBlock {
                         code: code.trim().to_string(),
@@ -261,8 +267,9 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
 
     let semantic_scale = match tag {
         "h1" => 2.0,
-        "h2" => 1.5,
-        "h3" => 1.17,
+        "h2" => 1.6,
+        "h3" => 1.3,
+        "h4" => 1.1,
         _ => 1.0,
     };
     let font_size_multiplier = css.font_size_px / (16.0 * semantic_scale);
@@ -305,8 +312,11 @@ fn push_heading(
     element: &roxmltree::Node,
     level: u8,
     node_style: &NodeStyle,
+    styles: &super::computed_style::ComputedDocumentStyles,
 ) {
-    let text = collect_text_content(element).trim().to_string();
+    let text = collect_visible_text_content(element, styles)
+        .trim()
+        .to_string();
     if !text.is_empty() {
         nodes.push(ContentNode::Heading {
             level,
@@ -453,14 +463,22 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
     }
 }
 
-/// Recursively collect all text content from an element.
-fn collect_text_content(node: &roxmltree::Node) -> String {
+/// Recursively collect text that participates in native presentation.
+fn collect_visible_text_content(
+    node: &roxmltree::Node,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> String {
     let mut text = String::new();
     for child in node.children() {
         if child.is_text() {
             text.push_str(child.text().unwrap_or(""));
         } else if child.is_element() {
-            text.push_str(&collect_text_content(&child));
+            let hidden = styles
+                .get(child)
+                .is_some_and(|style| style.display == super::computed_style::DisplayRole::None);
+            if !hidden {
+                text.push_str(&collect_visible_text_content(&child, styles));
+            }
         }
     }
     text
@@ -532,14 +550,26 @@ mod tests {
 
     #[test]
     fn test_parse_heading() {
-        let xhtml = r#"<html><body><h1>Title</h1><h2>Subtitle</h2></body></html>"#;
+        let xhtml = r#"<html><head><style>h2 { font-size: 16px; }</style></head><body>
+            <h1>Title</h1><h2>Subtitle</h2><h3>Section</h3><h4>Detail</h4>
+        </body></html>"#;
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
-        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes.len(), 4);
         assert!(
-            matches!(&nodes[0], ContentNode::Heading { level: 1, text, .. } if text == "Title")
+            matches!(&nodes[0], ContentNode::Heading { level: 1, text, style } if
+                text == "Title" && style.font_size_multiplier.is_none())
         );
         assert!(
-            matches!(&nodes[1], ContentNode::Heading { level: 2, text, .. } if text == "Subtitle")
+            matches!(&nodes[1], ContentNode::Heading { level: 2, text, style } if
+                text == "Subtitle" && style.font_size_multiplier == Some(0.625))
+        );
+        assert!(
+            matches!(&nodes[2], ContentNode::Heading { level: 3, style, .. } if
+            style.font_size_multiplier.is_none())
+        );
+        assert!(
+            matches!(&nodes[3], ContentNode::Heading { level: 4, style, .. } if
+            style.font_size_multiplier.is_none())
         );
     }
 
@@ -674,6 +704,47 @@ mod tests {
             Some(super::super::style::TextAlignment::Center)
         );
         assert_eq!(nodes.len(), 3, "display:none content must be omitted");
+    }
+
+    #[test]
+    fn production_rendering_honors_stylesheet_media_attributes() {
+        let xhtml = r#"<html><head>
+            <link rel="stylesheet" href="print.css" media="print"/>
+            <style media="screen">.target { font-style: italic; }</style>
+            <link rel="stylesheet" href="screen.css" media="screen"/>
+        </head><body><p class="target">Visible</p></body></html>"#;
+        let styles = super::super::style::EpubStyles::parse([
+            ("print.css", ".target { display: none; }"),
+            (
+                "screen.css",
+                ".target { font-style: normal; font-weight: bold; }",
+            ),
+        ]);
+
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        let ContentNode::Paragraph(spans, _) = &nodes[0] else {
+            panic!("expected visible paragraph");
+        };
+        assert!(!spans[0].italic, "later screen stylesheet must win");
+        assert!(spans[0].bold);
+    }
+
+    #[test]
+    fn production_rendering_omits_hidden_body_and_non_paragraph_descendants() {
+        let descendant_xhtml = r#"<html><head><style>.hidden { display: none; }</style></head><body>
+            <h1>Visible <span class="hidden">heading sentinel</span></h1>
+            <pre>Visible <span class="hidden">code sentinel</span></pre>
+        </body></html>"#;
+
+        let nodes = parse_chapter_xhtml(descendant_xhtml, "", &Default::default());
+
+        assert!(matches!(&nodes[0], ContentNode::Heading { text, .. } if text == "Visible"));
+        assert!(matches!(&nodes[1], ContentNode::CodeBlock { code, .. } if code == "Visible"));
+
+        let hidden_body = r#"<html><head><style>body { display: none; }</style></head>
+            <body><p>body sentinel</p></body></html>"#;
+        assert!(parse_chapter_xhtml(hidden_body, "", &Default::default()).is_empty());
     }
 
     #[test]
