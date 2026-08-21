@@ -71,21 +71,28 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
     let mut reader = Reader::from_str(xml);
     reader.config_mut().check_end_names = false;
     reader.config_mut().allow_unmatched_ends = true;
-    let mut depth = 0_usize;
+    let mut elements = Vec::<Vec<u8>>::new();
     let mut text_bytes = 0_u64;
     loop {
         match reader.read_event() {
-            Ok(Event::Start(_)) => {
-                depth = depth.checked_add(1).context("EPUB XML depth overflowed")?;
+            Ok(Event::Start(element)) => {
+                let depth = elements
+                    .len()
+                    .checked_add(1)
+                    .context("EPUB XML depth overflowed")?;
                 if depth > limits.max_xml_depth {
                     anyhow::bail!(
                         "EPUB XML entry exceeds depth limit: {path} ({depth} > {})",
                         limits.max_xml_depth
                     );
                 }
+                elements.push(element.name().as_ref().to_vec());
             }
             Ok(Event::Empty(_)) => {
-                let empty_depth = depth.checked_add(1).context("EPUB XML depth overflowed")?;
+                let empty_depth = elements
+                    .len()
+                    .checked_add(1)
+                    .context("EPUB XML depth overflowed")?;
                 if empty_depth > limits.max_xml_depth {
                     anyhow::bail!(
                         "EPUB XML entry exceeds depth limit: {path} ({empty_depth} > {})",
@@ -93,7 +100,14 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                     );
                 }
             }
-            Ok(Event::End(_)) => depth = depth.saturating_sub(1),
+            Ok(Event::End(element)) => {
+                if let Some(index) = elements
+                    .iter()
+                    .rposition(|name| name.as_slice() == element.name().as_ref())
+                {
+                    elements.truncate(index);
+                }
+            }
             Ok(Event::Text(text)) => {
                 text_bytes = text_bytes
                     .checked_add(text.len() as u64)
@@ -131,7 +145,8 @@ pub(crate) fn validate_resource(
     bytes: &[u8],
     limits: &EpubLimits,
 ) -> Result<()> {
-    if (is_font(media_type) || has_font_signature(bytes))
+    let media_type_essence = mime_essence(media_type);
+    if (is_font(&media_type_essence) || has_font_signature(bytes))
         && bytes.len() as u64 > limits.max_font_bytes
     {
         anyhow::bail!(
@@ -141,8 +156,8 @@ pub(crate) fn validate_resource(
         );
     }
 
-    let svg = media_type == "image/svg+xml" || has_svg_signature(bytes);
-    if is_xml(media_type) || svg {
+    let svg = media_type_essence == "image/svg+xml" || has_svg_signature(bytes);
+    if is_xml(&media_type_essence) || svg {
         if bytes.len() as u64 > limits.max_xml_bytes {
             anyhow::bail!(
                 "EPUB XML resource exceeds byte limit: {path} ({} > {})",
@@ -161,7 +176,7 @@ pub(crate) fn validate_resource(
         validate_image_dimensions(path, width, height, limits)?;
     } else {
         let format = image::guess_format(bytes).ok();
-        if media_type.starts_with("image/") || format.is_some() {
+        if media_type_essence.starts_with("image/") || format.is_some() {
             let format = format.with_context(|| {
                 format!("EPUB image resource could not inspect dimensions: {path}")
             })?;
@@ -245,17 +260,52 @@ fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let xml = std::str::from_utf8(bytes).ok()?;
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();
-    if let (Some(width), Some(height)) = (root.attribute("width"), root.attribute("height"))
-        && let (Some(width), Some(height)) = (svg_length(width), svg_length(height))
-    {
-        return Some((width, height));
+    let width = match root.attribute("width") {
+        Some(value) => Some(svg_length(value)?),
+        None => None,
+    };
+    let height = match root.attribute("height") {
+        Some(value) => Some(svg_length(value)?),
+        None => None,
+    };
+    match (width, height) {
+        (Some(width), Some(height)) => return Some((width, height)),
+        (Some(width), None) => {
+            let (view_width, view_height) = svg_view_box(root)?;
+            let height = bounded_dimension(f64::from(width) * view_height / view_width)?;
+            return Some((width, height));
+        }
+        (None, Some(height)) => {
+            let (view_width, view_height) = svg_view_box(root)?;
+            let width = bounded_dimension(f64::from(height) * view_width / view_height)?;
+            return Some((width, height));
+        }
+        (None, None) => {}
     }
+    let (view_width, view_height) = svg_view_box(root)?;
+    Some((
+        bounded_dimension(view_width)?,
+        bounded_dimension(view_height)?,
+    ))
+}
+
+fn svg_view_box(root: roxmltree::Node<'_, '_>) -> Option<(f64, f64)> {
     let mut view_box = root.attribute("viewBox")?.split_ascii_whitespace();
-    view_box.next()?.parse::<f64>().ok()?;
-    view_box.next()?.parse::<f64>().ok()?;
-    let width = bounded_dimension(view_box.next()?.parse::<f64>().ok()?)?;
-    let height = bounded_dimension(view_box.next()?.parse::<f64>().ok()?)?;
-    view_box.next().is_none().then_some((width, height))
+    let min_x = view_box.next()?.parse::<f64>().ok()?;
+    let min_y = view_box.next()?.parse::<f64>().ok()?;
+    let width = view_box.next()?.parse::<f64>().ok()?;
+    let height = view_box.next()?.parse::<f64>().ok()?;
+    if view_box.next().is_some()
+        || !min_x.is_finite()
+        || !min_y.is_finite()
+        || !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+    {
+        return None;
+    }
+    Some((width, height))
 }
 
 fn svg_length(value: &str) -> Option<u32> {
@@ -294,13 +344,16 @@ fn has_font_signature(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\0\x01\0\0")
         || bytes.starts_with(b"OTTO")
         || bytes.starts_with(b"ttcf")
+        || bytes.starts_with(b"true")
+        || bytes.starts_with(b"typ1")
         || bytes.starts_with(b"wOFF")
         || bytes.starts_with(b"wOF2")
 }
 
 fn is_xml(media_type: &str) -> bool {
+    let media_type = mime_essence(media_type);
     matches!(
-        media_type,
+        media_type.as_str(),
         "application/xhtml+xml"
             | "application/x-dtbncx+xml"
             | "application/xml"
@@ -310,15 +363,25 @@ fn is_xml(media_type: &str) -> bool {
 }
 
 fn is_font(media_type: &str) -> bool {
+    let media_type = mime_essence(media_type);
     media_type.starts_with("font/")
         || matches!(
-            media_type,
+            media_type.as_str(),
             "application/font-sfnt"
                 | "application/font-woff"
                 | "application/vnd.ms-opentype"
                 | "application/x-font-otf"
                 | "application/x-font-truetype"
         )
+}
+
+fn mime_essence(media_type: &str) -> String {
+    media_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
 }
 
 #[cfg(test)]
@@ -334,6 +397,23 @@ mod tests {
 
         let error = validate_xml_shape("<root><leaf/></root>", "chapter.xhtml", &limits)
             .expect_err("empty child must count as a nested element");
+
+        assert!(error.to_string().contains("depth limit"));
+    }
+
+    #[test]
+    fn unmatched_xml_end_tags_cannot_reset_nesting_depth() {
+        let limits = EpubLimits {
+            max_xml_depth: 2,
+            ..EpubLimits::default()
+        };
+
+        let error = validate_xml_shape(
+            "<root></bogus><parent><leaf/></parent></root>",
+            "chapter.xhtml",
+            &limits,
+        )
+        .expect_err("an unmatched end tag must not cancel a live ancestor");
 
         assert!(error.to_string().contains("depth limit"));
     }
@@ -399,6 +479,68 @@ mod tests {
     }
 
     #[test]
+    fn mime_essences_and_legacy_font_signatures_cannot_bypass_limits() {
+        let image_error = validate_resource(
+            "Images/corrupt.bin",
+            " IMAGE/PNG ; charset=binary ",
+            b"not an image",
+            &EpubLimits::default(),
+        )
+        .expect_err("MIME matching must be case-insensitive and ignore parameters");
+        assert!(
+            image_error
+                .to_string()
+                .contains("could not inspect dimensions")
+        );
+
+        let resource_limits = EpubLimits {
+            max_xml_bytes: 4,
+            max_font_bytes: 4,
+            ..EpubLimits::default()
+        };
+        let xml_error = validate_resource(
+            "Text/chapter.bin",
+            " APPLICATION/XHTML+XML ; CHARSET=UTF-8 ",
+            b"<root/>",
+            &resource_limits,
+        )
+        .expect_err("parameterized XML MIME must enforce XML limits");
+        assert!(
+            xml_error
+                .to_string()
+                .contains("XML resource exceeds byte limit")
+        );
+
+        let font_error = validate_resource(
+            "Fonts/book.bin",
+            " FONT/WOFF2 ; profile=fixture ",
+            b"not-a-font",
+            &resource_limits,
+        )
+        .expect_err("parameterized font MIME must enforce font limits");
+        assert!(
+            font_error
+                .to_string()
+                .contains("font resource exceeds byte limit")
+        );
+
+        for signature in [b"truepayload".as_slice(), b"typ1payload"] {
+            let error = validate_resource(
+                "Fonts/legacy.bin",
+                "application/octet-stream",
+                signature,
+                &resource_limits,
+            )
+            .expect_err("legacy SFNT signatures must enforce font limits");
+            assert!(
+                error
+                    .to_string()
+                    .contains("font resource exceeds byte limit")
+            );
+        }
+    }
+
+    #[test]
     fn declared_images_fail_closed_when_dimensions_are_uninspectable() {
         let error = validate_resource(
             "Images/corrupt.png",
@@ -428,6 +570,31 @@ mod tests {
             .expect_err("oversized absolute SVG lengths must be bounded");
 
             assert!(error.to_string().contains("dimension limit"));
+        }
+    }
+
+    #[test]
+    fn svg_single_axis_and_invalid_dimensions_cannot_fall_back_to_small_viewbox() {
+        for dimensions in [
+            "width=\"100000pt\"",
+            "height=\"100000pt\"",
+            "width=\"calc(1px)\" height=\"1px\"",
+        ] {
+            let svg = format!(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\" {dimensions}/>"
+            );
+            let error = validate_resource(
+                "Images/cover.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &EpubLimits::default(),
+            )
+            .expect_err("declared SVG dimensions must not be discarded for viewBox");
+
+            assert!(
+                error.to_string().contains("dimension"),
+                "unexpected SVG dimension error: {error:#}"
+            );
         }
     }
 }
