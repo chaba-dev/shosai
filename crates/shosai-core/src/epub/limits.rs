@@ -131,7 +131,9 @@ pub(crate) fn validate_resource(
     bytes: &[u8],
     limits: &EpubLimits,
 ) -> Result<()> {
-    if is_font(media_type) && bytes.len() as u64 > limits.max_font_bytes {
+    if (is_font(media_type) || has_font_signature(bytes))
+        && bytes.len() as u64 > limits.max_font_bytes
+    {
         anyhow::bail!(
             "EPUB font resource exceeds byte limit: {path} ({} > {})",
             bytes.len(),
@@ -139,21 +141,35 @@ pub(crate) fn validate_resource(
         );
     }
 
-    if is_xml(media_type) {
+    let svg = media_type == "image/svg+xml" || has_svg_signature(bytes);
+    if is_xml(media_type) || svg {
+        if bytes.len() as u64 > limits.max_xml_bytes {
+            anyhow::bail!(
+                "EPUB XML resource exceeds byte limit: {path} ({} > {})",
+                bytes.len(),
+                limits.max_xml_bytes
+            );
+        }
         let text = std::str::from_utf8(bytes)
             .with_context(|| format!("EPUB XML resource is not UTF-8: {path}"))?;
         validate_xml_shape(text, path, limits)?;
     }
 
-    if media_type == "image/svg+xml" {
-        if let Some((width, height)) = svg_dimensions(bytes) {
-            validate_image_dimensions(path, width, height, limits)?;
-        }
-    } else if media_type.starts_with("image/") {
-        let reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format();
-        if let Ok(reader) = reader
-            && let Ok((width, height)) = reader.into_dimensions()
-        {
+    if svg {
+        let (width, height) = svg_dimensions(bytes)
+            .with_context(|| format!("EPUB SVG dimensions could not be bounded: {path}"))?;
+        validate_image_dimensions(path, width, height, limits)?;
+    } else {
+        let format = image::guess_format(bytes).ok();
+        if media_type.starts_with("image/") || format.is_some() {
+            let format = format.with_context(|| {
+                format!("EPUB image resource could not inspect dimensions: {path}")
+            })?;
+            let (width, height) = image::ImageReader::with_format(Cursor::new(bytes), format)
+                .into_dimensions()
+                .with_context(|| {
+                    format!("EPUB image resource could not inspect dimensions: {path}")
+                })?;
             validate_image_dimensions(path, width, height, limits)?;
         }
     }
@@ -229,17 +245,57 @@ fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let xml = std::str::from_utf8(bytes).ok()?;
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();
-    let width = svg_length(root.attribute("width")?)?;
-    let height = svg_length(root.attribute("height")?)?;
-    Some((width, height))
+    if let (Some(width), Some(height)) = (root.attribute("width"), root.attribute("height"))
+        && let (Some(width), Some(height)) = (svg_length(width), svg_length(height))
+    {
+        return Some((width, height));
+    }
+    let mut view_box = root.attribute("viewBox")?.split_ascii_whitespace();
+    view_box.next()?.parse::<f64>().ok()?;
+    view_box.next()?.parse::<f64>().ok()?;
+    let width = bounded_dimension(view_box.next()?.parse::<f64>().ok()?)?;
+    let height = bounded_dimension(view_box.next()?.parse::<f64>().ok()?)?;
+    view_box.next().is_none().then_some((width, height))
 }
 
 fn svg_length(value: &str) -> Option<u32> {
-    value
-        .strip_suffix("px")
-        .unwrap_or(value)
-        .parse::<u32>()
+    const UNITS: &[(&str, f64)] = &[
+        ("px", 1.0),
+        ("in", 96.0),
+        ("cm", 96.0 / 2.54),
+        ("mm", 96.0 / 25.4),
+        ("q", 96.0 / 101.6),
+        ("pt", 96.0 / 72.0),
+        ("pc", 16.0),
+    ];
+    let normalized = value.trim().to_ascii_lowercase();
+    let (number, scale) = UNITS
+        .iter()
+        .find_map(|(unit, scale)| normalized.strip_suffix(unit).map(|number| (number, *scale)))
+        .unwrap_or((&normalized, 1.0));
+    bounded_dimension(number.parse::<f64>().ok()? * scale)
+}
+
+fn bounded_dimension(value: f64) -> Option<u32> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) {
+        return None;
+    }
+    Some(value.ceil() as u32)
+}
+
+fn has_svg_signature(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes)
         .ok()
+        .and_then(|xml| roxmltree::Document::parse(xml).ok())
+        .is_some_and(|document| document.root_element().tag_name().name() == "svg")
+}
+
+fn has_font_signature(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\0\x01\0\0")
+        || bytes.starts_with(b"OTTO")
+        || bytes.starts_with(b"ttcf")
+        || bytes.starts_with(b"wOFF")
+        || bytes.starts_with(b"wOF2")
 }
 
 fn is_xml(media_type: &str) -> bool {
@@ -267,7 +323,7 @@ fn is_font(media_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{EpubLimits, validate_xml_shape};
+    use super::{EpubLimits, validate_resource, validate_xml_shape};
 
     #[test]
     fn empty_xml_elements_count_toward_depth() {
@@ -296,5 +352,82 @@ mod tests {
                 .to_string()
                 .contains("failed to inspect EPUB XML resource")
         );
+    }
+
+    #[test]
+    fn signatures_apply_image_and_font_limits_despite_generic_media_types() {
+        let mut bmp = vec![0_u8; 54];
+        bmp[..2].copy_from_slice(b"BM");
+        bmp[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&20_000_i32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&20_000_i32.to_le_bytes());
+        bmp[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        let image_limits = EpubLimits {
+            max_image_dimension: 16_384,
+            ..EpubLimits::default()
+        };
+        let error = validate_resource(
+            "Images/cover.bin",
+            "application/octet-stream",
+            &bmp,
+            &image_limits,
+        )
+        .expect_err("a disguised BMP must still be inspected as an image");
+        assert!(
+            error.to_string().contains("dimension limit"),
+            "unexpected disguised image error: {error:#}"
+        );
+
+        let font_limits = EpubLimits {
+            max_font_bytes: 4,
+            ..EpubLimits::default()
+        };
+        let error = validate_resource(
+            "Fonts/book.bin",
+            "application/octet-stream",
+            b"wOF2payload",
+            &font_limits,
+        )
+        .expect_err("a disguised WOFF2 font must still enforce the font byte limit");
+        assert!(
+            error
+                .to_string()
+                .contains("font resource exceeds byte limit")
+        );
+    }
+
+    #[test]
+    fn declared_images_fail_closed_when_dimensions_are_uninspectable() {
+        let error = validate_resource(
+            "Images/corrupt.png",
+            "image/png",
+            b"not an image",
+            &EpubLimits::default(),
+        )
+        .expect_err("declared image bytes must not bypass dimension inspection");
+
+        assert!(error.to_string().contains("could not inspect dimensions"));
+    }
+
+    #[test]
+    fn svg_absolute_lengths_cannot_bypass_dimension_limits() {
+        for dimensions in [
+            "width=\"100000.5px\" height=\"1px\"",
+            "width=\"75000pt\" height=\"1pt\"",
+            "width=\"75000PT\" height=\"1PT\"",
+        ] {
+            let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" {dimensions}/>");
+            let error = validate_resource(
+                "Images/cover.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &EpubLimits::default(),
+            )
+            .expect_err("oversized absolute SVG lengths must be bounded");
+
+            assert!(error.to_string().contains("dimension limit"));
+        }
     }
 }
