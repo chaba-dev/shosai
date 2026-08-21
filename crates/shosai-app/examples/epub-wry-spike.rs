@@ -227,13 +227,21 @@ impl SpikeBook {
             CanonicalEpubPath::new(&first_chapter.path).map_err(|error| error.to_string())?;
         let start_url = first_path.to_protocol_uri();
         let mut resources = HashMap::new();
+        let mut manifest_resources = epub
+            .resources()
+            .map(|resource| {
+                (
+                    resource.path().as_str().to_string(),
+                    resource.bytes().to_vec(),
+                )
+            })
+            .collect::<HashMap<_, _>>();
         let mut chapter_resources = epub
             .content
             .chapters
             .into_iter()
             .map(|chapter| (chapter.path, chapter.content.into_bytes()))
             .collect::<HashMap<_, _>>();
-        let mut manifest_resources = epub.content.resources;
 
         for item in epub.content.manifest.into_values() {
             if let Some(body) = manifest_resources

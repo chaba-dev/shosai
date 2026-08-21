@@ -14,7 +14,9 @@ mod types;
 
 #[cfg(test)]
 mod computed_style;
+mod limits;
 
+pub use limits::EpubLimits;
 pub use parser::EpubDoc;
 pub use resource::{CanonicalEpubPath, EpubReference};
 pub use types::*;

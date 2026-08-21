@@ -5117,11 +5117,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "flate2",
  "image",
  "lightningcss",
  "natord",
  "pdfium-render",
  "percent-encoding",
+ "quick-xml",
  "roxmltree 0.21.1",
  "sha2",
  "sqlx",

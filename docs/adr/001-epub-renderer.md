@@ -1,7 +1,8 @@
 # ADR 001: EPUB renderer
 
-- Status: Investigating (Gate 0)
+- Status: Accepted — native renderer selected
 - Date: 2026-08-17
+- Decision date: 2026-08-21
 - Plan: [001 Enhanced EPUB Rendering](../plans/001-enhanced-epub-rendering.org)
 
 ## Context
@@ -13,8 +14,9 @@ browser implementation. Gate 0 compares two routes:
 1. embed an operating-system webview through `wry`;
 2. expand the native parser, computed-style, layout, and Iced presentation.
 
-This record is intentionally not a decision yet. It captures reproducible spike
-evidence and keeps unknowns visible until both routes render the same fixtures.
+This record preserves the spike evidence that led to the decision. Native
+rendering is the production route; the Wry harness remains an optional research
+and comparison tool, not a production backend or fallback.
 
 ## Current spike harness
 
@@ -334,11 +336,11 @@ The current support boundary is now explicit:
   and retain backend-independent core tests on Windows; shipping a Windows
   renderer is deferred until Shōsai publishes a Windows artifact.
 
-A Wry-only implementation does not currently satisfy that boundary because it
-has no child-view path in Shōsai's Wayland host and would add an unbundled
-WebKitGTK runtime to Linux. Gate 0 may still select Wry only if the spike proves
-a maintainable Wayland integration or defines and evaluates a native fallback;
-silently disabling EPUB rendering on a shipped session type is not acceptable.
+A Wry-only implementation does not satisfy that boundary because it has no
+child-view path in Shōsai's Wayland host and would add an unbundled WebKitGTK
+runtime to Linux. Silently disabling EPUB rendering on a shipped session type
+is not acceptable, and maintaining a second native fallback would retain most
+of the native implementation cost while adding webview integration complexity.
 
 Authoritative implementation references:
 
@@ -348,12 +350,16 @@ Authoritative implementation references:
 
 ## Comparison matrix
 
-Scores remain unset until the same fixture and measurement protocol is used.
+These are qualitative engineering assessments rather than synthetic numeric
+scores. Equivalent rendering measurements remain useful for implementation
+quality, but they cannot overcome Wry's failure to support a shipped session
+type. Gate 0 therefore rejects Wry at the support boundary instead of spending
+more work proving fidelity for a route that cannot ship everywhere required.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
 | CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
-| Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Smaller surface, resource policy incomplete                     | Repeat proof on Windows; resource limits               |
+| Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Shared archive/resource admission bounds actual ZIP output and XML/font/image inputs before native presentation | Backend decode allocation enforcement and external-link policy |
 | Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, exact text input, and directly addressed parent key routing proven on Linux/X11, but physical-key handoff remains unproven and child-to-Iced clipboard reads deadlock without a custom bridge; still outside widget composition | Natural widget composition                                      | Linux physical-key handoff, clipboard bridge decision, physical-pixel correctness, clipping, production tabs, IME, other targets |
 | Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
 | Accessibility/selection    | WebKit exposes the proof web area and labeled input on macOS, but the surrounding Iced controls are absent from the same accessibility tree; selection is untested | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Resolve the Iced blocker, then screen-reader, hit-testing, and selection tests |
@@ -680,26 +686,62 @@ workloads, host details, budgets, and complete native baseline. All measured
 paths met their initial budgets; large-text relayout was the dominant native
 cost.
 
-## Next spike steps
+## Native implementation follow-up
 
-1. Exercise broader display arrangements and physical-pixel behavior,
-   production-tab integration, IME, and accessibility behavior on macOS.
-   Logical bounds across one 2→1 scale change, invalid-bounds visibility,
-   overlays, repeated harness tab-state input handoffs, and ordinary close
-   teardown are already proven separately.
-2. Run the same child and hostile-content spikes on Windows and Linux arm64.
-   Confirm or reject the Linux/X11 physical-key handoff that untargeted XTest
-   cannot exercise, decide whether the blocked child-to-Iced clipboard path
-   justifies a custom bridge, then complete IME and accessibility checks. Decide
-   whether those results and the lack of a viable Wayland host reject Wry or
-   justify a documented backend fallback.
-3. Extend the native component evidence with inline-tree construction, a fuller
+1. Extend the native component evidence with inline-tree construction, a fuller
    table compatibility boundary, production font integration,
-   selection/accessibility, pagination, and MathML, then render the same fixture.
-   Treat every test-only prototype as evidence, not a production implementation.
-4. Run the same release performance protocol for Wry and on the other released
-   platforms before assigning final comparison scores or choosing a renderer.
+   selection/accessibility, pagination, and MathML, then render the combined
+   fixture. Treat every test-only prototype as evidence, not a production
+   implementation.
+2. Preserve the shared resource, hostile-input, stable-location, and reader
+   feature contracts independently of presentation code.
+3. Run the release performance and packaging protocols on macOS arm64, Linux
+   x86_64/arm64 under X11 and Wayland, and backend-independent Windows CI as
+   native milestones enter production.
+4. Keep unsupported CSS and MathML behavior explicit and readable rather than
+   silently approximating browser behavior.
 
 ## Decision
 
-No renderer selected. Gate 0 remains open.
+Select the expanded native renderer for production EPUB work and close Gate 0.
+This decision prioritizes the shipped platform boundary and one composable Iced
+application tree over browser-level fidelity:
+
+- native rendering works within the existing macOS, Linux X11, Linux Wayland,
+  and Windows build architecture without adding a platform web runtime;
+- Iced composition avoids native-child clipping, overlay, tab-lifecycle, focus,
+  clipboard, and split accessibility-tree problems;
+- EPUB bytes remain behind one Rust resource-policy boundary rather than being
+  served to several platform engines with different behavior;
+- the existing production renderer and the bounded native cascade, shaping,
+  block, table, font, and MathML prototypes provide an incremental path, even
+  though substantial fidelity and accessibility work remains.
+
+### Rejected alternatives
+
+- **Wry-only:** rejected because native Wayland child embedding is unavailable,
+  Linux packaging requires WebKitGTK, Linux clipboard interoperability is
+  blocked without a custom bridge, and macOS does not expose one complete Iced
+  plus WebKit accessibility tree.
+- **Wry with a native fallback:** rejected because it requires both renderer
+  stacks, duplicate behavioral testing, and platform-dependent reading output
+  while retaining nearly all native implementation and maintenance cost.
+- **Defer the decision:** rejected because the hard portability failure is
+  sufficient to choose an architecture; additional Wry fidelity evidence would
+  not make Wry-only shippable on the current support boundary.
+
+### Consequences and rollback
+
+Native does not imply full browser compatibility. Shōsai owns a documented CSS
+subset, table behavior, EPUB-local font policy, bounded MathML support and
+fallback, selection/accessibility mapping, pagination, and stable locations.
+Milestones must land behind semantic fixtures and keep the existing readable
+fallback until each replacement path is proven.
+
+Reconsider a webview backend only through a new ADR if the host architecture can
+embed one composably on every shipped session type, Linux distribution includes
+an accepted runtime strategy, focus/clipboard/accessibility blockers have
+platform proofs, and measured maintenance or fidelity shows that the bounded
+native route cannot meet agreed acceptance criteria. The optional Wry spike may
+be removed if it stops providing useful comparison evidence; it must not
+silently become a production fallback.

@@ -22,12 +22,13 @@ by default; only the text resource is compressed by the stress option.
 temporary compressed variant for testing specific size and compression-ratio
 limits. Stress variants are not expected to match the checked-in hashes.
 
-The checked-in matrix contains thirteen books expected to open and two archives
-expected to fail at a declared parser boundary (a missing spine resource and a
-duplicate ZIP entry). It supplies semantic source oracles and representative
-negative shapes; it does not yet claim every threshold permutation in ADR 001.
-Entry-count overflow, XML byte/depth ceilings, and decoded raster/font limits
-will use temporary variants tied to the configured production budgets.
+The checked-in matrix contains twelve books expected to open and three archives
+expected to fail at a declared parser boundary (an oversized declared image, a
+missing spine resource, and a duplicate ZIP entry). It supplies semantic source
+oracles and representative negative shapes; configurable-limit tests cover
+input, entry count, compression ratio, per-entry and aggregate bytes, XML
+bytes/depth/text, font bytes, and decoded image dimensions/bytes. Stress
+variants are generated temporarily against the production budgets.
 
 The fixture-contract tests assert source semantics, not renderer-specific pixel
 output. A backend must preserve those semantics before screenshots can count as

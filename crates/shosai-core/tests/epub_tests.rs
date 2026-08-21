@@ -104,7 +104,10 @@ fn test_resources_loaded() {
     // CSS should be loaded as a resource
     let css = doc.resource("OEBPS/style.css");
     assert!(css.is_some(), "CSS resource should be loaded");
-    let css_text = std::str::from_utf8(css.unwrap()).unwrap();
+    let css = css.unwrap();
+    assert_eq!(css.path().as_str(), "OEBPS/style.css");
+    assert_eq!(css.media_type(), "text/css");
+    let css_text = std::str::from_utf8(css.bytes()).unwrap();
     assert!(
         css_text.contains("font-family"),
         "CSS should contain styles"
@@ -114,7 +117,10 @@ fn test_resources_loaded() {
     let cover = doc.resource("OEBPS/images/cover.png");
     assert!(cover.is_some(), "cover image should be loaded");
     assert!(
-        cover.unwrap().starts_with(&[0x89, b'P', b'N', b'G']),
+        cover
+            .unwrap()
+            .bytes()
+            .starts_with(&[0x89, b'P', b'N', b'G']),
         "cover should be a valid PNG"
     );
 }

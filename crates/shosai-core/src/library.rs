@@ -471,8 +471,8 @@ fn extract_epub_metadata(path: &Path) -> Result<(String, Option<String>, Option<
         .cover_image_id
         .as_ref()
         .and_then(|id| doc.content.manifest.get(id))
-        .and_then(|item| doc.content.resources.get(&item.href))
-        .and_then(|data| resize_cover_image(data));
+        .and_then(|item| doc.resource(&item.href))
+        .and_then(|resource| resize_cover_image(resource.bytes()));
 
     Ok((title, author, cover))
 }

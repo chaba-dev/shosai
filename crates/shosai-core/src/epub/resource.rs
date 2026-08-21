@@ -1,5 +1,6 @@
 //! Canonical archive paths and same-book EPUB references.
 
+use std::borrow::Borrow;
 use std::fmt;
 
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
@@ -137,6 +138,12 @@ impl CanonicalEpubPath {
             .collect::<Vec<_>>()
             .join("/");
         format!("shosai://book/{encoded}")
+    }
+}
+
+impl Borrow<str> for CanonicalEpubPath {
+    fn borrow(&self) -> &str {
+        self.as_str()
     }
 }
 

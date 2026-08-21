@@ -1215,7 +1215,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 cache_epub_image_handles(
                     &mut state.epub_image_handles,
                     state.continuous_chapters.iter().flatten(),
-                    &doc.content.resources,
+                    &|path| doc.resource(path).map(|resource| resource.bytes()),
                 );
                 state.error = None;
                 return scroll_to_current_page(state);
@@ -1295,7 +1295,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             cache_epub_image_handles(
                 &mut state.epub_image_handles,
                 parsed_chapters.iter().flatten(),
-                &doc.content.resources,
+                &|path| doc.resource(path).map(|resource| resource.bytes()),
             );
             state.epub_pages = parsed_chapters
                 .iter()
@@ -1369,18 +1369,20 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
-fn cache_epub_image_handles<'a>(
+fn cache_epub_image_handles<'a, F>(
     handles: &mut HashMap<String, EpubImageHandle>,
     nodes: impl IntoIterator<Item = &'a ContentNode>,
-    resources: &HashMap<String, Vec<u8>>,
-) {
+    resource_bytes: &F,
+) where
+    F: Fn(&str) -> Option<&'a [u8]>,
+{
     for node in nodes {
         match node {
             ContentNode::Image { src, .. } => {
                 if handles.contains_key(src) {
                     continue;
                 }
-                let Some(data) = resources.get(src) else {
+                let Some(data) = resource_bytes(src) else {
                     continue;
                 };
                 let Ok(image) = ::image::load_from_memory(data) else {
@@ -1394,7 +1396,7 @@ fn cache_epub_image_handles<'a>(
                 );
             }
             ContentNode::BlockQuote { children, .. } => {
-                cache_epub_image_handles(handles, children, resources);
+                cache_epub_image_handles(handles, children, resource_bytes);
             }
             _ => {}
         }
@@ -6584,7 +6586,9 @@ mod tests {
         }];
         let mut handles = HashMap::new();
 
-        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        cache_epub_image_handles(&mut handles, &nodes, &|path| {
+            resources.get(path).map(Vec::as_slice)
+        });
         let first_id = handles.get("image.png").unwrap().0.id();
         drop(render_content_node(
             &nodes[0],
@@ -6596,7 +6600,9 @@ mod tests {
             0,
             &[],
         ));
-        cache_epub_image_handles(&mut handles, &nodes, &resources);
+        cache_epub_image_handles(&mut handles, &nodes, &|path| {
+            resources.get(path).map(Vec::as_slice)
+        });
         drop(render_content_node(
             &nodes[0],
             &I18n::new(LanguagePreference::English),
