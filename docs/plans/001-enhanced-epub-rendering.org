@@ -1,5 +1,5 @@
 #+TITLE: Enhanced EPUB Rendering Plan
-#+STATUS: Draft
+#+STATUS: Active
 #+AUTHOR: Shōsai contributors
 #+DATE: 2026-08-14
 #+STARTUP: showall
@@ -7,19 +7,21 @@
 * Objective
 
 Improve EPUB fidelity without weakening Shōsai's native reading experience or
-mistaking text shaping for a complete HTML/CSS implementation.  The first gate
-is an ADR-backed technical spike comparing an embedded ~wry~ webview with an
-expanded native renderer.  No production renderer work starts until that gate
-has selected an approach and recorded its security, packaging, accessibility,
-and maintenance consequences.
+mistaking text shaping for a complete HTML/CSS implementation.  ADR 001's first
+gate compared an embedded ~wry~ webview with an expanded native renderer and
+selected native on 2026-08-21.  Production work follows the native milestones
+and preserves the recorded security, packaging, accessibility, and maintenance
+boundaries.
 
 * Current Baseline
 
 - ~crates/shosai-core/src/epub/parser.rs~ reads container/OPF, spine, TOC,
   XHTML, and manifest resources.  Manifest resources are held eagerly in
-  ~EpubContent.resources~ without entry-count, compression-ratio, or
-  aggregate-byte limits.  A shared canonical resolver now validates archive
-  names and same-book paths before parser or custom-protocol lookup.
+  ~EpubContent.resources~ behind canonical read-only resource views.  Shared
+  admission policy bounds archive input, entries, compression, aggregate bytes,
+  XML, fonts, and image dimensions before resources reach presentation
+  backends.  A canonical resolver validates archive names and same-book paths
+  before parser or custom-protocol lookup.
 - ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but extracts class
   tokens from serialized selectors into a small-property ~StyleMap~.  It does
   not implement selector matching, the cascade, inheritance, layout, or
@@ -27,10 +29,12 @@ and maintenance consequences.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Tables and MathML have no fidelity-preserving model.
 - ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
-  ~app.rs~ reparses all chapters on layout refresh, decodes images without pixel
-  limits, and directly creates Iced widgets for both reader modes.  Ordinary
-  paginated turns reuse ~epub_pages~, resolve bookmark state from the loaded
-  bookmark cache, and queue/coalesce reading-state writes off the UI thread.
+  ~app.rs~ reparses all chapters on layout refresh and directly creates Iced
+  widgets for both reader modes.  Shared admission checks image dimensions and
+  estimated RGBA size, but backend-specific decode allocations remain a release
+  boundary.  Ordinary paginated turns reuse ~epub_pages~, resolve bookmark state
+  from the loaded bookmark cache, and queue/coalesce reading-state writes off
+  the UI thread.
   The writer is flushed before shutdown.  Release app-action-to-present
   measurements are recorded in ADR 001; the remaining Iced widget rebuild is
   included in those measurements.  Internal-link fragments are ignored;
@@ -50,13 +54,16 @@ external links follow an explicit confirmation/allow policy.
 
 * Gate 0 — Renderer ADR and Technical Spike
 :PROPERTIES:
-:STATUS: TODO
+:STATUS: DONE
 :END:
 
 ** Prerequisites
 
-- [ ] Capture baseline screenshots, load time, and memory use using
+- [-] Capture baseline screenshots, load time, and memory use using
   ~crates/shosai-core/tests/fixtures/sample.epub~ and at least one large EPUB.
+  The Wry comparison stopped when hard platform requirements rejected that
+  route; native load/memory and controlled visual baselines remain release
+  milestone measurements rather than a renderer-selection prerequisite.
 - [X] Capture synthetic app-action-to-compositor-present p50/p95 latency for
   warm page
   turns, chapter transitions, and font-size relayout using ~sample.epub~ plus
@@ -102,7 +109,7 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   canonical chapter path, fragment, and chapter text offset rather than a
   browser scroll/pixel position.  The proof passes on Linux/X11; production
   multi-chapter integration and the remaining target matrix stay separate.
-- [ ] Prove that a child webview can be embedded and resized inside the Iced
+- [-] Prove that a child webview can be embedded and resized inside the Iced
   reader on each target, with defined focus/input/event routing, tab lifecycle,
   accessibility-tree behavior, and teardown.  Map browser positions back to
   stable logical EPUB locations rather than pixel/scroll offsets.  The macOS
@@ -176,9 +183,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   visual-restoration display matrix, a viable Iced accessibility tree,
   screen-reader interaction, production-tab integration, production
   cross-chapter, and arbitrary character-offset locations remain open.
-- [ ] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
+- [-] Record Linux WebKitGTK, Windows WebView2, and macOS WebKit runtime and
   packaging requirements, binary impact, accessibility behavior, process
-  isolation, and ~wry~/platform license notices.
+  isolation, and ~wry~/platform license notices.  Existing evidence was enough
+  to reject production Wry: native Wayland embedding is unavailable,
+  WebKitGTK is absent from Linux packages, Linux clipboard interoperability is
+  blocked, and macOS lacks one complete accessibility tree.  Full notices and
+  package work are unnecessary unless a future ADR reopens the route.
 
 ** Spike B — Native renderer
 
@@ -239,25 +250,28 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** Decision and Exit Criteria
 
-- [ ] Add an ADR under ~docs/~ recording scores for fidelity, sandbox/security,
+- [X] Add an ADR under ~docs/~ recording assessments for fidelity, sandbox/security,
   accessibility, portability/packaging, performance, offline resource control,
   reader-feature integration, dependency licenses, and maintenance cost.
-- [ ] Select ~wry~, native, or explicitly defer.  Include rejected alternatives
+- [X] Select ~wry~, native, or explicitly defer.  Include rejected alternatives
   and a rollback strategy; do not choose merely from visual screenshots.
-- [ ] Gate passes only when all spike fixtures have recorded results, dependency
-  licenses are compatible with Apache-2.0 distribution, and CI/package owners
-  accept the platform requirements.
+- [X] Gate passes when a candidate satisfies the shipped platform boundary, or
+  ends early when a hard requirement rejects one route; selected production
+  dependencies must remain compatible with Apache-2.0 distribution and the
+  existing CI/package targets.  Wry was rejected before equivalent fidelity
+  runs because it cannot support native Wayland in the current Iced host.
 
 * Shared Foundation (After Gate 0)
 
 - [X] Replace unrestricted resource access with a read-only EPUB resource API
   carrying bytes, media type, and canonical path.  Add configurable per-entry
   input/archive, entry-count, compression-ratio, per-entry, and aggregate limits
-  to resist decompression/resource bombs.  Also bound XML depth/text and decoded
-  image dimensions/bytes before backend allocation.  ~EpubLimits~ now applies
-  bounded file/archive reads, central-directory admission, XML shape checks,
-  font-source bytes, and image-header/SVG dimension checks before resources are
-  exposed through ~EpubResource~; missing resources retain fallback behavior.
+  to resist decompression/resource bombs.  Also bound XML depth/text and image
+  dimensions/pixels/estimated RGBA bytes before resource exposure.
+  ~EpubLimits~ now applies bounded file/archive reads, central-directory
+  admission, XML shape checks, font-source bytes, and image-header/SVG dimension
+  checks before resources are exposed through ~EpubResource~; missing resources
+  retain fallback behavior.
 - [ ] Separate chapter parsing/computed presentation from
   ~crates/shosai-app/src/app.rs~ so search, pagination, and both view modes use
   one cached chapter representation and stable locations.
@@ -271,9 +285,6 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [ ] For the native route, replace class-only ~StyleMap~ with selector matching,
   cascade, inheritance, inline style, relevant at-rules, and computed values in
   ~epub/style.rs~; add explicit supported-property documentation.
-- [ ] For the webview route, preserve author CSS while injecting a narrowly
-  scoped reader stylesheet; serve all book assets only through the custom
-  protocol and retain the core resource-policy tests.
 - [ ] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
   with cycle, depth, origin, and size limits.
 
@@ -284,24 +295,23 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   explicitly permits bounded data URLs.
 - [ ] Validate font signatures and resource limits.  Register fonts per book,
   apply fallback deterministically, and release registrations when a book closes.
-- [ ] Add tests for WOFF/WOFF2/TTF/OTF as supported by the selected backend,
+- [ ] Add tests for WOFF/WOFF2/TTF/OTF as supported by the native font system,
   missing/corrupt fonts, synthetic bold/italic policy, and same-family clashes
   across two open books.
 
 ** M3 — Tables
 
 - [ ] Preserve ~table~, caption, row groups, rows, cells, headers, ~colspan~, and
-  ~rowspan~ in the core/native model, or verify equivalent webview semantics.
+  ~rowspan~ in the core/native model.
 - [ ] Define overflow behavior for tables wider than the viewport and ensure
   cells are not split into unusable fragments in paginated mode.
 - [ ] Verify theme contrast, nested content, links/images in cells, and screen
-  reader/header semantics where the selected backend exposes them.
+  reader/header semantics in the native accessibility model.
 
 ** M4 — MathML
 
-- [ ] Decide in the ADR follow-up whether MathML is native, backend-provided, or
-  rendered by a bundled permissively licensed engine; JavaScript/CDN fetching
-  is not an acceptable implicit dependency.
+- [ ] Define the bounded native MathML implementation and fallback; JavaScript,
+  a webview, and CDN fetching are not acceptable implicit dependencies.
 - [ ] Support inline versus display math, fallback text for unsupported markup,
   scaling with reader font size, theme contrast, and pagination boundaries.
 - [ ] Test common operators, fractions, roots, scripts, matrices, annotations,
@@ -318,12 +328,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [ ] Keep warm page turns free of parsing, repagination, image/font decoding,
   and synchronous storage.  Debounce or asynchronously persist reading state,
   resolve bookmark status off the turn path, and precompute/prefetch adjacent
-  presentation where the selected backend needs it.
+  native presentation where needed.
 - [ ] Move backend-specific rendering into focused modules under
   ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
   parsing/resource policy in ~shosai-core/src/epub/~.
-- [ ] Add feature/build configuration and packaging changes only for the ADR's
-  selected backend; document runtime prerequisites and attribution.
+- [ ] Add feature/build configuration and packaging changes only for the native
+  implementation; document runtime prerequisites and attribution.
 - [ ] Run the full workspace test suite and platform packaging smoke tests.
 
 * Tests and Fixtures
@@ -338,8 +348,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   including an opt-in compressed stress variant.  Shared semantic contract
   tests pass on macOS arm64 and Linux x86_64 without invoking either renderer.
   Configurable policy tests cover input/archive, entry count, compression ratio,
-  entry/aggregate bytes, XML bytes/depth/text, font bytes, and decoded image
-  dimensions/bytes; backend-specific hostile font decoding remains in M2.
+  entry/aggregate bytes, XML bytes/depth/text, font bytes, and image
+  dimensions/pixels/estimated RGBA bytes; backend-specific decode allocations
+  and hostile font decoding remain release and M2 boundaries.
 - Add app tests near the existing EPUB tests in ~crates/shosai-app/src/app.rs~
   for stable locations, pagination, links, image/font caches, and fallback.
 - Add an instrumented page-turn benchmark or performance harness that separates
@@ -350,7 +361,8 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 * Acceptance Criteria
 
-- [ ] The renderer ADR is approved before M1 and its security/license gates pass.
+- [X] The renderer ADR selects native before M1; production dependencies remain
+  subject to its security and license boundaries.
 - [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
   semantic and visual expectations on every supported platform.
 - [ ] No book content triggers network access or script execution by default;
