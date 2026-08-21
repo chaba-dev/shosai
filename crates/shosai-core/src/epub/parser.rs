@@ -11,6 +11,7 @@ use zip::ZipArchive;
 use super::limits::{
     resource_read_limit, validate_declared_resource_size, validate_resource, validate_xml_shape,
 };
+use super::presentation::EpubPresentation;
 use super::types::*;
 use super::{CanonicalEpubPath, EpubLimits};
 use crate::document::DocumentMetadata;
@@ -18,9 +19,19 @@ use crate::document::DocumentMetadata;
 const MAX_ARCHIVE_ENTRIES: usize = u16::MAX as usize;
 
 /// A parsed EPUB document.
+///
+/// Raw source content is read-only so it cannot diverge from the cached
+/// presentation.
+///
+/// ```compile_fail
+/// fn mutate_chapters(document: &mut shosai_core::epub::EpubDoc) {
+///     document.content.chapters.clear();
+/// }
+/// ```
 #[derive(Debug)]
 pub struct EpubDoc {
-    pub content: EpubContent,
+    content: EpubContent,
+    presentation: EpubPresentation,
 }
 
 impl EpubDoc {
@@ -127,6 +138,8 @@ impl EpubDoc {
         let styles =
             super::style::parse_epub_styles(css_sources.iter().map(|(path, css)| (*path, *css)));
 
+        let presentation = EpubPresentation::parse(&chapters, &styles);
+
         Ok(Self {
             content: EpubContent {
                 metadata,
@@ -136,6 +149,7 @@ impl EpubDoc {
                 resources,
                 styles,
             },
+            presentation,
         })
     }
 
@@ -147,6 +161,23 @@ impl EpubDoc {
     /// Get a chapter by index.
     pub fn chapter(&self, index: usize) -> Option<&Chapter> {
         self.content.chapters.get(index)
+    }
+
+    /// Parsed source content. The returned view is immutable so it cannot
+    /// diverge from [`Self::presentation`].
+    pub fn content(&self) -> &EpubContent {
+        &self.content
+    }
+
+    /// Consume the document and return its parsed source content.
+    #[doc(hidden)]
+    pub fn into_content(self) -> EpubContent {
+        self.content
+    }
+
+    /// Parsed chapter content shared by rendering, pagination, and search.
+    pub fn presentation(&self) -> &EpubPresentation {
+        &self.presentation
     }
 
     /// Get document metadata in the common format.

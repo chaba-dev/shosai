@@ -15,7 +15,7 @@ use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
-use shosai_core::epub::render::{ContentNode, parse_chapter_xhtml};
+use shosai_core::epub::render::ContentNode;
 use shosai_core::library::{Book, BookPage, Library};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -176,8 +176,28 @@ fn continuous_item_id(tab_id: u64, activation: u64, index: usize) -> WidgetId {
     ))
 }
 
+fn continuous_epub_title_id(tab_id: u64, activation: u64, chapter: usize) -> WidgetId {
+    WidgetId::from(format!(
+        "continuous-reader-{tab_id}-{activation}-chapter-{chapter}-title"
+    ))
+}
+
+fn continuous_epub_node_id(tab_id: u64, activation: u64, chapter: usize, node: usize) -> WidgetId {
+    WidgetId::from(format!(
+        "continuous-reader-{tab_id}-{activation}-chapter-{chapter}-node-{node}"
+    ))
+}
+
+#[derive(Debug, Clone)]
+struct ContinuousMeasuredItem {
+    id: WidgetId,
+    page: usize,
+    start: usize,
+    end: usize,
+}
+
 struct ContinuousItemOperation {
-    item_ids: Vec<WidgetId>,
+    items: Vec<ContinuousMeasuredItem>,
     scroll_id: WidgetId,
     item_bounds: Vec<Option<iced::Rectangle>>,
     content_top: Option<f32>,
@@ -185,17 +205,16 @@ struct ContinuousItemOperation {
     viewport_height: Option<f32>,
     current_tail_extent: f32,
     requested_offset: Option<f32>,
-    target: Option<usize>,
+    target: Option<(usize, usize)>,
 }
 
 impl ContinuousItemOperation {
-    fn resolve(tab_id: u64, activation: u64, total: usize, offset: f32) -> Self {
+    fn resolve(items: Vec<ContinuousMeasuredItem>, scroll_id: WidgetId, offset: f32) -> Self {
+        let item_count = items.len();
         Self {
-            item_ids: (0..total)
-                .map(|index| continuous_item_id(tab_id, activation, index))
-                .collect(),
-            scroll_id: continuous_scroll_id(tab_id, activation),
-            item_bounds: vec![None; total],
+            items,
+            scroll_id,
+            item_bounds: vec![None; item_count],
             content_top: None,
             content_height: None,
             viewport_height: None,
@@ -206,18 +225,16 @@ impl ContinuousItemOperation {
     }
 
     fn locate(
-        tab_id: u64,
-        activation: u64,
-        total: usize,
-        target: usize,
+        items: Vec<ContinuousMeasuredItem>,
+        scroll_id: WidgetId,
+        target: (usize, usize),
         current_tail_extent: f32,
     ) -> Self {
+        let item_count = items.len();
         Self {
-            item_ids: (0..total)
-                .map(|index| continuous_item_id(tab_id, activation, index))
-                .collect(),
-            scroll_id: continuous_scroll_id(tab_id, activation),
-            item_bounds: vec![None; total],
+            items,
+            scroll_id,
+            item_bounds: vec![None; item_count],
             content_top: None,
             content_height: None,
             viewport_height: None,
@@ -228,16 +245,16 @@ impl ContinuousItemOperation {
     }
 }
 
-impl operation::Operation<(usize, f32, f32)> for ContinuousItemOperation {
+impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation {
     fn traverse(
         &mut self,
-        operate: &mut dyn FnMut(&mut dyn operation::Operation<(usize, f32, f32)>),
+        operate: &mut dyn FnMut(&mut dyn operation::Operation<(usize, usize, f32, f32)>),
     ) {
         operate(self);
     }
 
     fn container(&mut self, id: Option<&WidgetId>, bounds: iced::Rectangle) {
-        if let Some(index) = id.and_then(|id| self.item_ids.iter().position(|item| item == id)) {
+        if let Some(index) = id.and_then(|id| self.items.iter().position(|item| item.id == *id)) {
             self.item_bounds[index] = Some(bounds);
         }
     }
@@ -257,38 +274,68 @@ impl operation::Operation<(usize, f32, f32)> for ContinuousItemOperation {
         }
     }
 
-    fn finish(&self) -> operation::Outcome<(usize, f32, f32)> {
+    fn finish(&self) -> operation::Outcome<(usize, usize, f32, f32)> {
         let Some(content_top) = self.content_top else {
             return operation::Outcome::None;
         };
-        if let Some(target) = self.target
-            && let Some(bounds) = self.item_bounds.get(target).copied().flatten()
-        {
-            let offset = (bounds.y - content_top).max(0.0);
-            let tail_extent = self
-                .content_height
-                .zip(self.viewport_height)
-                .map(|(content_height, viewport_height)| {
-                    (offset + viewport_height - (content_height - self.current_tail_extent))
-                        .max(0.0)
-                })
-                .unwrap_or(0.0);
-            return operation::Outcome::Some((target, offset, tail_extent));
+        if let Some((target_page, target_offset)) = self.target {
+            let measured = || {
+                self.items
+                    .iter()
+                    .zip(&self.item_bounds)
+                    .filter_map(|(item, bounds)| bounds.map(|bounds| (item, bounds)))
+                    .filter(|(item, _)| item.page == target_page)
+            };
+            let target = if target_offset == 0 {
+                measured()
+                    .find(|(item, _)| item.start == 0 && item.end == 0)
+                    .or_else(|| measured().find(|(item, _)| item.start == 0))
+            } else {
+                measured().rfind(|(item, _)| item.start <= target_offset)
+            };
+            if let Some((item, bounds)) = target {
+                let progress = if item.end > item.start {
+                    (target_offset.min(item.end) - item.start) as f32
+                        / (item.end - item.start) as f32
+                } else {
+                    0.0
+                };
+                let offset = (bounds.y + bounds.height * progress - content_top).max(0.0);
+                let tail_extent = self
+                    .content_height
+                    .zip(self.viewport_height)
+                    .map(|(content_height, viewport_height)| {
+                        (offset + viewport_height - (content_height - self.current_tail_extent))
+                            .max(0.0)
+                    })
+                    .unwrap_or(0.0);
+                return operation::Outcome::Some((target_page, target_offset, offset, tail_extent));
+            }
         }
         let Some(offset) = self.requested_offset else {
             return operation::Outcome::None;
         };
         let viewport_y = content_top + offset;
-        let resolved = self
-            .item_bounds
-            .iter()
-            .enumerate()
-            .filter_map(|(index, bounds)| bounds.map(|bounds| (index, bounds)))
-            .take_while(|(_, bounds)| bounds.y <= viewport_y + 1.0)
-            .map(|(index, _)| index)
-            .last()
-            .unwrap_or(0);
-        operation::Outcome::Some((resolved, offset, 0.0))
+        let measured = || {
+            self.items
+                .iter()
+                .zip(&self.item_bounds)
+                .filter_map(|(item, bounds)| bounds.map(|bounds| (item, bounds)))
+        };
+        let Some((item, bounds)) = measured()
+            .rfind(|(_, bounds)| bounds.y <= viewport_y + 1.0)
+            .or_else(|| measured().next())
+        else {
+            return operation::Outcome::None;
+        };
+        let progress = if bounds.height > 0.0 && item.end > item.start {
+            ((viewport_y - bounds.y) / bounds.height).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let resolved_offset =
+            item.start + ((item.end - item.start) as f32 * progress).round() as usize;
+        operation::Outcome::Some((item.page, resolved_offset.min(item.end), offset, 0.0))
     }
 }
 
@@ -297,6 +344,25 @@ enum ReadingMode {
     #[default]
     Paginated,
     Continuous,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EpubLayoutKey {
+    width: u32,
+    height: u32,
+    font_size: u32,
+    line_spacing: u32,
+}
+
+impl EpubLayoutKey {
+    fn new(page_size: Size, font_size: f32, line_spacing: f32) -> Self {
+        Self {
+            width: page_size.width.to_bits(),
+            height: page_size.height.to_bits(),
+            font_size: font_size.to_bits(),
+            line_spacing: line_spacing.to_bits(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -313,15 +379,14 @@ struct ReaderTab {
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
-    chapter_content: Vec<ContentNode>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
-    epub_pages: Vec<EpubPage>,
+    epub_pages: Arc<Vec<EpubPage>>,
+    epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
-    continuous_chapters: Vec<Vec<ContentNode>>,
     continuous_tail_extent: f32,
     render_generation: u64,
     page_input: String,
@@ -399,15 +464,14 @@ pub struct State {
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
-    chapter_content: Vec<ContentNode>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
-    epub_pages: Vec<EpubPage>,
+    epub_pages: Arc<Vec<EpubPage>>,
+    epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
-    continuous_chapters: Vec<Vec<ContentNode>>,
     continuous_tail_extent: f32,
     continuous_activation: u64,
     next_continuous_request_id: u64,
@@ -531,15 +595,14 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_facing_page_handle: None,
         page_cache: VecDeque::new(),
         render_generation: 0,
-        chapter_content: Vec::new(),
         epub_image_handles: HashMap::new(),
-        epub_pages: Vec::new(),
+        epub_pages: Arc::new(Vec::new()),
+        epub_layout_key: None,
         epub_page: 0,
         epub_offset: 0,
         continuous_pages: Vec::new(),
         continuous_pending: BTreeMap::new(),
         continuous_visible: BTreeSet::new(),
-        continuous_chapters: Vec::new(),
         continuous_tail_extent: 0.0,
         continuous_activation: 0,
         next_continuous_request_id: 1,
@@ -733,15 +796,14 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page: state.rendered_facing_page.clone(),
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
-        chapter_content: state.chapter_content.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_pages: state.epub_pages.clone(),
+        epub_layout_key: state.epub_layout_key,
         epub_page: state.epub_page,
         epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
-        continuous_chapters: state.continuous_chapters.clone(),
         continuous_tail_extent: state.continuous_tail_extent,
         render_generation: state.render_generation,
         page_input: state.page_input.clone(),
@@ -778,15 +840,14 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page = tab.rendered_facing_page;
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
-    state.chapter_content = tab.chapter_content;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_pages = tab.epub_pages;
+    state.epub_layout_key = tab.epub_layout_key;
     state.epub_page = tab.epub_page;
     state.epub_offset = tab.epub_offset;
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
-    state.continuous_chapters = tab.continuous_chapters;
     state.continuous_tail_extent = tab.continuous_tail_extent;
     state.page_input = tab.page_input;
     state.error = tab.error;
@@ -851,8 +912,13 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
         } else {
             scroll_to_current_page(state)
         }
-    } else if state.rendered_page.is_some() || matches!(state.document, Some(OpenDocument::Epub(_)))
-    {
+    } else if matches!(state.document, Some(OpenDocument::Epub(_))) {
+        if state.epub_layout_key == Some(epub_layout_key(state)) {
+            Task::none()
+        } else {
+            refresh_content(state)
+        }
+    } else if state.rendered_page.is_some() {
         Task::none()
     } else {
         refresh_content(state)
@@ -883,11 +949,11 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_facing_page = None;
         state.rendered_facing_page_handle = None;
         state.epub_image_handles.clear();
-        state.epub_pages.clear();
+        state.epub_pages = Arc::new(Vec::new());
+        state.epub_layout_key = None;
         state.epub_page = 0;
         state.epub_offset = 0;
         state.continuous_pages.clear();
-        state.continuous_chapters.clear();
         state.screen = Screen::Library;
         state.render_generation = state.render_generation.wrapping_add(1);
         state.search_document_generation = state.search_document_generation.wrapping_add(1);
@@ -969,15 +1035,14 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.rendered_facing_page = None;
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
-    state.chapter_content = Vec::new();
     state.epub_image_handles.clear();
-    state.epub_pages.clear();
+    state.epub_pages = Arc::new(Vec::new());
+    state.epub_layout_key = None;
     state.epub_page = 0;
     state.epub_offset = 0;
     state.continuous_pages.clear();
     state.continuous_pending.clear();
     state.continuous_visible.clear();
-    state.continuous_chapters.clear();
     state.continuous_tail_extent = 0.0;
     state.show_reader_settings = false;
     state.show_reader_more = false;
@@ -1151,7 +1216,7 @@ fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
         };
 
         // Find the chapter index by matching the resolved path.
-        if let Some(chapter_idx) = doc.content.chapters.iter().position(|ch| {
+        if let Some(chapter_idx) = doc.content().chapters.iter().position(|ch| {
             ch.path == resolved || ch.path.ends_with(target_path) || ch.path.ends_with(&resolved)
         }) {
             if uses_paginated_epub_layout(state) {
@@ -1199,22 +1264,12 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 state.rendered_page_handle = None;
                 state.rendered_facing_page = None;
                 state.rendered_facing_page_handle = None;
-                state.continuous_chapters = doc
-                    .content
-                    .chapters
-                    .iter()
-                    .map(|chapter| {
-                        let base_path = chapter
-                            .path
-                            .rsplit_once('/')
-                            .map(|(directory, _)| directory)
-                            .unwrap_or("");
-                        parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
-                    })
-                    .collect();
                 cache_epub_image_handles(
                     &mut state.epub_image_handles,
-                    state.continuous_chapters.iter().flatten(),
+                    doc.presentation()
+                        .chapters()
+                        .iter()
+                        .flat_map(|chapter| chapter.nodes()),
                     &|path| doc.resource(path).map(|resource| resource.bytes()),
                 );
                 state.error = None;
@@ -1248,7 +1303,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
             let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
-            state.chapter_content.clear();
             state.error = None;
             let mut tasks = Vec::new();
             for page in pages {
@@ -1272,76 +1326,36 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
-            let anchor = (state.current_page, state.epub_offset);
             let page_size = epub_page_size(state);
+            let layout_key = epub_layout_key(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
-            let parsed_chapters = doc
-                .content
-                .chapters
-                .iter()
-                .map(|chapter| {
-                    let base_path = chapter
-                        .path
-                        .rsplit_once('/')
-                        .map(|(dir, _)| dir)
-                        .unwrap_or("");
-                    parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
-                })
-                .collect::<Vec<_>>();
             cache_epub_image_handles(
                 &mut state.epub_image_handles,
-                parsed_chapters.iter().flatten(),
+                doc.presentation()
+                    .chapters()
+                    .iter()
+                    .flat_map(|chapter| chapter.nodes()),
                 &|path| doc.resource(path).map(|resource| resource.bytes()),
             );
-            state.epub_pages = parsed_chapters
-                .iter()
-                .enumerate()
-                .flat_map(|(chapter_index, nodes)| {
-                    let chapter = &doc.content.chapters[chapter_index];
-                    let title = chapter
-                        .title
-                        .as_deref()
-                        .filter(|title| !content_starts_with_heading(nodes, title));
-                    paginate_epub_chapter(
-                        nodes,
-                        title,
-                        state.font_size,
-                        state.line_spacing,
-                        page_size,
-                    )
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(page_index, nodes)| EpubPage {
-                        chapter: chapter_index,
-                        title: (page_index == 0)
-                            .then(|| title.map(str::to_string))
-                            .flatten(),
-                        nodes,
-                    })
-                })
-                .collect();
-            if state.epub_pages.is_empty() {
-                state.chapter_content.clear();
-                state.epub_page = 0;
-                state.error = Some(AppError::EpubEmpty);
-            } else {
-                let requested_page = epub_page_for_location(state, anchor.0, anchor.1);
-                state.epub_page = requested_page.min(state.epub_pages.len() - 1);
-                state.current_page = state.epub_pages[state.epub_page].chapter;
-                state.chapter_content = parsed_chapters[state.current_page].clone();
-                state.page_input = (state.epub_page + 1).to_string();
-                state.error = None;
-            }
+            state.error = None;
+            return paginate_epub_task(
+                tab_id,
+                generation,
+                Arc::clone(doc),
+                layout_key,
+                state.font_size,
+                state.line_spacing,
+                page_size,
+            );
         }
         Some(OpenDocument::Cbz(doc)) => {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
             let scale = paginated_raster_scale(state, &pages);
-            state.chapter_content.clear();
             state.error = None;
             let mut tasks = Vec::new();
             for page in pages {
@@ -1419,6 +1433,31 @@ fn epub_page_size(state: &State) -> Size {
     )
 }
 
+fn epub_layout_key(state: &State) -> EpubLayoutKey {
+    EpubLayoutKey::new(epub_page_size(state), state.font_size, state.line_spacing)
+}
+
+fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
+    let available_size = available_reader_size_with_panels(
+        state,
+        tab.show_bookmarks_panel,
+        tab.show_search_bar,
+        tab.show_reader_settings,
+        tab.show_reader_more,
+    );
+    let uses_spread = tab.reading_mode == ReadingMode::Paginated
+        && matches!(tab.document, OpenDocument::Epub(_))
+        && available_size.width >= MIN_TWO_PAGE_WIDTH;
+    let page_size = crate::epub::page_size(
+        available_size,
+        uses_spread,
+        PAGE_GUTTER,
+        tab.font_size,
+        tab.line_spacing,
+    );
+    EpubLayoutKey::new(page_size, tab.font_size, tab.line_spacing)
+}
+
 fn epub_spread_start(state: &State, page: usize) -> usize {
     crate::epub::spread_start(page, state.epub_pages.len(), epub_uses_spread(state))
 }
@@ -1463,8 +1502,128 @@ fn render_continuous_page_task(
     )
 }
 
+fn paginate_epub_task(
+    tab_id: u64,
+    generation: u64,
+    document: Arc<EpubDoc>,
+    layout_key: EpubLayoutKey,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: Size,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                paginate_epub_document(&document, font_size, line_spacing, page_size)
+            })
+            .await
+            .unwrap_or_default()
+        },
+        move |pages| Message::EpubPaginated {
+            tab_id,
+            generation,
+            layout_key,
+            pages: Arc::new(pages),
+        },
+    )
+}
+
+fn paginate_epub_document(
+    document: &EpubDoc,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: Size,
+) -> Vec<EpubPage> {
+    document
+        .presentation()
+        .chapters()
+        .iter()
+        .enumerate()
+        .flat_map(|(chapter_index, presentation)| {
+            let nodes = presentation.nodes();
+            let source = document
+                .chapter(chapter_index)
+                .expect("presentation chapters match source chapters");
+            let title = source
+                .title
+                .as_deref()
+                .filter(|title| !content_starts_with_heading(nodes, title));
+            paginate_epub_chapter(nodes, title, font_size, line_spacing, page_size)
+                .into_iter()
+                .enumerate()
+                .map(move |(page_index, nodes)| EpubPage {
+                    chapter: chapter_index,
+                    title: (page_index == 0)
+                        .then(|| title.map(str::to_string))
+                        .flatten(),
+                    nodes,
+                })
+        })
+        .collect()
+}
+
 fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
     iced::widget::Id::from(format!("continuous-reader-{tab_id}-{activation}"))
+}
+
+fn continuous_measured_items(
+    state: &State,
+    tab_id: u64,
+    activation: u64,
+) -> Vec<ContinuousMeasuredItem> {
+    let Some(OpenDocument::Epub(document)) = &state.document else {
+        return (0..state.total_pages)
+            .map(|page| ContinuousMeasuredItem {
+                id: continuous_item_id(tab_id, activation, page),
+                page,
+                start: 0,
+                end: 0,
+            })
+            .collect();
+    };
+
+    document
+        .presentation()
+        .chapters()
+        .iter()
+        .enumerate()
+        .flat_map(|(chapter_index, presentation)| {
+            let nodes = presentation.nodes();
+            let has_title = document
+                .chapter(chapter_index)
+                .and_then(|chapter| chapter.title.as_deref())
+                .is_some_and(|title| !content_starts_with_heading(nodes, title));
+            let mut items = Vec::with_capacity(nodes.len() + usize::from(has_title));
+            if has_title {
+                items.push(ContinuousMeasuredItem {
+                    id: continuous_epub_title_id(tab_id, activation, chapter_index),
+                    page: chapter_index,
+                    start: 0,
+                    end: 0,
+                });
+            }
+            let mut offset = 0;
+            for (node_index, node) in nodes.iter().enumerate() {
+                let end = offset + content_node_text_len(node) + 1;
+                items.push(ContinuousMeasuredItem {
+                    id: continuous_epub_node_id(tab_id, activation, chapter_index, node_index),
+                    page: chapter_index,
+                    start: offset,
+                    end,
+                });
+                offset = end;
+            }
+            if items.is_empty() {
+                items.push(ContinuousMeasuredItem {
+                    id: continuous_item_id(tab_id, activation, chapter_index),
+                    page: chapter_index,
+                    start: 0,
+                    end: 0,
+                });
+            }
+            items
+        })
+        .collect()
 }
 
 fn scroll_to_current_page(state: &State) -> Task<Message> {
@@ -1476,14 +1635,13 @@ fn scroll_to_current_page(state: &State) -> Task<Message> {
     };
     let activation = state.continuous_activation;
     iced::advanced::widget::operate(ContinuousItemOperation::locate(
-        tab_id,
-        activation,
-        state.total_pages,
-        state.current_page,
+        continuous_measured_items(state, tab_id, activation),
+        continuous_scroll_id(tab_id, activation),
+        (state.current_page, state.epub_offset),
         state.continuous_tail_extent,
     ))
     .map(
-        move |(_, offset, tail_extent)| Message::ContinuousNavigationMeasured {
+        move |(_, _, offset, tail_extent)| Message::ContinuousNavigationMeasured {
             tab_id,
             activation,
             offset,
@@ -1703,24 +1861,36 @@ fn uses_page_spreads(state: &State) -> bool {
 }
 
 fn available_reader_size(state: &State) -> Size {
+    available_reader_size_with_panels(
+        state,
+        state.show_bookmarks_panel,
+        state.show_search_bar,
+        state.show_reader_settings,
+        state.show_reader_more,
+    )
+}
+
+fn available_reader_size_with_panels(
+    state: &State,
+    show_bookmarks_panel: bool,
+    show_search_bar: bool,
+    show_reader_settings: bool,
+    show_reader_more: bool,
+) -> Size {
     let window_size = state.performance.window_size().unwrap_or(state.window_size);
     let compact = uses_compact_reader_layout(window_size.width);
-    let bookmarks_width = if state.show_bookmarks_panel {
+    let bookmarks_width = if show_bookmarks_panel {
         BOOKMARKS_PANEL_WIDTH
     } else {
         0.0
     };
-    let search_height = if state.show_search_bar {
+    let search_height = if show_search_bar {
         reader_search_height(compact)
     } else {
         0.0
     };
-    let settings_height = if state.show_reader_settings {
-        62.0
-    } else {
-        0.0
-    };
-    let more_height = if state.show_reader_more {
+    let settings_height = if show_reader_settings { 62.0 } else { 0.0 };
+    let more_height = if show_reader_more {
         reader_more_height(compact)
     } else {
         0.0
@@ -2181,6 +2351,26 @@ fn perform_search(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
+
+    if let Some(OpenDocument::Epub(document)) = &state.document {
+        let document = Arc::clone(document);
+        return Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    shosai_core::search::search_epub(&document, &query)
+                })
+                .await
+                .unwrap_or_default()
+            },
+            move |results| Message::SearchPerformed {
+                tab_id,
+                document_generation,
+                query_generation,
+                results,
+            },
+        );
+    }
+
     let Some(path) = state.file_path.clone() else {
         return Task::none();
     };
@@ -2219,9 +2409,6 @@ fn perform_search(state: &mut State) -> Task<Message> {
                 {
                     Some("pdf") => PdfDoc::open(&path)
                         .and_then(|document| document.page_texts())
-                        .unwrap_or_default(),
-                    Some("epub") => EpubDoc::open(&path)
-                        .map(|document| shosai_core::search::extract_epub_text(&document))
                         .unwrap_or_default(),
                     _ => Vec::new(),
                 };
@@ -2280,8 +2467,11 @@ fn navigate_to_current_search_result(
 }
 
 fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize {
-    state
-        .epub_pages
+    epub_page_for_pages(&state.epub_pages, chapter, offset)
+}
+
+fn epub_page_for_pages(pages: &[EpubPage], chapter: usize, offset: usize) -> usize {
+    pages
         .iter()
         .enumerate()
         .filter(|(_, page)| {
@@ -2293,12 +2483,7 @@ fn epub_page_for_location(state: &State, chapter: usize, offset: usize) -> usize
         })
         .map(|(index, _)| index)
         .next_back()
-        .or_else(|| {
-            state
-                .epub_pages
-                .iter()
-                .position(|page| page.chapter == chapter)
-        })
+        .or_else(|| pages.iter().position(|page| page.chapter == chapter))
         .unwrap_or(0)
 }
 
@@ -2837,7 +3022,7 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                 .size(12)
                 .color(app_theme::TEXT_MUTED),
         );
-        for (index, chapter) in document.content.chapters.iter().enumerate() {
+        for (index, chapter) in document.content().chapters.iter().enumerate() {
             let title = chapter
                 .title
                 .clone()
@@ -3144,7 +3329,8 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
         }
         Some(OpenDocument::Epub(doc)) => {
             let mut chapters = column![].spacing(32).padding(20).width(Length::Fill);
-            for (chapter_index, nodes) in state.continuous_chapters.iter().enumerate() {
+            for (chapter_index, presentation) in doc.presentation().chapters().iter().enumerate() {
+                let nodes = presentation.nodes();
                 let mut chapter = column![].spacing(state.font_size * state.line_spacing);
                 if let Some(title) = doc
                     .chapter(chapter_index)
@@ -3152,24 +3338,40 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                     .filter(|title| !content_starts_with_heading(nodes, title))
                 {
                     chapter = chapter.push(
-                        text(title.clone())
-                            .size(state.font_size * 1.5)
-                            .color(state.theme.text_color()),
+                        container(
+                            text(title.clone())
+                                .size(state.font_size * 1.5)
+                                .color(state.theme.text_color()),
+                        )
+                        .id(continuous_epub_title_id(
+                            tab_id,
+                            activation,
+                            chapter_index,
+                        )),
                     );
                 }
                 let highlights = search_highlight_models_for_page(state, chapter_index);
                 let mut text_offset = 0;
-                for node in nodes {
-                    chapter = chapter.push(render_content_node(
-                        node,
-                        &state.i18n,
-                        state.font_size,
-                        state.theme.text_color(),
-                        &state.epub_image_handles,
-                        false,
-                        text_offset,
-                        &highlights,
-                    ));
+                for (node_index, node) in nodes.iter().enumerate() {
+                    chapter = chapter.push(
+                        container(render_content_node(
+                            node,
+                            &state.i18n,
+                            state.font_size,
+                            state.theme.text_color(),
+                            &state.epub_image_handles,
+                            false,
+                            text_offset,
+                            &highlights,
+                        ))
+                        .id(continuous_epub_node_id(
+                            tab_id,
+                            activation,
+                            chapter_index,
+                            node_index,
+                        ))
+                        .width(Length::Fill),
+                    );
                     text_offset += content_node_text_len(node) + 1;
                 }
                 chapters = chapters.push(
@@ -4614,7 +4816,16 @@ mod tests {
 
     #[test]
     fn continuous_position_uses_measured_item_boundaries() {
-        let mut operation = ContinuousItemOperation::resolve(1, 0, 3, 500.0);
+        let items = (0..3)
+            .map(|page| ContinuousMeasuredItem {
+                id: continuous_item_id(1, 0, page),
+                page,
+                start: 0,
+                end: 0,
+            })
+            .collect::<Vec<_>>();
+        let mut operation =
+            ContinuousItemOperation::resolve(items.clone(), continuous_scroll_id(1, 0), 500.0);
         operation.content_top = Some(100.0);
         operation.item_bounds = vec![
             Some(iced::Rectangle::new(
@@ -4633,19 +4844,78 @@ mod tests {
 
         assert!(matches!(
             operation.finish(),
-            operation::Outcome::Some((0, _, _))
+            operation::Outcome::Some((0, 0, _, _))
         ));
 
-        let mut navigation = ContinuousItemOperation::locate(1, 0, 3, 1, 0.0);
+        let mut navigation =
+            ContinuousItemOperation::locate(items, continuous_scroll_id(1, 0), (1, 0), 0.0);
         navigation.content_top = operation.content_top;
         navigation.item_bounds = operation.item_bounds;
         navigation.content_height = Some(1000.0);
         navigation.viewport_height = Some(700.0);
         assert!(matches!(
             navigation.finish(),
-            operation::Outcome::Some((1, offset, tail_extent))
+            operation::Outcome::Some((1, 0, offset, tail_extent))
                 if offset == 800.0 && tail_extent == 500.0
         ));
+    }
+
+    #[test]
+    fn continuous_epub_position_interpolates_character_offsets_within_nodes() {
+        let items = vec![ContinuousMeasuredItem {
+            id: continuous_epub_node_id(1, 0, 0, 0),
+            page: 0,
+            start: 0,
+            end: 100,
+        }];
+        let bounds = Some(iced::Rectangle::new(
+            Point::new(0.0, 100.0),
+            Size::new(100.0, 1000.0),
+        ));
+        let mut resolve =
+            ContinuousItemOperation::resolve(items.clone(), continuous_scroll_id(1, 0), 500.0);
+        resolve.content_top = Some(100.0);
+        resolve.item_bounds = vec![bounds];
+        assert!(matches!(
+            resolve.finish(),
+            operation::Outcome::Some((0, 50, _, _))
+        ));
+
+        let mut locate =
+            ContinuousItemOperation::locate(items, continuous_scroll_id(1, 0), (0, 75), 0.0);
+        locate.content_top = Some(100.0);
+        locate.content_height = Some(1100.0);
+        locate.viewport_height = Some(200.0);
+        locate.item_bounds = vec![bounds];
+        assert!(matches!(
+            locate.finish(),
+            operation::Outcome::Some((0, 75, offset, _)) if offset == 750.0
+        ));
+    }
+
+    #[test]
+    fn continuous_epub_items_cover_the_shared_search_text_offsets() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let items = continuous_measured_items(&state, 1, 0);
+        let Some(OpenDocument::Epub(document)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        for (chapter, presentation) in document.presentation().chapters().iter().enumerate() {
+            let chapter_items = items
+                .iter()
+                .filter(|item| item.page == chapter && item.end > item.start)
+                .collect::<Vec<_>>();
+            assert_eq!(chapter_items.first().map(|item| item.start), Some(0));
+            assert_eq!(
+                chapter_items.last().map(|item| item.end),
+                Some(presentation.search_text().chars().count())
+            );
+        }
     }
 
     fn state_with_document(document: OpenDocument) -> State {
@@ -4659,6 +4929,28 @@ mod tests {
         state.library_loading = false;
         state.storage_initializing = false;
         state
+    }
+
+    fn complete_epub_pagination(state: &mut State) {
+        let Some(OpenDocument::Epub(document)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        let pages = paginate_epub_document(
+            document,
+            state.font_size,
+            state.line_spacing,
+            epub_page_size(state),
+        );
+        let layout_key = epub_layout_key(state);
+        let _ = update(
+            state,
+            Message::EpubPaginated {
+                tab_id: state.active_tab_id.unwrap(),
+                generation: state.render_generation,
+                layout_key,
+                pages: Arc::new(pages),
+            },
+        );
     }
 
     #[test]
@@ -5334,24 +5626,32 @@ mod tests {
     }
 
     #[test]
-    fn continuous_epub_mode_builds_every_chapter() {
+    fn continuous_epub_mode_reuses_the_shared_chapter_presentation() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let chapter_count = epub.chapter_count();
+        let first_chapter = epub.presentation().chapter(0).unwrap() as *const _;
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.total_pages = chapter_count;
 
         let _ = update(&mut state, Message::ToggleReadingMode);
 
         assert_eq!(state.reading_mode, ReadingMode::Continuous);
-        assert_eq!(state.continuous_chapters.len(), chapter_count);
+        let Some(OpenDocument::Epub(epub)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        assert_eq!(epub.presentation().chapters().len(), chapter_count);
+        assert_eq!(
+            epub.presentation().chapter(0).unwrap() as *const _,
+            first_chapter
+        );
         assert!(
-            state
-                .continuous_chapters
+            epub.presentation()
+                .chapters()
                 .iter()
-                .all(|chapter| !chapter.is_empty())
+                .all(|chapter| !chapter.nodes().is_empty())
         );
     }
 
@@ -5630,6 +5930,7 @@ mod tests {
                 tab_id: 2,
                 activation,
                 page: 1,
+                epub_offset: Some(0),
             },
         );
 
@@ -5653,6 +5954,7 @@ mod tests {
                 tab_id: 1,
                 activation: 2,
                 page: 1,
+                epub_offset: Some(0),
             },
         );
 
@@ -6198,6 +6500,22 @@ mod tests {
     }
 
     #[test]
+    fn epub_search_uses_the_loaded_shared_presentation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.search_query = "sample".to_string();
+
+        let task = perform_search(&mut state);
+
+        assert!(task.units() > 0);
+        assert!(state.search_text.is_none());
+        assert!(!state.search_loading);
+    }
+
+    #[test]
     fn stale_page_renders_do_not_replace_the_latest_request() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -6259,6 +6577,164 @@ mod tests {
             state.rendered_page.as_ref().map(|page| page.width),
             Some(20)
         );
+    }
+
+    #[test]
+    fn stale_epub_pagination_does_not_replace_the_latest_layout() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.render_generation = 2;
+        let current = Arc::clone(&state.epub_pages);
+        let layout_key = epub_layout_key(&state);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 1,
+                layout_key,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert!(Arc::ptr_eq(&state.epub_pages, &current));
+    }
+
+    #[test]
+    fn epub_pagination_preserves_navigation_that_happened_while_it_ran() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.render_generation = 2;
+        state.current_page = 1;
+        state.epub_offset = 25;
+        let layout_key = epub_layout_key(&state);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 2,
+                layout_key,
+                pages: Arc::new(vec![
+                    EpubPage {
+                        chapter: 0,
+                        title: None,
+                        nodes: Vec::new(),
+                    },
+                    EpubPage {
+                        chapter: 1,
+                        title: None,
+                        nodes: Vec::new(),
+                    },
+                ]),
+            },
+        );
+
+        assert_eq!((state.current_page, state.epub_offset), (1, 25));
+        assert_eq!(state.epub_page, 1);
+    }
+
+    #[test]
+    fn epub_pagination_completes_for_an_inactive_tab() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let document = OpenDocument::Epub(Arc::new(epub));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.render_generation = 4;
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.document = Some(document);
+        state.show_bookmarks_panel = true;
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+        let layout_key = epub_layout_key_for_tab(&state, &state.tabs[0]);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 4,
+                layout_key,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert_eq!(state.tabs[0].epub_pages.len(), 1);
+    }
+
+    #[test]
+    fn inactive_epub_rejects_pagination_from_obsolete_window_geometry() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let document = OpenDocument::Epub(Arc::new(epub));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.epub"));
+        state.render_generation = 4;
+        state.window_size = Size::new(700.0, 600.0);
+        let obsolete_layout = epub_layout_key(&state);
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.document = Some(document);
+        state.show_bookmarks_panel = true;
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+        state.window_size = Size::new(1_000.0, 600.0);
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: 4,
+                layout_key: obsolete_layout,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert!(state.tabs[0].epub_pages.is_empty());
+        assert!(update(&mut state, Message::SelectTab(0)).units() > 0);
+    }
+
+    #[test]
+    fn epub_bookmark_navigation_sets_location_before_initial_pagination() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.total_pages = 2;
+
+        let _ = update(&mut state, Message::GoToBookmark(1, Some(9)));
+
+        assert_eq!((state.current_page, state.epub_offset), (1, 9));
     }
 
     #[test]
@@ -6341,7 +6817,7 @@ mod tests {
     }
 
     #[test]
-    fn epub_refresh_remains_synchronous() {
+    fn epub_refresh_paginates_off_the_ui_thread() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -6350,10 +6826,87 @@ mod tests {
 
         let task = refresh_content(&mut state);
 
-        assert_eq!(task.units(), 0);
-        assert!(!state.chapter_content.is_empty());
-        assert!(!state.epub_pages.is_empty());
+        assert!(task.units() > 0);
+        assert!(state.epub_pages.is_empty());
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn reader_tabs_share_paginated_layout_storage() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let _ = refresh_content(&mut state);
+        complete_epub_pagination(&mut state);
+        state.file_path = Some(PathBuf::from("book.epub"));
+
+        let tab = capture_reader_tab(&state).expect("reader tab should be captured");
+
+        assert!(std::ptr::eq(
+            state.epub_pages.as_ptr(),
+            tab.epub_pages.as_ptr()
+        ));
+    }
+
+    #[test]
+    fn continuous_epub_resolution_updates_character_offset_within_a_chapter() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_mode = ReadingMode::Continuous;
+        let activation = state.continuous_activation;
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousItemResolved {
+                tab_id: 1,
+                activation,
+                page: 0,
+                epub_offset: Some(37),
+            },
+        );
+
+        assert_eq!(state.current_page, 0);
+        assert_eq!(state.epub_offset, 37);
+    }
+
+    #[test]
+    fn epub_location_survives_relayout_and_mode_changes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size = Size::new(360.0, 320.0);
+        state.font_size = 32.0;
+        let _ = refresh_content(&mut state);
+        complete_epub_pagination(&mut state);
+        let target_page = state
+            .epub_pages
+            .iter()
+            .position(|page| page.nodes.first().is_some_and(|node| node.text_offset > 0))
+            .expect("fixture should produce a continuation page");
+        state.epub_page = target_page;
+        sync_epub_location(&mut state);
+        let location = (state.current_page, state.epub_offset);
+
+        let _ = update(&mut state, Message::FontSizeDown);
+        complete_epub_pagination(&mut state);
+        assert_eq!((state.current_page, state.epub_offset), location);
+        assert_eq!(
+            state.epub_pages[state.epub_page].chapter, location.0,
+            "relayout should select a page in the anchored chapter"
+        );
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        complete_epub_pagination(&mut state);
+        assert_eq!((state.current_page, state.epub_offset), location);
+        assert_eq!(state.epub_pages[state.epub_page].chapter, location.0);
     }
 
     #[test]
@@ -6376,7 +6929,7 @@ mod tests {
                 Default::default(),
             )
         };
-        state.epub_pages = vec![
+        state.epub_pages = Arc::new(vec![
             EpubPage {
                 chapter: 0,
                 title: None,
@@ -6393,7 +6946,7 @@ mod tests {
                     text_offset: 5,
                 }],
             },
-        ];
+        ]);
 
         assert_eq!(epub_page_for_location(&state, 0, 5), 1);
     }
@@ -6406,6 +6959,7 @@ mod tests {
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         let _ = refresh_content(&mut state);
+        complete_epub_pagination(&mut state);
         assert!(state.epub_pages.iter().any(|page| page.chapter == 1));
 
         let _ = update(&mut state, Message::ToggleReadingMode);
@@ -6414,6 +6968,7 @@ mod tests {
         state.epub_page = 0;
 
         let _ = update(&mut state, Message::ToggleReadingMode);
+        complete_epub_pagination(&mut state);
 
         assert_eq!(state.reading_mode, ReadingMode::Paginated);
         assert_eq!(state.current_page, 1);
@@ -6431,7 +6986,7 @@ mod tests {
         state.file_path = Some(PathBuf::from("book.epub"));
         state.reading_state_saves = Some(saves);
         state.window_size.width = 900.0;
-        state.epub_pages = vec![
+        state.epub_pages = Arc::new(vec![
             EpubPage {
                 chapter: 0,
                 title: None,
@@ -6447,7 +7002,7 @@ mod tests {
                 title: None,
                 nodes: Vec::new(),
             },
-        ];
+        ]);
         state.bookmarks.push(Bookmark {
             id: 1,
             file_path: "book.epub".to_string(),
