@@ -269,9 +269,10 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   to resist decompression/resource bombs.  Also bound XML depth/text and image
   dimensions/pixels/estimated RGBA bytes before resource exposure.
   ~EpubLimits~ now applies bounded file/archive reads, central-directory
-  admission, XML shape checks, font-source bytes, and image-header/SVG dimension
-  checks before resources are exposed through ~EpubResource~; missing resources
-  retain fallback behavior.
+  admission, mismatch-safe XML shape checks, normalized MIME and signature-based
+  font/image classification, and fail-closed raster/SVG dimension checks before
+  resources are exposed through ~EpubResource~; missing resources retain
+  fallback behavior.
 - [ ] Separate chapter parsing/computed presentation from
   ~crates/shosai-app/src/app.rs~ so search, pagination, and both view modes use
   one cached chapter representation and stable locations.
@@ -349,8 +350,10 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   tests pass on macOS arm64 and Linux x86_64 without invoking either renderer.
   Configurable policy tests cover input/archive, entry count, compression ratio,
   entry/aggregate bytes, XML bytes/depth/text, font bytes, and image
-  dimensions/pixels/estimated RGBA bytes; backend-specific decode allocations
-  and hostile font decoding remain release and M2 boundaries.
+  dimensions/pixels/estimated RGBA bytes.  Adversarial tests include mismatched
+  XML end tags, MIME parameters/case, legacy font signatures, and partial or
+  invalid SVG dimensions; backend-specific decode allocations and hostile font
+  decoding remain release and M2 boundaries.
 - Add app tests near the existing EPUB tests in ~crates/shosai-app/src/app.rs~
   for stable locations, pagination, links, image/font caches, and fallback.
 - Add an instrumented page-turn benchmark or performance harness that separates
