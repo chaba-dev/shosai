@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use super::CanonicalEpubPath;
-use super::style::StyleMap;
+use super::style::EpubStyles;
 
 /// Metadata extracted from the OPF `<metadata>` element.
 #[derive(Debug, Clone, Default)]
@@ -96,6 +96,6 @@ pub struct EpubContent {
     pub manifest: HashMap<String, ManifestItem>,
     /// Resources admitted by the parser, keyed by canonical archive path.
     pub(crate) resources: HashMap<CanonicalEpubPath, StoredEpubResource>,
-    /// CSS class → style map extracted from the EPUB's stylesheets.
-    pub styles: StyleMap,
+    /// Admitted author stylesheets used by the native computed-style engine.
+    pub styles: EpubStyles,
 }

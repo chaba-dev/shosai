@@ -1,7 +1,7 @@
 //! Parsed EPUB chapter content shared by search and reader presentation.
 
 use super::render::{ContentNode, parse_chapter_xhtml};
-use super::style::StyleMap;
+use super::style::EpubStyles;
 use super::types::Chapter;
 
 /// Parsed content and searchable text for one spine chapter.
@@ -30,7 +30,7 @@ pub struct EpubPresentation {
 }
 
 impl EpubPresentation {
-    pub(crate) fn parse(chapters: &[Chapter], styles: &StyleMap) -> Self {
+    pub(crate) fn parse(chapters: &[Chapter], styles: &EpubStyles) -> Self {
         let chapters = chapters
             .iter()
             .map(|chapter| {

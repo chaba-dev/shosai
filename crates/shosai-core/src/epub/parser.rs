@@ -123,7 +123,7 @@ impl EpubDoc {
             &limits,
         )?;
 
-        // 6. Parse CSS stylesheets into a class → style map.
+        // 6. Retain admitted CSS stylesheets for document-scoped cascade.
         let css_sources: Vec<(&str, &str)> = manifest
             .values()
             .filter(|item| item.media_type == "text/css")
@@ -136,7 +136,7 @@ impl EpubDoc {
             .collect();
 
         let styles =
-            super::style::parse_epub_styles(css_sources.iter().map(|(path, css)| (*path, *css)));
+            super::style::EpubStyles::parse(css_sources.iter().map(|(path, css)| (*path, *css)));
 
         let presentation = EpubPresentation::parse(&chapters, &styles);
 

@@ -11,6 +11,8 @@ pub struct TextSpan {
     pub bold: bool,
     pub italic: bool,
     pub monospace: bool,
+    /// Font size relative to the containing native block.
+    pub font_size_multiplier: f32,
     /// Preserve source whitespace instead of applying normal HTML collapsing.
     pub preserve_whitespace: bool,
     /// If set, this span is a link to the given URL/href.
@@ -74,15 +76,21 @@ pub enum ContentNode {
 ///
 /// `base_path` is the directory of the chapter within the EPUB archive,
 /// used to resolve relative image `src` attributes.
-/// `styles` is the CSS class → style map for applying class-based styles.
+/// `styles` contains admitted author stylesheets for the native cascade.
 pub fn parse_chapter_xhtml(
     xhtml: &str,
     base_path: &str,
-    styles: &super::style::StyleMap,
+    styles: &super::style::EpubStyles,
 ) -> Vec<ContentNode> {
     let doc = match roxmltree::Document::parse(xhtml) {
         Ok(d) => d,
         Err(_) => return Vec::new(),
+    };
+
+    let css = styles.document_css(&doc, base_path);
+    let Ok(computed_styles) = super::computed_style::compute_parsed_document_styles(&doc, &css)
+    else {
+        return Vec::new();
     };
 
     // Find <body> (or fall back to root).
@@ -91,14 +99,14 @@ pub fn parse_chapter_xhtml(
         .find(|n| n.tag_name().name() == "body")
         .unwrap_or(doc.root());
 
-    parse_block_children(body, base_path, styles)
+    parse_block_children(body, base_path, &computed_styles)
 }
 
 /// Parse block-level children of an element.
 fn parse_block_children(
     parent: roxmltree::Node,
     base_path: &str,
-    styles: &super::style::StyleMap,
+    styles: &super::computed_style::ComputedDocumentStyles,
 ) -> Vec<ContentNode> {
     let mut nodes = Vec::new();
 
@@ -113,6 +121,7 @@ fn parse_block_children(
                             bold: false,
                             italic: false,
                             monospace: false,
+                            font_size_multiplier: 1.0,
                             preserve_whitespace: false,
                             link: None,
                         }],
@@ -123,19 +132,20 @@ fn parse_block_children(
             continue;
         }
 
-        // Look up CSS class-based style for this element.
-        let css_style = lookup_element_style(&child, styles);
+        let css_style = styles
+            .get(child)
+            .expect("computed style must exist for every element");
 
         // If `display: none`, skip entirely.
-        if css_style.as_ref().is_some_and(|s| s.hidden == Some(true)) {
+        if css_style.display == super::computed_style::DisplayRole::None {
             continue;
         }
 
         // If the CSS says monospace + preserve-whitespace, treat as code block
         // regardless of the HTML tag (handles Calibre-generated classes).
-        if css_style
-            .as_ref()
-            .is_some_and(|s| s.monospace == Some(true) && s.preserve_whitespace == Some(true))
+        if !matches!(child.tag_name().name(), "pre" | "code")
+            && css_style.monospace
+            && css_style.preserve_whitespace
         {
             let code = collect_text_content(&child);
             if !code.trim().is_empty() {
@@ -147,7 +157,7 @@ fn parse_block_children(
             }
         }
 
-        let node_style = css_to_node_style(&css_style);
+        let node_style = css_to_node_style(css_style, child.tag_name().name());
 
         match child.tag_name().name() {
             "h1" => push_heading(&mut nodes, &child, 1, &node_style),
@@ -158,7 +168,7 @@ fn parse_block_children(
             "h6" => push_heading(&mut nodes, &child, 6, &node_style),
 
             "p" => {
-                let spans = collect_inline_spans(&child, styles);
+                let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
                 if !spans.is_empty() {
                     nodes.push(ContentNode::Paragraph(spans, node_style));
                 }
@@ -234,7 +244,7 @@ fn parse_block_children(
             }
 
             _ => {
-                let spans = collect_inline_spans(&child, styles);
+                let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
                 if !spans.is_empty() {
                     nodes.push(ContentNode::Paragraph(spans, node_style));
                 }
@@ -245,55 +255,47 @@ fn parse_block_children(
     nodes
 }
 
-/// Look up the CSS style for an element based on its class attribute.
-fn lookup_element_style(
-    element: &roxmltree::Node,
-    styles: &super::style::StyleMap,
-) -> Option<super::style::EpubStyle> {
-    let class_attr = element.attribute("class")?;
-    let mut merged = super::style::EpubStyle::default();
-    let mut found = false;
-    for cls in class_attr.split_whitespace() {
-        if let Some(style) = styles.get(cls) {
-            // Simple merge: later classes override earlier ones.
-            macro_rules! merge {
-                ($field:ident) => {
-                    if style.$field.is_some() {
-                        merged.$field = style.$field;
-                    }
-                };
-            }
-            merge!(bold);
-            merge!(italic);
-            merge!(monospace);
-            merge!(font_size_multiplier);
-            merge!(text_align);
-            merge!(hidden);
-            merge!(text_indent_em);
-            merge!(margin_left_em);
-            merge!(preserve_whitespace);
-            found = true;
-        }
-    }
-    found.then_some(merged)
-}
+/// Convert a fully computed CSS style to native block annotations.
+fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> NodeStyle {
+    use super::computed_style::{Alignment, Direction};
 
-/// Convert a CSS style to a NodeStyle.
-fn css_to_node_style(css: &Option<super::style::EpubStyle>) -> NodeStyle {
-    match css {
-        Some(s) => NodeStyle {
-            text_align: s.text_align,
-            font_size_multiplier: s.font_size_multiplier,
-            // A negative text indent commonly cancels the containing margin on
-            // the first line to create a hanging indent. Native text widgets do
-            // not expose first-line indentation, so use the first-line origin
-            // rather than incorrectly shifting the entire paragraph inward.
-            margin_left_em: match (s.margin_left_em, s.text_indent_em) {
-                (Some(margin), Some(indent)) if indent < 0.0 => Some((margin + indent).max(0.0)),
-                (margin, _) => margin,
+    let semantic_scale = match tag {
+        "h1" => 2.0,
+        "h2" => 1.5,
+        "h3" => 1.17,
+        _ => 1.0,
+    };
+    let font_size_multiplier = css.font_size_px / (16.0 * semantic_scale);
+    let margin_left_em = css.margin_left_px / 16.0;
+    let text_indent_em = css.text_indent_px / 16.0;
+    NodeStyle {
+        text_align: Some(match css.alignment {
+            Alignment::Start => match css.direction {
+                Direction::Ltr => super::style::TextAlignment::Left,
+                Direction::Rtl => super::style::TextAlignment::Right,
             },
+            Alignment::End => match css.direction {
+                Direction::Ltr => super::style::TextAlignment::Right,
+                Direction::Rtl => super::style::TextAlignment::Left,
+            },
+            Alignment::Left => super::style::TextAlignment::Left,
+            Alignment::Right => super::style::TextAlignment::Right,
+            Alignment::Center => super::style::TextAlignment::Center,
+            Alignment::Justify => super::style::TextAlignment::Justify,
+        }),
+        font_size_multiplier: ((font_size_multiplier - 1.0).abs() > f32::EPSILON)
+            .then_some(font_size_multiplier),
+        // A negative text indent commonly cancels the containing margin on
+        // the first line to create a hanging indent. Native text widgets do
+        // not expose first-line indentation, so use the first-line origin
+        // rather than incorrectly shifting the entire paragraph inward.
+        margin_left_em: if text_indent_em < 0.0 {
+            Some((margin_left_em + text_indent_em).max(0.0))
+        } else if margin_left_em.abs() > f32::EPSILON {
+            Some(margin_left_em)
+        } else {
+            None
         },
-        None => NodeStyle::default(),
     }
 }
 
@@ -315,11 +317,14 @@ fn push_heading(
 }
 
 /// Parse <li> items from a <ul> or <ol>.
-fn parse_list_items(list: &roxmltree::Node, styles: &super::style::StyleMap) -> Vec<Vec<TextSpan>> {
+fn parse_list_items(
+    list: &roxmltree::Node,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> Vec<Vec<TextSpan>> {
     let mut items = Vec::new();
     for child in list.children() {
         if child.is_element() && child.tag_name().name() == "li" {
-            let spans = collect_inline_spans(&child, styles);
+            let spans = collect_inline_spans(&child, styles, 16.0);
             if !spans.is_empty() {
                 items.push(spans);
             }
@@ -331,27 +336,11 @@ fn parse_list_items(list: &roxmltree::Node, styles: &super::style::StyleMap) -> 
 /// Collect inline text spans with bold/italic formatting from an element.
 fn collect_inline_spans(
     element: &roxmltree::Node,
-    styles: &super::style::StyleMap,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    base_font_size: f32,
 ) -> Vec<TextSpan> {
     let mut spans = Vec::new();
-    // Check if the element itself has CSS-based styling.
-    let css = lookup_element_style(element, styles);
-    let bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
-    let italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
-    let mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
-    let preserve_whitespace = css
-        .as_ref()
-        .is_some_and(|s| s.preserve_whitespace == Some(true));
-    collect_inline_spans_recursive(
-        element,
-        bold,
-        italic,
-        mono,
-        preserve_whitespace,
-        None,
-        styles,
-        &mut spans,
-    );
+    collect_inline_spans_recursive(element, base_font_size, None, styles, &mut spans);
 
     // XHTML follows HTML whitespace rules for normal inline content: source
     // line breaks and indentation collapse to a single space. Preserve raw
@@ -399,72 +388,45 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
     spans.retain(|span| !span.text.is_empty());
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collect_inline_spans_recursive(
     node: &roxmltree::Node,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-    preserve_whitespace: bool,
+    base_font_size: f32,
     link: Option<&str>,
-    styles: &super::style::StyleMap,
+    styles: &super::computed_style::ComputedDocumentStyles,
     spans: &mut Vec<TextSpan>,
 ) {
+    let style = styles
+        .get(*node)
+        .expect("computed style must exist for every element");
     for child in node.children() {
         if child.is_text() {
             let text = child.text().unwrap_or("");
             if !text.is_empty() {
                 spans.push(TextSpan {
                     text: text.to_string(),
-                    bold,
-                    italic,
-                    monospace,
-                    preserve_whitespace,
+                    bold: style.bold,
+                    italic: style.italic,
+                    monospace: style.monospace,
+                    font_size_multiplier: style.font_size_px / base_font_size,
+                    preserve_whitespace: style.preserve_whitespace,
                     link: link.map(|s| s.to_string()),
                 });
             }
         } else if child.is_element() {
-            // Apply CSS class-based overrides for this inline element.
-            let css = lookup_element_style(&child, styles);
-            let css_bold = css.as_ref().is_some_and(|s| s.bold == Some(true));
-            let css_italic = css.as_ref().is_some_and(|s| s.italic == Some(true));
-            let css_mono = css.as_ref().is_some_and(|s| s.monospace == Some(true));
-            let css_preserve_whitespace = css
-                .as_ref()
-                .is_some_and(|s| s.preserve_whitespace == Some(true));
+            let child_style = styles
+                .get(child)
+                .expect("computed style must exist for every element");
+            if child_style.display == super::computed_style::DisplayRole::None {
+                continue;
+            }
 
             match child.tag_name().name() {
                 "a" => {
                     let href = child.attribute("href");
-                    collect_inline_spans_recursive(
-                        &child,
-                        bold || css_bold,
-                        italic || css_italic,
-                        monospace || css_mono,
-                        preserve_whitespace || css_preserve_whitespace,
-                        href,
-                        styles,
-                        spans,
-                    );
+                    collect_inline_spans_recursive(&child, base_font_size, href, styles, spans);
                 }
-                tag => {
-                    let (b, i, m) = match tag {
-                        "b" | "strong" => (true, italic, monospace),
-                        "i" | "em" | "cite" => (bold, true, monospace),
-                        "bi" => (true, true, monospace),
-                        "code" | "tt" | "samp" | "kbd" => (bold, italic, true),
-                        _ => (bold, italic, monospace),
-                    };
-                    collect_inline_spans_recursive(
-                        &child,
-                        b || css_bold,
-                        i || css_italic,
-                        m || css_mono,
-                        preserve_whitespace || css_preserve_whitespace,
-                        link,
-                        styles,
-                        spans,
-                    );
+                _ => {
+                    collect_inline_spans_recursive(&child, base_font_size, link, styles, spans);
                 }
             }
         }
@@ -478,6 +440,7 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
         if spans[i].bold == spans[i + 1].bold
             && spans[i].italic == spans[i + 1].italic
             && spans[i].monospace == spans[i + 1].monospace
+            && spans[i].font_size_multiplier == spans[i + 1].font_size_multiplier
             && spans[i].preserve_whitespace == spans[i + 1].preserve_whitespace
             && spans[i].link == spans[i + 1].link
         {
@@ -633,9 +596,9 @@ mod tests {
 
     #[test]
     fn test_parse_preserves_inline_preformatted_whitespace() {
-        let xhtml = r#"<html><body><p>Run <code class="keep">  x
+        let xhtml = r#"<html><head><link rel="stylesheet" href="style.css"/></head><body><p>Run <code class="keep">  x
     y</code> now.</p></body></html>"#;
-        let styles = super::super::style::parse_epub_styles([(
+        let styles = super::super::style::EpubStyles::parse([(
             "style.css",
             ".keep { font-family: monospace; white-space: pre; }",
         )]);
@@ -651,6 +614,66 @@ mod tests {
             }
             other => panic!("expected Paragraph, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn production_rendering_uses_selector_cascade_inheritance_and_inline_style() {
+        let xhtml = r#"<html><head><link rel="stylesheet" href="style.css"/></head><body>
+            <article class="chapter">
+                <h1>Title</h1>
+                <p id="lead" class="note" style="font-style: normal">Lead <span class="big">large</span></p>
+                <p class="source-order">Source order</p>
+                <p class="hidden">Hidden</p>
+            </article>
+        </body></html>"#;
+        let css = r#"
+            article { font-style: italic; font-size: 125%; }
+            article > p.note { font-size: 1.2em; text-align: right; }
+            #lead { font-weight: bold; font-style: italic; }
+            p.note { font-weight: normal !important; }
+            .big { font-size: 2em; }
+            h1 ~ p.source-order { font-family: monospace; }
+            .source-order { text-align: left; }
+            .source-order { text-align: center; }
+            .hidden { display: none; }
+        "#;
+        let styles = super::super::style::EpubStyles::parse([("style.css", css)]);
+
+        let nodes = parse_chapter_xhtml(xhtml, "", &styles);
+
+        let ContentNode::Paragraph(lead, lead_style) = &nodes[1] else {
+            panic!("expected lead paragraph");
+        };
+        assert!(!lead[0].bold, "author !important must beat the ID rule");
+        assert!(!lead[0].italic, "inline style must beat the author ID rule");
+        assert_eq!(
+            lead.iter()
+                .find(|span| span.text == "large")
+                .map(|span| span.font_size_multiplier),
+            Some(2.0)
+        );
+        assert_eq!(
+            lead_style.text_align,
+            Some(super::super::style::TextAlignment::Right)
+        );
+        assert_eq!(lead_style.font_size_multiplier, Some(1.5));
+
+        let ContentNode::Paragraph(source_order, source_order_style) = &nodes[2] else {
+            panic!("expected source-order paragraph");
+        };
+        assert!(
+            source_order[0].italic,
+            "font style must inherit from article"
+        );
+        assert!(
+            source_order[0].monospace,
+            "general sibling selector must match"
+        );
+        assert_eq!(
+            source_order_style.text_align,
+            Some(super::super::style::TextAlignment::Center)
+        );
+        assert_eq!(nodes.len(), 3, "display:none content must be omitted");
     }
 
     #[test]
@@ -686,10 +709,10 @@ mod tests {
 
     #[test]
     fn test_parse_blockquote_style_and_hanging_indent() {
-        let xhtml = r#"<html><body>
+        let xhtml = r#"<html><head><link rel="stylesheet" href="style.css"/></head><body>
             <blockquote class="toc"><p class="entry">Chapter 1</p></blockquote>
         </body></html>"#;
-        let styles = super::super::style::parse_epub_styles([(
+        let styles = super::super::style::EpubStyles::parse([(
             "style.css",
             ".toc { margin-left: 16px; } .entry { margin-left: 32px; text-indent: -32px; }",
         )]);

@@ -121,7 +121,8 @@ pub(crate) fn paginate_epub_chapter(
         match node {
             ContentNode::Paragraph(spans, style) => {
                 let mut consumed = 0;
-                let style_scale = style.font_size_multiplier.unwrap_or(1.0);
+                let style_scale =
+                    style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
                 let text_line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
                 let paragraph_chars_per_line =
                     scaled_characters_per_line(chars_per_line, style_scale);
@@ -641,7 +642,7 @@ fn estimated_epub_compact_node_height(
         }
         ContentNode::HorizontalRule => text_line_height,
         ContentNode::Paragraph(spans, style) => {
-            let scale = style.font_size_multiplier.unwrap_or(1.0);
+            let scale = style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
             wrapped(spans_text_len(spans), scale) * text_line_height * scale
         }
     }
@@ -649,6 +650,13 @@ fn estimated_epub_compact_node_height(
 
 pub(crate) fn spans_text_len(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
     spans.iter().map(|span| span.text.chars().count()).sum()
+}
+
+fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) -> f32 {
+    spans
+        .iter()
+        .map(|span| span.font_size_multiplier)
+        .fold(1.0, f32::max)
 }
 
 pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
@@ -695,6 +703,7 @@ mod tests {
             bold: true,
             italic: false,
             monospace: false,
+            font_size_multiplier: 1.0,
             preserve_whitespace: false,
             link: Some("chapter-2.xhtml".to_string()),
         }];
@@ -739,6 +748,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: None,
                 }]
@@ -785,6 +795,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: Some(format!("{}.xhtml", text.replace(' ', "-"))),
                 }],
@@ -819,6 +830,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     }],
@@ -843,6 +855,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: Some(format!("section-{index}.xhtml")),
                     }],
@@ -870,6 +883,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                 }],
                 Default::default(),
@@ -911,6 +925,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: link.map(str::to_string),
                 }],
@@ -967,6 +982,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     }],
@@ -1009,6 +1025,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: None,
                 }],
@@ -1064,6 +1081,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: link.map(str::to_string),
                 }],
@@ -1112,6 +1130,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 monospace: false,
+                font_size_multiplier: 1.0,
                 preserve_whitespace: false,
                 link: None,
             }],
@@ -1148,6 +1167,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 monospace: false,
+                font_size_multiplier: 1.0,
                 preserve_whitespace: false,
                 link: None,
             }],
@@ -1169,6 +1189,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     }],

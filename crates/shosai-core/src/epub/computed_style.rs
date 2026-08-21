@@ -1,13 +1,10 @@
-//! Gate 0 native computed-style spike.
-//!
-//! This is deliberately test-only. It exercises a real cascade over the parsed
-//! XHTML tree without changing the class-only production renderer before the
-//! renderer ADR selects a backend.
+//! Bounded native CSS cascade and computed-style engine for EPUB XHTML.
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use lightningcss::declaration::DeclarationBlock;
+use lightningcss::media_query::{MediaList, MediaType, Qualifier};
 use lightningcss::properties::Property;
 use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, DisplayOutside};
 use lightningcss::properties::font::{
@@ -20,19 +17,19 @@ use lightningcss::stylesheet::{ParserOptions, StyleAttribute, StyleSheet};
 use lightningcss::traits::ToCss;
 use lightningcss::values::length::{LengthPercentageOrAuto, LengthValue};
 use lightningcss::values::percentage::DimensionPercentage;
-use roxmltree::Node;
+use roxmltree::{Node, NodeId};
 
 const INITIAL_FONT_SIZE_PX: f32 = 16.0;
 const INLINE_SPECIFICITY: u32 = u32::MAX;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Direction {
+pub(crate) enum Direction {
     Ltr,
     Rtl,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Alignment {
+pub(crate) enum Alignment {
     Start,
     End,
     Left,
@@ -42,7 +39,7 @@ enum Alignment {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DisplayRole {
+pub(crate) enum DisplayRole {
     None,
     Inline,
     Block,
@@ -54,25 +51,38 @@ enum DisplayRole {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ComputedStyle {
-    display: DisplayRole,
-    font_size_px: f32,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-    alignment: Alignment,
-    direction: Direction,
-    preserve_whitespace: bool,
-    margin_left_px: f32,
+pub(crate) struct ComputedStyle {
+    pub(crate) display: DisplayRole,
+    pub(crate) font_size_px: f32,
+    pub(crate) bold: bool,
+    pub(crate) italic: bool,
+    pub(crate) monospace: bool,
+    pub(crate) alignment: Alignment,
+    pub(crate) direction: Direction,
+    pub(crate) preserve_whitespace: bool,
+    pub(crate) margin_left_px: f32,
+    pub(crate) text_indent_px: f32,
 }
 
 #[derive(Debug)]
-struct PrototypeReport {
+pub(crate) struct ComputedDocumentStyles {
+    node_styles: HashMap<NodeId, ComputedStyle>,
+    #[allow(dead_code)]
     element_styles: HashMap<String, ComputedStyle>,
-    font_face_rules: usize,
-    unsupported_selectors: Vec<String>,
-    unsupported_rules: Vec<String>,
-    unsupported_declarations: Vec<String>,
+    #[allow(dead_code)]
+    pub(crate) font_face_rules: usize,
+    #[allow(dead_code)]
+    pub(crate) unsupported_selectors: Vec<String>,
+    #[allow(dead_code)]
+    pub(crate) unsupported_rules: Vec<String>,
+    #[allow(dead_code)]
+    pub(crate) unsupported_declarations: Vec<String>,
+}
+
+impl ComputedDocumentStyles {
+    pub(crate) fn get(&self, node: Node<'_, '_>) -> Option<&ComputedStyle> {
+        self.node_styles.get(&node.id())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,10 +171,19 @@ struct SpecifiedStyle {
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
     margin_left: Slot<RelativeLength>,
+    text_indent: Slot<RelativeLength>,
 }
 
-fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, String> {
+#[cfg(test)]
+fn compute_document_styles(xhtml: &str, css: &str) -> Result<ComputedDocumentStyles, String> {
     let document = roxmltree::Document::parse(xhtml).map_err(|error| error.to_string())?;
+    compute_parsed_document_styles(&document, css)
+}
+
+pub(crate) fn compute_parsed_document_styles(
+    document: &roxmltree::Document<'_>,
+    css: &str,
+) -> Result<ComputedDocumentStyles, String> {
     let sheet =
         StyleSheet::parse(css, ParserOptions::default()).map_err(|error| error.to_string())?;
     let mut unsupported_selectors = HashSet::new();
@@ -180,12 +199,14 @@ fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, St
     );
     inventory_inline_declarations(document.root_element(), &mut unsupported_declarations);
 
+    let mut node_styles = HashMap::new();
     let mut element_styles = HashMap::new();
     walk_element(
         document.root_element(),
         None,
         None,
         &sheet.rules.0,
+        &mut node_styles,
         &mut element_styles,
     );
     let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
@@ -195,7 +216,8 @@ fn compute_document_styles(xhtml: &str, css: &str) -> Result<PrototypeReport, St
     let mut unsupported_declarations = unsupported_declarations.into_iter().collect::<Vec<_>>();
     unsupported_declarations.sort();
 
-    Ok(PrototypeReport {
+    Ok(ComputedDocumentStyles {
+        node_styles,
         element_styles,
         font_face_rules,
         unsupported_selectors,
@@ -209,6 +231,7 @@ fn walk_element(
     parent: Option<&ComputedStyle>,
     root_font_size: Option<f32>,
     rules: &[CssRule<'_>],
+    node_styles: &mut HashMap<NodeId, ComputedStyle>,
     styles: &mut HashMap<String, ComputedStyle>,
 ) {
     let style = compute_element_style(
@@ -218,11 +241,19 @@ fn walk_element(
         rules,
     );
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
+    node_styles.insert(element.id(), style.clone());
     if let Some(id) = element.attribute("id") {
         styles.insert(id.to_string(), style.clone());
     }
     for child in element.children().filter(Node::is_element) {
-        walk_element(child, Some(&style), Some(root_font_size), rules, styles);
+        walk_element(
+            child,
+            Some(&style),
+            Some(root_font_size),
+            rules,
+            node_styles,
+            styles,
+        );
     }
 }
 
@@ -242,11 +273,13 @@ fn compute_element_style(
         direction: Direction::Ltr,
         preserve_whitespace: false,
         margin_left_px: 0.0,
+        text_indent_px: 0.0,
     });
     let tag = element.tag_name().name();
     let mut style = inherited.clone();
     style.display = ua_display(tag);
     style.margin_left_px = 0.0;
+    style.text_indent_px = 0.0;
     apply_ua_text_defaults(tag, &mut style);
     if element.attribute("dir") == Some("rtl") {
         style.direction = Direction::Rtl;
@@ -311,6 +344,9 @@ fn compute_element_style(
     if let Some(value) = specified.margin_left.value() {
         style.margin_left_px = value.resolve(style.font_size_px, root_font_size);
     }
+    if let Some(value) = specified.text_indent.value() {
+        style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
+    }
     style
 }
 
@@ -321,21 +357,52 @@ fn apply_rules(
     source_order: &mut usize,
 ) {
     for rule in rules {
-        if let CssRule::Style(rule) = rule {
-            let specificity = rule
-                .selectors
-                .0
-                .iter()
-                .filter(|selector| {
-                    selector_supported(selector) && selector_matches(selector, element)
-                })
-                .map(Selector::specificity)
-                .max();
-            if let Some(specificity) = specificity {
-                apply_declarations(&rule.declarations, specificity, source_order, specified);
+        match rule {
+            CssRule::Style(rule) => {
+                let specificity = rule
+                    .selectors
+                    .0
+                    .iter()
+                    .filter(|selector| {
+                        selector_supported(selector) && selector_matches(selector, element)
+                    })
+                    .map(Selector::specificity)
+                    .max();
+                if let Some(specificity) = specificity {
+                    apply_declarations(&rule.declarations, specificity, source_order, specified);
+                }
             }
+            CssRule::Media(media) if screen_media_matches(&media.query) => {
+                apply_rules(&media.rules.0, element, specified, source_order);
+            }
+            _ => {}
         }
     }
+}
+
+fn screen_media_matches(media: &MediaList<'_>) -> bool {
+    media.media_queries.iter().any(|query| {
+        if query.condition.is_some() {
+            return false;
+        }
+        matches!(
+            (&query.qualifier, &query.media_type),
+            (
+                None | Some(Qualifier::Only),
+                MediaType::All | MediaType::Screen
+            ) | (
+                Some(Qualifier::Not),
+                MediaType::Print | MediaType::Custom(_)
+            )
+        )
+    })
+}
+
+fn bounded_media_query(media: &MediaList<'_>) -> bool {
+    media
+        .media_queries
+        .iter()
+        .all(|query| query.condition.is_none() && !matches!(query.media_type, MediaType::Custom(_)))
 }
 
 fn apply_declarations(
@@ -406,6 +473,11 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
                 specified.margin_left.offer(priority, value);
             }
         }
+        Property::TextIndent(indent) => {
+            if let Some(value) = relative_length(&indent.value) {
+                specified.text_indent.offer(priority, value);
+            }
+        }
         _ => {}
     }
 }
@@ -435,6 +507,17 @@ fn inventory_rules(
                 }
             }
             CssRule::FontFace(_) => *font_face_rules += 1,
+            CssRule::Media(media) if bounded_media_query(&media.query) => {
+                if screen_media_matches(&media.query) {
+                    inventory_rules(
+                        &media.rules.0,
+                        unsupported_selectors,
+                        unsupported_rules,
+                        unsupported_declarations,
+                        font_face_rules,
+                    );
+                }
+            }
             rule => {
                 unsupported_rules.insert(unsupported_rule_name(rule).into());
             }
@@ -522,6 +605,7 @@ fn property_supported(property: &Property<'_>) -> bool {
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
             margin_length(value).is_some()
         }
+        Property::TextIndent(indent) => relative_length(&indent.value).is_some(),
         _ => false,
     }
 }
@@ -771,7 +855,7 @@ mod tests {
     const XHTML: &str = include_str!("../../tests/fixtures/native-computed-style.xhtml");
     const CSS: &str = include_str!("../../tests/fixtures/native-computed-style.css");
 
-    fn report() -> PrototypeReport {
+    fn report() -> ComputedDocumentStyles {
         compute_document_styles(XHTML, CSS).expect("computed-style fixture should parse")
     }
 
@@ -903,5 +987,20 @@ mod tests {
             report.element_styles["layer-target"].alignment,
             Alignment::Start
         );
+    }
+
+    #[test]
+    fn bounded_screen_media_rules_participate_in_source_order() {
+        let xhtml = r#"<html><body><p id="target">Target</p></body></html>"#;
+        let css = r#"
+            #target { text-align: left; }
+            @media print { #target { text-align: right; } }
+            @media screen { #target { text-align: center; } }
+        "#;
+
+        let report = compute_document_styles(xhtml, css).unwrap();
+
+        assert_eq!(report.element_styles["target"].alignment, Alignment::Center);
+        assert!(report.unsupported_rules.is_empty());
     }
 }

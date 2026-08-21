@@ -4057,7 +4057,10 @@ fn styled_epub_span<'a>(
         ..Font::DEFAULT
     };
     let color = if is_link { LINK_COLOR } else { text_color };
-    let mut rendered = span(fragment).size(font_size).font(font).color(color);
+    let mut rendered = span(fragment)
+        .size(font_size * text_span.font_size_multiplier)
+        .font(font)
+        .color(color);
     if is_link {
         rendered = rendered.underline(true);
     }
@@ -6923,6 +6926,7 @@ mod tests {
                     bold: false,
                     italic: false,
                     monospace: false,
+                    font_size_multiplier: 1.0,
                     preserve_whitespace: false,
                     link: None,
                 }],
@@ -7334,6 +7338,7 @@ mod tests {
                         bold: true,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     }]],
