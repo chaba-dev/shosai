@@ -216,6 +216,21 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
     let winning_source_order = css.find(".source-order { color: #222222; }").unwrap();
     assert!(first_source_order < winning_source_order);
 
+    let rendered = cascade_doc.presentation().chapter(0).unwrap().nodes();
+    let paragraph = |text: &str| {
+        rendered.iter().find_map(|node| match node {
+            shosai_core::epub::render::ContentNode::Paragraph(spans, _)
+                if spans.iter().map(|span| span.text.as_str()).collect::<String>() == text =>
+            {
+                Some(spans)
+            }
+            _ => None,
+        })
+    };
+    assert!(paragraph("Specificity").unwrap()[0].bold);
+    assert!(paragraph("Inherited and child-selector styles").unwrap()[0].italic);
+    assert!(paragraph("Hidden sentinel").is_none());
+
     let table_doc = open("table");
     let table = chapter_document(&table_doc, 0);
     assert_eq!(
