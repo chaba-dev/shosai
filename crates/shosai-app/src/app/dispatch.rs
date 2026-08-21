@@ -178,7 +178,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             };
             state.continuous_pages.clear();
             state.continuous_visible.clear();
-            state.continuous_chapters.clear();
             state.render_generation = state.render_generation.wrapping_add(1);
             let task = refresh_content(state);
             state.page_input = if uses_paginated_epub_layout(state) {

@@ -15,7 +15,7 @@ use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
-use shosai_core::epub::render::{ContentNode, parse_chapter_xhtml};
+use shosai_core::epub::render::ContentNode;
 use shosai_core::library::{Book, BookPage, Library};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -313,7 +313,6 @@ struct ReaderTab {
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
-    chapter_content: Vec<ContentNode>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Vec<EpubPage>,
     epub_page: usize,
@@ -321,7 +320,6 @@ struct ReaderTab {
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
-    continuous_chapters: Vec<Vec<ContentNode>>,
     continuous_tail_extent: f32,
     render_generation: u64,
     page_input: String,
@@ -399,7 +397,6 @@ pub struct State {
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
-    chapter_content: Vec<ContentNode>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_pages: Vec<EpubPage>,
     epub_page: usize,
@@ -407,7 +404,6 @@ pub struct State {
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
-    continuous_chapters: Vec<Vec<ContentNode>>,
     continuous_tail_extent: f32,
     continuous_activation: u64,
     next_continuous_request_id: u64,
@@ -531,7 +527,6 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_facing_page_handle: None,
         page_cache: VecDeque::new(),
         render_generation: 0,
-        chapter_content: Vec::new(),
         epub_image_handles: HashMap::new(),
         epub_pages: Vec::new(),
         epub_page: 0,
@@ -539,7 +534,6 @@ pub fn boot() -> (State, Task<Message>) {
         continuous_pages: Vec::new(),
         continuous_pending: BTreeMap::new(),
         continuous_visible: BTreeSet::new(),
-        continuous_chapters: Vec::new(),
         continuous_tail_extent: 0.0,
         continuous_activation: 0,
         next_continuous_request_id: 1,
@@ -733,7 +727,6 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page: state.rendered_facing_page.clone(),
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
-        chapter_content: state.chapter_content.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_pages: state.epub_pages.clone(),
         epub_page: state.epub_page,
@@ -741,7 +734,6 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
-        continuous_chapters: state.continuous_chapters.clone(),
         continuous_tail_extent: state.continuous_tail_extent,
         render_generation: state.render_generation,
         page_input: state.page_input.clone(),
@@ -778,7 +770,6 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page = tab.rendered_facing_page;
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
-    state.chapter_content = tab.chapter_content;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_pages = tab.epub_pages;
     state.epub_page = tab.epub_page;
@@ -786,7 +777,6 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
-    state.continuous_chapters = tab.continuous_chapters;
     state.continuous_tail_extent = tab.continuous_tail_extent;
     state.page_input = tab.page_input;
     state.error = tab.error;
@@ -887,7 +877,6 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.epub_page = 0;
         state.epub_offset = 0;
         state.continuous_pages.clear();
-        state.continuous_chapters.clear();
         state.screen = Screen::Library;
         state.render_generation = state.render_generation.wrapping_add(1);
         state.search_document_generation = state.search_document_generation.wrapping_add(1);
@@ -969,7 +958,6 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.rendered_facing_page = None;
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
-    state.chapter_content = Vec::new();
     state.epub_image_handles.clear();
     state.epub_pages.clear();
     state.epub_page = 0;
@@ -977,7 +965,6 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.continuous_pages.clear();
     state.continuous_pending.clear();
     state.continuous_visible.clear();
-    state.continuous_chapters.clear();
     state.continuous_tail_extent = 0.0;
     state.show_reader_settings = false;
     state.show_reader_more = false;
@@ -1199,22 +1186,12 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 state.rendered_page_handle = None;
                 state.rendered_facing_page = None;
                 state.rendered_facing_page_handle = None;
-                state.continuous_chapters = doc
-                    .content
-                    .chapters
-                    .iter()
-                    .map(|chapter| {
-                        let base_path = chapter
-                            .path
-                            .rsplit_once('/')
-                            .map(|(directory, _)| directory)
-                            .unwrap_or("");
-                        parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
-                    })
-                    .collect();
                 cache_epub_image_handles(
                     &mut state.epub_image_handles,
-                    state.continuous_chapters.iter().flatten(),
+                    doc.presentation()
+                        .chapters()
+                        .iter()
+                        .flat_map(|chapter| chapter.nodes()),
                     &|path| doc.resource(path).map(|resource| resource.bytes()),
                 );
                 state.error = None;
@@ -1248,7 +1225,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
             let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
-            state.chapter_content.clear();
             state.error = None;
             let mut tasks = Vec::new();
             for page in pages {
@@ -1279,28 +1255,21 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
-            let parsed_chapters = doc
-                .content
-                .chapters
-                .iter()
-                .map(|chapter| {
-                    let base_path = chapter
-                        .path
-                        .rsplit_once('/')
-                        .map(|(dir, _)| dir)
-                        .unwrap_or("");
-                    parse_chapter_xhtml(&chapter.content, base_path, &doc.content.styles)
-                })
-                .collect::<Vec<_>>();
             cache_epub_image_handles(
                 &mut state.epub_image_handles,
-                parsed_chapters.iter().flatten(),
+                doc.presentation()
+                    .chapters()
+                    .iter()
+                    .flat_map(|chapter| chapter.nodes()),
                 &|path| doc.resource(path).map(|resource| resource.bytes()),
             );
-            state.epub_pages = parsed_chapters
+            state.epub_pages = doc
+                .presentation()
+                .chapters()
                 .iter()
                 .enumerate()
-                .flat_map(|(chapter_index, nodes)| {
+                .flat_map(|(chapter_index, presentation)| {
+                    let nodes = presentation.nodes();
                     let chapter = &doc.content.chapters[chapter_index];
                     let title = chapter
                         .title
@@ -1325,14 +1294,12 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 })
                 .collect();
             if state.epub_pages.is_empty() {
-                state.chapter_content.clear();
                 state.epub_page = 0;
                 state.error = Some(AppError::EpubEmpty);
             } else {
                 let requested_page = epub_page_for_location(state, anchor.0, anchor.1);
                 state.epub_page = requested_page.min(state.epub_pages.len() - 1);
                 state.current_page = state.epub_pages[state.epub_page].chapter;
-                state.chapter_content = parsed_chapters[state.current_page].clone();
                 state.page_input = (state.epub_page + 1).to_string();
                 state.error = None;
             }
@@ -1341,7 +1308,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
             let scale = paginated_raster_scale(state, &pages);
-            state.chapter_content.clear();
             state.error = None;
             let mut tasks = Vec::new();
             for page in pages {
@@ -2181,6 +2147,26 @@ fn perform_search(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
+
+    if let Some(OpenDocument::Epub(document)) = &state.document {
+        let document = Arc::clone(document);
+        return Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    shosai_core::search::search_epub(&document, &query)
+                })
+                .await
+                .unwrap_or_default()
+            },
+            move |results| Message::SearchPerformed {
+                tab_id,
+                document_generation,
+                query_generation,
+                results,
+            },
+        );
+    }
+
     let Some(path) = state.file_path.clone() else {
         return Task::none();
     };
@@ -2219,9 +2205,6 @@ fn perform_search(state: &mut State) -> Task<Message> {
                 {
                     Some("pdf") => PdfDoc::open(&path)
                         .and_then(|document| document.page_texts())
-                        .unwrap_or_default(),
-                    Some("epub") => EpubDoc::open(&path)
-                        .map(|document| shosai_core::search::extract_epub_text(&document))
                         .unwrap_or_default(),
                     _ => Vec::new(),
                 };
@@ -3144,7 +3127,8 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
         }
         Some(OpenDocument::Epub(doc)) => {
             let mut chapters = column![].spacing(32).padding(20).width(Length::Fill);
-            for (chapter_index, nodes) in state.continuous_chapters.iter().enumerate() {
+            for (chapter_index, presentation) in doc.presentation().chapters().iter().enumerate() {
+                let nodes = presentation.nodes();
                 let mut chapter = column![].spacing(state.font_size * state.line_spacing);
                 if let Some(title) = doc
                     .chapter(chapter_index)
@@ -5334,24 +5318,32 @@ mod tests {
     }
 
     #[test]
-    fn continuous_epub_mode_builds_every_chapter() {
+    fn continuous_epub_mode_reuses_the_shared_chapter_presentation() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let chapter_count = epub.chapter_count();
+        let first_chapter = epub.presentation().chapter(0).unwrap() as *const _;
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.total_pages = chapter_count;
 
         let _ = update(&mut state, Message::ToggleReadingMode);
 
         assert_eq!(state.reading_mode, ReadingMode::Continuous);
-        assert_eq!(state.continuous_chapters.len(), chapter_count);
+        let Some(OpenDocument::Epub(epub)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        assert_eq!(epub.presentation().chapters().len(), chapter_count);
+        assert_eq!(
+            epub.presentation().chapter(0).unwrap() as *const _,
+            first_chapter
+        );
         assert!(
-            state
-                .continuous_chapters
+            epub.presentation()
+                .chapters()
                 .iter()
-                .all(|chapter| !chapter.is_empty())
+                .all(|chapter| !chapter.nodes().is_empty())
         );
     }
 
@@ -6198,6 +6190,22 @@ mod tests {
     }
 
     #[test]
+    fn epub_search_uses_the_loaded_shared_presentation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.search_query = "sample".to_string();
+
+        let task = perform_search(&mut state);
+
+        assert!(task.units() > 0);
+        assert!(state.search_text.is_none());
+        assert!(!state.search_loading);
+    }
+
+    #[test]
     fn stale_page_renders_do_not_replace_the_latest_request() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -6351,9 +6359,44 @@ mod tests {
         let task = refresh_content(&mut state);
 
         assert_eq!(task.units(), 0);
-        assert!(!state.chapter_content.is_empty());
+        let Some(OpenDocument::Epub(epub)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        assert!(!epub.presentation().chapter(0).unwrap().nodes().is_empty());
         assert!(!state.epub_pages.is_empty());
         assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn epub_location_survives_relayout_and_mode_changes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size = Size::new(360.0, 320.0);
+        state.font_size = 32.0;
+        let _ = refresh_content(&mut state);
+        let target_page = state
+            .epub_pages
+            .iter()
+            .position(|page| page.nodes.first().is_some_and(|node| node.text_offset > 0))
+            .expect("fixture should produce a continuation page");
+        state.epub_page = target_page;
+        sync_epub_location(&mut state);
+        let location = (state.current_page, state.epub_offset);
+
+        let _ = update(&mut state, Message::FontSizeDown);
+        assert_eq!((state.current_page, state.epub_offset), location);
+        assert_eq!(
+            state.epub_pages[state.epub_page].chapter, location.0,
+            "relayout should select a page in the anchored chapter"
+        );
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        assert_eq!((state.current_page, state.epub_offset), location);
+        assert_eq!(state.epub_pages[state.epub_page].chapter, location.0);
     }
 
     #[test]

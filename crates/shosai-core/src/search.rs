@@ -47,8 +47,9 @@ pub fn search_epub(doc: &EpubDoc, query: &str) -> Vec<SearchMatch> {
     }
 
     let mut results = Vec::new();
-    let chapters = extract_epub_text(doc);
-    find_matches_in_pages(&chapters, query, &mut results);
+    for (chapter, presentation) in doc.presentation().chapters().iter().enumerate() {
+        find_matches_in_text(presentation.search_text(), query, chapter, &mut results);
+    }
     results
 }
 
