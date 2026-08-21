@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use super::CanonicalEpubPath;
 use super::style::StyleMap;
 
 /// Metadata extracted from the OPF `<metadata>` element.
@@ -51,6 +52,37 @@ pub struct TocEntry {
     pub children: Vec<TocEntry>,
 }
 
+/// A read-only manifest resource admitted through the EPUB resource policy.
+#[derive(Debug, Clone, Copy)]
+pub struct EpubResource<'a> {
+    pub(crate) path: &'a CanonicalEpubPath,
+    pub(crate) media_type: &'a str,
+    pub(crate) bytes: &'a [u8],
+}
+
+impl<'a> EpubResource<'a> {
+    /// Canonical path within the EPUB archive.
+    pub fn path(self) -> &'a CanonicalEpubPath {
+        self.path
+    }
+
+    /// Media type declared by the OPF manifest.
+    pub fn media_type(self) -> &'a str {
+        self.media_type
+    }
+
+    /// Resource bytes retained by the parsed document.
+    pub fn bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct StoredEpubResource {
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+}
+
 /// Complete parsed EPUB structure.
 #[derive(Debug, Clone)]
 pub struct EpubContent {
@@ -62,8 +94,8 @@ pub struct EpubContent {
     pub toc: Vec<TocEntry>,
     /// All manifest items by ID.
     pub manifest: HashMap<String, ManifestItem>,
-    /// Raw resource data by archive path (images, CSS, fonts).
-    pub resources: HashMap<String, Vec<u8>>,
+    /// Resources admitted by the parser, keyed by canonical archive path.
+    pub(crate) resources: HashMap<CanonicalEpubPath, StoredEpubResource>,
     /// CSS class → style map extracted from the EPUB's stylesheets.
     pub styles: StyleMap,
 }

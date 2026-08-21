@@ -77,20 +77,19 @@ impl EpubDoc {
         )?;
 
         // 6. Parse CSS stylesheets into a class → style map.
-        let css_sources: Vec<(&str, String)> = manifest
+        let css_sources: Vec<(&str, &str)> = manifest
             .values()
             .filter(|item| item.media_type == "text/css")
             .filter_map(|item| {
                 resources
-                    .get(&item.href)
-                    .and_then(|data| String::from_utf8(data.clone()).ok())
+                    .get(item.href.as_str())
+                    .and_then(|resource| std::str::from_utf8(&resource.bytes).ok())
                     .map(|css| (item.href.as_str(), css))
             })
             .collect();
 
-        let styles = super::style::parse_epub_styles(
-            css_sources.iter().map(|(path, css)| (*path, css.as_str())),
-        );
+        let styles =
+            super::style::parse_epub_styles(css_sources.iter().map(|(path, css)| (*path, *css)));
 
         Ok(Self {
             content: EpubContent {
@@ -124,9 +123,26 @@ impl EpubDoc {
         }
     }
 
-    /// Get a resource (image, CSS, etc.) by its archive path.
-    pub fn resource(&self, path: &str) -> Option<&[u8]> {
-        self.content.resources.get(path).map(|v| v.as_slice())
+    /// Get a read-only resource by its canonical archive path.
+    pub fn resource(&self, path: &str) -> Option<EpubResource<'_>> {
+        let (path, resource) = self.content.resources.get_key_value(path)?;
+        Some(EpubResource {
+            path,
+            media_type: &resource.media_type,
+            bytes: &resource.bytes,
+        })
+    }
+
+    /// Iterate over resources admitted from the EPUB manifest.
+    pub fn resources(&self) -> impl Iterator<Item = EpubResource<'_>> {
+        self.content
+            .resources
+            .iter()
+            .map(|(path, resource)| EpubResource {
+                path,
+                media_type: &resource.media_type,
+                bytes: &resource.bytes,
+            })
     }
 
     /// Get the table of contents.
@@ -560,7 +576,7 @@ fn load_resources(
     manifest: &HashMap<String, ManifestItem>,
     chapter_paths: &HashSet<&str>,
     include_non_spine_content: bool,
-) -> Result<HashMap<String, Vec<u8>>> {
+) -> Result<HashMap<CanonicalEpubPath, StoredEpubResource>> {
     let mut resources = HashMap::new();
 
     for item in manifest.values() {
@@ -576,7 +592,13 @@ fn load_resources(
 
         // Best effort: skip resources we can't read (e.g. missing from archive).
         if let Ok(data) = read_archive_bytes(archive, &item.href) {
-            resources.insert(item.href.clone(), data);
+            resources.insert(
+                CanonicalEpubPath::new(&item.href)?,
+                StoredEpubResource {
+                    media_type: item.media_type.clone(),
+                    bytes: data,
+                },
+            );
         }
     }
 
@@ -674,7 +696,7 @@ mod tests {
             )
         }) {
             assert!(
-                !epub.content.resources.contains_key(&item.href),
+                !epub.content.resources.contains_key(item.href.as_str()),
                 "content document duplicated in resources: {}",
                 item.href
             );

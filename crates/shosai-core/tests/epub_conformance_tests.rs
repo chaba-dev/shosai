@@ -48,6 +48,10 @@ fn open(id: &str) -> EpubDoc {
     EpubDoc::open(fixture_path(id)).unwrap_or_else(|error| panic!("{id}: {error:#}"))
 }
 
+fn resource_bytes<'a>(doc: &'a EpubDoc, path: &str) -> Option<&'a [u8]> {
+    doc.resource(path).map(|resource| resource.bytes())
+}
+
 fn archive_entry(id: &str, path: &str) -> String {
     let file = std::fs::File::open(fixture_path(id)).unwrap();
     let mut archive = ZipArchive::new(file).unwrap();
@@ -144,9 +148,7 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
         Some("font-weight: 700")
     );
     let css = std::str::from_utf8(
-        cascade_doc
-            .resource("OEBPS/Styles/book.css")
-            .expect("missing cascade CSS"),
+        resource_bytes(&cascade_doc, "OEBPS/Styles/book.css").expect("missing cascade CSS"),
     )
     .unwrap();
     for marker in [
@@ -203,26 +205,28 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
         ("OEBPS/Fonts/book-a.woff2", b"wOF2".as_slice()),
     ] {
         assert!(
-            fonts
-                .resource(path)
+            resource_bytes(&fonts, path)
                 .expect("missing font")
                 .starts_with(signature)
         );
     }
     assert_eq!(
-        &fonts.resource("OEBPS/Fonts/book-a.ttf").unwrap()[..4],
+        &resource_bytes(&fonts, "OEBPS/Fonts/book-a.ttf").unwrap()[..4],
         &[0, 1, 0, 0]
     );
     assert_eq!(
-        fonts.resource("OEBPS/Fonts/book-a.otf").unwrap().get(..4),
+        resource_bytes(&fonts, "OEBPS/Fonts/book-a.otf")
+            .unwrap()
+            .get(..4),
         Some(b"OTTO".as_slice())
     );
     assert!(fonts.resource("OEBPS/Fonts/missing.woff2").is_none());
     assert_eq!(
-        fonts.resource("OEBPS/Fonts/corrupt.woff2"),
+        resource_bytes(&fonts, "OEBPS/Fonts/corrupt.woff2"),
         Some(b"not a font".as_slice())
     );
-    let font_css = std::str::from_utf8(fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
+    let font_css =
+        std::str::from_utf8(resource_bytes(&fonts, "OEBPS/Styles/fonts.css").unwrap()).unwrap();
     assert!(
         font_css.contains("src: url('../Fonts/book-a.ttf') format('truetype'); font-weight: 700;")
     );
@@ -237,11 +241,12 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
     assert!(font_css.contains(".italic { font-family: FixtureTtf; font-style: italic; }"));
 
     let isolated_fonts = open("fonts-isolation");
-    let book_a = fonts.resource("OEBPS/Fonts/book-a.ttf").unwrap();
-    let book_b = isolated_fonts.resource("OEBPS/Fonts/book-b.ttf").unwrap();
+    let book_a = resource_bytes(&fonts, "OEBPS/Fonts/book-a.ttf").unwrap();
+    let book_b = resource_bytes(&isolated_fonts, "OEBPS/Fonts/book-b.ttf").unwrap();
     assert_ne!(book_a, book_b);
     let isolated_css =
-        std::str::from_utf8(isolated_fonts.resource("OEBPS/Styles/fonts.css").unwrap()).unwrap();
+        std::str::from_utf8(resource_bytes(&isolated_fonts, "OEBPS/Styles/fonts.css").unwrap())
+            .unwrap();
     assert!(isolated_css.contains("font-family: FixtureTtf"));
     assert!(isolated_css.contains("src: url('../Fonts/book-b.ttf') format('truetype')"));
     assert!(!isolated_css.contains("book-a.ttf"));
@@ -419,7 +424,7 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
         );
     }
     let remote_css =
-        std::str::from_utf8(remote.resource("OEBPS/Styles/remote.css").unwrap()).unwrap();
+        std::str::from_utf8(resource_bytes(&remote, "OEBPS/Styles/remote.css").unwrap()).unwrap();
     assert!(remote_css.contains("@import url('https://example.invalid/import.css')"));
     assert!(remote_css.contains("https://example.invalid/font.woff2"));
     assert!(remote_css.contains("background: url('https://example.invalid/background.png')"));
@@ -438,17 +443,22 @@ fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
 
     let limits = open("resource-limits");
     assert_eq!(
-        limits.resource("OEBPS/Data/compression.txt").unwrap().len(),
+        resource_bytes(&limits, "OEBPS/Data/compression.txt")
+            .unwrap()
+            .len(),
         1024 * 1024
     );
-    let svg = std::str::from_utf8(limits.resource("OEBPS/Images/huge.svg").unwrap()).unwrap();
+    let svg =
+        std::str::from_utf8(resource_bytes(&limits, "OEBPS/Images/huge.svg").unwrap()).unwrap();
     assert!(svg.contains("width=\"100000\" height=\"100000\""));
     assert_eq!(
-        limits.resource("OEBPS/Fonts/corrupt.ttf"),
+        resource_bytes(&limits, "OEBPS/Fonts/corrupt.ttf"),
         Some(b"malformed font sentinel".as_slice())
     );
     assert_eq!(
-        limits.resource("OEBPS/Fonts/oversized.ttf").unwrap().len(),
+        resource_bytes(&limits, "OEBPS/Fonts/oversized.ttf")
+            .unwrap()
+            .len(),
         1024 * 1024
     );
 }
