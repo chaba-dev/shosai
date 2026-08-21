@@ -66,7 +66,7 @@ fn test_metadata_author() {
 #[test]
 fn test_epub_metadata_full() {
     let doc = EpubDoc::open(fixture_path("sample.epub")).unwrap();
-    let meta = &doc.content.metadata;
+    let meta = &doc.content().metadata;
     assert_eq!(meta.language.as_deref(), Some("en"));
     assert_eq!(meta.publisher.as_deref(), Some("Shosai Press"));
     assert_eq!(
@@ -157,7 +157,7 @@ fn test_resources_loaded() {
 #[test]
 fn test_manifest_entries() {
     let doc = EpubDoc::open(fixture_path("sample.epub")).unwrap();
-    let manifest = &doc.content.manifest;
+    let manifest = &doc.content().manifest;
 
     assert!(manifest.contains_key("ch1"), "manifest should contain ch1");
     assert!(manifest.contains_key("ch2"), "manifest should contain ch2");

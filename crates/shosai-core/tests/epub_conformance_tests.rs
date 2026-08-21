@@ -142,12 +142,12 @@ fn complete_fixture_matrix_opens_with_stable_metadata() {
         let doc = open(id);
         assert!(doc.chapter_count() > 0, "{id} has no spine chapters");
         assert_eq!(
-            doc.content.metadata.title.as_deref(),
+            doc.content().metadata.title.as_deref(),
             Some(format!("Shosai Conformance: {id}").as_str()),
             "{id} title drifted"
         );
         assert_eq!(
-            doc.content.metadata.author.as_deref(),
+            doc.content().metadata.author.as_deref(),
             Some("Shosai contributors")
         );
         assert_eq!(doc.toc().len(), doc.chapter_count(), "{id} TOC drifted");

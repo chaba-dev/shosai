@@ -462,7 +462,7 @@ fn extract_pdf_metadata(path: &Path) -> Result<(String, Option<String>, Option<V
 
 fn extract_epub_metadata(path: &Path) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
     let doc = EpubDoc::open(path)?;
-    let meta = &doc.content.metadata;
+    let meta = &doc.content().metadata;
     let title = meta.title.clone().unwrap_or_else(|| filename_title(path));
     let author = meta.author.clone();
 
@@ -470,7 +470,7 @@ fn extract_epub_metadata(path: &Path) -> Result<(String, Option<String>, Option<
     let cover = meta
         .cover_image_id
         .as_ref()
-        .and_then(|id| doc.content.manifest.get(id))
+        .and_then(|id| doc.content().manifest.get(id))
         .and_then(|item| doc.resource(&item.href))
         .and_then(|resource| resize_cover_image(resource.bytes()));
 

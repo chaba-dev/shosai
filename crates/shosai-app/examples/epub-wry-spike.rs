@@ -219,7 +219,7 @@ impl SpikeBook {
         let epub =
             EpubDoc::from_bytes_for_renderer_spike(bytes).map_err(|error| error.to_string())?;
         let first_chapter = epub
-            .content
+            .content()
             .chapters
             .first()
             .ok_or_else(|| "EPUB has no readable spine chapter".to_string())?;
@@ -236,14 +236,14 @@ impl SpikeBook {
                 )
             })
             .collect::<HashMap<_, _>>();
-        let mut chapter_resources = epub
-            .content
+        let content = epub.into_content();
+        let mut chapter_resources = content
             .chapters
             .into_iter()
             .map(|chapter| (chapter.path, chapter.content.into_bytes()))
             .collect::<HashMap<_, _>>();
 
-        for item in epub.content.manifest.into_values() {
+        for item in content.manifest.into_values() {
             if let Some(body) = manifest_resources
                 .remove(&item.href)
                 .or_else(|| chapter_resources.remove(&item.href))
