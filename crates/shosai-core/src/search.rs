@@ -106,7 +106,10 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
             }
             for row in row_groups.iter().flat_map(|group| &group.rows) {
                 for (index, cell) in row.cells.iter().enumerate() {
-                    for child in &cell.children {
+                    for (child_index, child) in cell.children.iter().enumerate() {
+                        if cell.block_starts.contains(&child_index) {
+                            out.push('\n');
+                        }
                         extract_node_text(child, out);
                     }
                     if index + 1 < row.cells.len() {

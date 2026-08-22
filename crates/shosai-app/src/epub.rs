@@ -1190,11 +1190,16 @@ fn estimated_epub_compact_node_height(
         }
         ContentNode::Table {
             caption,
+            caption_style,
             row_groups,
             ..
         } => {
             let caption_height = (!caption.is_empty()).then(|| {
-                let scale = spans_font_scale(caption);
+                let scale = caption_style
+                    .as_ref()
+                    .and_then(|style| style.font_size_multiplier)
+                    .unwrap_or(1.0)
+                    * spans_font_scale(caption);
                 wrapped(spans_text_len(caption), scale) * text_line_height * scale
                     + BLOCKQUOTE_SPACING
             });
@@ -1390,7 +1395,11 @@ pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
                             .map(|cell| {
                                 cell.children
                                     .iter()
-                                    .map(content_node_text_len)
+                                    .enumerate()
+                                    .map(|(index, child)| {
+                                        content_node_text_len(child)
+                                            + usize::from(cell.block_starts.contains(&index))
+                                    })
                                     .sum::<usize>()
                             })
                             .sum::<usize>()

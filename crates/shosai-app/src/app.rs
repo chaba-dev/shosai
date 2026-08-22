@@ -1415,6 +1415,15 @@ fn cache_epub_image_handles<'a, F>(
             ContentNode::BlockQuote { children, .. } => {
                 cache_epub_image_handles(handles, children, resource_bytes);
             }
+            ContentNode::Table { row_groups, .. } => {
+                for cell in row_groups
+                    .iter()
+                    .flat_map(|group| &group.rows)
+                    .flat_map(|row| &row.cells)
+                {
+                    cache_epub_image_handles(handles, &cell.children, resource_bytes);
+                }
+            }
             _ => {}
         }
     }
@@ -3752,22 +3761,27 @@ fn render_content_node<'a>(
 
         ContentNode::Table {
             caption,
+            caption_style,
             row_groups,
             style,
         } => {
             let mut table = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
             let mut table_offset = text_offset;
             if !caption.is_empty() {
+                let caption_style = caption_style.as_ref().unwrap_or(style);
+                let caption_size = caption_style
+                    .font_size_multiplier
+                    .map_or(font_size, |multiplier| font_size * multiplier);
                 table = table.push(render_spans(
                     caption,
-                    style.direction,
-                    font_size,
+                    caption_style.direction,
+                    caption_size,
                     text_color,
                     table_offset,
                     highlights,
                     fonts,
                     scale,
-                    style.text_align,
+                    caption_style.text_align,
                 ));
                 table_offset += spans_text_len(caption) + 1;
             }
@@ -3775,7 +3789,10 @@ fn render_content_node<'a>(
                 let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
                 for (cell_index, cell) in table_row.cells.iter().enumerate() {
                     let mut rendered_cell = column![].spacing(4);
-                    for child in &cell.children {
+                    for (child_index, child) in cell.children.iter().enumerate() {
+                        if cell.block_starts.contains(&child_index) {
+                            table_offset += 1;
+                        }
                         rendered_cell = rendered_cell.push(render_content_node(
                             child,
                             i18n,
@@ -3944,6 +3961,20 @@ fn render_epub_image<'a>(
         if fill {
             image_container = image_container.height(Length::Fill);
         }
+        if image_alt_highlight(alt, text_offset, highlights).is_some() {
+            return column![
+                image_container,
+                render_highlighted_text_with_font(
+                    alt,
+                    text_offset,
+                    font_size,
+                    text_color,
+                    Font::DEFAULT,
+                    highlights,
+                )
+            ]
+            .into();
+        }
         return image_container.into();
     }
 
@@ -3962,6 +3993,17 @@ fn render_epub_image<'a>(
     );
     spans.push(span("]".to_string()).size(font_size).color(text_color));
     rich_text(spans).into()
+}
+
+fn image_alt_highlight(
+    alt: &str,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
+) -> Option<bool> {
+    highlighted_fragments(alt, text_offset, highlights)
+        .into_iter()
+        .filter_map(|(_, highlight)| highlight)
+        .max()
 }
 
 /// Render a code block with optional syntax highlighting.
@@ -7439,6 +7481,7 @@ mod tests {
         let resources = HashMap::from([("table.png".to_string(), image_bytes)]);
         let nodes = vec![ContentNode::Table {
             caption: Vec::new(),
+            caption_style: None,
             row_groups: vec![TableRowGroup {
                 kind: TableRowGroupKind::Body,
                 rows: vec![TableRow {
@@ -7453,6 +7496,7 @@ mod tests {
                             src: "table.png".to_string(),
                             alt: "diagram".to_string(),
                         }],
+                        block_starts: Vec::new(),
                         style: Default::default(),
                     }],
                 }],
@@ -7466,6 +7510,25 @@ mod tests {
         });
 
         assert!(handles.contains_key("table.png"));
+    }
+
+    #[test]
+    fn cached_image_alt_matches_remain_visibly_highlighted() {
+        let highlights = [
+            SearchHighlight {
+                start: 11,
+                end: 13,
+                current: false,
+            },
+            SearchHighlight {
+                start: 12,
+                end: 14,
+                current: true,
+            },
+        ];
+
+        assert_eq!(image_alt_highlight("diagram", 10, &highlights), Some(true));
+        assert_eq!(image_alt_highlight("diagram", 20, &highlights), None);
     }
 
     #[test]
