@@ -3750,6 +3750,68 @@ fn render_content_node<'a>(
                 .into()
         }
 
+        ContentNode::Table {
+            caption,
+            row_groups,
+            style,
+        } => {
+            let mut table = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
+            let mut table_offset = text_offset;
+            if !caption.is_empty() {
+                table = table.push(render_spans(
+                    caption,
+                    style.direction,
+                    font_size,
+                    text_color,
+                    table_offset,
+                    highlights,
+                    fonts,
+                    scale,
+                    style.text_align,
+                ));
+                table_offset += spans_text_len(caption) + 1;
+            }
+            for table_row in row_groups.iter().flat_map(|group| &group.rows) {
+                let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
+                for (cell_index, cell) in table_row.cells.iter().enumerate() {
+                    let mut rendered_cell = column![].spacing(4);
+                    for child in &cell.children {
+                        rendered_cell = rendered_cell.push(render_content_node(
+                            child,
+                            i18n,
+                            font_size,
+                            text_color,
+                            image_handles,
+                            fill_images,
+                            table_offset,
+                            highlights,
+                            fonts,
+                            scale,
+                        ));
+                        table_offset += content_node_text_len(child);
+                    }
+                    rendered_row = rendered_row.push(
+                        container(rendered_cell)
+                            .width(Length::FillPortion(cell.column_span.max(1)))
+                            .padding(6),
+                    );
+                    if cell_index + 1 < table_row.cells.len() {
+                        table_offset += 1;
+                    }
+                }
+                table = table.push(rendered_row);
+                table_offset += 1;
+            }
+            let mut table = container(table).width(Length::Fill);
+            if let Some(margin) = style.margin_left_em {
+                table = table.padding(iced::Padding {
+                    left: margin * font_size,
+                    ..iced::Padding::ZERO
+                });
+            }
+            table.into()
+        }
+
         ContentNode::UnorderedList(items) => {
             let mut col = column![].spacing(4);
             let mut item_offset = text_offset;

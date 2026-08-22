@@ -39,6 +39,42 @@ pub struct NodeStyle {
     pub margin_left_em: Option<f32>,
 }
 
+/// Semantic row-group role retained from an EPUB table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableRowGroupKind {
+    Head,
+    Body,
+    Foot,
+}
+
+/// A semantic table row group in source order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRowGroup {
+    pub kind: TableRowGroupKind,
+    pub rows: Vec<TableRow>,
+}
+
+/// One row in an EPUB table.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableRow {
+    pub cells: Vec<TableCell>,
+}
+
+/// One header or data cell with retained span and accessibility metadata.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableCell {
+    pub id: Option<String>,
+    pub header: bool,
+    pub scope: Option<String>,
+    pub headers: Vec<String>,
+    /// Source `rowspan`; zero means all remaining rows in the row group.
+    pub row_span: u16,
+    /// Source `colspan`; malformed or zero values use the HTML initial value.
+    pub column_span: u16,
+    pub children: Vec<ContentNode>,
+    pub style: NodeStyle,
+}
+
 /// A content node in the simplified document model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ContentNode {
@@ -53,6 +89,12 @@ pub enum ContentNode {
     /// A block quote (contains paragraphs).
     BlockQuote {
         children: Vec<ContentNode>,
+        style: NodeStyle,
+    },
+    /// A semantic EPUB table. Layout is owned by the native app layer.
+    Table {
+        caption: Vec<TextSpan>,
+        row_groups: Vec<TableRowGroup>,
         style: NodeStyle,
     },
     /// An unordered list.
@@ -240,6 +282,12 @@ fn parse_block_children(
                 }
             }
 
+            "table" => {
+                if let Some(table) = parse_table(&child, base_path, styles, node_style) {
+                    nodes.push(table);
+                }
+            }
+
             "ul" => {
                 let items = parse_list_items(&child, styles);
                 if !items.is_empty() {
@@ -309,6 +357,149 @@ fn parse_block_children(
     }
 
     nodes
+}
+
+fn parse_table(
+    table: &roxmltree::Node,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    style: NodeStyle,
+) -> Option<ContentNode> {
+    let caption = table
+        .children()
+        .find(|child| child.is_element() && child.tag_name().name() == "caption")
+        .filter(|caption| {
+            styles
+                .get(*caption)
+                .is_none_or(|style| style.display != super::computed_style::DisplayRole::None)
+        })
+        .map(|caption| {
+            let base = styles.get(caption).map_or(16.0, |style| style.font_size_px);
+            collect_inline_spans(&caption, styles, base)
+        })
+        .unwrap_or_default();
+    let mut row_groups = Vec::new();
+    let mut implicit_body = Vec::new();
+    for child in table.children().filter(roxmltree::Node::is_element) {
+        if styles
+            .get(child)
+            .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
+        {
+            continue;
+        }
+        match child.tag_name().name() {
+            "thead" | "tbody" | "tfoot" => {
+                flush_implicit_table_rows(&mut row_groups, &mut implicit_body);
+                let kind = match child.tag_name().name() {
+                    "thead" => TableRowGroupKind::Head,
+                    "tfoot" => TableRowGroupKind::Foot,
+                    _ => TableRowGroupKind::Body,
+                };
+                let rows = child
+                    .children()
+                    .filter(|row| row.is_element() && row.tag_name().name() == "tr")
+                    .filter_map(|row| parse_table_row(&row, base_path, styles))
+                    .collect::<Vec<_>>();
+                if !rows.is_empty() {
+                    row_groups.push(TableRowGroup { kind, rows });
+                }
+            }
+            "tr" => {
+                if let Some(row) = parse_table_row(&child, base_path, styles) {
+                    implicit_body.push(row);
+                }
+            }
+            _ => {}
+        }
+    }
+    flush_implicit_table_rows(&mut row_groups, &mut implicit_body);
+    (!caption.is_empty() || !row_groups.is_empty()).then_some(ContentNode::Table {
+        caption,
+        row_groups,
+        style,
+    })
+}
+
+fn flush_implicit_table_rows(groups: &mut Vec<TableRowGroup>, rows: &mut Vec<TableRow>) {
+    if !rows.is_empty() {
+        groups.push(TableRowGroup {
+            kind: TableRowGroupKind::Body,
+            rows: std::mem::take(rows),
+        });
+    }
+}
+
+fn parse_table_row(
+    row: &roxmltree::Node,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> Option<TableRow> {
+    if styles
+        .get(*row)
+        .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
+    {
+        return None;
+    }
+    let cells = row
+        .children()
+        .filter(|cell| cell.is_element() && matches!(cell.tag_name().name(), "th" | "td"))
+        .filter_map(|cell| parse_table_cell(&cell, base_path, styles))
+        .collect::<Vec<_>>();
+    (!cells.is_empty()).then_some(TableRow { cells })
+}
+
+fn parse_table_cell(
+    cell: &roxmltree::Node,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> Option<TableCell> {
+    let css = styles.get(*cell)?;
+    if css.display == super::computed_style::DisplayRole::None {
+        return None;
+    }
+    let mut children = Vec::new();
+    let spans = collect_inline_spans(cell, styles, css.font_size_px);
+    if !spans.is_empty() {
+        children.push(ContentNode::Paragraph(
+            spans,
+            css_to_node_style(css, cell.tag_name().name()),
+        ));
+    }
+    for image in cell
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "img")
+        .filter(|node| {
+            styles
+                .get(*node)
+                .is_none_or(|style| style.display != super::computed_style::DisplayRole::None)
+        })
+    {
+        if let Some(src) = image.attribute("src") {
+            children.push(ContentNode::Image {
+                src: resolve_relative(base_path, src),
+                alt: image.attribute("alt").unwrap_or("").to_owned(),
+            });
+        }
+    }
+    Some(TableCell {
+        id: cell.attribute("id").map(str::to_owned),
+        header: cell.tag_name().name() == "th",
+        scope: cell.attribute("scope").map(str::to_owned),
+        headers: cell.attribute("headers").map_or_else(Vec::new, |headers| {
+            headers.split_whitespace().map(str::to_owned).collect()
+        }),
+        row_span: table_span(cell.attribute("rowspan"), true),
+        column_span: table_span(cell.attribute("colspan"), false),
+        children,
+        style: css_to_node_style(css, cell.tag_name().name()),
+    })
+}
+
+fn table_span(value: Option<&str>, zero_is_valid: bool) -> u16 {
+    value
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|value| *value > 0 || zero_is_valid)
+        .unwrap_or(1)
 }
 
 /// Convert a fully computed CSS style to native block annotations.
@@ -583,13 +774,10 @@ fn extract_language_hint(node: &roxmltree::Node) -> Option<String> {
 
 /// Resolve a relative path against a base directory.
 fn resolve_relative(base: &str, href: &str) -> String {
-    if href.starts_with('/') || href.contains("://") {
-        return href.to_string();
-    }
-    if base.is_empty() {
-        return href.to_string();
-    }
-    format!("{base}/{href}")
+    super::CanonicalEpubPath::resolve(base, href).map_or_else(
+        |_| href.to_owned(),
+        |reference| reference.path.as_str().to_owned(),
+    )
 }
 
 #[cfg(test)]
@@ -610,6 +798,89 @@ mod tests {
             }
             other => panic!("expected Paragraph, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tables_preserve_caption_groups_headers_spans_and_nested_content() {
+        let nodes = parse_chapter_xhtml(
+            r##"<html><body><table>
+                <caption>Build <em>matrix</em></caption>
+                <thead><tr><th id="platform" scope="col">Platform</th><th scope="col">Status</th></tr></thead>
+                <tbody>
+                    <tr><th id="linux" scope="row" rowspan="2">Linux</th><td headers="platform linux"><a href="#pass">Pass</a></td></tr>
+                    <tr><td colspan="2">Diagram <img src="../images/table.png" alt="table diagram"/></td></tr>
+                </tbody>
+                <tfoot><tr><td colspan="2">Summary</td></tr></tfoot>
+            </table></body></html>"##,
+            "OPS/Text",
+            &Default::default(),
+        );
+        let ContentNode::Table {
+            caption,
+            row_groups,
+            ..
+        } = &nodes[0]
+        else {
+            panic!("table must remain semantic");
+        };
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Build matrix"
+        );
+        assert!(caption.iter().any(|span| span.italic));
+        assert_eq!(
+            row_groups
+                .iter()
+                .map(|group| group.kind)
+                .collect::<Vec<_>>(),
+            [
+                TableRowGroupKind::Head,
+                TableRowGroupKind::Body,
+                TableRowGroupKind::Foot
+            ]
+        );
+        let platform = &row_groups[0].rows[0].cells[0];
+        assert!(platform.header);
+        assert_eq!(platform.id.as_deref(), Some("platform"));
+        assert_eq!(platform.scope.as_deref(), Some("col"));
+        let linux = &row_groups[1].rows[0].cells[0];
+        assert_eq!(linux.row_span, 2);
+        let pass = &row_groups[1].rows[0].cells[1];
+        assert_eq!(pass.headers, ["platform", "linux"]);
+        assert!(
+            matches!(&pass.children[0], ContentNode::Paragraph(spans, _) if
+            spans.iter().any(|span| span.link.as_deref() == Some("#pass")))
+        );
+        let nested = &row_groups[1].rows[1].cells[0];
+        assert_eq!(nested.column_span, 2);
+        assert!(
+            matches!(nested.children.last(), Some(ContentNode::Image { src, alt }) if
+            src == "OPS/images/table.png" && alt == "table diagram")
+        );
+
+        let searchable = crate::search::extract_text_from_nodes(&nodes);
+        assert!(searchable.contains("Build matrix"));
+        assert!(searchable.contains("Platform\tStatus"));
+        assert!(searchable.contains("Linux\tPass"));
+        assert!(searchable.contains("table diagram"));
+    }
+
+    #[test]
+    fn direct_rows_form_implicit_bodies_and_preserve_rowspan_zero() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><body><table><tr><td rowspan="0" colspan="nope">Cell</td></tr></table></body></html>"#,
+            "",
+            &Default::default(),
+        );
+        let ContentNode::Table { row_groups, .. } = &nodes[0] else {
+            panic!("table must remain semantic");
+        };
+        assert_eq!(row_groups[0].kind, TableRowGroupKind::Body);
+        let cell = &row_groups[0].rows[0].cells[0];
+        assert_eq!((cell.row_span, cell.column_span), (0, 1));
     }
 
     #[test]
