@@ -1,8 +1,12 @@
 //! Renderer-neutral, book-local EPUB text shaping and rasterization.
 
+#[cfg(test)]
+use std::collections::HashSet;
 use std::{collections::HashMap, ops::Range};
 
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
+use cosmic_text::CacheKey;
 use cosmic_text::{
     Align, Attrs, BidiParagraphs, Buffer, CacheKeyFlags, Color, FontSystem, Metrics, Shaping,
     SwashCache, Wrap,
@@ -14,6 +18,8 @@ use super::{EpubFontBook, EpubFontFace, EpubFontStyle};
 
 /// Hard ceiling for the sum of returned line bitmap pixels (64 MiB RGBA).
 pub const EPUB_TEXT_MAX_PIXELS: usize = 16 * 1024 * 1024;
+/// Hard ceiling for Unicode scalars shaped by one native request.
+pub const EPUB_TEXT_MAX_SCALARS: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EpubTextAlign {
@@ -71,6 +77,7 @@ pub struct EpubTextHit {
 pub struct EpubTextLine {
     pub top: f32,
     pub width: f32,
+    pub rtl: bool,
     pub scalars: Range<usize>,
     pub pixel_width: u32,
     pub pixel_height: u32,
@@ -89,6 +96,8 @@ pub(super) struct NativeTextState {
     cache: SwashCache,
     aliases: HashMap<String, String>,
     styles: HashMap<String, Vec<Style>>,
+    #[cfg(test)]
+    raster_keys: HashSet<CacheKey>,
 }
 
 impl NativeTextState {
@@ -138,6 +147,8 @@ impl NativeTextState {
             cache: SwashCache::new(),
             aliases,
             styles,
+            #[cfg(test)]
+            raster_keys: HashSet::new(),
         }
     }
 
@@ -153,6 +164,11 @@ impl NativeTextState {
             .db()
             .face(id)
             .map(|face| face.post_script_name.as_str())
+    }
+
+    #[cfg(test)]
+    pub(super) fn retained_raster_image_count(&self) -> usize {
+        self.raster_keys.len()
     }
 }
 
@@ -181,6 +197,8 @@ impl EpubFontBook {
             cache,
             aliases,
             styles,
+            #[cfg(test)]
+            raster_keys,
         } = &mut *state;
         let default_size = request.runs.first().map_or(16.0, |r| r.font_size);
         let mut buffer = Buffer::new(fonts, Metrics::new(default_size, request.line_height));
@@ -219,13 +237,7 @@ impl EpubFontBook {
                     .as_ref()
                     .and_then(|family| styles.get(family))
                     .map_or((requested_style, CacheKeyFlags::empty()), |available| {
-                        if available.contains(&requested_style) {
-                            (requested_style, CacheKeyFlags::empty())
-                        } else if run.italic && available.contains(&Style::Normal) {
-                            (Style::Normal, CacheKeyFlags::FAKE_ITALIC)
-                        } else {
-                            (available[0], CacheKeyFlags::empty())
-                        }
+                        select_style(available, run.italic)
                     });
                 let a = Attrs::new()
                     .family(family)
@@ -395,6 +407,8 @@ impl EpubFontBook {
                 if rasterize {
                     let physical = glyph.physical((0.0, 0.0), request.scale);
                     let color = glyph.color_opt.unwrap_or(Color::rgb(0, 0, 0));
+                    #[cfg(test)]
+                    raster_keys.insert(physical.cache_key);
                     cache.with_pixels(fonts, physical.cache_key, color, |x, y, c| {
                         fill(
                             &mut rgba,
@@ -415,6 +429,7 @@ impl EpubFontBook {
             lines.push(EpubTextLine {
                 top: run.line_top,
                 width: run.line_w,
+                rtl: run.rtl,
                 scalars: line_range,
                 pixel_width: pw as u32,
                 pixel_height: ph as u32,
@@ -431,6 +446,17 @@ impl EpubFontBook {
             lines,
             links,
         })
+    }
+}
+
+fn select_style(available: &[Style], italic: bool) -> (Style, CacheKeyFlags) {
+    let requested = if italic { Style::Italic } else { Style::Normal };
+    if available.contains(&requested) {
+        (requested, CacheKeyFlags::empty())
+    } else if italic && available.contains(&Style::Normal) {
+        (Style::Normal, CacheKeyFlags::FAKE_ITALIC)
+    } else {
+        (available[0], CacheKeyFlags::empty())
     }
 }
 
@@ -507,5 +533,18 @@ fn fill(buf: &mut [u8], dimensions: (usize, usize), rect: (i32, i32, i32, i32), 
             }
             buf[i + 3] = oa as u8;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn real_oblique_precedes_synthesized_italic() {
+        assert_eq!(
+            select_style(&[Style::Normal, Style::Oblique], true),
+            (Style::Oblique, CacheKeyFlags::empty())
+        );
     }
 }

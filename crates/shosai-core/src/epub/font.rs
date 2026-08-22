@@ -1044,6 +1044,127 @@ mod tests {
     }
 
     #[test]
+    fn native_raster_cache_does_not_grow_across_requests() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", INTER)],
+            EpubLimits::default(),
+            1,
+        );
+        for size in 10..40 {
+            book.layout_text(&EpubTextRequest {
+                runs: vec![EpubTextRun {
+                    text: "Retained glyph bitmap".into(),
+                    family: Some("Book".into()),
+                    monospace: false,
+                    font_size: size as f32,
+                    bold: false,
+                    italic: false,
+                    foreground: [0, 0, 0, 255],
+                    link: None,
+                }],
+                max_width: 500.0,
+                line_height: 48.0,
+                scale: 1.0,
+                align: EpubTextAlign::Left,
+                direction: EpubTextDirection::LeftToRight,
+                highlights: Vec::new(),
+            })
+            .unwrap();
+        }
+        assert_eq!(
+            book.native.lock().unwrap().retained_raster_image_count(),
+            0,
+            "per-book state must not retain glyph images across raster requests"
+        );
+    }
+
+    #[test]
+    fn native_layout_bounds_input_and_forces_each_paragraph_direction() {
+        use super::super::{
+            EPUB_TEXT_MAX_SCALARS, EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun,
+        };
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", INTER)],
+            EpubLimits::default(),
+            1,
+        );
+        let request = |text: String| EpubTextRequest {
+            runs: vec![EpubTextRun {
+                text,
+                family: Some("Book".into()),
+                monospace: false,
+                font_size: 20.0,
+                bold: false,
+                italic: false,
+                foreground: [0, 0, 0, 255],
+                link: Some("target".into()),
+            }],
+            max_width: 400.0,
+            line_height: 28.0,
+            scale: 1.0,
+            align: EpubTextAlign::Left,
+            direction: EpubTextDirection::RightToLeft,
+            highlights: Vec::new(),
+        };
+        let layout = book.layout_text(&request("אבג\nABC".into())).unwrap();
+        assert_eq!(layout.lines.len(), 2);
+        assert!(layout.lines.iter().all(|line| line.rtl));
+        assert_eq!(layout.lines[0].scalars, 0..4);
+        assert_eq!(layout.lines[1].scalars, 4..7);
+        assert!(layout.links.iter().all(|hit| hit.scalars.end <= 7));
+
+        assert!(
+            book.measure_text(&request("x".repeat(EPUB_TEXT_MAX_SCALARS + 1)))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn static_regular_face_synthesizes_requested_bold() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; font-weight: 400; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        let request = |bold| EpubTextRequest {
+            runs: vec![EpubTextRun {
+                text: "Static face".into(),
+                family: Some("Book".into()),
+                monospace: false,
+                font_size: 32.0,
+                bold,
+                italic: false,
+                foreground: [0, 0, 0, 255],
+                link: None,
+            }],
+            max_width: 300.0,
+            line_height: 40.0,
+            scale: 1.0,
+            align: EpubTextAlign::Left,
+            direction: EpubTextDirection::LeftToRight,
+            highlights: Vec::new(),
+        };
+        let regular = book.layout_text(&request(false)).unwrap();
+        let bold = book.layout_text(&request(true)).unwrap();
+        let opacity = |layout: &super::super::EpubTextLayout| {
+            layout.lines[0]
+                .rgba
+                .chunks_exact(4)
+                .map(|pixel| u64::from(pixel[3]))
+                .sum::<u64>()
+        };
+        assert!(opacity(&bold) > opacity(&regular));
+    }
+
+    #[test]
     fn ttf_otf_woff_and_woff2_are_admitted_into_book_local_databases() {
         use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
 

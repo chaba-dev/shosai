@@ -399,7 +399,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                                 None,
                                 font_size,
                                 line_spacing,
-                                page_size,
+                                blockquote_continuation_page_size(page_size, font_size, style),
                                 fonts,
                                 budget,
                             );
@@ -575,6 +575,15 @@ fn blockquote_width(
     style: &shosai_core::epub::render::NodeStyle,
 ) -> f32 {
     (width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0)
+}
+
+fn blockquote_continuation_page_size(
+    page_size: Size,
+    font_size: f32,
+    style: &shosai_core::epub::render::NodeStyle,
+) -> Size {
+    let _ = (font_size, style);
+    page_size
 }
 
 pub(crate) fn uses_native_fonts(
@@ -1340,6 +1349,11 @@ mod tests {
         assert_eq!(inner, 208.0);
         assert_eq!(blockquote_width(inner, 16.0, &Default::default()), 192.0);
         assert_eq!(paragraph_width(192.0, 16.0, &paragraph), 176.0);
+        assert_eq!(
+            blockquote_continuation_page_size(Size::new(240.0, 320.0), 16.0, &block),
+            Size::new(208.0, 320.0),
+            "continued quote pages must retain their effective inner width"
+        );
     }
 
     #[test]
@@ -2092,6 +2106,7 @@ mod tests {
                 shosai_core::epub::EpubTextLine {
                     top: 0.0,
                     width: 40.0,
+                    rtl: false,
                     scalars: 0..3,
                     pixel_width: 0,
                     pixel_height: 20,
@@ -2100,6 +2115,7 @@ mod tests {
                 shosai_core::epub::EpubTextLine {
                     top: 20.0,
                     width: 60.0,
+                    rtl: false,
                     scalars: 3..8,
                     pixel_width: 0,
                     pixel_height: 20,
@@ -2121,6 +2137,7 @@ mod tests {
                 lines: vec![shosai_core::epub::EpubTextLine {
                     top: 0.0,
                     width: 60.0,
+                    rtl: false,
                     scalars: 0..scalars,
                     pixel_width: 0,
                     pixel_height: 20,

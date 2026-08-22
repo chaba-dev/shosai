@@ -145,12 +145,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             cache.budget = book_raster_budget(fonts);
             *cache.raster.get_mut() = None;
         }
-        let height = cache
-            .layout
-            .as_ref()
-            .map_or(cache.fallback_height, |layout| {
-                layout.height.max(cache.fallback_height)
-            });
+        let height = layout_height(cache.layout.as_ref(), cache.fallback_height);
         layout::Node::new(limits.resolve(Length::Fill, Length::Fixed(height), Size::ZERO))
     }
 
@@ -282,6 +277,10 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
     }
 }
 
+fn layout_height(native: Option<&EpubTextLayout>, fallback: f32) -> f32 {
+    native.map_or(fallback, |layout| layout.height.max(fallback))
+}
+
 fn fallback_height(renderer: &iced::Renderer, request: &EpubTextRequest) -> f32 {
     use iced::advanced::text::{Paragraph as _, Renderer as _};
     let content = fallback_content(request);
@@ -395,5 +394,17 @@ mod tests {
         assert_eq!(hit(&layout, 10.0, 2.0), Some("chapter.xhtml#note"));
         assert_eq!(hit(&layout, 39.9, 13.9), Some("chapter.xhtml#note"));
         assert_eq!(hit(&layout, 40.0, 14.0), None);
+    }
+
+    #[test]
+    fn successful_native_measurement_owns_widget_height() {
+        let layout = EpubTextLayout {
+            width: 100.0,
+            height: 20.0,
+            lines: Vec::new(),
+            links: Vec::new(),
+        };
+        assert_eq!(layout_height(Some(&layout), 60.0), 20.0);
+        assert_eq!(layout_height(None, 60.0), 60.0);
     }
 }
