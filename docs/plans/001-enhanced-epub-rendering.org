@@ -347,10 +347,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   preserve link hit-testing, search highlights, logical source ranges, and
   readable system-font fallback when a face is absent, rejected, or cannot be
   rasterized within the per-book cache budget.
-- [ ] Verify visual format parity, alias-to-internal-family mapping, weight/style
+- [X] Verify visual format parity, alias-to-internal-family mapping, weight/style
   face matching and synthesis policy, same-alias isolation across open tabs,
-  cache cleanup on close, and representative macOS/Linux renderer output before
-  claiming embedded-font rendering support.
+  cache cleanup on close, and representative macOS/Linux renderer output.  The
+  exact stack renders bounded nonempty RGBA for TTF, OTF, WOFF, and WOFF2 and
+  passes the full workspace gate independently on macOS and Framework 16 Linux.
 
 ** M3 — Tables
 
