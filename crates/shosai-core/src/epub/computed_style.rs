@@ -870,17 +870,17 @@ fn selector_matches_from(
                     }
                     false
                 }
-                Combinator::NextSibling => previous_element(element)
+                Combinator::NextSibling => previous_element(element, budget)?
                     .map(|sibling| selector_matches_from(selector, sibling, next, budget))
                     .transpose()?
                     .unwrap_or(false),
                 Combinator::LaterSibling => {
-                    let mut sibling = previous_element(element);
+                    let mut sibling = previous_element(element, budget)?;
                     while let Some(previous) = sibling {
                         if selector_matches_from(selector, previous, next, budget)? {
                             return Ok(true);
                         }
-                        sibling = previous_element(previous);
+                        sibling = previous_element(previous, budget)?;
                     }
                     false
                 }
@@ -903,15 +903,31 @@ fn component_matches(
         Component::ExplicitAnyNamespace | Component::ExplicitUniversalType => true,
         Component::LocalName(name) => name.name.0.as_ref() == element.tag_name().name(),
         Component::ID(id) => element.attribute("id") == Some(id.0.as_ref()),
-        Component::Class(class) => element.attribute("class").is_some_and(|classes| {
-            classes
-                .split_whitespace()
-                .any(|value| value == class.0.as_ref())
-        }),
+        Component::Class(class) => {
+            let mut matched = false;
+            if let Some(classes) = element.attribute("class") {
+                for value in classes.split_whitespace() {
+                    budget.step()?;
+                    if value == class.0.as_ref() {
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            matched
+        }
         Component::Root => parent_element(element).is_none(),
-        Component::Empty => !element
-            .children()
-            .any(|child| child.is_element() || child.text().is_some_and(|text| !text.is_empty())),
+        Component::Empty => {
+            let mut empty = true;
+            for child in element.children() {
+                budget.step()?;
+                if child.is_element() || child.text().is_some_and(|text| !text.is_empty()) {
+                    empty = false;
+                    break;
+                }
+            }
+            empty
+        }
         Component::Negation(selectors) => {
             for selector in selectors.iter() {
                 if selector_matches(selector, element, budget)? {
@@ -944,15 +960,19 @@ fn parent_element<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>
     })
 }
 
-fn previous_element<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
+fn previous_element<'a, 'input>(
+    node: Node<'a, 'input>,
+    budget: &mut ProcessingBudget,
+) -> Result<Option<Node<'a, 'input>>> {
     let mut sibling = node.prev_sibling();
     while let Some(previous) = sibling {
+        budget.step()?;
         if previous.is_element() {
-            return Some(previous);
+            return Ok(Some(previous));
         }
         sibling = previous.prev_sibling();
     }
-    None
+    Ok(None)
 }
 
 fn ua_display(tag: &str) -> DisplayRole {
@@ -1336,6 +1356,18 @@ mod tests {
             ".target { font-weight: bold; font-style: italic; }",
             &EpubLimits {
                 max_css_processing_steps_per_document: 4,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("CSS processing step limit"));
+
+        let class_tokens = roxmltree::Document::parse(r#"<html class="one two three"/>"#).unwrap();
+        let error = compute_parsed_document_styles(
+            &class_tokens,
+            ".missing { font-weight: bold; }",
+            &EpubLimits {
+                max_css_processing_steps_per_document: 5,
                 ..EpubLimits::default()
             },
         )
