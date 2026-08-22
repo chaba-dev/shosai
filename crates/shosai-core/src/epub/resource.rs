@@ -139,6 +139,14 @@ impl CanonicalEpubPath {
             .join("/");
         format!("shosai://book/{encoded}")
     }
+
+    /// Attach and validate a raw URI fragment without reparsing this decoded path.
+    pub fn with_fragment(&self, raw_fragment: &str) -> Result<EpubReference, EpubPathError> {
+        Ok(EpubReference {
+            path: self.clone(),
+            fragment: Some(decode_fragment(raw_fragment)?),
+        })
+    }
 }
 
 impl Borrow<str> for CanonicalEpubPath {

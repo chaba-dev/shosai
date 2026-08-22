@@ -426,9 +426,10 @@ fn resolve_css_url(
     owner_path: Option<&str>,
     url: &str,
 ) -> Option<super::EpubReference> {
-    if url.starts_with('#') {
+    if let Some(fragment) = url.strip_prefix('#') {
         let owner_path = owner_path?;
-        return CanonicalEpubPath::resolve("", &format!("{owner_path}{url}")).ok();
+        let owner_path = CanonicalEpubPath::new(owner_path).ok()?;
+        return owner_path.with_fragment(fragment).ok();
     }
     CanonicalEpubPath::resolve(base_path, url).ok()
 }
@@ -859,13 +860,20 @@ mod tests {
 
     #[test]
     fn fragment_only_urls_retain_external_and_inline_owners() {
-        let styles = EpubStyles::parse([(
-            "OEBPS/Styles/main.css",
-            ".external { filter: url(#external-filter); }",
-        )]);
+        let styles = EpubStyles::parse([
+            (
+                "OEBPS/Styles/main.css",
+                ".external { filter: url(#external-filter); }",
+            ),
+            (
+                "OEBPS/Styles/100%.css",
+                ".escaped { filter: url(#escaped-filter); }",
+            ),
+        ]);
         let document = roxmltree::Document::parse(
             r#"<html><head>
                 <link rel="stylesheet" href="../Styles/main.css"/>
+                <link rel="stylesheet" href="../Styles/100%25.css"/>
                 <style>.inline { filter: url(#inline-filter); }</style>
             </head><body/></html>"#,
         )
@@ -875,11 +883,12 @@ mod tests {
             .document_css_with_owner(
                 &document,
                 "OEBPS/Text",
-                Some("OEBPS/Text/chapter.xhtml"),
+                Some("OEBPS/Text/chapter%.xhtml"),
                 &EpubLimits::default(),
             )
             .unwrap();
         assert!(css.contains("shosai://book/OEBPS/Styles/main.css#external-filter"));
-        assert!(css.contains("shosai://book/OEBPS/Text/chapter.xhtml#inline-filter"));
+        assert!(css.contains("shosai://book/OEBPS/Styles/100%25.css#escaped-filter"));
+        assert!(css.contains("shosai://book/OEBPS/Text/chapter%25.xhtml#inline-filter"));
     }
 }
