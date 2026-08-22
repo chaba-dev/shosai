@@ -349,7 +349,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   rasterized within the per-book cache budget.
 - [X] Verify visual format parity, alias-to-internal-family mapping, weight/style
   face matching and synthesis policy, same-alias isolation across open tabs,
-  cache cleanup on close, and representative macOS/Linux renderer output.  The
+  uncached glyph-image rasterization, bounded shaping requests and pagination
+  chunks, per-paragraph direction, continued-quote widths, native-owned widget
+  height, cache cleanup on close, and representative macOS/Linux renderer output.  The
   exact stack renders bounded nonempty RGBA for TTF, OTF, WOFF, and WOFF2 and
   passes the full workspace gate independently on macOS and Framework 16 Linux.
 

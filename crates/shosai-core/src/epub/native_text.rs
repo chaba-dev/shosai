@@ -1,15 +1,11 @@
 //! Renderer-neutral, book-local EPUB text shaping and rasterization.
 
-#[cfg(test)]
-use std::collections::HashSet;
 use std::{collections::HashMap, ops::Range};
 
 use anyhow::{Context, Result, bail};
-#[cfg(test)]
-use cosmic_text::CacheKey;
 use cosmic_text::{
     Align, Attrs, BidiParagraphs, Buffer, CacheKeyFlags, Color, FontSystem, Metrics, Shaping,
-    SwashCache, Wrap,
+    SwashCache, SwashContent, Wrap,
     fontdb::{Database, Language, Stretch, Style, Weight},
 };
 use unicode_casefold::UnicodeCaseFold;
@@ -20,6 +16,7 @@ use super::{EpubFontBook, EpubFontFace, EpubFontStyle};
 pub const EPUB_TEXT_MAX_PIXELS: usize = 16 * 1024 * 1024;
 /// Hard ceiling for Unicode scalars shaped by one native request.
 pub const EPUB_TEXT_MAX_SCALARS: usize = 64 * 1024;
+const EPUB_TEXT_MAX_PARAGRAPHS: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EpubTextAlign {
@@ -96,8 +93,7 @@ pub(super) struct NativeTextState {
     cache: SwashCache,
     aliases: HashMap<String, String>,
     styles: HashMap<String, Vec<Style>>,
-    #[cfg(test)]
-    raster_keys: HashSet<CacheKey>,
+    weights: HashMap<String, Vec<(Style, f32, f32)>>,
 }
 
 impl NativeTextState {
@@ -108,6 +104,7 @@ impl NativeTextState {
         let mut db = Database::new();
         let mut aliases = HashMap::new();
         let mut styles = HashMap::<String, Vec<Style>>::new();
+        let mut weights = HashMap::<String, Vec<(Style, f32, f32)>>::new();
         if !faces.is_empty() {
             db.load_system_fonts();
         }
@@ -132,7 +129,12 @@ impl NativeTextState {
                     EpubFontStyle::Italic => Style::Italic,
                     EpubFontStyle::Oblique => Style::Oblique,
                 };
-                styles.entry(folded).or_default().push(info.style);
+                styles.entry(folded.clone()).or_default().push(info.style);
+                weights.entry(folded).or_default().push((
+                    info.style,
+                    declared.weight.min(),
+                    declared.weight.max(),
+                ));
                 info.weight = Weight(
                     ((declared.weight.min() + declared.weight.max()) / 2.0)
                         .round()
@@ -147,8 +149,7 @@ impl NativeTextState {
             cache: SwashCache::new(),
             aliases,
             styles,
-            #[cfg(test)]
-            raster_keys: HashSet::new(),
+            weights,
         }
     }
 
@@ -168,7 +169,7 @@ impl NativeTextState {
 
     #[cfg(test)]
     pub(super) fn retained_raster_image_count(&self) -> usize {
-        self.raster_keys.len()
+        0
     }
 }
 
@@ -189,6 +190,70 @@ impl EpubFontBook {
         rasterize: bool,
     ) -> Result<EpubTextLayout> {
         validate(request)?;
+        let visible_text: String = request.runs.iter().map(|run| run.text.as_str()).collect();
+        let paragraphs = paragraph_ranges(&visible_text);
+        if paragraphs.len() <= 1 {
+            return self.layout_text_single(request, rasterize);
+        }
+
+        let requests = paragraphs
+            .iter()
+            .map(|range| paragraph_request(request, range, &visible_text))
+            .collect::<Result<Vec<_>>>()?;
+        if rasterize {
+            let pixels = requests.iter().try_fold(0_usize, |pixels, paragraph| {
+                self.layout_text_single(paragraph, false)?
+                    .lines
+                    .iter()
+                    .try_fold(pixels, |pixels, line| {
+                        pixels
+                            .checked_add(line.pixel_width as usize * line.pixel_height as usize)
+                            .context("EPUB text bitmap dimensions overflow")
+                    })
+            })?;
+            if pixels > EPUB_TEXT_MAX_PIXELS {
+                bail!("EPUB text output exceeds the {EPUB_TEXT_MAX_PIXELS}-pixel per-call ceiling");
+            }
+        }
+
+        let mut result = EpubTextLayout {
+            width: 0.0,
+            height: 0.0,
+            lines: Vec::new(),
+            links: Vec::new(),
+        };
+        for (index, paragraph) in requests.iter().enumerate() {
+            let range = &paragraphs[index];
+            let scalar_start = visible_text[..range.start].chars().count();
+            let separator_end = paragraphs
+                .get(index + 1)
+                .map_or(visible_text.len(), |next| next.start);
+            let scalar_end = visible_text[..separator_end].chars().count();
+            let mut layout = self.layout_text_single(paragraph, rasterize)?;
+            for line in &mut layout.lines {
+                line.top += result.height;
+                line.scalars = line.scalars.start + scalar_start..line.scalars.end + scalar_start;
+            }
+            if let Some(last) = layout.lines.last_mut() {
+                last.scalars.end = scalar_end;
+            }
+            for hit in &mut layout.links {
+                hit.rect.y += result.height;
+                hit.scalars = hit.scalars.start + scalar_start..hit.scalars.end + scalar_start;
+            }
+            result.width = result.width.max(layout.width);
+            result.height += layout.height;
+            result.lines.extend(layout.lines);
+            result.links.extend(layout.links);
+        }
+        Ok(result)
+    }
+
+    fn layout_text_single(
+        &self,
+        request: &EpubTextRequest,
+        rasterize: bool,
+    ) -> Result<EpubTextLayout> {
         let mut state = self.native.lock().map_err(|_| {
             anyhow::anyhow!("EPUB text renderer lock is poisoned; discard and reopen this book")
         })?;
@@ -197,8 +262,7 @@ impl EpubFontBook {
             cache,
             aliases,
             styles,
-            #[cfg(test)]
-            raster_keys,
+            weights,
         } = &mut *state;
         let default_size = request.runs.first().map_or(16.0, |r| r.font_size);
         let mut buffer = Buffer::new(fonts, Metrics::new(default_size, request.line_height));
@@ -212,6 +276,24 @@ impl EpubFontBook {
             .metrics(Metrics::new(default_size, request.line_height))
             .color(Color::rgba(0, 0, 0, 0))
             .metadata(usize::MAX);
+        let synthetic_bold = request
+            .runs
+            .iter()
+            .map(|run| {
+                run.bold
+                    && run.family.as_deref().is_some_and(|family| {
+                        let family = folded_family(family);
+                        styles.get(&family).is_some_and(|available| {
+                            let selected = select_style(available, run.italic).0;
+                            !weights.get(&family).is_some_and(|faces| {
+                                faces.iter().any(|(style, min, max)| {
+                                    *style == selected && *min <= 700.0 && *max >= 700.0
+                                })
+                            })
+                        })
+                    })
+            })
+            .collect::<Vec<_>>();
         let attrs = std::iter::once((isolate, control_attrs.clone()))
             .chain(request.runs.iter().enumerate().map(|(i, run)| {
                 let folded = run.family.as_deref().map(folded_family);
@@ -407,9 +489,8 @@ impl EpubFontBook {
                 if rasterize {
                     let physical = glyph.physical((0.0, 0.0), request.scale);
                     let color = glyph.color_opt.unwrap_or(Color::rgb(0, 0, 0));
-                    #[cfg(test)]
-                    raster_keys.insert(physical.cache_key);
-                    cache.with_pixels(fonts, physical.cache_key, color, |x, y, c| {
+                    let synthetic_bold = synthetic_bold[glyph.metadata];
+                    with_pixels_uncached(cache, fonts, physical.cache_key, color, |x, y, c| {
                         fill(
                             &mut rgba,
                             (pw, ph),
@@ -422,14 +503,29 @@ impl EpubFontBook {
                                 1,
                             ),
                             [c.r(), c.g(), c.b(), c.a()],
-                        )
+                        );
+                        if synthetic_bold {
+                            fill(
+                                &mut rgba,
+                                (pw, ph),
+                                (
+                                    physical.x + x + 1,
+                                    ((run.line_y - run.line_top) * request.scale) as i32
+                                        + physical.y
+                                        + y,
+                                    1,
+                                    1,
+                                ),
+                                [c.r(), c.g(), c.b(), c.a()],
+                            );
+                        }
                     });
                 }
             }
             lines.push(EpubTextLine {
                 top: run.line_top,
                 width: run.line_w,
-                rtl: run.rtl,
+                rtl: request.direction == EpubTextDirection::RightToLeft,
                 scalars: line_range,
                 pixel_width: pw as u32,
                 pixel_height: ph as u32,
@@ -449,10 +545,119 @@ impl EpubFontBook {
     }
 }
 
+fn with_pixels_uncached(
+    cache: &mut SwashCache,
+    fonts: &mut FontSystem,
+    key: cosmic_text::CacheKey,
+    base: Color,
+    mut draw: impl FnMut(i32, i32, Color),
+) {
+    let Some(image) = cache.get_image_uncached(fonts, key) else {
+        return;
+    };
+    let x = image.placement.left;
+    let y = -image.placement.top;
+    match image.content {
+        SwashContent::Mask => {
+            for (index, alpha) in image.data.into_iter().enumerate() {
+                let off_x = index as i32 % image.placement.width as i32;
+                let off_y = index as i32 / image.placement.width as i32;
+                draw(
+                    x + off_x,
+                    y + off_y,
+                    Color((u32::from(alpha) << 24) | base.0 & 0x00ff_ffff),
+                );
+            }
+        }
+        SwashContent::Color => {
+            for (index, pixel) in image.data.chunks_exact(4).enumerate() {
+                let off_x = index as i32 % image.placement.width as i32;
+                let off_y = index as i32 / image.placement.width as i32;
+                draw(
+                    x + off_x,
+                    y + off_y,
+                    Color::rgba(pixel[0], pixel[1], pixel[2], pixel[3]),
+                );
+            }
+        }
+        SwashContent::SubpixelMask => {}
+    }
+}
+
+fn paragraph_request(
+    request: &EpubTextRequest,
+    range: &Range<usize>,
+    visible_text: &str,
+) -> Result<EpubTextRequest> {
+    let mut runs = Vec::new();
+    let mut offset = 0;
+    for run in &request.runs {
+        let run_range = offset..offset + run.text.len();
+        let start = range.start.max(run_range.start);
+        let end = range.end.min(run_range.end);
+        if start < end {
+            let mut sliced = run.clone();
+            sliced.text = visible_text[start..end].to_owned();
+            runs.push(sliced);
+        }
+        offset = run_range.end;
+    }
+    if runs.is_empty() {
+        let empty = request.runs.first().map_or(
+            EpubTextRun {
+                text: String::new(),
+                family: None,
+                monospace: false,
+                font_size: 16.0,
+                bold: false,
+                italic: false,
+                foreground: [0, 0, 0, 0],
+                link: None,
+            },
+            |run| EpubTextRun {
+                text: String::new(),
+                family: run.family.clone(),
+                monospace: run.monospace,
+                font_size: run.font_size,
+                bold: run.bold,
+                italic: run.italic,
+                foreground: run.foreground,
+                link: None,
+            },
+        );
+        runs.push(empty);
+    }
+    let scalar_start = visible_text[..range.start].chars().count();
+    let scalar_end = visible_text[..range.end].chars().count();
+    let highlights = request
+        .highlights
+        .iter()
+        .filter_map(|highlight| {
+            let start = highlight.scalars.start.max(scalar_start);
+            let end = highlight.scalars.end.min(scalar_end);
+            (start < end).then(|| EpubTextHighlight {
+                scalars: start - scalar_start..end - scalar_start,
+                color: highlight.color,
+            })
+        })
+        .collect();
+    Ok(EpubTextRequest {
+        runs,
+        max_width: request.max_width,
+        line_height: request.line_height,
+        scale: request.scale,
+        align: request.align,
+        direction: request.direction,
+        highlights,
+    })
+}
+
 fn select_style(available: &[Style], italic: bool) -> (Style, CacheKeyFlags) {
     let requested = if italic { Style::Italic } else { Style::Normal };
     if available.contains(&requested) {
         (requested, CacheKeyFlags::empty())
+    } else if italic && available.contains(&Style::Oblique) {
+        (Style::Oblique, CacheKeyFlags::empty())
     } else if italic && available.contains(&Style::Normal) {
         (Style::Normal, CacheKeyFlags::FAKE_ITALIC)
     } else {
@@ -483,7 +688,31 @@ fn validate(r: &EpubTextRequest) -> Result<()> {
     {
         bail!("EPUB font sizes must be finite and positive");
     }
+    let scalars = r.runs.iter().try_fold(0_usize, |total, run| {
+        total
+            .checked_add(run.text.chars().count())
+            .context("EPUB text length overflow")
+    })?;
+    if scalars > EPUB_TEXT_MAX_SCALARS {
+        bail!("EPUB text exceeds the {EPUB_TEXT_MAX_SCALARS}-scalar per-request ceiling");
+    }
+    let paragraphs = r
+        .runs
+        .iter()
+        .flat_map(|run| run.text.chars())
+        .filter(|character| is_bidi_paragraph_separator(*character))
+        .count()
+        .saturating_add(1);
+    if paragraphs > EPUB_TEXT_MAX_PARAGRAPHS {
+        bail!("EPUB text exceeds the {EPUB_TEXT_MAX_PARAGRAPHS}-paragraph per-request ceiling");
+    }
     Ok(())
+}
+fn is_bidi_paragraph_separator(character: char) -> bool {
+    matches!(
+        character,
+        '\n' | '\r' | '\u{001c}' | '\u{001d}' | '\u{001e}' | '\u{0085}' | '\u{2029}'
+    )
 }
 fn paragraph_ranges(text: &str) -> Vec<Range<usize>> {
     let base = text.as_ptr() as usize;

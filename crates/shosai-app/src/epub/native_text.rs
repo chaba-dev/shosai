@@ -191,7 +191,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             }
         }
         let Some(raster) = raster.as_ref() else {
-            draw_system_fallback(renderer, &self.request, bounds, viewport);
+            draw_system_fallback_lines(renderer, &self.request, text_layout, bounds, viewport);
             return;
         };
         for (line, handle) in text_layout.lines.iter().zip(&raster.handles) {
@@ -238,12 +238,9 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             return;
         };
         let local = position - layout.position();
-        if let Some(link) = tree
-            .state
-            .downcast_ref::<Cache>()
-            .layout
-            .as_ref()
-            .and_then(|l| hit(l, local.x, local.y))
+        let cache = tree.state.downcast_ref::<Cache>();
+        if cache.raster.borrow().is_some()
+            && let Some(link) = cache.layout.as_ref().and_then(|l| hit(l, local.x, local.y))
         {
             shell.publish((self.on_link)(link.to_owned()));
             shell.capture_event();
@@ -262,13 +259,13 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             return mouse::Interaction::None;
         };
         let p = p - layout.position();
-        if tree
-            .state
-            .downcast_ref::<Cache>()
-            .layout
-            .as_ref()
-            .and_then(|l| hit(l, p.x, p.y))
-            .is_some()
+        let cache = tree.state.downcast_ref::<Cache>();
+        if cache.raster.borrow().is_some()
+            && cache
+                .layout
+                .as_ref()
+                .and_then(|l| hit(l, p.x, p.y))
+                .is_some()
         {
             mouse::Interaction::Pointer
         } else {
@@ -278,7 +275,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
 }
 
 fn layout_height(native: Option<&EpubTextLayout>, fallback: f32) -> f32 {
-    native.map_or(fallback, |layout| layout.height.max(fallback))
+    native.map_or(fallback, |layout| layout.height)
 }
 
 fn fallback_height(renderer: &iced::Renderer, request: &EpubTextRequest) -> f32 {
@@ -309,6 +306,44 @@ fn draw_system_fallback(
     bounds: Rectangle,
     viewport: &Rectangle,
 ) {
+    draw_system_text(
+        renderer,
+        request,
+        bounds,
+        viewport,
+        iced::advanced::text::Wrapping::WordOrGlyph,
+    );
+}
+
+fn draw_system_fallback_lines(
+    renderer: &mut iced::Renderer,
+    request: &EpubTextRequest,
+    layout: &EpubTextLayout,
+    bounds: Rectangle,
+    viewport: &Rectangle,
+) {
+    for line in &layout.lines {
+        let line_bounds = Rectangle::new(
+            iced::Point::new(bounds.x, bounds.y + line.top),
+            Size::new(bounds.width, line.pixel_height as f32 / request.scale),
+        );
+        draw_system_text(
+            renderer,
+            &slice_request(request, line.scalars.clone()),
+            line_bounds,
+            viewport,
+            iced::advanced::text::Wrapping::None,
+        );
+    }
+}
+
+fn draw_system_text(
+    renderer: &mut iced::Renderer,
+    request: &EpubTextRequest,
+    bounds: Rectangle,
+    viewport: &Rectangle,
+    wrapping: iced::advanced::text::Wrapping,
+) {
     use iced::advanced::text::Renderer as _;
     let content = fallback_content(request);
     let color = request.runs.first().map_or(iced::Color::BLACK, |run| {
@@ -331,12 +366,37 @@ fn draw_system_fallback(
             align_x: fallback_alignment(request),
             align_y: iced::alignment::Vertical::Top,
             shaping: iced::advanced::text::Shaping::Advanced,
-            wrapping: iced::advanced::text::Wrapping::WordOrGlyph,
+            wrapping,
         },
         bounds.position(),
         color,
         bounds.intersection(viewport).unwrap_or(bounds),
     );
+}
+
+fn slice_request(request: &EpubTextRequest, scalars: std::ops::Range<usize>) -> EpubTextRequest {
+    let mut offset = 0;
+    let runs = request
+        .runs
+        .iter()
+        .filter_map(|run| {
+            let count = run.text.chars().count();
+            let start = scalars.start.saturating_sub(offset).min(count);
+            let end = scalars.end.saturating_sub(offset).min(count);
+            offset += count;
+            (start < end).then(|| {
+                let mut sliced = run.clone();
+                sliced.text = run.text.chars().skip(start).take(end - start).collect();
+                sliced.link = None;
+                sliced
+            })
+        })
+        .collect();
+    EpubTextRequest {
+        runs,
+        highlights: Vec::new(),
+        ..request.clone()
+    }
 }
 
 fn fallback_content(request: &EpubTextRequest) -> String {

@@ -14,6 +14,7 @@ pub(crate) const AVERAGE_CHARACTER_WIDTH: f32 = 0.55;
 pub(crate) const MAX_CHARACTERS_PER_LINE: usize = 72;
 pub(crate) const PAGE_NUMBER_SIZE: f32 = 11.0;
 pub(crate) const MAX_EPUB_PAGES: usize = 10_000;
+const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
 
 pub(crate) struct EpubPaginationBudget {
     remaining_page_breaks: usize,
@@ -185,8 +186,12 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                         style.text_align,
                     )
                 };
-                if measure(spans).is_some() {
-                    paginate_measured_paragraph(
+                if fonts.is_some_and(|fonts| uses_native_fonts(fonts, spans)) {
+                    let saved_page_count = pages.len();
+                    let saved_last_page_nodes = pages.last().map_or(0, Vec::len);
+                    let saved_remaining = remaining;
+                    let saved_page_breaks = budget.remaining_page_breaks;
+                    if paginate_measured_paragraph(
                         spans,
                         style,
                         &measure,
@@ -197,9 +202,17 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                         &mut pages,
                         &mut remaining,
                         budget,
-                    );
-                    text_offset += text_len + 1;
-                    continue;
+                    ) {
+                        text_offset += text_len + 1;
+                        continue;
+                    }
+                    pages.truncate(saved_page_count);
+                    pages
+                        .last_mut()
+                        .expect("EPUB pagination always retains one page")
+                        .truncate(saved_last_page_nodes);
+                    remaining = saved_remaining;
+                    budget.remaining_page_breaks = saved_page_breaks;
                 }
                 let mut cursor = EpubSpanCursor::new(spans);
                 let style_scale =
@@ -511,6 +524,9 @@ fn measure_epub_spans_with_prefix(
     direction: shosai_core::epub::style::TextDirection,
     alignment: Option<shosai_core::epub::style::TextAlignment>,
 ) -> Option<EpubTextLayout> {
+    if spans_text_len(spans).saturating_add(prefix.chars().count()) > EPUB_PAGINATION_SHAPE_CHUNK {
+        return None;
+    }
     let fonts = fonts.filter(|fonts| uses_native_fonts(fonts, spans))?;
     let mut runs = Vec::with_capacity(spans.len() + usize::from(!prefix.is_empty()));
     if !prefix.is_empty() {
@@ -582,19 +598,22 @@ fn blockquote_continuation_page_size(
     font_size: f32,
     style: &shosai_core::epub::render::NodeStyle,
 ) -> Size {
-    let _ = (font_size, style);
-    page_size
+    Size::new(
+        blockquote_width(page_size.width, font_size, style),
+        page_size.height,
+    )
 }
 
 pub(crate) fn uses_native_fonts(
     fonts: &EpubFontBook,
     spans: &[shosai_core::epub::render::TextSpan],
 ) -> bool {
-    spans.iter().any(|span| {
-        span.font_family
-            .as_deref()
-            .is_some_and(|family| fonts.contains_family(family))
-    })
+    spans_text_len(spans) <= shosai_core::epub::EPUB_TEXT_MAX_SCALARS
+        && spans.iter().any(|span| {
+            span.font_family
+                .as_deref()
+                .is_some_and(|family| fonts.contains_family(family))
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -609,18 +628,22 @@ fn paginate_measured_paragraph(
     pages: &mut Vec<PageNodes>,
     remaining: &mut f32,
     budget: &mut EpubPaginationBudget,
-) {
+) -> bool {
     let text_len = spans_text_len(spans);
     let mut start = 0;
+    let mut shape_window = EPUB_PAGINATION_SHAPE_CHUNK;
+    let mut shaping_work = text_len
+        .saturating_mul(4)
+        .saturating_add(EPUB_PAGINATION_SHAPE_CHUNK);
     while start < text_len {
-        let remaining_spans = slice_epub_spans(spans, start, text_len - start);
+        let window_len = (text_len - start).min(shape_window);
+        if shaping_work < window_len {
+            return false;
+        }
+        shaping_work -= window_len;
+        let remaining_spans = slice_epub_spans(spans, start, window_len);
         let Some(layout) = measure(&remaining_spans) else {
-            pages.last_mut().unwrap().push(PageNode {
-                node: ContentNode::Paragraph(remaining_spans, style.clone()),
-                text_offset: text_offset + start,
-            });
-            *remaining = 0.0;
-            break;
+            return false;
         };
         let line_height = layout
             .lines
@@ -645,17 +668,16 @@ fn paginate_measured_paragraph(
         let mut length = layout
             .lines
             .get(end_line.saturating_sub(1))
-            .map_or(text_len - start, |line| line.scalars.end)
-            .min(text_len - start)
+            .map_or(window_len, |line| line.scalars.end)
+            .min(window_len)
             .max(1);
         let mut page_spans = slice_epub_spans(spans, start, length);
+        if shaping_work < length {
+            return false;
+        }
+        shaping_work -= length;
         let Some(mut page_layout) = measure(&page_spans) else {
-            pages.last_mut().unwrap().push(PageNode {
-                node: ContentNode::Paragraph(remaining_spans, style.clone()),
-                text_offset: text_offset + start,
-            });
-            *remaining = 0.0;
-            break;
+            return false;
         };
         while !at_limit && page_layout.height > available && length > 1 {
             let previous = page_layout
@@ -667,9 +689,13 @@ fn paginate_measured_paragraph(
             if previous == 0 || previous >= length {
                 break;
             }
+            if shaping_work < previous {
+                return false;
+            }
+            shaping_work -= previous;
             let adjusted_spans = slice_epub_spans(spans, start, previous);
             let Some(adjusted) = measure(&adjusted_spans) else {
-                break;
+                return false;
             };
             length = previous;
             page_spans = adjusted_spans;
@@ -681,7 +707,11 @@ fn paginate_measured_paragraph(
         });
         *remaining = (*remaining - (page_layout.height + block_spacing)).max(0.0);
         start += length;
+        shape_window = length
+            .saturating_mul(2)
+            .clamp(1, EPUB_PAGINATION_SHAPE_CHUNK);
     }
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2148,7 +2178,7 @@ mod tests {
         };
         let mut pages = vec![Vec::new()];
         let mut remaining = 25.0;
-        paginate_measured_paragraph(
+        assert!(paginate_measured_paragraph(
             &spans,
             &Default::default(),
             &measure,
@@ -2159,7 +2189,7 @@ mod tests {
             &mut pages,
             &mut remaining,
             &mut EpubPaginationBudget::default(),
-        );
+        ));
 
         let chunks = pages
             .iter()
@@ -2194,6 +2224,81 @@ mod tests {
                 .windows(3)
                 .any(|calls| calls == [8, 3, 5])
         );
+    }
+
+    #[test]
+    fn measured_pagination_bounds_each_native_shaping_request() {
+        let text = "x".repeat(EPUB_PAGINATION_SHAPE_CHUNK * 3 + 17);
+        let spans = vec![shosai_core::epub::render::TextSpan {
+            text: text.clone(),
+            font_family: Some("Book".into()),
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        }];
+        let measured = std::cell::RefCell::new(Vec::new());
+        let measure = |spans: &[shosai_core::epub::render::TextSpan]| {
+            let count = spans_text_len(spans);
+            measured.borrow_mut().push(count);
+            Some(EpubTextLayout {
+                width: 100.0,
+                height: count as f32 * 20.0,
+                lines: (0..count)
+                    .map(|index| shosai_core::epub::EpubTextLine {
+                        top: index as f32 * 20.0,
+                        width: 100.0,
+                        rtl: false,
+                        scalars: index..index + 1,
+                        pixel_width: 0,
+                        pixel_height: 20,
+                        rgba: Vec::new(),
+                    })
+                    .collect(),
+                links: Vec::new(),
+            })
+        };
+        let mut pages = vec![Vec::new()];
+        let mut remaining = 20.0;
+        assert!(paginate_measured_paragraph(
+            &spans,
+            &Default::default(),
+            &measure,
+            0,
+            0.0,
+            20.0,
+            false,
+            &mut pages,
+            &mut remaining,
+            &mut EpubPaginationBudget::default(),
+        ));
+
+        assert!(
+            measured
+                .borrow()
+                .iter()
+                .all(|count| *count <= EPUB_PAGINATION_SHAPE_CHUNK)
+        );
+        assert!(
+            measured.borrow().iter().sum::<usize>() <= text.len() * 4 + EPUB_PAGINATION_SHAPE_CHUNK,
+            "overlapping native suffix work must remain linear in paragraph size"
+        );
+        let retained = pages
+            .iter()
+            .flatten()
+            .filter_map(|page| match &page.node {
+                ContentNode::Paragraph(spans, _) => Some(
+                    spans
+                        .iter()
+                        .map(|span| span.text.as_str())
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(retained, text);
     }
 
     #[test]

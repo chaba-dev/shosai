@@ -1122,6 +1122,11 @@ mod tests {
             book.measure_text(&request("x".repeat(EPUB_TEXT_MAX_SCALARS + 1)))
                 .is_err()
         );
+        assert!(
+            book.measure_text(&request("\n".repeat(4 * 1024 + 1)))
+                .is_err(),
+            "paragraph splitting must be bounded before allocating child requests"
+        );
     }
 
     #[test]
