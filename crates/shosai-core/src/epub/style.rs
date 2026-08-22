@@ -80,7 +80,7 @@ impl EpubStyles {
         let mut css = String::new();
         let mut applications = 0_usize;
         for element in document.descendants().filter(Node::is_element) {
-            let appended = match element.tag_name().name() {
+            match element.tag_name().name() {
                 "link" if is_stylesheet_link(element) => {
                     let Some(href) = element.attribute("href") else {
                         continue;
@@ -89,9 +89,13 @@ impl EpubStyles {
                         continue;
                     };
                     if let Some(source) = self.sources.get(&reference.path) {
-                        append_stylesheet(&mut css, source, element.attribute("media"))
-                    } else {
-                        false
+                        let _ = append_stylesheet(
+                            &mut css,
+                            source,
+                            element.attribute("media"),
+                            &mut applications,
+                            limits,
+                        )?;
                     }
                 }
                 "style" => {
@@ -103,30 +107,16 @@ impl EpubStyles {
                         },
                     );
                     if let Some(source) = normalized_css(&source) {
-                        append_stylesheet(&mut css, &source, element.attribute("media"))
-                    } else {
-                        false
+                        let _ = append_stylesheet(
+                            &mut css,
+                            &source,
+                            element.attribute("media"),
+                            &mut applications,
+                            limits,
+                        )?;
                     }
                 }
-                _ => false,
-            };
-            if appended {
-                applications = applications
-                    .checked_add(1)
-                    .context("EPUB stylesheet application count overflowed")?;
-                if applications > limits.max_css_stylesheets_per_document {
-                    anyhow::bail!(
-                        "EPUB document exceeds stylesheet application limit ({applications} > {})",
-                        limits.max_css_stylesheets_per_document
-                    );
-                }
-                if css.len() as u64 > limits.max_css_bytes_per_document {
-                    anyhow::bail!(
-                        "EPUB document exceeds selected CSS byte limit ({} > {})",
-                        css.len(),
-                        limits.max_css_bytes_per_document
-                    );
-                }
+                _ => {}
             }
         }
         Ok(css)
@@ -143,11 +133,45 @@ impl EpubStyles {
     }
 }
 
-fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) -> bool {
-    if let Some(media) = media.filter(|media| !media.trim().is_empty()) {
-        let Some(media) = normalized_media(media) else {
-            return false;
-        };
+fn append_stylesheet(
+    target: &mut String,
+    source: &str,
+    media: Option<&str>,
+    applications: &mut usize,
+    limits: &EpubLimits,
+) -> Result<bool> {
+    let media = match media.filter(|media| !media.trim().is_empty()) {
+        Some(media) => {
+            let Some(media) = normalized_media(media) else {
+                return Ok(false);
+            };
+            Some(media)
+        }
+        None => None,
+    };
+    let next_applications = applications
+        .checked_add(1)
+        .context("EPUB stylesheet application count overflowed")?;
+    if next_applications > limits.max_css_stylesheets_per_document {
+        anyhow::bail!(
+            "EPUB document exceeds stylesheet application limit ({next_applications} > {})",
+            limits.max_css_stylesheets_per_document
+        );
+    }
+    let wrapper_bytes = media.as_ref().map_or(1, |media| 10 + media.len());
+    let next_bytes = target
+        .len()
+        .checked_add(source.len())
+        .and_then(|bytes| bytes.checked_add(wrapper_bytes))
+        .context("EPUB selected CSS byte count overflowed")?;
+    if next_bytes as u64 > limits.max_css_bytes_per_document {
+        anyhow::bail!(
+            "EPUB document exceeds selected CSS byte limit ({next_bytes} > {})",
+            limits.max_css_bytes_per_document
+        );
+    }
+
+    if let Some(media) = media {
         target.push_str("@media ");
         target.push_str(&media);
         target.push('{');
@@ -157,7 +181,8 @@ fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) -> 
         target.push_str(source);
         target.push('\n');
     }
-    true
+    *applications = next_applications;
+    Ok(true)
 }
 
 fn normalized_media(source: &str) -> Option<String> {
@@ -321,5 +346,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(resource_error.to_string().contains("CSS resource exceeds"));
+
+        let mut target = "existing".to_string();
+        let mut applications = 0;
+        let existing_bytes = target.len() as u64;
+        let error = append_stylesheet(
+            &mut target,
+            source,
+            None,
+            &mut applications,
+            &EpubLimits {
+                max_css_bytes_per_document: existing_bytes,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("selected CSS byte limit"));
+        assert_eq!(target, "existing");
+        assert_eq!(applications, 0);
+
+        let error = append_stylesheet(
+            &mut target,
+            source,
+            None,
+            &mut applications,
+            &EpubLimits {
+                max_css_stylesheets_per_document: 0,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("application limit"));
+        assert_eq!(target, "existing");
+        assert_eq!(applications, 0);
     }
 }
