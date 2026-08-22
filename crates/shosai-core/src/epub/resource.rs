@@ -153,6 +153,18 @@ pub struct EpubReference {
     pub fragment: Option<String>,
 }
 
+impl EpubReference {
+    /// Serialize this reference as a canonical URI within the isolated book origin.
+    pub fn to_protocol_uri(&self) -> String {
+        let mut uri = self.path.to_protocol_uri();
+        if let Some(fragment) = &self.fragment {
+            uri.push('#');
+            uri.push_str(&encode_component(fragment));
+        }
+        uri
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpubPathError(&'static str);
 
@@ -361,5 +373,16 @@ mod tests {
                 archive_path
             );
         }
+
+        let reference = CanonicalEpubPath::resolve(
+            "OEBPS/Text",
+            "../Images/My%20Image.svg#figure%201",
+        )
+        .unwrap();
+        let uri = reference.to_protocol_uri();
+        assert_eq!(
+            CanonicalEpubPath::from_protocol_uri(&uri).unwrap(),
+            reference
+        );
     }
 }

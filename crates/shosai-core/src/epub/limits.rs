@@ -35,6 +35,8 @@ pub struct EpubLimits {
     pub max_css_stylesheets_per_document: usize,
     /// Maximum aggregate selected CSS bytes for one XHTML document.
     pub max_css_bytes_per_document: u64,
+    /// Maximum nested `@import` depth selected by one XHTML document.
+    pub max_css_import_depth: usize,
     /// Maximum CSS rules inspected for one XHTML document.
     pub max_css_rules_per_document: usize,
     /// Maximum selectors inspected for one XHTML document.
@@ -75,6 +77,7 @@ impl Default for EpubLimits {
             max_css_resource_bytes: 8 * MIB,
             max_css_stylesheets_per_document: 256,
             max_css_bytes_per_document: 16 * MIB,
+            max_css_import_depth: 16,
             max_css_rules_per_document: 50_000,
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
