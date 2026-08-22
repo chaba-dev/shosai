@@ -583,16 +583,20 @@ apply before a face enters a private `fontdb::Database` owned by `EpubDoc`.
 
 The CSS family is intentionally an author alias and need not match the face's
 internal family.  Computed styles retain ordered named families; native
-presentation chooses the first admitted alias and preserves weight and style
-requests for eventual face matching or synthetic fallback.  Tests cover all
-four formats, missing/corrupt/mismatched and oversized inputs, fallback attempt
-diagnostics, descriptor deduplication, two live books carrying distinct bytes
-under the same alias, and releasing one book's binary source without disturbing
-the other.  The old test-only loading adapter was removed after this production
-admission path superseded its evidence.
+presentation chooses the first alias admitted for that chapter and preserves
+the renderer's existing normal/bold and normal/italic requests for eventual
+face matching or synthetic fallback.  Numeric intermediate weights and the
+italic/oblique distinction remain M2b renderer semantics; M2a does not claim to
+retain them in `TextSpan`. Tests cover all four formats,
+missing/corrupt/mismatched and oversized inputs, independent descriptor/source/
+admitted-face limits, CSS last-declaration and media-list behavior, fallback
+attempt diagnostics, chapter scope, descriptor deduplication, two live books
+carrying distinct bytes under the same alias, and releasing one book's binary
+source without disturbing the other.  The old test-only loading adapter was
+removed after this production admission path superseded its evidence.
 
-Admission does not yet mean displayed glyph consumption.  Iced 0.14 loads font
-bytes into a process-global renderer database, requires ~&'static str~ for named
+Admission does not yet mean displayed glyph consumption. Iced 0.14 loads font
+bytes into a process-global renderer database, requires `&'static str` for named
 families, and exposes no unload operation.  Shōsai retains several live EPUB
 tabs, so global loading would leak bytes and aliases until process exit and
 would not isolate same-family declarations.  Iced's raw cosmic-text primitive

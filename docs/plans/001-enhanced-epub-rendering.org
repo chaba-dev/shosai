@@ -246,10 +246,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   admission, WOFF/WOFF2 table-directory preflight and output-bounded decoder
   callbacks, malformed/oversized rejection, unsupported descriptor fallback,
   newly loaded family validation, and same-family isolation between per-book
-  cosmic-text databases.  The dev-only bridge does not bound Brotli or
+  cosmic-text databases.  This historical dev-only bridge did not bound Brotli or
   transformed-table scratch allocations and does not implement arbitrary
   CSS-family aliases, production resource budgets, cache lifecycle, complete
-  descriptor matching, or hostile-font/parser hardening.
+  descriptor matching, or hostile-font/parser hardening; M2a replaced it with
+  the production admission boundary and retired the bridge.
 - [X] Render the same MathML/mixed-script fixtures and identify whether
   maintained permissive dependencies can fill each missing component.  A
   bounded test-only adapter produces semantic geometry for a narrow
@@ -322,9 +323,10 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   descriptors; resolve only canonical in-archive sources and reject local,
   remote, data, query-bearing, and escaping sources.
 - [X] Validate font signatures, decoded table structure, face count, encoded and
-  decoded size, and aggregate per-book limits.  Admit decoded faces into a
-  private database owned by each ~EpubDoc~, select source and family fallback
-  deterministically, and release the database when its book closes.
+  decoded size, descriptor/source inspection, and aggregate per-book limits.
+  Admit decoded faces into a private database owned by each ~EpubDoc~, select
+  chapter-scoped source and family fallback deterministically, and release the
+  database when its book closes.
 - [X] Test WOFF/WOFF2/TTF/OTF admission, missing/corrupt/mismatched fonts,
   retained bold/italic synthesis requests, alias propagation, deterministic
   fallback, independent same-family faces across two live books, and release of
