@@ -884,6 +884,70 @@ mod tests {
     }
 
     #[test]
+    fn table_cells_preserve_source_order_block_boundaries_and_hidden_subtrees() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><body><table><tr><td><span>A</span><img src="x.png" alt="X"/><span>B</span><p>C</p><p>D</p><div style="display:none"><img src="secret.png" alt="secret"/></div></td></tr></table></body></html>"#,
+            "OPS",
+            &Default::default(),
+        );
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "AXB\nC\nD\n\n"
+        );
+    }
+
+    #[test]
+    fn table_captions_retain_their_own_computed_font_scale() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><head><style>caption { font-size: 200%; text-align: right; direction: rtl; }</style></head><body><table><caption>Summary</caption><tr><td>Value</td></tr></table></body></html>"#,
+            "",
+            &Default::default(),
+        );
+        let ContentNode::Table { caption, .. } = &nodes[0] else {
+            panic!("table must remain semantic");
+        };
+
+        assert_eq!(caption[0].font_size_multiplier, 2.0);
+    }
+
+    #[test]
+    fn rejected_image_references_preserve_alt_text_without_entering_the_resource_model() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><body><img src="https://example.com/remote.png" alt="remote diagram"/></body></html>"#,
+            "OPS/Text",
+            &Default::default(),
+        );
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "remote diagram\n"
+        );
+        assert!(
+            !nodes
+                .iter()
+                .any(|node| matches!(node, ContentNode::Image { .. }))
+        );
+    }
+
+    #[test]
+    fn numeric_table_spans_saturate_at_html_semantic_limits() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><body><table><tr><td rowspan="65536" colspan="65536">large</td><td rowspan="oops" colspan="0">initial</td></tr></table></body></html>"#,
+            "",
+            &Default::default(),
+        );
+        let ContentNode::Table { row_groups, .. } = &nodes[0] else {
+            panic!("table must remain semantic");
+        };
+
+        assert_eq!(row_groups[0].rows[0].cells[0].row_span, 65_534);
+        assert_eq!(row_groups[0].rows[0].cells[0].column_span, 1_000);
+        assert_eq!(row_groups[0].rows[0].cells[1].row_span, 1);
+        assert_eq!(row_groups[0].rows[0].cells[1].column_span, 1);
+    }
+
+    #[test]
     fn test_parse_heading() {
         let xhtml = r#"<html><head><style>
             h1 { font-style: italic; font-family: monospace; }

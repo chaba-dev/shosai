@@ -7422,6 +7422,53 @@ mod tests {
     }
 
     #[test]
+    fn table_cell_images_are_loaded_into_the_book_local_cache() {
+        use shosai_core::epub::render::{TableCell, TableRow, TableRowGroup, TableRowGroupKind};
+
+        let mut image_bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            2,
+            3,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut image_bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+        let resources = HashMap::from([("table.png".to_string(), image_bytes)]);
+        let nodes = vec![ContentNode::Table {
+            caption: Vec::new(),
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![TableCell {
+                        id: None,
+                        header: false,
+                        scope: None,
+                        headers: Vec::new(),
+                        row_span: 1,
+                        column_span: 1,
+                        children: vec![ContentNode::Image {
+                            src: "table.png".to_string(),
+                            alt: "diagram".to_string(),
+                        }],
+                        style: Default::default(),
+                    }],
+                }],
+            }],
+            style: Default::default(),
+        }];
+        let mut handles = HashMap::new();
+
+        cache_epub_image_handles(&mut handles, &nodes, &|path| {
+            resources.get(path).map(Vec::as_slice)
+        });
+
+        assert!(handles.contains_key("table.png"));
+    }
+
+    #[test]
     fn raster_page_refresh_schedules_background_work() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
