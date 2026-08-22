@@ -98,12 +98,34 @@ pub(crate) fn parse_chapter_xhtml_with_limits(
     styles: &super::style::EpubStyles,
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
+    parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, None, styles, limits)
+}
+
+pub(crate) fn parse_chapter_xhtml_at_path_with_limits(
+    xhtml: &str,
+    chapter_path: &str,
+    styles: &super::style::EpubStyles,
+    limits: &EpubLimits,
+) -> Result<Vec<ContentNode>> {
+    let base_path = chapter_path
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, Some(chapter_path), styles, limits)
+}
+
+fn parse_chapter_xhtml_with_owner_and_limits(
+    xhtml: &str,
+    base_path: &str,
+    chapter_path: Option<&str>,
+    styles: &super::style::EpubStyles,
+    limits: &EpubLimits,
+) -> Result<Vec<ContentNode>> {
     let doc = match roxmltree::Document::parse(xhtml) {
         Ok(d) => d,
         Err(_) => return Ok(Vec::new()),
     };
 
-    let css = styles.document_css(&doc, base_path, limits)?;
+    let css = styles.document_css_with_owner(&doc, base_path, chapter_path, limits)?;
     let computed_styles =
         super::computed_style::compute_parsed_document_styles(&doc, &css, limits)?;
 
