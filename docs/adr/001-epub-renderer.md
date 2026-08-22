@@ -572,28 +572,34 @@ Grid alone cannot justify browser-equivalent fidelity.
 ## Native EPUB font admission and renderer boundary
 
 The production EPUB document now admits author-supplied fonts after canonical
-stylesheet resolution.  It parses CSS family aliases, ordered sources, style,
-weight, and supported format hints; rejects local, foreign, data, query-bearing,
-escaping, unsupported-format, and unsupported-technology sources; and applies
-deterministic source fallback.  TrueType and CFF OpenType sfnt bytes are admitted
-directly.  WOFF and WOFF2 pass table-directory and decoded-output preflight,
-then use output-bounded Wuff callbacks backed by Flate2 and Brotli.  Signature,
-table-count, per-face decoded-byte, face-count, and aggregate decoded-byte limits
-apply before a face enters a private `fontdb::Database` owned by `EpubDoc`.
+stylesheet resolution. It parses decoded CSS family aliases, ordered sources,
+supported style categories, numeric weight ranges, and supported format hints;
+rejects local, foreign, data, query-bearing, escaping, unsupported-format, and
+unsupported-technology sources; and applies deterministic source fallback.
+TrueType (including Apple `true`) and CFF OpenType sfnt bytes are admitted
+directly. WOFF and WOFF2 pass table-directory and decoded-output preflight,
+then use output-bounded Wuff callbacks backed by Flate2 and Brotli. Signature,
+table-count, family name/list byte, source-reference byte, per-face decoded-byte,
+face-count, and aggregate decoded-byte limits apply before a face enters a private
+`fontdb::Database` owned by `EpubDoc`. Zero font maxima act as deny-all
+boundaries without preventing font-free books from opening.
 
 The CSS family is intentionally an author alias and need not match the face's
 internal family.  Computed styles retain ordered named families; native
 presentation chooses the first alias admitted for that chapter and preserves
 the renderer's existing normal/bold and normal/italic requests for eventual
 face matching or synthetic fallback.  Numeric intermediate weights and the
-italic/oblique distinction remain M2b renderer semantics; M2a does not claim to
-retain them in `TextSpan`. Tests cover all four formats,
+italic/oblique distinction remain M2b presentation semantics; M2a retains
+descriptor weight ranges and style categories on admitted faces but does not
+retain oblique angles/ranges or claim to retain descriptor metadata in
+`TextSpan`. Tests cover all four formats,
 missing/corrupt/mismatched and oversized inputs, independent descriptor/source/
-admitted-face limits, CSS last-declaration and media-list behavior, fallback
-attempt diagnostics, chapter scope, descriptor deduplication, two live books
-carrying distinct bytes under the same alias, and releasing one book's binary
-source without disturbing the other.  The old test-only loading adapter was
-removed after this production admission path superseded its evidence.
+admitted-face/family limits, decoded aliases and Unicode case folding, CSS
+last-declaration and media-list behavior, bounded fallback diagnostics, chapter
+scope, descriptor deduplication, two live books carrying distinct bytes under
+the same alias, and releasing one book's binary source without disturbing the
+other. The old test-only loading adapter was removed after this production
+admission path superseded its evidence.
 
 Admission does not yet mean displayed glyph consumption. Iced 0.14 loads font
 bytes into a process-global renderer database, requires `&'static str` for named

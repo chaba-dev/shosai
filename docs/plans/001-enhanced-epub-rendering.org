@@ -322,15 +322,19 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [X] Parse family aliases, source lists, style, weight, and supported format
   descriptors; resolve only canonical in-archive sources and reject local,
   remote, data, query-bearing, and escaping sources.
-- [X] Validate font signatures, decoded table structure, face count, encoded and
-  decoded size, descriptor/source inspection, and aggregate per-book limits.
-  Admit decoded faces into a private database owned by each ~EpubDoc~, select
-  chapter-scoped source and family fallback deterministically, and release the
-  database when its book closes.
-- [X] Test WOFF/WOFF2/TTF/OTF admission, missing/corrupt/mismatched fonts,
-  retained bold/italic synthesis requests, alias propagation, deterministic
-  fallback, independent same-family faces across two live books, and release of
-  one book without disturbing the other.
+- [X] Validate font signatures, compressed-container directories, decoded sfnt
+  signature/table count, fontdb metadata admission, face count, encoded and
+  decoded size, descriptor/source inspection, source-reference bytes, family
+  name/list bytes, and aggregate per-book limits.  Admit decoded faces into a
+  private database owned by each ~EpubDoc~, select chapter-scoped source and
+  Unicode-caseless family fallback deterministically, and release the database
+  when its book closes.
+- [X] Test WOFF/WOFF2/TTF/OTF admission (including Apple ~true~ sfnt),
+  missing/corrupt/mismatched fonts, bounded family metadata and diagnostics,
+  decoded aliases, weight ranges, retained bold/italic synthesis requests,
+  deterministic fallback, independent same-family faces across two live books,
+  zero-valued deny-all limits, and release of one book without disturbing the
+  other.
 
 ** M2b — Embedded Font Native Rendering
 

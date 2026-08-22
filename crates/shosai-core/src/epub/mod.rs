@@ -18,7 +18,7 @@ mod computed_style;
 mod limits;
 
 pub use font::{
-    EpubFontAttempt, EpubFontBook, EpubFontFace, EpubFontFormat, EpubFontStyle,
+    EpubFontAttempt, EpubFontBook, EpubFontFace, EpubFontFormat, EpubFontStyle, EpubFontWeight,
     EpubRejectedFontFace,
 };
 pub use limits::EpubLimits;

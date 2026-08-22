@@ -5,6 +5,7 @@
 //! supported computed styles onto block and inline presentation values.
 
 use anyhow::Result;
+use std::sync::Arc;
 
 use super::EpubLimits;
 
@@ -13,7 +14,7 @@ use super::EpubLimits;
 pub struct TextSpan {
     pub text: String,
     /// First admitted embedded family from the computed CSS fallback list.
-    pub font_family: Option<String>,
+    pub font_family: Option<Arc<str>>,
     pub bold: bool,
     pub italic: bool,
     pub monospace: bool,

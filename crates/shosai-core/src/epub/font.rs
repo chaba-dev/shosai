@@ -3,14 +3,15 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt,
+    hash::{Hash, Hasher},
     io::Read,
     sync::Arc,
 };
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use fontdb::{Database, Source};
 use lightningcss::{
-    properties::font::FontFamily,
+    properties::font::{AbsoluteFontWeight, FontFamily, FontWeight},
     rules::{
         CssRule,
         font_face::{FontFaceProperty, FontFormat as CssFormat, Source as CssSource},
@@ -18,8 +19,11 @@ use lightningcss::{
     stylesheet::{ParserOptions, StyleSheet},
     traits::ToCss,
 };
+use unicode_casefold::UnicodeCaseFold;
 
 use super::{CanonicalEpubPath, Chapter, EpubLimits, style::EpubStyles, types::StoredEpubResource};
+
+const MAX_DIAGNOSTIC_LABEL_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EpubFontFormat {
@@ -34,6 +38,41 @@ pub enum EpubFontStyle {
     Normal,
     Italic,
     Oblique,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct EpubFontWeight {
+    min: f32,
+    max: f32,
+}
+
+impl EpubFontWeight {
+    const NORMAL: Self = Self {
+        min: 400.0,
+        max: 400.0,
+    };
+
+    pub fn min(self) -> f32 {
+        self.min
+    }
+    pub fn max(self) -> f32 {
+        self.max
+    }
+}
+
+impl PartialEq for EpubFontWeight {
+    fn eq(&self, other: &Self) -> bool {
+        self.min.to_bits() == other.min.to_bits() && self.max.to_bits() == other.max.to_bits()
+    }
+}
+
+impl Eq for EpubFontWeight {}
+
+impl Hash for EpubFontWeight {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.min.to_bits().hash(state);
+        self.max.to_bits().hash(state);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,7 +91,7 @@ pub enum EpubFontAttempt {
 pub struct EpubFontFace {
     pub family: String,
     pub style: EpubFontStyle,
-    pub weight: u16,
+    pub weight: EpubFontWeight,
     pub path: CanonicalEpubPath,
     pub format: EpubFontFormat,
     pub decoded_bytes: usize,
@@ -108,18 +147,16 @@ impl EpubFontBook {
             .with_face_data(*self.registered_ids.get(index)?, read)
     }
     pub fn contains_family(&self, family: &str) -> bool {
+        let family = folded_family(family);
         self.faces
             .iter()
-            .any(|face| face.family.eq_ignore_ascii_case(family))
+            .any(|face| folded_family(&face.family) == family)
     }
     pub(crate) fn contains_family_for_chapter(&self, chapter_path: &str, family: &str) -> bool {
+        let family = folded_family(family);
         self.chapter_families
             .get(chapter_path)
-            .is_some_and(|families| {
-                families
-                    .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(family))
-            })
+            .is_some_and(|families| families.contains(&family))
     }
 
     pub(crate) fn new(
@@ -128,15 +165,6 @@ impl EpubFontBook {
         resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
         limits: &EpubLimits,
     ) -> Result<Self> {
-        if limits.max_font_faces_per_book == 0
-            || limits.max_font_face_descriptors_per_book == 0
-            || limits.max_font_sources_per_face == 0
-            || limits.max_decoded_font_bytes == 0
-            || limits.max_total_decoded_font_bytes == 0
-            || limits.max_font_tables == 0
-        {
-            bail!("EPUB font limits must be non-zero");
-        }
         let mut book = Self {
             database: Database::new(),
             registered_ids: Vec::new(),
@@ -161,14 +189,14 @@ impl EpubFontBook {
                         book.chapter_families
                             .entry(chapter.path.clone())
                             .or_default()
-                            .insert(descriptor.family.clone());
+                            .insert(folded_family(&descriptor.family));
                     }
                     continue;
                 }
                 if inspected.len() >= limits.max_font_face_descriptors_per_book {
                     if !descriptor_limit_reported {
                         book.rejected_faces.push(EpubRejectedFontFace {
-                            family: descriptor.family,
+                            family: bounded_diagnostic(&descriptor.family),
                             attempts: vec![EpubFontAttempt::Rejected {
                                 source: "@font-face".into(),
                                 reason: "per-book font descriptor inspection limit is exhausted"
@@ -181,7 +209,7 @@ impl EpubFontBook {
                 }
                 if descriptor.sources.len() > limits.max_font_sources_per_face {
                     book.rejected_faces.push(EpubRejectedFontFace {
-                        family: descriptor.family.clone(),
+                        family: bounded_diagnostic(&descriptor.family),
                         attempts: vec![EpubFontAttempt::Rejected {
                             source: "@font-face".into(),
                             reason: "font source inspection limit is exhausted".into(),
@@ -190,9 +218,20 @@ impl EpubFontBook {
                     inspected.insert(descriptor, false);
                     continue;
                 }
+                if descriptor.family.len() > limits.max_css_font_family_name_bytes {
+                    book.rejected_faces.push(EpubRejectedFontFace {
+                        family: bounded_diagnostic(&descriptor.family),
+                        attempts: vec![EpubFontAttempt::Rejected {
+                            source: "@font-face".into(),
+                            reason: "font family name exceeds the byte limit".into(),
+                        }],
+                    });
+                    inspected.insert(descriptor, false);
+                    continue;
+                }
                 if book.faces.len() >= limits.max_font_faces_per_book {
                     book.rejected_faces.push(EpubRejectedFontFace {
-                        family: descriptor.family.clone(),
+                        family: bounded_diagnostic(&descriptor.family),
                         attempts: vec![EpubFontAttempt::Rejected {
                             source: "@font-face".into(),
                             reason: "per-book admitted font face limit is exhausted".into(),
@@ -208,7 +247,7 @@ impl EpubFontBook {
                     book.chapter_families
                         .entry(chapter.path.clone())
                         .or_default()
-                        .insert(family);
+                        .insert(folded_family(&family));
                 }
             }
         }
@@ -223,14 +262,20 @@ impl EpubFontBook {
     ) -> bool {
         let mut attempts = Vec::new();
         for source in &descriptor.sources {
-            let SourceDescriptor::Url {
-                reference,
-                format,
-                technology,
-            } = source
-            else {
-                reject(&mut attempts, source.label(), "local fonts are disabled");
-                continue;
+            let (reference, format, technology) = match source {
+                SourceDescriptor::Local(_) => {
+                    reject(&mut attempts, source.label(), "local fonts are disabled");
+                    continue;
+                }
+                SourceDescriptor::Rejected { label, reason } => {
+                    reject(&mut attempts, label, reason);
+                    continue;
+                }
+                SourceDescriptor::Url {
+                    reference,
+                    format,
+                    technology,
+                } => (reference, format, technology),
             };
             if *technology {
                 reject(
@@ -346,12 +391,16 @@ impl EpubFontBook {
 struct Descriptor {
     family: String,
     style: EpubFontStyle,
-    weight: u16,
+    weight: EpubFontWeight,
     sources: Vec<SourceDescriptor>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum SourceDescriptor {
     Local(String),
+    Rejected {
+        label: String,
+        reason: String,
+    },
     Url {
         reference: String,
         format: FormatHint,
@@ -362,6 +411,7 @@ impl SourceDescriptor {
     fn label(&self) -> String {
         match self {
             Self::Local(v) => format!("local({v})"),
+            Self::Rejected { label, .. } => label.clone(),
             Self::Url { reference, .. } => reference.clone(),
         }
     }
@@ -376,6 +426,34 @@ enum FormatHint {
 fn text<T: ToCss>(value: &T) -> Option<String> {
     value.to_css_string(Default::default()).ok()
 }
+
+fn folded_family(value: &str) -> String {
+    value.case_fold().collect()
+}
+
+fn absolute_weight(value: &FontWeight) -> Option<f32> {
+    let value = match value {
+        FontWeight::Absolute(AbsoluteFontWeight::Weight(value)) => *value,
+        FontWeight::Absolute(AbsoluteFontWeight::Normal) => 400.0,
+        FontWeight::Absolute(AbsoluteFontWeight::Bold) => 700.0,
+        FontWeight::Bolder | FontWeight::Lighter => return None,
+    };
+    (value.is_finite() && (1.0..=1_000.0).contains(&value)).then_some(value)
+}
+
+fn bounded_diagnostic(value: &str) -> String {
+    if value.len() <= MAX_DIAGNOSTIC_LABEL_BYTES {
+        return value.to_owned();
+    }
+    let end = value
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= MAX_DIAGNOSTIC_LABEL_BYTES - 3)
+        .last()
+        .unwrap_or(0);
+    format!("{}...", &value[..end])
+}
+
 fn parse_faces(
     css: &str,
     limits: &EpubLimits,
@@ -391,6 +469,7 @@ fn parse_faces(
         seen: &mut HashSet<Descriptor>,
         globally_inspected: &HashMap<Descriptor, bool>,
         remaining_new: &mut usize,
+        limits: &EpubLimits,
     ) {
         for rule in rules {
             if let CssRule::Media(media) = rule {
@@ -401,6 +480,7 @@ fn parse_faces(
                         seen,
                         globally_inspected,
                         remaining_new,
+                        limits,
                     );
                 }
                 continue;
@@ -409,12 +489,16 @@ fn parse_faces(
                 continue;
             };
             let Some(descriptor) = (|| -> Option<Descriptor> {
-                let (mut family, mut style, mut weight, mut sources) =
-                    (None, EpubFontStyle::Normal, 400, Vec::new());
+                let (mut family, mut style, mut weight, mut sources) = (
+                    None,
+                    EpubFontStyle::Normal,
+                    EpubFontWeight::NORMAL,
+                    Vec::new(),
+                );
                 for property in &rule.properties {
                     match property {
                         FontFaceProperty::FontFamily(FontFamily::FamilyName(v)) => {
-                            family = text(v).map(|v| v.trim_matches(['\'', '"']).to_owned())
+                            family = super::computed_style::decoded_family_name(v)
                         }
                         FontFaceProperty::FontStyle(v) => {
                             style = match text(v)?.to_ascii_lowercase().as_str() {
@@ -424,43 +508,65 @@ fn parse_faces(
                             }
                         }
                         FontFaceProperty::FontWeight(v) => {
-                            let v = text(v)?;
-                            weight = if v.eq_ignore_ascii_case("normal") {
-                                400
-                            } else if v.eq_ignore_ascii_case("bold") {
-                                700
-                            } else {
-                                v.parse().ok()?
-                            };
+                            if let (Some(min), Some(max)) =
+                                (absolute_weight(&v.0), absolute_weight(&v.1))
+                                && min <= max
+                            {
+                                weight = EpubFontWeight { min, max };
+                            }
                         }
                         FontFaceProperty::Source(values) => {
                             sources = values
                                 .iter()
                                 .map(|source| match source {
-                                    CssSource::Local(v) => {
-                                        SourceDescriptor::Local(text(v).unwrap_or_default())
-                                    }
-                                    CssSource::Url(v) => SourceDescriptor::Url {
-                                        reference: v.url.url.to_string(),
-                                        format: v.format.as_ref().map_or(FormatHint::Absent, |f| {
-                                            match f {
-                                                CssFormat::TrueType => {
-                                                    FormatHint::Supported(EpubFontFormat::TrueType)
-                                                }
-                                                CssFormat::OpenType => {
-                                                    FormatHint::Supported(EpubFontFormat::OpenType)
-                                                }
-                                                CssFormat::WOFF => {
-                                                    FormatHint::Supported(EpubFontFormat::Woff)
-                                                }
-                                                CssFormat::WOFF2 => {
-                                                    FormatHint::Supported(EpubFontFormat::Woff2)
-                                                }
-                                                _ => FormatHint::Unsupported,
+                                    CssSource::Local(v) => SourceDescriptor::Local(match v {
+                                        FontFamily::FamilyName(name) => bounded_diagnostic(
+                                            &super::computed_style::decoded_family_name(name)
+                                                .unwrap_or_default(),
+                                        ),
+                                        FontFamily::Generic(_) => {
+                                            bounded_diagnostic(&text(v).unwrap_or_default())
+                                        }
+                                    }),
+                                    CssSource::Url(v) => {
+                                        let reference = v.url.url.to_string();
+                                        if reference.len() > limits.max_font_source_reference_bytes
+                                        {
+                                            SourceDescriptor::Rejected {
+                                                label: bounded_diagnostic(&reference),
+                                                reason:
+                                                    "font source reference exceeds the byte limit"
+                                                        .into(),
                                             }
-                                        }),
-                                        technology: !v.tech.is_empty(),
-                                    },
+                                        } else {
+                                            SourceDescriptor::Url {
+                                                reference,
+                                                format: v.format.as_ref().map_or(
+                                                    FormatHint::Absent,
+                                                    |f| match f {
+                                                        CssFormat::TrueType => {
+                                                            FormatHint::Supported(
+                                                                EpubFontFormat::TrueType,
+                                                            )
+                                                        }
+                                                        CssFormat::OpenType => {
+                                                            FormatHint::Supported(
+                                                                EpubFontFormat::OpenType,
+                                                            )
+                                                        }
+                                                        CssFormat::WOFF => FormatHint::Supported(
+                                                            EpubFontFormat::Woff,
+                                                        ),
+                                                        CssFormat::WOFF2 => FormatHint::Supported(
+                                                            EpubFontFormat::Woff2,
+                                                        ),
+                                                        _ => FormatHint::Unsupported,
+                                                    },
+                                                ),
+                                                technology: !v.tech.is_empty(),
+                                            }
+                                        }
+                                    }
                                 })
                                 .collect()
                         }
@@ -499,6 +605,7 @@ fn parse_faces(
         &mut seen,
         globally_inspected,
         &mut remaining_new,
+        limits,
     );
     Ok(faces)
 }
@@ -509,8 +616,8 @@ fn reject(
     reason: impl Into<String>,
 ) {
     attempts.push(EpubFontAttempt::Rejected {
-        source: source.into(),
-        reason: reason.into(),
+        source: bounded_diagnostic(&source.into()),
+        reason: bounded_diagnostic(&reason.into()),
     });
 }
 fn read_u16(b: &[u8], o: usize) -> std::result::Result<usize, String> {
@@ -652,7 +759,7 @@ fn bounded(
 }
 fn sniff(b: &[u8]) -> std::result::Result<EpubFontFormat, String> {
     match b.get(..4) {
-        Some([0, 1, 0, 0]) => Ok(EpubFontFormat::TrueType),
+        Some([0, 1, 0, 0]) | Some(b"true") => Ok(EpubFontFormat::TrueType),
         Some(b"OTTO") => Ok(EpubFontFormat::OpenType),
         Some(b"wOFF") => Ok(EpubFontFormat::Woff),
         Some(b"wOF2") => Ok(EpubFontFormat::Woff2),
@@ -664,7 +771,7 @@ fn decode_font(
     declared: Option<EpubFontFormat>,
     l: &EpubLimits,
 ) -> std::result::Result<(EpubFontFormat, Vec<u8>), String> {
-    if b.len() > l.max_font_bytes as usize {
+    if b.len() as u64 > l.max_font_bytes {
         return Err("encoded font exceeds the input limit".into());
     }
     let f = sniff(b)?;
@@ -789,7 +896,8 @@ mod tests {
             assert_eq!(book.registered_face_count(), 1, "{path}");
             assert_eq!(book.faces()[0].format, expected, "{path}");
             assert_eq!(book.faces()[0].style, EpubFontStyle::Italic, "{path}");
-            assert_eq!(book.faces()[0].weight, 700, "{path}");
+            assert_eq!(book.faces()[0].weight.min(), 700.0, "{path}");
+            assert_eq!(book.faces()[0].weight.max(), 700.0, "{path}");
             assert!(book.with_face_data(0, |data, _| !data.is_empty()).unwrap());
         }
     }
@@ -909,26 +1017,57 @@ mod tests {
 
     #[test]
     fn family_metadata_and_diagnostic_labels_are_bounded_before_amplification() {
+        let parse = |css: &str, paragraph: &str, limits: EpubLimits| {
+            let styles = EpubStyles::parse([("OPS/styles/book.css", css)]);
+            let chapter = Chapter {
+                index: 0,
+                title: None,
+                path: "OPS/Text/chapter.xhtml".into(),
+                content: format!(
+                    r#"<html><head><link rel="stylesheet" href="../styles/book.css"/></head><body>{paragraph}</body></html>"#
+                ),
+            };
+            let fonts = EpubFontBook::new(&[], &styles, &HashMap::new(), &limits).unwrap();
+            super::super::render::parse_chapter_xhtml_at_path_with_limits(
+                &chapter.content,
+                &chapter.path,
+                &styles,
+                &fonts,
+                &limits,
+            )
+        };
+
         let long_family = "x".repeat(1_024);
         let css = format!(r#"p {{ font-family: "{long_family}"; }}"#);
-        let styles = EpubStyles::parse([("OPS/styles/book.css", css.as_str())]);
-        let chapter = Chapter {
-            index: 0,
-            title: None,
-            path: "OPS/Text/chapter.xhtml".into(),
-            content: r#"<html><head><link rel="stylesheet" href="../styles/book.css"/></head><body><p>Bounded</p></body></html>"#.into(),
-        };
         let limits = EpubLimits::default();
-        let fonts = EpubFontBook::new(&[], &styles, &HashMap::new(), &limits).unwrap();
-        let error = super::super::render::parse_chapter_xhtml_at_path_with_limits(
-            &chapter.content,
-            &chapter.path,
-            &styles,
-            &fonts,
-            &limits,
-        )
-        .expect_err("oversized family metadata must stop before style-tree inheritance");
+        let error = parse(&css, "<p>Bounded</p>", limits)
+            .expect_err("oversized family metadata must stop before style-tree inheritance");
         assert!(error.to_string().contains("font family"));
+
+        let inline = format!(r#"<p style="font-family: '{long_family}'">Inline</p>"#);
+        assert!(parse("", &inline, limits).is_err());
+        assert!(
+            parse(
+                r#"p { font-family: "One", "Two"; }"#,
+                "<p>Count</p>",
+                EpubLimits {
+                    max_css_font_families_per_declaration: 1,
+                    ..limits
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            parse(
+                r#"p { font-family: "Four", "Bytes"; }"#,
+                "<p>Bytes</p>",
+                EpubLimits {
+                    max_css_font_family_bytes_per_declaration: 8,
+                    ..limits
+                },
+            )
+            .is_err()
+        );
 
         let long_local = "y".repeat(1_024);
         let face_css =
@@ -939,19 +1078,32 @@ mod tests {
             panic!("local source must be rejected");
         };
         assert!(source.len() <= 256);
+
+        let long_url = "z".repeat(4_096);
+        let url_css =
+            format!(r#"@font-face {{ font-family: "Bounded"; src: url("{long_url}"); }}"#);
+        let rejected = font_book(&url_css, &[], limits, 1);
+        assert!(matches!(
+            rejected.rejected_faces()[0].attempts.as_slice(),
+            [EpubFontAttempt::Rejected { source, reason }]
+                if source.len() <= 256
+                    && reason == "font source reference exceeds the byte limit"
+        ));
     }
 
     #[test]
     fn weight_ranges_are_retained_and_invalid_weights_use_the_initial_value() {
         let ranged = font_book(
             &format!(
-                r#"@font-face {{ font-family: "{FAMILY}"; font-weight: 300 700; src: url("../fonts/book.ttf"); }}"#
+                r#"@font-face {{ font-family: "{FAMILY}"; font-weight: 300.5 700.25; src: url("../fonts/book.ttf"); }}"#
             ),
             &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
             EpubLimits::default(),
             1,
         );
         assert_eq!(ranged.len(), 1);
+        assert_eq!(ranged.faces()[0].weight.min(), 300.5);
+        assert_eq!(ranged.faces()[0].weight.max(), 700.25);
 
         let invalid = font_book(
             &format!(
@@ -962,7 +1114,23 @@ mod tests {
             1,
         );
         assert_eq!(invalid.len(), 1);
-        assert_eq!(invalid.faces()[0].weight, 400);
+        assert_eq!(invalid.faces()[0].weight.min(), 400.0);
+        assert_eq!(invalid.faces()[0].weight.max(), 400.0);
+
+        let unsupported_style_range = font_book(
+            &format!(
+                r#"@font-face {{ font-family: "{FAMILY}"; font-style: oblique 10deg 20deg; src: url("../fonts/book.ttf"); }}"#
+            ),
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        assert_eq!(unsupported_style_range.len(), 1);
+        assert_eq!(
+            unsupported_style_range.faces()[0].style,
+            EpubFontStyle::Oblique,
+            "M2a retains the supported style category without claiming angle-range metadata"
+        );
     }
 
     #[test]
