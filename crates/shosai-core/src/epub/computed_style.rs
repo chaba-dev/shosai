@@ -203,6 +203,15 @@ pub(crate) fn compute_parsed_document_styles(
     css: &str,
     limits: &EpubLimits,
 ) -> Result<ComputedDocumentStyles> {
+    if !limits.min_css_computed_font_size_px.is_finite()
+        || !limits.max_css_computed_font_size_px.is_finite()
+        || limits.min_css_computed_font_size_px <= 0.0
+        || limits.max_css_computed_font_size_px < limits.min_css_computed_font_size_px
+        || !(limits.max_css_computed_font_size_px / limits.min_css_computed_font_size_px)
+            .is_finite()
+    {
+        anyhow::bail!("EPUB computed font size limits are invalid");
+    }
     let sheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     validate_stylesheet_complexity(&sheet.rules.0, limits)?;
@@ -232,6 +241,7 @@ pub(crate) fn compute_parsed_document_styles(
         &mut node_styles,
         &mut element_styles,
         &mut processing_budget,
+        limits,
     )?;
     let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
     unsupported_selectors.sort();
@@ -250,6 +260,7 @@ pub(crate) fn compute_parsed_document_styles(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk_element(
     element: Node<'_, '_>,
     parent: Option<&ComputedStyle>,
@@ -258,6 +269,7 @@ fn walk_element(
     node_styles: &mut HashMap<NodeId, ComputedStyle>,
     styles: &mut HashMap<String, ComputedStyle>,
     processing_budget: &mut ProcessingBudget,
+    limits: &EpubLimits,
 ) -> Result<()> {
     let style = compute_element_style(
         element,
@@ -266,6 +278,17 @@ fn walk_element(
         rules,
         processing_budget,
     )?;
+    if !style.font_size_px.is_finite()
+        || style.font_size_px < limits.min_css_computed_font_size_px
+        || style.font_size_px > limits.max_css_computed_font_size_px
+    {
+        anyhow::bail!(
+            "EPUB document computed font size is outside limits ({}px, min {}px, max {}px)",
+            style.font_size_px,
+            limits.min_css_computed_font_size_px,
+            limits.max_css_computed_font_size_px
+        );
+    }
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
     node_styles.insert(element.id(), style.clone());
     if let Some(id) = element.attribute("id") {
@@ -280,6 +303,7 @@ fn walk_element(
             node_styles,
             styles,
             processing_budget,
+            limits,
         )?;
     }
     Ok(())
@@ -1373,5 +1397,45 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("CSS processing step limit"));
+    }
+
+    #[test]
+    fn computed_font_sizes_stop_at_the_configured_admission_boundary() {
+        let document =
+            roxmltree::Document::parse(r#"<html><body><p class="huge">Target</p></body></html>"#)
+                .unwrap();
+        let error = compute_parsed_document_styles(
+            &document,
+            ".huge { font-size: 1000000000px; }",
+            &EpubLimits {
+                max_css_computed_font_size_px: 512.0,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("computed font size is outside limits")
+        );
+    }
+
+    #[test]
+    fn zero_and_tiny_computed_font_sizes_stop_before_span_normalization() {
+        for size in [0.0, 0.000_001] {
+            let document = roxmltree::Document::parse(
+                r#"<html><body><p class="parent"><span class="child">Target</span></p></body></html>"#,
+            )
+            .unwrap();
+            let error = compute_parsed_document_styles(
+                &document,
+                &format!(".parent {{ font-size: {size}px; }} .child {{ font-size: 512px; }}"),
+                &EpubLimits::default(),
+            )
+            .unwrap_err();
+
+            assert!(error.to_string().contains("outside limits"));
+        }
     }
 }

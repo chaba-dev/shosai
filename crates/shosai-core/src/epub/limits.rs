@@ -27,6 +27,8 @@ pub struct EpubLimits {
     pub max_xml_depth: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
+    /// Maximum number of reading-order items admitted from the OPF spine.
+    pub max_spine_items: usize,
     /// Maximum encoded size of an individual CSS resource.
     pub max_css_resource_bytes: u64,
     /// Maximum stylesheet applications selected by one XHTML document.
@@ -41,6 +43,10 @@ pub struct EpubLimits {
     pub max_css_selector_components_per_document: usize,
     /// Maximum amplified rule, selector, and declaration processing steps per XHTML document.
     pub max_css_processing_steps_per_document: usize,
+    /// Minimum computed CSS font size admitted into native presentation.
+    pub min_css_computed_font_size_px: f32,
+    /// Maximum computed CSS font size admitted into native presentation.
+    pub max_css_computed_font_size_px: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
     /// Maximum width or height reported by an admitted image.
@@ -65,6 +71,7 @@ impl Default for EpubLimits {
             max_xml_bytes: 8 * MIB,
             max_xml_depth: 128,
             max_xml_text_bytes: 4 * MIB,
+            max_spine_items: 10_000,
             max_css_resource_bytes: 8 * MIB,
             max_css_stylesheets_per_document: 256,
             max_css_bytes_per_document: 16 * MIB,
@@ -72,6 +79,8 @@ impl Default for EpubLimits {
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
             max_css_processing_steps_per_document: 10_000_000,
+            min_css_computed_font_size_px: 1.0,
+            max_css_computed_font_size_px: 512.0,
             max_font_bytes: 16 * MIB,
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,

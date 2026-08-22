@@ -655,6 +655,13 @@ fn configurable_limits_reject_before_unbounded_resource_reads() {
             },
             "CSS processing step limit",
         ),
+        (
+            EpubLimits {
+                max_css_computed_font_size_px: 1.0,
+                ..EpubLimits::default()
+            },
+            "computed font size is outside limits",
+        ),
     ] {
         let error = EpubDoc::open_with_limits(fixture_path("css-cascade"), limits).unwrap_err();
         assert!(

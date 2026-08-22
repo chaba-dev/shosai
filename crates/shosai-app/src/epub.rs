@@ -8,6 +8,27 @@ pub(crate) const TEXT_LINE_HEIGHT: f32 = 1.2;
 pub(crate) const AVERAGE_CHARACTER_WIDTH: f32 = 0.55;
 pub(crate) const MAX_CHARACTERS_PER_LINE: usize = 72;
 pub(crate) const PAGE_NUMBER_SIZE: f32 = 11.0;
+pub(crate) const MAX_EPUB_PAGES: usize = 10_000;
+
+pub(crate) struct EpubPaginationBudget {
+    remaining_page_breaks: usize,
+}
+
+impl Default for EpubPaginationBudget {
+    fn default() -> Self {
+        Self {
+            remaining_page_breaks: MAX_EPUB_PAGES - 1,
+        }
+    }
+}
+
+impl EpubPaginationBudget {
+    pub(crate) fn for_document(chapters: usize) -> Self {
+        Self {
+            remaining_page_breaks: MAX_EPUB_PAGES.saturating_sub(chapters),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PageNode {
@@ -60,12 +81,31 @@ pub(crate) fn visible_pages(page: usize, page_count: usize, spread: bool) -> Vec
     (start..=end).collect()
 }
 
+#[cfg(test)]
 pub(crate) fn paginate_epub_chapter(
     nodes: &[ContentNode],
     title: Option<&str>,
     font_size: f32,
     line_spacing: f32,
     page_size: Size,
+) -> Vec<PageNodes> {
+    paginate_epub_chapter_with_budget(
+        nodes,
+        title,
+        font_size,
+        line_spacing,
+        page_size,
+        &mut EpubPaginationBudget::default(),
+    )
+}
+
+pub(crate) fn paginate_epub_chapter_with_budget(
+    nodes: &[ContentNode],
+    title: Option<&str>,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: Size,
+    budget: &mut EpubPaginationBudget,
 ) -> Vec<PageNodes> {
     let chars_per_line = (page_size.width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
         .floor()
@@ -111,8 +151,7 @@ pub(crate) fn paginate_epub_chapter(
                 lines_per_page,
                 font_size,
             );
-            if node_height + first_child_height > remaining {
-                pages.push(Vec::new());
+            if node_height + first_child_height > remaining && push_epub_page(&mut pages, budget) {
                 remaining = page_size.height;
             }
         }
@@ -120,26 +159,35 @@ pub(crate) fn paginate_epub_chapter(
         let text_len = content_node_text_len(node);
         match node {
             ContentNode::Paragraph(spans, style) => {
-                let mut consumed = 0;
+                let mut cursor = EpubSpanCursor::new(spans);
                 let style_scale =
                     style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
                 let text_line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
                 let paragraph_chars_per_line =
                     scaled_characters_per_line(chars_per_line, style_scale);
-                while consumed < text_len {
+                while cursor.remaining() > 0 {
+                    let mut at_page_limit = false;
                     if remaining < text_line_height + block_spacing
                         && page_has_content(&pages, first_page_has_title)
                     {
-                        pages.push(Vec::new());
-                        remaining = page_size.height;
+                        if push_epub_page(&mut pages, budget) {
+                            remaining = page_size.height;
+                        } else {
+                            at_page_limit = true;
+                        }
                     }
                     let available_lines = ((remaining - block_spacing).max(text_line_height)
                         / text_line_height)
                         .floor()
                         .max(1.0) as usize;
-                    let available_chars = paragraph_chars_per_line * available_lines;
-                    let take = epub_span_split_length(spans, consumed, available_chars);
-                    let chunk = slice_epub_spans(spans, consumed, take);
+                    let available_chars = if at_page_limit {
+                        cursor.remaining()
+                    } else {
+                        paragraph_chars_per_line * available_lines
+                    };
+                    let take = cursor.split_length(available_chars);
+                    let consumed = cursor.consumed();
+                    let chunk = cursor.take(take);
                     let chunk_height = take.div_ceil(paragraph_chars_per_line).max(1) as f32
                         * text_line_height
                         + block_spacing;
@@ -148,33 +196,40 @@ pub(crate) fn paginate_epub_chapter(
                         text_offset: text_offset + consumed,
                     });
                     remaining = (remaining - chunk_height).max(0.0);
-                    consumed += take;
                 }
             }
             ContentNode::CodeBlock { code, language } => {
                 let mut consumed = 0;
+                let mut consumed_bytes = 0;
                 let code_line_height = font_size * TEXT_LINE_HEIGHT * 0.85;
                 let code_padding = 24.0;
                 while consumed < text_len {
+                    let mut at_page_limit = false;
                     if remaining < code_line_height + code_padding + block_spacing
                         && page_has_content(&pages, first_page_has_title)
                     {
-                        pages.push(Vec::new());
-                        remaining = page_size.height;
+                        if push_epub_page(&mut pages, budget) {
+                            remaining = page_size.height;
+                        } else {
+                            at_page_limit = true;
+                        }
                     }
                     let available_lines = ((remaining - code_padding - block_spacing)
                         .max(code_line_height)
                         / code_line_height)
                         .floor()
                         .max(1.0) as usize;
-                    let chunk = code
-                        .chars()
-                        .skip(consumed)
-                        .collect::<String>()
-                        .split_inclusive('\n')
-                        .take(available_lines)
-                        .collect::<String>();
+                    let remaining_code = &code[consumed_bytes..];
+                    let chunk = if at_page_limit {
+                        remaining_code.to_string()
+                    } else {
+                        remaining_code
+                            .split_inclusive('\n')
+                            .take(available_lines)
+                            .collect::<String>()
+                    };
                     let chunk_len = chunk.chars().count();
+                    consumed_bytes += chunk.len();
                     let chunk_height = chunk.lines().count().max(1) as f32 * code_line_height
                         + code_padding
                         + block_spacing;
@@ -200,6 +255,7 @@ pub(crate) fn paginate_epub_chapter(
                 first_page_has_title,
                 &mut pages,
                 &mut remaining,
+                budget,
             ),
             ContentNode::OrderedList { items, start } => paginate_epub_list(
                 items,
@@ -212,6 +268,7 @@ pub(crate) fn paginate_epub_chapter(
                 first_page_has_title,
                 &mut pages,
                 &mut remaining,
+                budget,
             ),
             ContentNode::BlockQuote { children, style } => {
                 let node_height = estimated_epub_node_height(
@@ -235,8 +292,10 @@ pub(crate) fn paginate_epub_chapter(
                     && node_height > remaining
                     && page_has_content(&pages, first_page_has_title);
                 if node_height <= page_size.height && !split_after_label {
-                    if node_height > remaining && page_has_content(&pages, first_page_has_title) {
-                        pages.push(Vec::new());
+                    if node_height > remaining
+                        && page_has_content(&pages, first_page_has_title)
+                        && push_epub_page(&mut pages, budget)
+                    {
                         remaining = page_size.height;
                     }
                     pages.last_mut().unwrap().push(PageNode {
@@ -271,31 +330,42 @@ pub(crate) fn paginate_epub_chapter(
 
                     if !remaining_children.is_empty() {
                         if page_has_content(&pages, first_page_has_title) {
-                            pages.push(Vec::new());
+                            let _ = push_epub_page(&mut pages, budget);
                         }
-                        let child_pages = paginate_epub_chapter(
-                            &remaining_children,
-                            None,
-                            font_size,
-                            line_spacing,
-                            page_size,
-                        );
-                        for (index, child_page) in child_pages.into_iter().enumerate() {
-                            if index > 0 {
-                                pages.push(Vec::new());
-                            }
-                            let child_offset =
-                                child_page.first().map_or(0, |node| node.text_offset);
+                        if budget.remaining_page_breaks == 0 {
                             pages.last_mut().unwrap().push(PageNode {
                                 node: ContentNode::BlockQuote {
-                                    children: child_page
-                                        .into_iter()
-                                        .map(|node| node.node)
-                                        .collect(),
+                                    children: remaining_children,
                                     style: style.clone(),
                                 },
-                                text_offset: text_offset + prefix_text_len + child_offset,
+                                text_offset: text_offset + prefix_text_len,
                             });
+                        } else {
+                            let child_pages = paginate_epub_chapter_with_budget(
+                                &remaining_children,
+                                None,
+                                font_size,
+                                line_spacing,
+                                page_size,
+                                budget,
+                            );
+                            for (index, child_page) in child_pages.into_iter().enumerate() {
+                                if index > 0 {
+                                    let _ = push_epub_page(&mut pages, budget);
+                                }
+                                let child_offset =
+                                    child_page.first().map_or(0, |node| node.text_offset);
+                                pages.last_mut().unwrap().push(PageNode {
+                                    node: ContentNode::BlockQuote {
+                                        children: child_page
+                                            .into_iter()
+                                            .map(|node| node.node)
+                                            .collect(),
+                                        style: style.clone(),
+                                    },
+                                    text_offset: text_offset + prefix_text_len + child_offset,
+                                });
+                            }
                         }
                         remaining = 0.0;
                     }
@@ -303,7 +373,7 @@ pub(crate) fn paginate_epub_chapter(
             }
             ContentNode::Image { .. } => {
                 if page_has_content(&pages, first_page_has_title) {
-                    pages.push(Vec::new());
+                    let _ = push_epub_page(&mut pages, budget);
                 }
                 pages.last_mut().unwrap().push(PageNode {
                     node: node.clone(),
@@ -319,8 +389,10 @@ pub(crate) fn paginate_epub_chapter(
                     font_size,
                     line_spacing,
                 );
-                if node_height > remaining && page_has_content(&pages, first_page_has_title) {
-                    pages.push(Vec::new());
+                if node_height > remaining
+                    && page_has_content(&pages, first_page_has_title)
+                    && push_epub_page(&mut pages, budget)
+                {
                     remaining = page_size.height;
                 }
                 pages.last_mut().unwrap().push(PageNode {
@@ -343,6 +415,15 @@ fn scaled_characters_per_line(chars_per_line: usize, scale: f32) -> usize {
     ((chars_per_line as f32 / scale.max(0.1)).floor() as usize).max(1)
 }
 
+fn push_epub_page(pages: &mut Vec<PageNodes>, budget: &mut EpubPaginationBudget) -> bool {
+    if budget.remaining_page_breaks == 0 {
+        return false;
+    }
+    budget.remaining_page_breaks -= 1;
+    pages.push(Vec::new());
+    true
+}
+
 fn page_has_content(pages: &[PageNodes], first_page_has_title: bool) -> bool {
     pages.last().is_some_and(|page| !page.is_empty()) || (first_page_has_title && pages.len() == 1)
 }
@@ -359,6 +440,7 @@ fn paginate_epub_list(
     first_page_has_title: bool,
     pages: &mut Vec<PageNodes>,
     remaining: &mut f32,
+    budget: &mut EpubPaginationBudget,
 ) {
     let mut consumed_items = 0;
     let mut consumed_text = 0;
@@ -370,8 +452,18 @@ fn paginate_epub_list(
         if *remaining < first_line_height + block_spacing
             && page_has_content(pages, first_page_has_title)
         {
-            pages.push(Vec::new());
-            *remaining = page_height;
+            if push_epub_page(pages, budget) {
+                *remaining = page_height;
+            } else {
+                pages.last_mut().unwrap().push(PageNode {
+                    node: epub_list_node(
+                        &items[consumed_items..],
+                        ordered_start.map(|start| start + consumed_items),
+                    ),
+                    text_offset: text_offset + consumed_text,
+                });
+                return;
+            }
         }
 
         let available_height = (*remaining - block_spacing).max(first_line_height);
@@ -399,19 +491,25 @@ fn paginate_epub_list(
         }
 
         if take == 0 {
-            pages.push(Vec::new());
-            *remaining = page_height;
+            if push_epub_page(pages, budget) {
+                *remaining = page_height;
+            } else {
+                pages.last_mut().unwrap().push(PageNode {
+                    node: epub_list_node(
+                        &items[consumed_items..],
+                        ordered_start.map(|start| start + consumed_items),
+                    ),
+                    text_offset: text_offset + consumed_text,
+                });
+                return;
+            }
             continue;
         }
 
-        let chunk = items[consumed_items..consumed_items + take].to_vec();
-        let node = match ordered_start {
-            Some(start) => ContentNode::OrderedList {
-                items: chunk,
-                start: start + consumed_items,
-            },
-            None => ContentNode::UnorderedList(chunk),
-        };
+        let node = epub_list_node(
+            &items[consumed_items..consumed_items + take],
+            ordered_start.map(|start| start + consumed_items),
+        );
         pages.last_mut().unwrap().push(PageNode {
             node,
             text_offset: text_offset + consumed_text,
@@ -422,6 +520,102 @@ fn paginate_epub_list(
             .map(|item| spans_text_len(item) + 1)
             .sum::<usize>();
         consumed_items += take;
+    }
+}
+
+fn epub_list_node(
+    items: &[Vec<shosai_core::epub::render::TextSpan>],
+    ordered_start: Option<usize>,
+) -> ContentNode {
+    match ordered_start {
+        Some(start) => ContentNode::OrderedList {
+            items: items.to_vec(),
+            start,
+        },
+        None => ContentNode::UnorderedList(items.to_vec()),
+    }
+}
+
+struct EpubSpanCursor<'a> {
+    spans: &'a [shosai_core::epub::render::TextSpan],
+    span_index: usize,
+    byte_offset: usize,
+    consumed: usize,
+    remaining: usize,
+}
+
+impl<'a> EpubSpanCursor<'a> {
+    fn new(spans: &'a [shosai_core::epub::render::TextSpan]) -> Self {
+        Self {
+            spans,
+            span_index: 0,
+            byte_offset: 0,
+            consumed: 0,
+            remaining: spans_text_len(spans),
+        }
+    }
+
+    fn consumed(&self) -> usize {
+        self.consumed
+    }
+
+    fn remaining(&self) -> usize {
+        self.remaining
+    }
+
+    fn split_length(&self, maximum: usize) -> usize {
+        if self.remaining <= maximum {
+            return self.remaining;
+        }
+        let mut length = 0;
+        let mut last_whitespace = None;
+        for (index, span) in self.spans[self.span_index..].iter().enumerate() {
+            let start = if index == 0 { self.byte_offset } else { 0 };
+            for character in span.text[start..].chars() {
+                if length == maximum {
+                    break;
+                }
+                length += 1;
+                if character.is_whitespace() {
+                    last_whitespace = Some(length);
+                }
+            }
+            if length == maximum {
+                break;
+            }
+        }
+        last_whitespace
+            .filter(|length| *length >= maximum / 2)
+            .unwrap_or(maximum)
+    }
+
+    fn take(&mut self, length: usize) -> Vec<shosai_core::epub::render::TextSpan> {
+        let mut output = Vec::new();
+        let mut remaining = length;
+        while remaining > 0 && self.span_index < self.spans.len() {
+            let source = &self.spans[self.span_index];
+            let suffix = &source.text[self.byte_offset..];
+            let mut bytes = 0;
+            let mut characters = 0;
+            for character in suffix.chars().take(remaining) {
+                bytes += character.len_utf8();
+                characters += 1;
+            }
+            if characters > 0 {
+                let mut span = source.clone();
+                span.text = suffix[..bytes].to_string();
+                output.push(span);
+                self.byte_offset += bytes;
+                self.consumed += characters;
+                self.remaining -= characters;
+                remaining -= characters;
+            }
+            if self.byte_offset == source.text.len() {
+                self.span_index += 1;
+                self.byte_offset = 0;
+            }
+        }
+        output
     }
 }
 
@@ -748,6 +942,127 @@ mod tests {
             chunks
                 .iter()
                 .all(|span| span.link.as_deref() == Some("chapter-2.xhtml"))
+        );
+    }
+
+    #[test]
+    fn epub_paginator_bounds_pathological_text_geometry_without_losing_content() {
+        let text = "é".repeat(MAX_EPUB_PAGES + 20);
+        let spans = vec![shosai_core::epub::render::TextSpan {
+            text: text.clone(),
+            bold: true,
+            italic: true,
+            monospace: true,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        }];
+        let style = shosai_core::epub::render::NodeStyle {
+            font_size_multiplier: Some(1_000_000_000.0),
+            ..Default::default()
+        };
+
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(spans, style)],
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+        );
+
+        assert_eq!(pages.len(), MAX_EPUB_PAGES);
+        let chunks = pages
+            .iter()
+            .flatten()
+            .map(|page_node| match &page_node.node {
+                ContentNode::Paragraph(spans, _) => &spans[0],
+                node => panic!("expected paragraph, got {node:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            chunks
+                .iter()
+                .flat_map(|span| span.text.chars())
+                .collect::<String>(),
+            text
+        );
+        assert!(chunks.iter().all(|span| {
+            span.bold && span.italic && span.monospace && span.font_size_multiplier == 1.0
+        }));
+        assert_eq!(chunks.last().unwrap().text.chars().count(), 20);
+        assert_eq!(pages.last().unwrap().len(), 2);
+        assert_eq!(pages.last().unwrap()[1].text_offset, MAX_EPUB_PAGES);
+    }
+
+    #[test]
+    fn epub_pagination_budget_is_shared_across_blockquotes_and_chapters() {
+        let paragraph = |character: char| {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text: character.to_string().repeat(20),
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                shosai_core::epub::render::NodeStyle {
+                    font_size_multiplier: Some(1_000_000_000.0),
+                    ..Default::default()
+                },
+            )
+        };
+        let first_chapter = vec![
+            ContentNode::BlockQuote {
+                children: vec![paragraph('a')],
+                style: Default::default(),
+            },
+            ContentNode::BlockQuote {
+                children: vec![paragraph('b')],
+                style: Default::default(),
+            },
+        ];
+        let second_chapter = vec![paragraph('c')];
+        let mut budget = EpubPaginationBudget {
+            remaining_page_breaks: 3,
+        };
+
+        let first_pages = paginate_epub_chapter_with_budget(
+            &first_chapter,
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+            &mut budget,
+        );
+        let second_pages = paginate_epub_chapter_with_budget(
+            &second_chapter,
+            None,
+            16.0,
+            1.6,
+            Size::new(240.0, 180.0),
+            &mut budget,
+        );
+
+        assert_eq!(first_pages.len() + second_pages.len(), 2);
+        assert_eq!(budget.remaining_page_breaks, 0);
+        assert!(
+            first_pages.iter().flatten().count() + second_pages.iter().flatten().count() <= 7,
+            "exhausted recursive pagination must retain source nodes without fresh fragmentation"
+        );
+        let text = first_pages
+            .iter()
+            .chain(&second_pages)
+            .flat_map(|page| page.iter().map(|node| node.node.clone()))
+            .collect::<Vec<_>>();
+        let text = shosai_core::search::extract_text_from_nodes(&text)
+            .chars()
+            .filter(|character| matches!(character, 'a' | 'b' | 'c'))
+            .collect::<String>();
+        assert_eq!(
+            text,
+            format!("{}{}{}", "a".repeat(20), "b".repeat(20), "c".repeat(20))
         );
     }
 

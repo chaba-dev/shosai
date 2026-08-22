@@ -22,9 +22,9 @@ use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 
 use crate::epub::{
-    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE,
-    Page as EpubPage, PageNode as EpubPageNode, content_node_text_len, paginate_epub_chapter,
-    spans_font_scale, spans_text_len,
+    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
+    PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, PageNode as EpubPageNode,
+    content_node_text_len, paginate_epub_chapter_with_budget, spans_font_scale, spans_text_len,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
@@ -1534,32 +1534,42 @@ fn paginate_epub_document(
     line_spacing: f32,
     page_size: Size,
 ) -> Vec<EpubPage> {
-    document
-        .presentation()
-        .chapters()
-        .iter()
-        .enumerate()
-        .flat_map(|(chapter_index, presentation)| {
-            let nodes = presentation.nodes();
-            let source = document
-                .chapter(chapter_index)
-                .expect("presentation chapters match source chapters");
-            let title = source
-                .title
-                .as_deref()
-                .filter(|title| !content_starts_with_heading(nodes, title));
-            paginate_epub_chapter(nodes, title, font_size, line_spacing, page_size)
-                .into_iter()
-                .enumerate()
-                .map(move |(page_index, nodes)| EpubPage {
-                    chapter: chapter_index,
-                    title: (page_index == 0)
-                        .then(|| title.map(str::to_string))
-                        .flatten(),
-                    nodes,
-                })
-        })
-        .collect()
+    let mut pages = Vec::new();
+    let chapters = document.presentation().chapters();
+    let mut budget = EpubPaginationBudget::for_document(chapters.len());
+    for (chapter_index, presentation) in chapters.iter().enumerate() {
+        if pages.len() >= MAX_EPUB_PAGES {
+            break;
+        }
+        let nodes = presentation.nodes();
+        let source = document
+            .chapter(chapter_index)
+            .expect("presentation chapters match source chapters");
+        let title = source
+            .title
+            .as_deref()
+            .filter(|title| !content_starts_with_heading(nodes, title));
+        pages.extend(
+            paginate_epub_chapter_with_budget(
+                nodes,
+                title,
+                font_size,
+                line_spacing,
+                page_size,
+                &mut budget,
+            )
+            .into_iter()
+            .enumerate()
+            .map(|(page_index, nodes)| EpubPage {
+                chapter: chapter_index,
+                title: (page_index == 0)
+                    .then(|| title.map(str::to_string))
+                    .flatten(),
+                nodes,
+            }),
+        );
+    }
+    pages
 }
 
 fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
@@ -3655,17 +3665,7 @@ fn render_content_node<'a>(
             spans,
             style,
         } => {
-            let base_size = match level {
-                1 => font_size * 2.0,
-                2 => font_size * 1.6,
-                3 => font_size * 1.3,
-                4 => font_size * 1.1,
-                _ => font_size,
-            };
-            let size = style
-                .font_size_multiplier
-                .map(|m| base_size * m)
-                .unwrap_or(base_size);
+            let size = epub_heading_font_size(*level, style, font_size);
             let align = node_style_to_alignment(style);
             let heading = render_spans(spans, size, text_color, text_offset, highlights);
             container(heading).width(Length::Fill).align_x(align).into()
@@ -3793,6 +3793,23 @@ fn render_content_node<'a>(
             .color(text_color)
             .into(),
     }
+}
+
+fn epub_heading_font_size(
+    level: u8,
+    style: &shosai_core::epub::render::NodeStyle,
+    font_size: f32,
+) -> f32 {
+    let base_size = match level {
+        1 => font_size * 2.0,
+        2 => font_size * 1.6,
+        3 => font_size * 1.3,
+        4 => font_size * 1.1,
+        _ => font_size,
+    };
+    style
+        .font_size_multiplier
+        .map_or(base_size, |multiplier| base_size * multiplier)
 }
 
 /// Render a cached EPUB image, falling back to alt text.
@@ -4060,13 +4077,28 @@ fn styled_epub_span<'a>(
     highlight: Option<bool>,
 ) -> iced::widget::text::Span<'a, String> {
     let is_link = text_span.link.is_some();
-    let family = if text_span.monospace {
-        iced::font::Family::Monospace
-    } else {
-        iced::font::Family::default()
-    };
-    let font = Font {
-        family,
+    let font = epub_span_font(text_span);
+    let color = if is_link { LINK_COLOR } else { text_color };
+    let mut rendered = span(fragment)
+        .size(epub_span_size(font_size, text_span))
+        .font(font)
+        .color(color);
+    if is_link {
+        rendered = rendered.underline(true);
+    }
+    if let Some(href) = &text_span.link {
+        rendered = rendered.link(href.clone());
+    }
+    apply_search_highlight(rendered, highlight)
+}
+
+fn epub_span_font(text_span: &shosai_core::epub::render::TextSpan) -> Font {
+    Font {
+        family: if text_span.monospace {
+            iced::font::Family::Monospace
+        } else {
+            iced::font::Family::default()
+        },
         weight: if text_span.bold {
             iced::font::Weight::Bold
         } else {
@@ -4078,19 +4110,11 @@ fn styled_epub_span<'a>(
             iced::font::Style::Normal
         },
         ..Font::DEFAULT
-    };
-    let color = if is_link { LINK_COLOR } else { text_color };
-    let mut rendered = span(fragment)
-        .size(font_size * text_span.font_size_multiplier)
-        .font(font)
-        .color(color);
-    if is_link {
-        rendered = rendered.underline(true);
     }
-    if let Some(href) = &text_span.link {
-        rendered = rendered.link(href.clone());
-    }
-    apply_search_highlight(rendered, highlight)
+}
+
+fn epub_span_size(font_size: f32, text_span: &shosai_core::epub::render::TextSpan) -> f32 {
+    font_size * text_span.font_size_multiplier
 }
 
 fn render_highlighted_text_with_font<'a>(
@@ -7368,6 +7392,57 @@ mod tests {
             .sum();
 
         assert_eq!(rendered_length, extracted.chars().count());
+    }
+
+    #[test]
+    fn computed_heading_spans_survive_pagination_search_and_app_font_resolution() {
+        let nodes = shosai_core::epub::render::parse_chapter_xhtml(
+            r#"<html><body><h2 style="font-size:40px;font-style:italic;font-family:monospace">
+                Styled <span style="font-size:20px;font-weight:normal">plain</span>
+            </h2></body></html>"#,
+            "",
+            &Default::default(),
+        );
+        let ContentNode::Heading {
+            level,
+            spans,
+            style,
+        } = &nodes[0]
+        else {
+            panic!("expected heading presentation");
+        };
+
+        let pages =
+            crate::epub::paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 180.0));
+        let ContentNode::Heading {
+            spans: paginated_spans,
+            ..
+        } = &pages[0][0].node
+        else {
+            panic!("expected paginated heading");
+        };
+        assert_eq!(paginated_spans, spans);
+        assert_eq!(pages[0][0].text_offset, 0);
+        let search_text = shosai_core::search::extract_text_from_nodes(&nodes);
+        assert_eq!(search_text, "Styled plain\n");
+        let mut matches = Vec::new();
+        shosai_core::search::find_matches_in_text_pub(&search_text, "plain", 0, &mut matches);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].offset, 7);
+        assert_eq!(matches[0].length, 5);
+
+        let heading_size = epub_heading_font_size(*level, style, 16.0);
+        assert!((heading_size - 40.0).abs() < 0.01);
+        assert!((epub_span_size(heading_size, &spans[0]) - 40.0).abs() < 0.01);
+        assert!((epub_span_size(heading_size, &spans[1]) - 20.0).abs() < 0.01);
+        let inherited_font = epub_span_font(&spans[0]);
+        assert_eq!(inherited_font.family, iced::font::Family::Monospace);
+        assert_eq!(inherited_font.weight, iced::font::Weight::Bold);
+        assert_eq!(inherited_font.style, iced::font::Style::Italic);
+        let overridden_font = epub_span_font(&spans[1]);
+        assert_eq!(overridden_font.family, iced::font::Family::Monospace);
+        assert_eq!(overridden_font.weight, iced::font::Weight::Normal);
+        assert_eq!(overridden_font.style, iced::font::Style::Italic);
     }
 
     #[test]
