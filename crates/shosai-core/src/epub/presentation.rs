@@ -36,6 +36,7 @@ impl EpubPresentation {
     pub(crate) fn parse(
         chapters: &[Chapter],
         styles: &EpubStyles,
+        fonts: &super::font::EpubFontBook,
         limits: &EpubLimits,
     ) -> Result<Self> {
         let chapters = chapters
@@ -45,6 +46,7 @@ impl EpubPresentation {
                     &chapter.content,
                     &chapter.path,
                     styles,
+                    fonts,
                     limits,
                 )?;
                 let search_text = crate::search::extract_text_from_nodes(&nodes);

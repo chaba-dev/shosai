@@ -6,6 +6,7 @@
 //! - XHTML content documents (chapters)
 //! - CSS stylesheets, images, fonts, and other resources
 
+mod font;
 mod parser;
 mod presentation;
 pub mod render;
@@ -16,6 +17,10 @@ mod types;
 mod computed_style;
 mod limits;
 
+pub use font::{
+    EpubFontAttempt, EpubFontBook, EpubFontFace, EpubFontFormat, EpubFontStyle, EpubFontWeight,
+    EpubRejectedFontFace,
+};
 pub use limits::EpubLimits;
 pub use parser::EpubDoc;
 pub use presentation::{EpubChapterPresentation, EpubPresentation};

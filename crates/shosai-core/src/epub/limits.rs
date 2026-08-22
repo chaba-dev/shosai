@@ -45,12 +45,32 @@ pub struct EpubLimits {
     pub max_css_selector_components_per_document: usize,
     /// Maximum amplified rule, selector, and declaration processing steps per XHTML document.
     pub max_css_processing_steps_per_document: usize,
+    /// Maximum named font families retained from one CSS declaration.
+    pub max_css_font_families_per_declaration: usize,
+    /// Maximum decoded UTF-8 bytes retained for one CSS font family name.
+    pub max_css_font_family_name_bytes: usize,
+    /// Maximum aggregate decoded UTF-8 family-name bytes retained from one CSS declaration.
+    pub max_css_font_family_bytes_per_declaration: usize,
     /// Minimum computed CSS font size admitted into native presentation.
     pub min_css_computed_font_size_px: f32,
     /// Maximum computed CSS font size admitted into native presentation.
     pub max_css_computed_font_size_px: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
+    /// Maximum font faces admitted for one EPUB.
+    pub max_font_faces_per_book: usize,
+    /// Maximum distinct `@font-face` descriptors inspected for one EPUB.
+    pub max_font_face_descriptors_per_book: usize,
+    /// Maximum fallback sources inspected for one `@font-face` descriptor.
+    pub max_font_sources_per_face: usize,
+    /// Maximum encoded UTF-8 bytes inspected from one `@font-face` URL reference.
+    pub max_font_source_reference_bytes: usize,
+    /// Maximum decoded size of an individual font.
+    pub max_decoded_font_bytes: usize,
+    /// Maximum aggregate decoded font bytes retained for one EPUB.
+    pub max_total_decoded_font_bytes: usize,
+    /// Maximum table count admitted from one decoded font.
+    pub max_font_tables: usize,
     /// Maximum width or height reported by an admitted image.
     pub max_image_dimension: u32,
     /// Maximum pixel count reported by an admitted image.
@@ -82,9 +102,19 @@ impl Default for EpubLimits {
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
             max_css_processing_steps_per_document: 10_000_000,
+            max_css_font_families_per_declaration: 32,
+            max_css_font_family_name_bytes: 256,
+            max_css_font_family_bytes_per_declaration: 2_048,
             min_css_computed_font_size_px: 1.0,
             max_css_computed_font_size_px: 512.0,
             max_font_bytes: 16 * MIB,
+            max_font_faces_per_book: 64,
+            max_font_face_descriptors_per_book: 256,
+            max_font_sources_per_face: 16,
+            max_font_source_reference_bytes: 2_048,
+            max_decoded_font_bytes: 32 * MIB as usize,
+            max_total_decoded_font_bytes: 128 * MIB as usize,
+            max_font_tables: 256,
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,
             max_decoded_image_bytes: 160 * MIB,

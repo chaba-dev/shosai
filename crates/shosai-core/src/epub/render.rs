@@ -5,6 +5,7 @@
 //! supported computed styles onto block and inline presentation values.
 
 use anyhow::Result;
+use std::sync::Arc;
 
 use super::EpubLimits;
 
@@ -12,6 +13,8 @@ use super::EpubLimits;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSpan {
     pub text: String,
+    /// First admitted embedded family from the computed CSS fallback list.
+    pub font_family: Option<Arc<str>>,
     pub bold: bool,
     pub italic: bool,
     pub monospace: bool,
@@ -98,19 +101,27 @@ pub(crate) fn parse_chapter_xhtml_with_limits(
     styles: &super::style::EpubStyles,
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
-    parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, None, styles, limits)
+    parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, None, styles, None, limits)
 }
 
 pub(crate) fn parse_chapter_xhtml_at_path_with_limits(
     xhtml: &str,
     chapter_path: &str,
     styles: &super::style::EpubStyles,
+    fonts: &super::font::EpubFontBook,
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
     let base_path = chapter_path
         .rsplit_once('/')
         .map_or("", |(directory, _)| directory);
-    parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, Some(chapter_path), styles, limits)
+    parse_chapter_xhtml_with_owner_and_limits(
+        xhtml,
+        base_path,
+        Some(chapter_path),
+        styles,
+        Some(fonts),
+        limits,
+    )
 }
 
 fn parse_chapter_xhtml_with_owner_and_limits(
@@ -118,6 +129,7 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     base_path: &str,
     chapter_path: Option<&str>,
     styles: &super::style::EpubStyles,
+    fonts: Option<&super::font::EpubFontBook>,
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
     let doc = match roxmltree::Document::parse(xhtml) {
@@ -126,8 +138,9 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     };
 
     let css = styles.document_css_with_owner(&doc, base_path, chapter_path, limits)?;
-    let computed_styles =
+    let mut computed_styles =
         super::computed_style::compute_parsed_document_styles(&doc, &css, limits)?;
+    computed_styles.resolve_font_families(chapter_path, fonts);
 
     // Find <body> (or fall back to root).
     let body = doc
@@ -160,6 +173,7 @@ fn parse_block_children(
                     nodes.push(ContentNode::Paragraph(
                         vec![TextSpan {
                             text: text.to_string(),
+                            font_family: None,
                             bold: false,
                             italic: false,
                             monospace: false,
@@ -462,6 +476,7 @@ fn collect_inline_spans_recursive(
             if !text.is_empty() {
                 spans.push(TextSpan {
                     text: text.to_string(),
+                    font_family: style.font_families.first().cloned(),
                     bold: style.bold,
                     italic: style.italic,
                     monospace: style.monospace,
@@ -496,6 +511,7 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
     let mut i = 0;
     while i + 1 < spans.len() {
         if spans[i].bold == spans[i + 1].bold
+            && spans[i].font_family == spans[i + 1].font_family
             && spans[i].italic == spans[i + 1].italic
             && spans[i].monospace == spans[i + 1].monospace
             && spans[i].font_size_multiplier == spans[i + 1].font_size_multiplier

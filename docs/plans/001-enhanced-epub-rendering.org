@@ -246,10 +246,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   admission, WOFF/WOFF2 table-directory preflight and output-bounded decoder
   callbacks, malformed/oversized rejection, unsupported descriptor fallback,
   newly loaded family validation, and same-family isolation between per-book
-  cosmic-text databases.  The dev-only bridge does not bound Brotli or
+  cosmic-text databases.  This historical dev-only bridge did not bound Brotli or
   transformed-table scratch allocations and does not implement arbitrary
   CSS-family aliases, production resource budgets, cache lifecycle, complete
-  descriptor matching, or hostile-font/parser hardening.
+  descriptor matching, or hostile-font/parser hardening; M2a replaced it with
+  the production admission boundary and retired the bridge.
 - [X] Render the same MathML/mixed-script fixtures and identify whether
   maintained permissive dependencies can fill each missing component.  A
   bounded test-only adapter produces semantic geometry for a narrow
@@ -316,16 +317,37 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   rejects the document.  Supported resource URLs are rewritten to canonical
   isolated-book URIs before the owning stylesheet path is discarded.
 
-** M2 — Embedded Fonts and ~@font-face~
+** M2a — Embedded Font Admission and Presentation Metadata
 
-- [ ] Parse family, source list, style, weight, and supported format descriptors;
-  resolve only in-archive sources and reject remote/data sources unless the ADR
-  explicitly permits bounded data URLs.
-- [ ] Validate font signatures and resource limits.  Register fonts per book,
-  apply fallback deterministically, and release registrations when a book closes.
-- [ ] Add tests for WOFF/WOFF2/TTF/OTF as supported by the native font system,
-  missing/corrupt fonts, synthetic bold/italic policy, and same-family clashes
-  across two open books.
+- [X] Parse family aliases, source lists, style, weight, and supported format
+  descriptors; resolve only canonical in-archive sources and reject local,
+  remote, data, query-bearing, and escaping sources.
+- [X] Validate font signatures, compressed-container directories, decoded sfnt
+  signature/table count, fontdb metadata admission, face count, encoded and
+  decoded size, descriptor/source inspection, source-reference bytes, family
+  name/list bytes, and aggregate per-book limits.  Admit decoded faces into a
+  private database owned by each ~EpubDoc~, select chapter-scoped source and
+  Unicode-caseless family fallback deterministically, and release the database
+  when its book closes.
+- [X] Test WOFF/WOFF2/TTF/OTF admission (including Apple ~true~ sfnt),
+  missing/corrupt/mismatched fonts, bounded family metadata and diagnostics,
+  decoded aliases, weight ranges, retained bold/italic synthesis requests,
+  deterministic fallback, independent same-family faces across two live books,
+  zero-valued deny-all limits, and release of one book without disturbing the
+  other.
+
+** M2b — Embedded Font Native Rendering
+
+- [ ] Shape, measure, and rasterize admitted bytes with one per-book font system;
+  the production Iced 0.14 font loader is process-global and has no unload API,
+  so global registration and leaked ~'static~ CSS aliases are not acceptable.
+- [ ] Make embedded face metrics drive the same layout used for pagination, and
+  preserve link hit-testing, search highlights, logical source ranges, and
+  readable system-font fallback when a face is absent or rejected.
+- [ ] Verify visual format parity, alias-to-internal-family mapping, weight/style
+  face matching and synthesis policy, same-alias isolation across open tabs,
+  cache cleanup on close, and representative macOS/Linux renderer output before
+  claiming embedded-font rendering support.
 
 ** M3 — Tables
 

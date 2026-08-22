@@ -2,17 +2,19 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use cssparser::{Parser, ParserInput};
 use lightningcss::declaration::DeclarationBlock;
 use lightningcss::media_query::{MediaList, MediaType, Qualifier};
 use lightningcss::properties::Property;
 use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, DisplayOutside};
 use lightningcss::properties::font::{
-    AbsoluteFontWeight, FontFamily, FontSize, FontStyle, FontWeight, GenericFontFamily,
+    AbsoluteFontWeight, FamilyName, FontFamily, FontSize, FontStyle, FontWeight, GenericFontFamily,
 };
 use lightningcss::properties::text::{Direction as CssDirection, TextAlign, WhiteSpace};
-use lightningcss::rules::CssRule;
+use lightningcss::rules::{CssRule, font_face::FontFaceProperty};
 use lightningcss::selector::{Combinator, Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleAttribute, StyleSheet};
 use lightningcss::traits::ToCss;
@@ -60,6 +62,7 @@ pub(crate) struct ComputedStyle {
     pub(crate) bold: bool,
     pub(crate) italic: bool,
     pub(crate) monospace: bool,
+    pub(crate) font_families: Arc<[Arc<str>]>,
     pub(crate) alignment: Alignment,
     pub(crate) direction: Direction,
     pub(crate) preserve_whitespace: bool,
@@ -85,6 +88,26 @@ pub(crate) struct ComputedDocumentStyles {
 impl ComputedDocumentStyles {
     pub(crate) fn get(&self, node: Node<'_, '_>) -> Option<&ComputedStyle> {
         self.node_styles.get(&node.id())
+    }
+
+    pub(crate) fn resolve_font_families(
+        &mut self,
+        chapter_path: Option<&str>,
+        fonts: Option<&super::font::EpubFontBook>,
+    ) {
+        for style in self.node_styles.values_mut() {
+            style.font_families = style
+                .font_families
+                .iter()
+                .filter(|family| {
+                    fonts.is_some_and(|fonts| {
+                        chapter_path
+                            .is_some_and(|path| fonts.contains_family_for_chapter(path, family))
+                    })
+                })
+                .cloned()
+                .collect();
+        }
     }
 }
 
@@ -170,6 +193,7 @@ struct SpecifiedStyle {
     bold: Slot<bool>,
     italic: Slot<bool>,
     monospace: Slot<bool>,
+    font_families: Slot<Arc<[Arc<str>]>>,
     alignment: Slot<SpecifiedAlignment>,
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
@@ -215,6 +239,7 @@ pub(crate) fn compute_parsed_document_styles(
     let sheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     validate_stylesheet_complexity(&sheet.rules.0, limits)?;
+    validate_inline_font_families(document.root_element(), limits)?;
     let mut unsupported_selectors = HashSet::new();
     let mut unsupported_rules = HashSet::new();
     let mut unsupported_declarations = HashSet::new();
@@ -322,6 +347,7 @@ fn compute_element_style(
         bold: false,
         italic: false,
         monospace: false,
+        font_families: Arc::from([]),
         alignment: Alignment::Start,
         direction: Direction::Ltr,
         preserve_whitespace: false,
@@ -377,6 +403,9 @@ fn compute_element_style(
     }
     if let Some(value) = specified.monospace.value() {
         style.monospace = value;
+    }
+    if let Some(value) = specified.font_families.value() {
+        style.font_families = value;
     }
     if let Some(value) = specified.alignment.value() {
         style.alignment = match value {
@@ -460,7 +489,7 @@ fn apply_rules(
     Ok(())
 }
 
-fn screen_media_matches(media: &MediaList<'_>) -> bool {
+pub(crate) fn screen_media_matches(media: &MediaList<'_>) -> bool {
     media.media_queries.iter().any(screen_media_query_matches)
 }
 
@@ -490,7 +519,7 @@ fn screen_media_query_matches(query: &lightningcss::media_query::MediaQuery<'_>)
     )
 }
 
-fn bounded_media_query(media: &MediaList<'_>) -> bool {
+pub(crate) fn bounded_media_query(media: &MediaList<'_>) -> bool {
     media
         .media_queries
         .iter()
@@ -543,9 +572,14 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             priority,
             matches!(style, FontStyle::Italic | FontStyle::Oblique(_)),
         ),
-        Property::FontFamily(families) => specified
-            .monospace
-            .offer(priority, has_monospace_family(families)),
+        Property::FontFamily(families) => {
+            specified
+                .monospace
+                .offer(priority, has_monospace_family(families));
+            specified
+                .font_families
+                .offer(priority, named_font_families(families));
+        }
         Property::TextAlign(alignment) => {
             specified
                 .alignment
@@ -586,7 +620,10 @@ struct StylesheetComplexity {
     selector_components: usize,
 }
 
-fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) -> Result<()> {
+pub(crate) fn validate_stylesheet_complexity(
+    rules: &[CssRule<'_>],
+    limits: &EpubLimits,
+) -> Result<()> {
     fn inspect(
         rules: &[CssRule<'_>],
         complexity: &mut StylesheetComplexity,
@@ -607,6 +644,7 @@ fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) ->
 
             match rule {
                 CssRule::Style(rule) => {
+                    validate_declaration_font_families(&rule.declarations, limits)?;
                     complexity.selectors = complexity
                         .selectors
                         .checked_add(rule.selectors.0.len())
@@ -635,6 +673,14 @@ fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) ->
                     }
                     inspect(&rule.rules.0, complexity, limits)?;
                 }
+                CssRule::FontFace(rule) => {
+                    for property in &rule.properties {
+                        if let FontFaceProperty::FontFamily(FontFamily::FamilyName(name)) = property
+                        {
+                            validate_family_name(name, limits)?;
+                        }
+                    }
+                }
                 CssRule::Media(rule) => inspect(&rule.rules.0, complexity, limits)?,
                 _ => {}
             }
@@ -643,6 +689,76 @@ fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) ->
     }
 
     inspect(rules, &mut StylesheetComplexity::default(), limits)
+}
+
+fn validate_declaration_font_families(
+    declarations: &DeclarationBlock<'_>,
+    limits: &EpubLimits,
+) -> Result<()> {
+    for property in declarations
+        .declarations
+        .iter()
+        .chain(&declarations.important_declarations)
+    {
+        if let Property::FontFamily(families) = property {
+            validate_font_families(families, limits)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_font_families(families: &[FontFamily<'_>], limits: &EpubLimits) -> Result<()> {
+    let mut count = 0_usize;
+    let mut bytes = 0_usize;
+    for family in families {
+        let FontFamily::FamilyName(name) = family else {
+            continue;
+        };
+        let name = validate_family_name(name, limits)?;
+        count = count
+            .checked_add(1)
+            .context("EPUB CSS font family count overflowed")?;
+        bytes = bytes
+            .checked_add(name.len())
+            .context("EPUB CSS font family byte count overflowed")?;
+    }
+    if count > limits.max_css_font_families_per_declaration {
+        anyhow::bail!(
+            "EPUB CSS font family declaration exceeds name limit ({count} > {})",
+            limits.max_css_font_families_per_declaration
+        );
+    }
+    if bytes > limits.max_css_font_family_bytes_per_declaration {
+        anyhow::bail!(
+            "EPUB CSS font family declaration exceeds byte limit ({bytes} > {})",
+            limits.max_css_font_family_bytes_per_declaration
+        );
+    }
+    Ok(())
+}
+
+fn validate_family_name(name: &FamilyName<'_>, limits: &EpubLimits) -> Result<String> {
+    let name =
+        decoded_family_name(name).context("EPUB CSS font family name could not be decoded")?;
+    if name.len() > limits.max_css_font_family_name_bytes {
+        anyhow::bail!(
+            "EPUB CSS font family name exceeds byte limit ({} > {})",
+            name.len(),
+            limits.max_css_font_family_name_bytes
+        );
+    }
+    Ok(name)
+}
+
+fn validate_inline_font_families(element: Node<'_, '_>, limits: &EpubLimits) -> Result<()> {
+    for element in element.descendants().filter(Node::is_element) {
+        if let Some(inline) = element.attribute("style")
+            && let Ok(attribute) = StyleAttribute::parse(inline, ParserOptions::default())
+        {
+            validate_declaration_font_families(&attribute.declarations, limits)?;
+        }
+    }
+    Ok(())
 }
 
 fn selector_component_count(selector: &Selector<'_>) -> Result<usize> {
@@ -1095,12 +1211,38 @@ fn has_monospace_family(families: &[FontFamily]) -> bool {
             family,
             GenericFontFamily::Monospace | GenericFontFamily::UIMonospace
         ),
-        FontFamily::FamilyName(name) => name
-            .to_css_string(Default::default())
+        FontFamily::FamilyName(name) => decoded_family_name(name)
             .unwrap_or_default()
             .to_ascii_lowercase()
             .contains("mono"),
     })
+}
+
+pub(crate) fn decoded_family_name(name: &FamilyName<'_>) -> Option<String> {
+    let css = name.to_css_string(Default::default()).ok()?;
+    let mut input = ParserInput::new(&css);
+    let mut parser = Parser::new(&mut input);
+    if let Ok(value) = parser.try_parse(|parser| parser.expect_string_cloned()) {
+        parser.expect_exhausted().ok()?;
+        return Some(value.to_string());
+    }
+    let mut value = parser.expect_ident_cloned().ok()?.to_string();
+    while let Ok(ident) = parser.try_parse(|parser| parser.expect_ident_cloned()) {
+        value.push(' ');
+        value.push_str(&ident);
+    }
+    parser.expect_exhausted().ok()?;
+    Some(value)
+}
+
+fn named_font_families(families: &[FontFamily]) -> Arc<[Arc<str>]> {
+    families
+        .iter()
+        .filter_map(|family| match family {
+            FontFamily::FamilyName(name) => decoded_family_name(name).map(Arc::<str>::from),
+            FontFamily::Generic(_) => None,
+        })
+        .collect()
 }
 
 fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {

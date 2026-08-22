@@ -31,6 +31,7 @@ const MAX_ARCHIVE_ENTRIES: usize = u16::MAX as usize;
 #[derive(Debug)]
 pub struct EpubDoc {
     content: EpubContent,
+    fonts: super::font::EpubFontBook,
     presentation: EpubPresentation,
 }
 
@@ -141,7 +142,8 @@ impl EpubDoc {
             &limits,
         )?;
 
-        let presentation = EpubPresentation::parse(&chapters, &styles, &limits)?;
+        let fonts = super::font::EpubFontBook::new(&chapters, &styles, &resources, &limits)?;
+        let presentation = EpubPresentation::parse(&chapters, &styles, &fonts, &limits)?;
 
         Ok(Self {
             content: EpubContent {
@@ -152,6 +154,7 @@ impl EpubDoc {
                 resources,
                 styles,
             },
+            fonts,
             presentation,
         })
     }
@@ -181,6 +184,11 @@ impl EpubDoc {
     /// Parsed chapter content shared by rendering, pagination, and search.
     pub fn presentation(&self) -> &EpubPresentation {
         &self.presentation
+    }
+
+    /// Book-local embedded fonts admitted from author stylesheets.
+    pub fn fonts(&self) -> &super::font::EpubFontBook {
+        &self.fonts
     }
 
     /// Get document metadata in the common format.
