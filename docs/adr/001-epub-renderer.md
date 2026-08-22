@@ -358,14 +358,14 @@ more work proving fidelity for a route that cannot ship everywhere required.
 
 | Criterion                  | Wry route                                                                                                     | Native route                                                    | Evidence still needed                                  |
 |----------------------------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------|
-| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Test-only cascade, shaping, block-box, normalized Grid table, bounded EPUB font-loading, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
+| CSS/table/MathML fidelity  | Promising on macOS system WebKit                                                                              | Production cascade, CSS resources, and bounded font admission are integrated; shaping, block-box, normalized Grid table, and bounded MathML-subset prototypes pass semantic assertions; CSS inline/table algorithms, production font rendering/math integration, and CJK/emoji font coverage remain absent | Combined rendered fixture on every target              |
 | Sandbox and offline policy | macOS and Linux/X11 hostile-content proofs record zero network connections; deny handlers configured; CSP/navigation tested | Shared archive/resource admission bounds actual ZIP output and XML/font/image inputs before native presentation | Backend decode allocation enforcement and external-link policy |
 | Iced integration           | Measured bounds, resize, focus routing and visibility method returns, observed replacement size, one 2→1 display-scale transition, two Iced tab-state destroy/recreate cycles with repeated input handoffs, and ordinary-close teardown proven on macOS; measured bounds, resize, lifecycle teardown, child focus, exact text input, and directly addressed parent key routing proven on Linux/X11, but physical-key handoff remains unproven and child-to-Iced clipboard reads deadlock without a custom bridge; still outside widget composition | Natural widget composition                                      | Linux physical-key handoff, clipboard bridge decision, physical-pixel correctness, clipping, production tabs, IME, other targets |
 | Reader-feature integration | Host-owned Linux/X11 proof applies theme/font size, internal fragment navigation, search highlighting, stable path/fragment/text-offset restoration, and continuous/paginated CSS modes | Existing production features are not connected to the test-only native prototypes | Multi-chapter sample integration and other targets     |
 | Accessibility/selection    | WebKit exposes the proof web area and labeled input on macOS, but the surrounding Iced controls are absent from the same accessibility tree; selection is untested | Shaped clusters retain logical source ranges; selection and accessibility are not modeled | Resolve the Iced blocker, then screen-reader, hit-testing, and selection tests |
 | Portability                | macOS and x86_64 X11 paths proven; Wayland blocker and platform runtimes differ                                | Existing Iced targets                                           | Windows, Linux arm64, interactive X11, native Wayland  |
 | Warm page-turn latency     | Unknown                                                                                                       | Release p50 0.34–2.81 ms, p95 1.20–6.31 ms on the baseline host | Equivalent Wry and cross-platform measurements         |
-| Packaging cost             | WebKitGTK added on Linux                                                                                      | `cosmic-text` is already present through Iced; test-only Taffy and Wuff candidates are pure Rust but not selected for production; no direct native MathML dependency was identified | Remaining dependency size; package smoke tests         |
+| Packaging cost             | WebKitGTK added on Linux                                                                                      | `fontdb`, Wuff, Flate2, and Brotli are pure-Rust production dependencies for bounded admission; `cosmic-text` is already present through Iced; test-only Taffy is not selected for production; no direct native MathML dependency was identified | Remaining dependency size; package smoke tests         |
 | Maintenance cost           | Browser integration and platform variance                                                                     | Selector/cascade, shaping, block-leaf measurement, explicit table-grid lowering, bounded font admission, and a narrow MathML subset are feasible, but CSS inline/table compatibility plus production font/math policy remain substantial | Native compatibility and accessibility ownership      |
 
 ## Fixture and measurement matrix
@@ -569,63 +569,48 @@ yet position an image among shaped glyphs. Promoting this route would therefore
 require a documented EPUB table subset or a fuller maintained table algorithm;
 Grid alone cannot justify browser-equivalent fidelity.
 
-## Native EPUB font-loading spike
+## Native EPUB font admission and renderer boundary
 
-A generated, redistribution-safe test fixture supplies a small TrueType sfnt,
-CFF OpenType sfnt, WOFF 1, WOFF 2, and a second TrueType font with the same
-family name but different advances. The checked-in Python/FontTools generator
-is provenance and is not part of the Rust build. A test-only adapter parses
-`@font-face` with Lightning CSS, resolves sources relative to the canonical
-stylesheet archive path, decodes compressed formats, admits sfnt bytes through
-`fontdb::load_font_source`, and creates one database per book. Tests prove that:
+The production EPUB document now admits author-supplied fonts after canonical
+stylesheet resolution.  It parses CSS family aliases, ordered sources, style,
+weight, and supported format hints; rejects local, foreign, data, query-bearing,
+escaping, unsupported-format, and unsupported-technology sources; and applies
+deterministic source fallback.  TrueType and CFF OpenType sfnt bytes are admitted
+directly.  WOFF and WOFF2 pass table-directory and decoded-output preflight,
+then use output-bounded Wuff callbacks backed by Flate2 and Brotli.  Signature,
+table-count, per-face decoded-byte, face-count, and aggregate decoded-byte limits
+apply before a face enters a private `fontdb::Database` owned by `EpubDoc`.
 
-- custom family, normal style, weight 400, ordered `local()`/URL sources, and
-  WOFF2 format hints survive parsing;
-- local sources, a foreign HTTPS origin, and a missing archive entry are
-  rejected before fallback reaches the final canonical in-book source;
-- TrueType, CFF OpenType, WOFF, and WOFF2 fixtures each reach fontdb as one
-  valid face and shape through cosmic-text using the requested family;
-- unsupported explicit `format()` and `tech()` descriptors fall back without
-  reading archive bytes, and signatures that disagree with supported hints are
-  rejected;
-- malformed bytes, oversized declared output, and WOFF/WOFF2 table directories
-  whose declared stream or reconstructed-output lengths exceed the spike caps
-  fail before decoding and fontdb admission;
-- each newly loaded face must itself expose the declared CSS family rather than
-  relying on a matching face already present in the book database; and
-- separate per-book databases containing the same family name select their own
-  font, producing different observable line widths, while a fresh database has
-  no global registration.
+The CSS family is intentionally an author alias and need not match the face's
+internal family.  Computed styles retain ordered named families; native
+presentation chooses the first admitted alias and preserves weight and style
+requests for eventual face matching or synthetic fallback.  Tests cover all
+four formats, missing/corrupt/mismatched and oversized inputs, fallback attempt
+diagnostics, descriptor deduplication, two live books carrying distinct bytes
+under the same alias, and releasing one book's binary source without disturbing
+the other.  The old test-only loading adapter was removed after this production
+admission path superseded its evidence.
 
-`fontdb` 0.23 accepts TrueType/OpenType sfnt bytes directly but not WOFF
-containers. The spike pins Wuff 0.2.8 (MIT), a pure-Rust WOFF/WOFF2 decoder,
-with its default decoder features disabled. It supplies custom output-bounded
-callbacks using Flate2 1.1.9 for zlib and Brotli Decompressor 5.0.3
-(BSD-3-Clause OR MIT) for Brotli. The latter adds Alloc No Stdlib 2.0.4 and
-Alloc Stdlib 0.2.4 (BSD-3-Clause); Flate2 and Bytes were already present in the
-workspace lockfile. Wuff has no native dependency and requires Rust 1.85, below
-the workspace toolchain. These are dev dependencies; production notices and
-packaging change only if this route is selected.
+Admission does not yet mean displayed glyph consumption.  Iced 0.14 loads font
+bytes into a process-global renderer database, requires ~&'static str~ for named
+families, and exposes no unload operation.  Shōsai retains several live EPUB
+tabs, so global loading would leak bytes and aliases until process exit and
+would not isolate same-family declarations.  Iced's raw cosmic-text primitive
+does not solve this: both WGPU and Tiny Skia rasterize raw buffers against the
+same global font system, so IDs shaped by a private database are unsafe there.
 
-This is feasibility evidence, not a hostile-font security boundary. Before
-invoking Wuff, the adapter caps compressed input, table count, declared output,
-each WOFF table's emitted size, cumulative reconstructed sfnt size, and the
-WOFF2 transformed stream size. Custom decoder callbacks cap their requested
-output and read at most one byte beyond it to verify the exact length. Admission
-then caps decoded output, cumulative per-book bytes, and face count. These are
-byte-stream and retained-output limits, not a total allocator ceiling: Brotli's
-internal window/Huffman state and Wuff's transformed-glyph scratch structures
-can allocate above the 8 KiB output cap based on hostile stream contents. Wuff
-also exposes only opaque decode errors, and the spike has no fuzzing, bounded
-allocator, parser sandbox, CPU budget, deep validation of hostile sfnt or
-transformed-table internals, collection/variable-font policy, MIME check, or
-aggregate EPUB-resource integration. It implements only normal style/weight
-fixture parsing, rejects a format-hint/signature mismatch rather than applying
-all browser fallback details, and requires the CSS family to match a newly
-loaded font's internal family because it does not add a fontdb alias. Source
-selection is not connected to the computed-style, production resource, layout,
-cache, or close lifecycle paths. A production design must resolve those
-semantics and add hostile-parser hardening before adopting this component.
+Consequently M2 is split. M2a owns bounded admission, alias metadata, and book
+lifecycle and is complete.  M2b must make a per-book native path own shaping,
+measurement, rasterization, and caching together.  Its metrics must also drive
+pagination, while logical source ranges continue to support link hit-testing
+and search highlights.  Until M2b lands, production rendering deliberately
+uses its readable system-font fallback and must not claim that embedded font
+bytes, aliases, variants, or metrics are rendered.
+
+These are byte-stream and retained-output limits, not a total allocator or CPU
+ceiling.  Brotli and transformed-glyph decoding can allocate scratch space;
+Wuff exposes opaque decode failures; and hostile-font fuzzing or process
+isolation remains release hardening rather than a guarantee of this boundary.
 
 ## Native MathML and mixed-script spike
 
@@ -689,7 +674,7 @@ cost.
 ## Native implementation follow-up
 
 1. Extend the native component evidence with inline-tree construction, a fuller
-   table compatibility boundary, production font integration,
+   table compatibility boundary, production font shaping/rasterization,
    selection/accessibility, pagination, and MathML, then render the combined
    fixture. Treat every test-only prototype as evidence, not a production
    implementation.
