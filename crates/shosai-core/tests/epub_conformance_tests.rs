@@ -605,6 +605,64 @@ fn configurable_limits_reject_before_unbounded_resource_reads() {
         "unexpected text limit error: {message}"
     );
 
+    for (limits, expected) in [
+        (
+            EpubLimits {
+                max_css_resource_bytes: 1,
+                ..EpubLimits::default()
+            },
+            "CSS resource exceeds byte limit",
+        ),
+        (
+            EpubLimits {
+                max_css_stylesheets_per_document: 0,
+                ..EpubLimits::default()
+            },
+            "stylesheet application limit",
+        ),
+        (
+            EpubLimits {
+                max_css_bytes_per_document: 1,
+                ..EpubLimits::default()
+            },
+            "selected CSS byte limit",
+        ),
+        (
+            EpubLimits {
+                max_css_rules_per_document: 0,
+                ..EpubLimits::default()
+            },
+            "CSS rule limit",
+        ),
+        (
+            EpubLimits {
+                max_css_selectors_per_document: 0,
+                ..EpubLimits::default()
+            },
+            "CSS selector limit",
+        ),
+        (
+            EpubLimits {
+                max_css_selector_components_per_document: 0,
+                ..EpubLimits::default()
+            },
+            "CSS selector component limit",
+        ),
+        (
+            EpubLimits {
+                max_css_match_steps_per_document: 0,
+                ..EpubLimits::default()
+            },
+            "selector-match step limit",
+        ),
+    ] {
+        let error = EpubDoc::open_with_limits(fixture_path("css-cascade"), limits).unwrap_err();
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?}, got {error:#}"
+        );
+    }
+
     let toc_limits = EpubLimits {
         max_xml_depth: 4,
         ..EpubLimits::default()

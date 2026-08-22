@@ -28,9 +28,11 @@ boundaries.
   class, ID, structural-combinator, and supported functional-pseudo selectors;
   applies importance, specificity, source order, inheritance, inline styles,
   UA defaults, resolved lengths, and simple screen media rules; and lowers the
-  supported property set into native block and inline presentation.  Unsupported
-  selectors, declarations, conditional rules, ~@import~, and named namespaces
-  fail soft.  Font-face application, tables, and MathML remain later milestones.
+  supported property set into native block and inline presentation.  Per-resource
+  and per-document byte/application limits plus rule, selector, component, and
+  match-step budgets bound hostile CSS work.  Unsupported selectors,
+  declarations, conditional rules, ~@import~, and named namespaces fail soft.
+  Font-face application, tables, and MathML remain later milestones.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Each ~EpubDoc~ parses that model once into an immutable chapter
   presentation shared by search, pagination, and continuous rendering.  Tables
@@ -304,8 +306,10 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   chapter lowering now consumes one document-scoped computed-style map, honors
   linked/inline stylesheet order and bounded screen media rules, and carries
   relative inline font sizes into native rendering and pagination.  Module docs
-  list the exact selector/property surface and fail-soft exclusions; bounded
-  ~@import~ resolution remains the next separate M1 item.
+  list the exact selector/property surface and fail-soft exclusions.  CSS
+  resource, selection, complexity, and matching budgets reject work beyond the
+  configured admission boundary; bounded ~@import~ resolution remains the next
+  separate M1 item.
 - [ ] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
   with cycle, depth, origin, and size limits.
 

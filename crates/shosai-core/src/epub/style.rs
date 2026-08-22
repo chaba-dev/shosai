@@ -13,12 +13,13 @@
 
 use std::collections::HashMap;
 
+use anyhow::{Context, Result};
 use lightningcss::rules::CssRule;
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use lightningcss::traits::ToCss;
 use roxmltree::Node;
 
-use super::CanonicalEpubPath;
+use super::{CanonicalEpubPath, EpubLimits};
 
 /// Simplified text alignment consumed by native reader widgets.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -38,23 +39,48 @@ pub struct EpubStyles {
 impl EpubStyles {
     /// Retain UTF-8 stylesheets for document-scoped matching and cascade.
     pub fn parse<'a>(css_sources: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        Self::parse_with_limits(css_sources, &EpubLimits::default()).unwrap_or_default()
+    }
+
+    pub(crate) fn parse_with_limits<'a>(
+        css_sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+        limits: &EpubLimits,
+    ) -> Result<Self> {
         let sources = css_sources
             .into_iter()
-            .filter_map(|(path, css)| {
-                Some((CanonicalEpubPath::new(path).ok()?, normalized_css(css)?))
+            .map(|(path, css)| -> Result<Option<_>> {
+                if css.len() as u64 > limits.max_css_resource_bytes {
+                    anyhow::bail!(
+                        "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
+                        css.len(),
+                        limits.max_css_resource_bytes
+                    );
+                }
+                let Ok(path) = CanonicalEpubPath::new(path) else {
+                    return Ok(None);
+                };
+                let Some(css) = normalized_css(css) else {
+                    return Ok(None);
+                };
+                Ok(Some((path, css)))
             })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
             .collect();
-        Self { sources }
+        Ok(Self { sources })
     }
 
     pub(crate) fn document_css(
         &self,
         document: &roxmltree::Document<'_>,
         base_path: &str,
-    ) -> String {
+        limits: &EpubLimits,
+    ) -> Result<String> {
         let mut css = String::new();
+        let mut applications = 0_usize;
         for element in document.descendants().filter(Node::is_element) {
-            match element.tag_name().name() {
+            let appended = match element.tag_name().name() {
                 "link" if is_stylesheet_link(element) => {
                     let Some(href) = element.attribute("href") else {
                         continue;
@@ -63,7 +89,9 @@ impl EpubStyles {
                         continue;
                     };
                     if let Some(source) = self.sources.get(&reference.path) {
-                        append_stylesheet(&mut css, source, element.attribute("media"));
+                        append_stylesheet(&mut css, source, element.attribute("media"))
+                    } else {
+                        false
                     }
                 }
                 "style" => {
@@ -75,13 +103,33 @@ impl EpubStyles {
                         },
                     );
                     if let Some(source) = normalized_css(&source) {
-                        append_stylesheet(&mut css, &source, element.attribute("media"));
+                        append_stylesheet(&mut css, &source, element.attribute("media"))
+                    } else {
+                        false
                     }
                 }
-                _ => {}
+                _ => false,
+            };
+            if appended {
+                applications = applications
+                    .checked_add(1)
+                    .context("EPUB stylesheet application count overflowed")?;
+                if applications > limits.max_css_stylesheets_per_document {
+                    anyhow::bail!(
+                        "EPUB document exceeds stylesheet application limit ({applications} > {})",
+                        limits.max_css_stylesheets_per_document
+                    );
+                }
+                if css.len() as u64 > limits.max_css_bytes_per_document {
+                    anyhow::bail!(
+                        "EPUB document exceeds selected CSS byte limit ({} > {})",
+                        css.len(),
+                        limits.max_css_bytes_per_document
+                    );
+                }
             }
         }
-        css
+        Ok(css)
     }
 
     /// Number of admitted external stylesheet resources.
@@ -95,10 +143,10 @@ impl EpubStyles {
     }
 }
 
-fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) {
+fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) -> bool {
     if let Some(media) = media.filter(|media| !media.trim().is_empty()) {
         let Some(media) = normalized_media(media) else {
-            return;
+            return false;
         };
         target.push_str("@media ");
         target.push_str(&media);
@@ -109,6 +157,7 @@ fn append_stylesheet(target: &mut String, source: &str, media: Option<&str>) {
         target.push_str(source);
         target.push('\n');
     }
+    true
 }
 
 fn normalized_media(source: &str) -> Option<String> {
@@ -170,7 +219,9 @@ mod tests {
         )
         .unwrap();
 
-        let css = styles.document_css(&document, "OEBPS/Text");
+        let css = styles
+            .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+            .unwrap();
         let italic = css.find("font-style: italic").unwrap();
         let bold = css.find("font-weight: bold").unwrap();
         let normal = css.find("font-style: normal").unwrap();
@@ -196,7 +247,9 @@ mod tests {
         )
         .unwrap();
 
-        let css = styles.document_css(&document, "OEBPS/Text");
+        let css = styles
+            .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+            .unwrap();
         assert!(css.contains("@media print"));
         assert!(css.contains("@media screen"));
         assert!(css.contains("font-weight: bold"));
@@ -215,6 +268,58 @@ mod tests {
         )
         .unwrap();
 
-        assert!(styles.document_css(&document, "OEBPS/Text").is_empty());
+        assert!(
+            styles
+                .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn stylesheet_resource_selection_is_bounded_before_amplification() {
+        let source = ".target { font-weight: bold; }";
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="style.css"/>
+                <link rel="stylesheet" href="style.css"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+        let styles = EpubStyles::parse([("style.css", source)]);
+
+        let application_error = styles
+            .document_css(
+                &document,
+                "",
+                &EpubLimits {
+                    max_css_stylesheets_per_document: 1,
+                    ..EpubLimits::default()
+                },
+            )
+            .unwrap_err();
+        assert!(application_error.to_string().contains("application limit"));
+
+        let byte_error = styles
+            .document_css(
+                &document,
+                "",
+                &EpubLimits {
+                    max_css_bytes_per_document: source.len() as u64,
+                    ..EpubLimits::default()
+                },
+            )
+            .unwrap_err();
+        assert!(byte_error.to_string().contains("selected CSS byte limit"));
+
+        let resource_error = EpubStyles::parse_with_limits(
+            [("style.css", source)],
+            &EpubLimits {
+                max_css_resource_bytes: 1,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(resource_error.to_string().contains("CSS resource exceeds"));
     }
 }

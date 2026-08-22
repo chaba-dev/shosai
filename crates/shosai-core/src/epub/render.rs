@@ -4,6 +4,10 @@
 //! the GUI layer can map to native widgets. A bounded native CSS cascade maps
 //! supported computed styles onto block and inline presentation values.
 
+use anyhow::Result;
+
+use super::EpubLimits;
+
 /// A styled span of inline text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSpan {
@@ -82,16 +86,24 @@ pub fn parse_chapter_xhtml(
     base_path: &str,
     styles: &super::style::EpubStyles,
 ) -> Vec<ContentNode> {
+    parse_chapter_xhtml_with_limits(xhtml, base_path, styles, &EpubLimits::default())
+        .unwrap_or_default()
+}
+
+pub(crate) fn parse_chapter_xhtml_with_limits(
+    xhtml: &str,
+    base_path: &str,
+    styles: &super::style::EpubStyles,
+    limits: &EpubLimits,
+) -> Result<Vec<ContentNode>> {
     let doc = match roxmltree::Document::parse(xhtml) {
         Ok(d) => d,
-        Err(_) => return Vec::new(),
+        Err(_) => return Ok(Vec::new()),
     };
 
-    let css = styles.document_css(&doc, base_path);
-    let Ok(computed_styles) = super::computed_style::compute_parsed_document_styles(&doc, &css)
-    else {
-        return Vec::new();
-    };
+    let css = styles.document_css(&doc, base_path, limits)?;
+    let computed_styles =
+        super::computed_style::compute_parsed_document_styles(&doc, &css, limits)?;
 
     // Find <body> (or fall back to root).
     let body = doc
@@ -102,10 +114,10 @@ pub fn parse_chapter_xhtml(
         .get(body)
         .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
     {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    parse_block_children(body, base_path, &computed_styles)
+    Ok(parse_block_children(body, base_path, &computed_styles))
 }
 
 /// Parse block-level children of an element.
@@ -334,6 +346,12 @@ fn parse_list_items(
     let mut items = Vec::new();
     for child in list.children() {
         if child.is_element() && child.tag_name().name() == "li" {
+            if styles
+                .get(child)
+                .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
+            {
+                continue;
+            }
             let spans = collect_inline_spans(&child, styles, 16.0);
             if !spans.is_empty() {
                 items.push(spans);
@@ -760,6 +778,23 @@ mod tests {
             &nodes[1],
             ContentNode::OrderedList { items, start: 1 } if items.len() == 2
         ));
+    }
+
+    #[test]
+    fn hidden_list_items_are_omitted_from_presentation_and_search_text() {
+        let xhtml = r#"<html><head><style>.hidden { display: none; }</style></head><body>
+            <ul><li>Visible unordered</li><li class="hidden">Hidden unordered</li></ul>
+            <ol><li class="hidden">Hidden ordered</li><li>Visible ordered</li></ol>
+        </body></html>"#;
+
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+        let search_text = crate::search::extract_text_from_nodes(&nodes);
+
+        assert!(matches!(&nodes[0], ContentNode::UnorderedList(items) if items.len() == 1));
+        assert!(matches!(&nodes[1], ContentNode::OrderedList { items, .. } if items.len() == 1));
+        assert!(search_text.contains("Visible unordered"));
+        assert!(search_text.contains("Visible ordered"));
+        assert!(!search_text.contains("Hidden"));
     }
 
     #[test]

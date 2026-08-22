@@ -135,10 +135,12 @@ impl EpubDoc {
             })
             .collect();
 
-        let styles =
-            super::style::EpubStyles::parse(css_sources.iter().map(|(path, css)| (*path, *css)));
+        let styles = super::style::EpubStyles::parse_with_limits(
+            css_sources.iter().map(|(path, css)| (*path, *css)),
+            &limits,
+        )?;
 
-        let presentation = EpubPresentation::parse(&chapters, &styles);
+        let presentation = EpubPresentation::parse(&chapters, &styles, &limits)?;
 
         Ok(Self {
             content: EpubContent {

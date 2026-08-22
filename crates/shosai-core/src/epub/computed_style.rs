@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
+use anyhow::{Context, Result};
 use lightningcss::declaration::DeclarationBlock;
 use lightningcss::media_query::{MediaList, MediaType, Qualifier};
 use lightningcss::properties::Property;
@@ -18,6 +19,8 @@ use lightningcss::traits::ToCss;
 use lightningcss::values::length::{LengthPercentageOrAuto, LengthValue};
 use lightningcss::values::percentage::DimensionPercentage;
 use roxmltree::{Node, NodeId};
+
+use super::EpubLimits;
 
 const INITIAL_FONT_SIZE_PX: f32 = 16.0;
 const INLINE_SPECIFICITY: u32 = u32::MAX;
@@ -174,18 +177,35 @@ struct SpecifiedStyle {
     text_indent: Slot<RelativeLength>,
 }
 
+struct MatchBudget {
+    remaining: usize,
+}
+
+impl MatchBudget {
+    fn step(&mut self) -> Result<()> {
+        self.remaining = self
+            .remaining
+            .checked_sub(1)
+            .context("EPUB document exceeds CSS selector-match step limit")?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
-fn compute_document_styles(xhtml: &str, css: &str) -> Result<ComputedDocumentStyles, String> {
-    let document = roxmltree::Document::parse(xhtml).map_err(|error| error.to_string())?;
-    compute_parsed_document_styles(&document, css)
+fn compute_document_styles(xhtml: &str, css: &str) -> Result<ComputedDocumentStyles> {
+    let document =
+        roxmltree::Document::parse(xhtml).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    compute_parsed_document_styles(&document, css, &EpubLimits::default())
 }
 
 pub(crate) fn compute_parsed_document_styles(
     document: &roxmltree::Document<'_>,
     css: &str,
-) -> Result<ComputedDocumentStyles, String> {
-    let sheet =
-        StyleSheet::parse(css, ParserOptions::default()).map_err(|error| error.to_string())?;
+    limits: &EpubLimits,
+) -> Result<ComputedDocumentStyles> {
+    let sheet = StyleSheet::parse(css, ParserOptions::default())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    validate_stylesheet_complexity(&sheet.rules.0, limits)?;
     let mut unsupported_selectors = HashSet::new();
     let mut unsupported_rules = HashSet::new();
     let mut unsupported_declarations = HashSet::new();
@@ -201,6 +221,9 @@ pub(crate) fn compute_parsed_document_styles(
 
     let mut node_styles = HashMap::new();
     let mut element_styles = HashMap::new();
+    let mut match_budget = MatchBudget {
+        remaining: limits.max_css_match_steps_per_document,
+    };
     walk_element(
         document.root_element(),
         None,
@@ -208,7 +231,8 @@ pub(crate) fn compute_parsed_document_styles(
         &sheet.rules.0,
         &mut node_styles,
         &mut element_styles,
-    );
+        &mut match_budget,
+    )?;
     let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
     unsupported_selectors.sort();
     let mut unsupported_rules = unsupported_rules.into_iter().collect::<Vec<_>>();
@@ -233,13 +257,15 @@ fn walk_element(
     rules: &[CssRule<'_>],
     node_styles: &mut HashMap<NodeId, ComputedStyle>,
     styles: &mut HashMap<String, ComputedStyle>,
-) {
+    match_budget: &mut MatchBudget,
+) -> Result<()> {
     let style = compute_element_style(
         element,
         parent,
         root_font_size.unwrap_or(INITIAL_FONT_SIZE_PX),
         rules,
-    );
+        match_budget,
+    )?;
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
     node_styles.insert(element.id(), style.clone());
     if let Some(id) = element.attribute("id") {
@@ -253,8 +279,10 @@ fn walk_element(
             rules,
             node_styles,
             styles,
-        );
+            match_budget,
+        )?;
     }
+    Ok(())
 }
 
 fn compute_element_style(
@@ -262,7 +290,8 @@ fn compute_element_style(
     parent: Option<&ComputedStyle>,
     root_font_size: f32,
     rules: &[CssRule<'_>],
-) -> ComputedStyle {
+    match_budget: &mut MatchBudget,
+) -> Result<ComputedStyle> {
     let inherited = parent.cloned().unwrap_or(ComputedStyle {
         display: DisplayRole::Block,
         font_size_px: INITIAL_FONT_SIZE_PX,
@@ -290,7 +319,13 @@ fn compute_element_style(
 
     let mut specified = SpecifiedStyle::default();
     let mut source_order = 0;
-    apply_rules(rules, element, &mut specified, &mut source_order);
+    apply_rules(
+        rules,
+        element,
+        &mut specified,
+        &mut source_order,
+        match_budget,
+    )?;
     if let Some(inline) = element.attribute("style")
         && let Ok(attribute) = StyleAttribute::parse(inline, ParserOptions::default())
     {
@@ -348,7 +383,7 @@ fn compute_element_style(
     if let Some(value) = specified.text_indent.value() {
         style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
     }
-    style
+    Ok(style)
 }
 
 fn apply_rules(
@@ -356,29 +391,39 @@ fn apply_rules(
     element: Node<'_, '_>,
     specified: &mut SpecifiedStyle,
     source_order: &mut usize,
-) {
+    match_budget: &mut MatchBudget,
+) -> Result<()> {
     for rule in rules {
         match rule {
             CssRule::Style(rule) => {
-                let specificity = rule
-                    .selectors
-                    .0
-                    .iter()
-                    .filter(|selector| {
-                        selector_supported(selector) && selector_matches(selector, element)
-                    })
-                    .map(Selector::specificity)
-                    .max();
+                let mut specificity = None;
+                for selector in &rule.selectors.0 {
+                    if selector_supported_with_budget(selector, match_budget)?
+                        && selector_matches(selector, element, match_budget)?
+                    {
+                        let candidate = selector.specificity();
+                        specificity = Some(
+                            specificity.map_or(candidate, |current: u32| current.max(candidate)),
+                        );
+                    }
+                }
                 if let Some(specificity) = specificity {
                     apply_declarations(&rule.declarations, specificity, source_order, specified);
                 }
             }
             CssRule::Media(media) if screen_media_matches(&media.query) => {
-                apply_rules(&media.rules.0, element, specified, source_order);
+                apply_rules(
+                    &media.rules.0,
+                    element,
+                    specified,
+                    source_order,
+                    match_budget,
+                )?;
             }
             _ => {}
         }
     }
+    Ok(())
 }
 
 fn screen_media_matches(media: &MediaList<'_>) -> bool {
@@ -478,6 +523,93 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
         }
         _ => {}
     }
+}
+
+#[derive(Default)]
+struct StylesheetComplexity {
+    rules: usize,
+    selectors: usize,
+    selector_components: usize,
+}
+
+fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) -> Result<()> {
+    fn inspect(
+        rules: &[CssRule<'_>],
+        complexity: &mut StylesheetComplexity,
+        limits: &EpubLimits,
+    ) -> Result<()> {
+        for rule in rules {
+            complexity.rules = complexity
+                .rules
+                .checked_add(1)
+                .context("EPUB CSS rule count overflowed")?;
+            if complexity.rules > limits.max_css_rules_per_document {
+                anyhow::bail!(
+                    "EPUB document exceeds CSS rule limit ({} > {})",
+                    complexity.rules,
+                    limits.max_css_rules_per_document
+                );
+            }
+
+            match rule {
+                CssRule::Style(rule) => {
+                    complexity.selectors = complexity
+                        .selectors
+                        .checked_add(rule.selectors.0.len())
+                        .context("EPUB CSS selector count overflowed")?;
+                    if complexity.selectors > limits.max_css_selectors_per_document {
+                        anyhow::bail!(
+                            "EPUB document exceeds CSS selector limit ({} > {})",
+                            complexity.selectors,
+                            limits.max_css_selectors_per_document
+                        );
+                    }
+                    for selector in &rule.selectors.0 {
+                        complexity.selector_components = complexity
+                            .selector_components
+                            .checked_add(selector_component_count(selector)?)
+                            .context("EPUB CSS selector component count overflowed")?;
+                        if complexity.selector_components
+                            > limits.max_css_selector_components_per_document
+                        {
+                            anyhow::bail!(
+                                "EPUB document exceeds CSS selector component limit ({} > {})",
+                                complexity.selector_components,
+                                limits.max_css_selector_components_per_document
+                            );
+                        }
+                    }
+                    inspect(&rule.rules.0, complexity, limits)?;
+                }
+                CssRule::Media(rule) => inspect(&rule.rules.0, complexity, limits)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    inspect(rules, &mut StylesheetComplexity::default(), limits)
+}
+
+fn selector_component_count(selector: &Selector<'_>) -> Result<usize> {
+    let mut count = 0_usize;
+    for component in selector.iter_raw_match_order() {
+        count = count
+            .checked_add(1)
+            .context("EPUB CSS selector component count overflowed")?;
+        if let Component::Negation(selectors)
+        | Component::Where(selectors)
+        | Component::Is(selectors)
+        | Component::Any(_, selectors) = component
+        {
+            for nested in selectors.iter() {
+                count = count
+                    .checked_add(selector_component_count(nested)?)
+                    .context("EPUB CSS selector component count overflowed")?;
+            }
+        }
+    }
+    Ok(count)
 }
 
 fn inventory_rules(
@@ -634,51 +766,110 @@ fn selector_supported(selector: &Selector<'_>) -> bool {
         })
 }
 
-fn selector_matches(selector: &Selector<'_>, element: Node<'_, '_>) -> bool {
-    selector_matches_from(selector, element, 0)
+fn selector_supported_with_budget(
+    selector: &Selector<'_>,
+    budget: &mut MatchBudget,
+) -> Result<bool> {
+    for component in selector.iter_raw_match_order() {
+        budget.step()?;
+        let supported = match component {
+            Component::Combinator(combinator) => matches!(
+                combinator,
+                Combinator::Child
+                    | Combinator::Descendant
+                    | Combinator::NextSibling
+                    | Combinator::LaterSibling
+            ),
+            Component::ExplicitAnyNamespace
+            | Component::ExplicitUniversalType
+            | Component::LocalName(_)
+            | Component::ID(_)
+            | Component::Class(_)
+            | Component::Root
+            | Component::Empty => true,
+            Component::Negation(selectors)
+            | Component::Where(selectors)
+            | Component::Is(selectors)
+            | Component::Any(_, selectors) => {
+                for nested in selectors.iter() {
+                    if !selector_supported_with_budget(nested, budget)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            _ => false,
+        };
+        if !supported {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
-fn selector_matches_from(selector: &Selector<'_>, element: Node<'_, '_>, offset: usize) -> bool {
+fn selector_matches(
+    selector: &Selector<'_>,
+    element: Node<'_, '_>,
+    budget: &mut MatchBudget,
+) -> Result<bool> {
+    selector_matches_from(selector, element, 0, budget)
+}
+
+fn selector_matches_from(
+    selector: &Selector<'_>,
+    element: Node<'_, '_>,
+    offset: usize,
+    budget: &mut MatchBudget,
+) -> Result<bool> {
     for (index, component) in selector.iter_raw_match_order().enumerate().skip(offset) {
+        budget.step()?;
         if let Component::Combinator(combinator) = component {
             let next = index + 1;
-            return match combinator {
+            return Ok(match combinator {
                 Combinator::Child => parent_element(element)
-                    .is_some_and(|parent| selector_matches_from(selector, parent, next)),
+                    .map(|parent| selector_matches_from(selector, parent, next, budget))
+                    .transpose()?
+                    .unwrap_or(false),
                 Combinator::Descendant => {
                     let mut parent = parent_element(element);
                     while let Some(ancestor) = parent {
-                        if selector_matches_from(selector, ancestor, next) {
-                            return true;
+                        if selector_matches_from(selector, ancestor, next, budget)? {
+                            return Ok(true);
                         }
                         parent = parent_element(ancestor);
                     }
                     false
                 }
                 Combinator::NextSibling => previous_element(element)
-                    .is_some_and(|sibling| selector_matches_from(selector, sibling, next)),
+                    .map(|sibling| selector_matches_from(selector, sibling, next, budget))
+                    .transpose()?
+                    .unwrap_or(false),
                 Combinator::LaterSibling => {
                     let mut sibling = previous_element(element);
                     while let Some(previous) = sibling {
-                        if selector_matches_from(selector, previous, next) {
-                            return true;
+                        if selector_matches_from(selector, previous, next, budget)? {
+                            return Ok(true);
                         }
                         sibling = previous_element(previous);
                     }
                     false
                 }
                 _ => false,
-            };
+            });
         }
-        if !component_matches(component, element) {
-            return false;
+        if !component_matches(component, element, budget)? {
+            return Ok(false);
         }
     }
-    true
+    Ok(true)
 }
 
-fn component_matches(component: &Component<'_>, element: Node<'_, '_>) -> bool {
-    match component {
+fn component_matches(
+    component: &Component<'_>,
+    element: Node<'_, '_>,
+    budget: &mut MatchBudget,
+) -> Result<bool> {
+    Ok(match component {
         Component::ExplicitAnyNamespace | Component::ExplicitUniversalType => true,
         Component::LocalName(name) => name.name.0.as_ref() == element.tag_name().name(),
         Component::ID(id) => element.attribute("id") == Some(id.0.as_ref()),
@@ -691,16 +882,26 @@ fn component_matches(component: &Component<'_>, element: Node<'_, '_>) -> bool {
         Component::Empty => !element
             .children()
             .any(|child| child.is_element() || child.text().is_some_and(|text| !text.is_empty())),
-        Component::Negation(selectors) => selectors
-            .iter()
-            .all(|selector| !selector_matches(selector, element)),
+        Component::Negation(selectors) => {
+            for selector in selectors.iter() {
+                if selector_matches(selector, element, budget)? {
+                    return Ok(false);
+                }
+            }
+            true
+        }
         Component::Where(selectors) | Component::Is(selectors) | Component::Any(_, selectors) => {
-            selectors
-                .iter()
-                .any(|selector| selector_matches(selector, element))
+            let mut matched = false;
+            for selector in selectors.iter() {
+                if selector_matches(selector, element, budget)? {
+                    matched = true;
+                    break;
+                }
+            }
+            matched
         }
         _ => false,
-    }
+    })
 }
 
 fn parent_element<'a, 'input>(node: Node<'a, 'input>) -> Option<Node<'a, 'input>> {
@@ -1041,5 +1242,50 @@ mod tests {
         assert!(report.element_styles["truly-empty"].bold);
         assert!(!report.element_styles["whitespace"].bold);
         assert_eq!(report.element_styles["rtl"].direction, Direction::Rtl);
+    }
+
+    #[test]
+    fn stylesheet_complexity_and_matching_stop_at_configured_budgets() {
+        let document =
+            roxmltree::Document::parse(r#"<html><body><p class="target">Target</p></body></html>"#)
+                .unwrap();
+        let css = ".target, body > p { font-weight: bold; }";
+
+        for (limits, expected) in [
+            (
+                EpubLimits {
+                    max_css_rules_per_document: 0,
+                    ..EpubLimits::default()
+                },
+                "CSS rule limit",
+            ),
+            (
+                EpubLimits {
+                    max_css_selectors_per_document: 1,
+                    ..EpubLimits::default()
+                },
+                "CSS selector limit",
+            ),
+            (
+                EpubLimits {
+                    max_css_selector_components_per_document: 1,
+                    ..EpubLimits::default()
+                },
+                "CSS selector component limit",
+            ),
+            (
+                EpubLimits {
+                    max_css_match_steps_per_document: 0,
+                    ..EpubLimits::default()
+                },
+                "selector-match step limit",
+            ),
+        ] {
+            let error = compute_parsed_document_styles(&document, css, &limits).unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected:?}, got {error:#}"
+            );
+        }
     }
 }
