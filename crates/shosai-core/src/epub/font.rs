@@ -1045,6 +1045,8 @@ mod tests {
 
     #[test]
     fn ttf_otf_woff_and_woff2_are_admitted_into_book_local_databases() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
         for (path, format, bytes, expected) in [
             (
                 "book-a.ttf",
@@ -1075,6 +1077,33 @@ mod tests {
             assert_eq!(book.faces()[0].weight.min(), 700.0, "{path}");
             assert_eq!(book.faces()[0].weight.max(), 700.0, "{path}");
             assert!(book.with_face_data(0, |data, _| !data.is_empty()).unwrap());
+            let layout = book
+                .layout_text(&EpubTextRequest {
+                    runs: vec![EpubTextRun {
+                        text: "AB".into(),
+                        family: Some(FAMILY.into()),
+                        monospace: false,
+                        font_size: 28.0,
+                        bold: true,
+                        italic: true,
+                        foreground: [20, 30, 40, 255],
+                        link: None,
+                    }],
+                    max_width: 120.0,
+                    line_height: 36.0,
+                    scale: 1.0,
+                    align: EpubTextAlign::Left,
+                    direction: EpubTextDirection::LeftToRight,
+                    highlights: Vec::new(),
+                })
+                .unwrap_or_else(|error| panic!("{path} failed native rendering: {error:#}"));
+            assert!(
+                layout
+                    .lines
+                    .iter()
+                    .any(|line| line.rgba.iter().any(|value| *value != 0)),
+                "{path} produced no embedded-font pixels"
+            );
         }
     }
 
