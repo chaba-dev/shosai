@@ -861,6 +861,150 @@ mod tests {
     }
 
     #[test]
+    fn family_aliases_preserve_decoded_names_and_use_unicode_case_folding() {
+        let numeric_alias = "123 Font";
+        let numeric_css = format!(
+            r#"@font-face {{ font-family: "{numeric_alias}"; src: url("../fonts/book.ttf"); }}"#
+        );
+        let numeric = font_book(
+            &numeric_css,
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        assert_eq!(numeric.faces()[0].family, numeric_alias);
+
+        let unicode_css = r#"@font-face { font-family: "Straße"; src: url("../fonts/book.ttf"); }
+            p { font-family: "STRASSE"; }"#;
+        let styles = EpubStyles::parse([("OPS/styles/book.css", unicode_css)]);
+        let chapter = Chapter {
+            index: 0,
+            title: None,
+            path: "OPS/Text/chapter.xhtml".into(),
+            content: r#"<html><head><link rel="stylesheet" href="../styles/book.css"/></head><body><p>Folded</p></body></html>"#.into(),
+        };
+        let resources = HashMap::from([(
+            CanonicalEpubPath::new("OPS/fonts/book.ttf").unwrap(),
+            StoredEpubResource {
+                media_type: "font/ttf".into(),
+                bytes: BOOK_A_TTF.to_vec(),
+            },
+        )]);
+        let limits = EpubLimits::default();
+        let fonts = EpubFontBook::new(std::slice::from_ref(&chapter), &styles, &resources, &limits)
+            .unwrap();
+        let nodes = super::super::render::parse_chapter_xhtml_at_path_with_limits(
+            &chapter.content,
+            &chapter.path,
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .unwrap();
+        let super::super::render::ContentNode::Paragraph(spans, _) = &nodes[0] else {
+            panic!("fixture paragraph must be retained");
+        };
+        assert_eq!(spans[0].font_family.as_deref(), Some("STRASSE"));
+    }
+
+    #[test]
+    fn family_metadata_and_diagnostic_labels_are_bounded_before_amplification() {
+        let long_family = "x".repeat(1_024);
+        let css = format!(r#"p {{ font-family: "{long_family}"; }}"#);
+        let styles = EpubStyles::parse([("OPS/styles/book.css", css.as_str())]);
+        let chapter = Chapter {
+            index: 0,
+            title: None,
+            path: "OPS/Text/chapter.xhtml".into(),
+            content: r#"<html><head><link rel="stylesheet" href="../styles/book.css"/></head><body><p>Bounded</p></body></html>"#.into(),
+        };
+        let limits = EpubLimits::default();
+        let fonts = EpubFontBook::new(&[], &styles, &HashMap::new(), &limits).unwrap();
+        let error = super::super::render::parse_chapter_xhtml_at_path_with_limits(
+            &chapter.content,
+            &chapter.path,
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect_err("oversized family metadata must stop before style-tree inheritance");
+        assert!(error.to_string().contains("font family"));
+
+        let long_local = "y".repeat(1_024);
+        let face_css =
+            format!(r#"@font-face {{ font-family: "Bounded"; src: local("{long_local}"); }}"#);
+        let rejected = font_book(&face_css, &[], limits, 1);
+        let EpubFontAttempt::Rejected { source, .. } = &rejected.rejected_faces()[0].attempts[0]
+        else {
+            panic!("local source must be rejected");
+        };
+        assert!(source.len() <= 256);
+    }
+
+    #[test]
+    fn weight_ranges_are_retained_and_invalid_weights_use_the_initial_value() {
+        let ranged = font_book(
+            &format!(
+                r#"@font-face {{ font-family: "{FAMILY}"; font-weight: 300 700; src: url("../fonts/book.ttf"); }}"#
+            ),
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        assert_eq!(ranged.len(), 1);
+
+        let invalid = font_book(
+            &format!(
+                r#"@font-face {{ font-family: "{FAMILY}"; font-weight: 2000; src: url("../fonts/book.ttf"); }}"#
+            ),
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        assert_eq!(invalid.len(), 1);
+        assert_eq!(invalid.faces()[0].weight, 400);
+    }
+
+    #[test]
+    fn apple_true_sfnt_signature_is_admitted_as_truetype() {
+        let mut apple = BOOK_A_TTF.to_vec();
+        apple[..4].copy_from_slice(b"true");
+        let book = font_book(
+            &one_face("apple.ttf", "truetype"),
+            &[("OPS/fonts/apple.ttf", apple.as_slice())],
+            EpubLimits::default(),
+            1,
+        );
+
+        assert_eq!(book.len(), 1, "{:?}", book.rejected_faces());
+        assert_eq!(book.faces()[0].format, EpubFontFormat::TrueType);
+    }
+
+    #[test]
+    fn zero_font_limits_disable_admission_without_rejecting_font_free_books() {
+        let disabled = EpubLimits {
+            max_font_faces_per_book: 0,
+            max_font_face_descriptors_per_book: 0,
+            max_font_sources_per_face: 0,
+            max_decoded_font_bytes: 0,
+            max_total_decoded_font_bytes: 0,
+            max_font_tables: 0,
+            ..EpubLimits::default()
+        };
+        let empty = font_book("", &[], disabled, 1);
+        assert!(empty.is_empty());
+
+        let rejected = font_book(
+            &one_face("book.ttf", "truetype"),
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            disabled,
+            1,
+        );
+        assert!(rejected.is_empty());
+        assert_eq!(rejected.rejected_faces().len(), 1);
+    }
+
+    #[test]
     fn rejected_face_does_not_consume_admitted_face_budget() {
         let css = format!(
             r#"@font-face {{ font-family: "Missing"; src: url("../fonts/missing.ttf"); }}
