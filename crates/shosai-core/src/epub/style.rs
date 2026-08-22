@@ -51,6 +51,9 @@ struct StylesheetImport {
 struct StylesheetSource {
     body: String,
     imports: Vec<StylesheetImport>,
+    urls: HashMap<String, String>,
+    base_path: String,
+    owner_path: Option<String>,
 }
 
 /// Admitted author stylesheets keyed by canonical archive path.
@@ -83,7 +86,7 @@ impl EpubStyles {
                     return Ok(None);
                 };
                 let base_path = stylesheet_directory(path.as_str());
-                let Some(css) = parsed_stylesheet(css, base_path) else {
+                let Some(css) = parsed_stylesheet(css, base_path, Some(path.as_str())) else {
                     return Ok(None);
                 };
                 Ok(Some((path, css)))
@@ -95,10 +98,21 @@ impl EpubStyles {
         Ok(Self { sources })
     }
 
+    #[cfg(test)]
     pub(crate) fn document_css(
         &self,
         document: &roxmltree::Document<'_>,
         base_path: &str,
+        limits: &EpubLimits,
+    ) -> Result<String> {
+        self.document_css_with_owner(document, base_path, None, limits)
+    }
+
+    pub(crate) fn document_css_with_owner(
+        &self,
+        document: &roxmltree::Document<'_>,
+        base_path: &str,
+        document_path: Option<&str>,
         limits: &EpubLimits,
     ) -> Result<String> {
         let mut css = String::new();
@@ -123,12 +137,8 @@ impl EpubStyles {
                         &mut applications,
                         limits,
                     )? {
-                        let _ = append_stylesheet_content(
-                            &mut css,
-                            &source,
-                            media.as_deref(),
-                            limits,
-                        )?;
+                        let _ =
+                            append_stylesheet_content(&mut css, &source, media.as_deref(), limits)?;
                     }
                 }
                 "style" => {
@@ -142,7 +152,7 @@ impl EpubStyles {
                             source
                         },
                     );
-                    if let Some(source) = parsed_stylesheet(&source, base_path) {
+                    if let Some(source) = parsed_stylesheet(&source, base_path, document_path) {
                         let source = self.expand_stylesheet(
                             &source,
                             base_path,
@@ -228,7 +238,8 @@ impl EpubStyles {
                 )?;
             }
         }
-        let _ = append_stylesheet_content(&mut expanded, &source.body, None, limits)?;
+        let body = rewrite_resource_urls(source, limits)?;
+        let _ = append_stylesheet_content(&mut expanded, &body, None, limits)?;
         Ok(expanded)
     }
 
@@ -334,7 +345,11 @@ fn selected_media(source: Option<&str>) -> Option<Option<String>> {
     }
 }
 
-fn parsed_stylesheet(source: &str, base_path: &str) -> Option<StylesheetSource> {
+fn parsed_stylesheet(
+    source: &str,
+    base_path: &str,
+    owner_path: Option<&str>,
+) -> Option<StylesheetSource> {
     let mut sheet = StyleSheet::parse(source, ParserOptions::default()).ok()?;
     if sheet
         .rules
@@ -375,22 +390,93 @@ fn parsed_stylesheet(source: &str, base_path: &str) -> Option<StylesheetSource> 
             ..PrinterOptions::default()
         })
         .ok()?;
-    let mut body = result.code;
+    let mut urls = HashMap::new();
     for dependency in result.dependencies.unwrap_or_default() {
         if let Dependency::Url(dependency) = dependency {
-            let replacement = CanonicalEpubPath::resolve(base_path, &dependency.url).map_or_else(
-                |_| "about:invalid".to_owned(),
-                |reference| reference.to_protocol_uri(),
-            );
-            body = body.replace(&dependency.placeholder, &replacement);
+            match urls.entry(dependency.placeholder) {
+                std::collections::hash_map::Entry::Occupied(entry)
+                    if entry.get() != &dependency.url =>
+                {
+                    return None;
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(dependency.url);
+                }
+            }
         }
     }
-    Some(StylesheetSource { body, imports })
+    Some(StylesheetSource {
+        body: result.code,
+        imports,
+        urls,
+        base_path: base_path.to_owned(),
+        owner_path: owner_path.map(str::to_owned),
+    })
 }
 
 #[cfg(test)]
 fn normalized_css(source: &str) -> Option<String> {
-    parsed_stylesheet(source, "").map(|source| source.body)
+    let source = parsed_stylesheet(source, "", None)?;
+    rewrite_resource_urls(&source, &EpubLimits::default()).ok()
+}
+
+fn resolve_css_url(
+    base_path: &str,
+    owner_path: Option<&str>,
+    url: &str,
+) -> Option<super::EpubReference> {
+    if url.starts_with('#') {
+        let owner_path = owner_path?;
+        return CanonicalEpubPath::resolve("", &format!("{owner_path}{url}")).ok();
+    }
+    CanonicalEpubPath::resolve(base_path, url).ok()
+}
+
+fn rewrite_resource_urls(source: &StylesheetSource, limits: &EpubLimits) -> Result<String> {
+    let mut rewritten = String::new();
+    let mut remainder = source.body.as_str();
+    while let Some(start) = remainder.find("url(\"") {
+        append_selected_css(&mut rewritten, &remainder[..start], limits)?;
+        let token = &remainder[start..];
+        let Some(end) = token.find("\")") else {
+            append_selected_css(&mut rewritten, token, limits)?;
+            remainder = "";
+            break;
+        };
+        let end = end + 2;
+        let placeholder = &token[5..end - 2];
+        if let Some(url) = source.urls.get(placeholder) {
+            let replacement = resolve_css_url(&source.base_path, source.owner_path.as_deref(), url)
+                .map_or_else(
+                    || "about:invalid".to_owned(),
+                    |reference| reference.to_protocol_uri(),
+                );
+            append_selected_css(&mut rewritten, "url(\"", limits)?;
+            append_selected_css(&mut rewritten, &replacement, limits)?;
+            append_selected_css(&mut rewritten, "\")", limits)?;
+        } else {
+            append_selected_css(&mut rewritten, &token[..end], limits)?;
+        }
+        remainder = &token[end..];
+    }
+    append_selected_css(&mut rewritten, remainder, limits)?;
+    Ok(rewritten)
+}
+
+fn append_selected_css(target: &mut String, source: &str, limits: &EpubLimits) -> Result<()> {
+    let next_bytes = target
+        .len()
+        .checked_add(source.len())
+        .context("EPUB selected CSS byte count overflowed")?;
+    if next_bytes as u64 > limits.max_css_bytes_per_document {
+        anyhow::bail!(
+            "EPUB document exceeds selected CSS byte limit ({next_bytes} > {})",
+            limits.max_css_bytes_per_document
+        );
+    }
+    target.push_str(source);
+    Ok(())
 }
 
 fn stylesheet_directory(path: &str) -> &str {
@@ -725,5 +811,75 @@ mod tests {
         assert!(css.contains("shosai://book/OEBPS/Images/inline.png"));
         assert!(!css.contains("https://example.com"));
         assert!(!css.contains("?v=1"));
+    }
+
+    #[test]
+    fn resource_url_rewriting_is_token_scoped_and_selected_byte_bounded() {
+        let probe = parsed_stylesheet(
+            ".target { background-image: url('image.png'); }",
+            "Styles",
+            Some("Styles/main.css"),
+        )
+        .unwrap();
+        let placeholder = probe.urls.keys().next().unwrap();
+        let source = format!(
+            ".target {{ background-image: {}; }} .literal {{ font-family: \"{placeholder}\"; }}",
+            (0..64)
+                .map(|_| "url('image.png')")
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let styles = EpubStyles::parse([("Styles/main.css", source.as_str())]);
+        let document = roxmltree::Document::parse(
+            r#"<html><head><link rel="stylesheet" href="Styles/main.css"/></head><body/></html>"#,
+        )
+        .unwrap();
+
+        let css = styles
+            .document_css(&document, "", &EpubLimits::default())
+            .unwrap();
+        assert_eq!(css.matches("shosai://book/Styles/image.png").count(), 64);
+        assert!(
+            css.contains(placeholder),
+            "an unrelated CSS string was rewritten"
+        );
+
+        let error = styles
+            .document_css(
+                &document,
+                "",
+                &EpubLimits {
+                    max_css_bytes_per_document: 128,
+                    ..EpubLimits::default()
+                },
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("selected CSS byte limit"));
+    }
+
+    #[test]
+    fn fragment_only_urls_retain_external_and_inline_owners() {
+        let styles = EpubStyles::parse([(
+            "OEBPS/Styles/main.css",
+            ".external { filter: url(#external-filter); }",
+        )]);
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="../Styles/main.css"/>
+                <style>.inline { filter: url(#inline-filter); }</style>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+
+        let css = styles
+            .document_css_with_owner(
+                &document,
+                "OEBPS/Text",
+                Some("OEBPS/Text/chapter.xhtml"),
+                &EpubLimits::default(),
+            )
+            .unwrap();
+        assert!(css.contains("shosai://book/OEBPS/Styles/main.css#external-filter"));
+        assert!(css.contains("shosai://book/OEBPS/Text/chapter.xhtml#inline-filter"));
     }
 }

@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use super::EpubLimits;
-use super::render::{ContentNode, parse_chapter_xhtml_with_limits};
+use super::render::ContentNode;
 use super::style::EpubStyles;
 use super::types::Chapter;
 
@@ -41,13 +41,12 @@ impl EpubPresentation {
         let chapters = chapters
             .iter()
             .map(|chapter| -> Result<_> {
-                let base_path = chapter
-                    .path
-                    .rsplit_once('/')
-                    .map(|(directory, _)| directory)
-                    .unwrap_or("");
-                let nodes =
-                    parse_chapter_xhtml_with_limits(&chapter.content, base_path, styles, limits)?;
+                let nodes = super::render::parse_chapter_xhtml_at_path_with_limits(
+                    &chapter.content,
+                    &chapter.path,
+                    styles,
+                    limits,
+                )?;
                 let search_text = crate::search::extract_text_from_nodes(&nodes);
                 Ok(EpubChapterPresentation { nodes, search_text })
             })

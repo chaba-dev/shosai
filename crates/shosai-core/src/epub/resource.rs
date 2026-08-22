@@ -374,11 +374,9 @@ mod tests {
             );
         }
 
-        let reference = CanonicalEpubPath::resolve(
-            "OEBPS/Text",
-            "../Images/My%20Image.svg#figure%201",
-        )
-        .unwrap();
+        let reference =
+            CanonicalEpubPath::resolve("OEBPS/Text", "../Images/My%20Image.svg#figure%201")
+                .unwrap();
         let uri = reference.to_protocol_uri();
         assert_eq!(
             CanonicalEpubPath::from_protocol_uri(&uri).unwrap(),
