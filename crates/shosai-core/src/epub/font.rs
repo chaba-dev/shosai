@@ -72,6 +72,7 @@ pub struct EpubFontBook {
     registered_ids: Vec<fontdb::ID>,
     faces: Vec<EpubFontFace>,
     rejected_faces: Vec<EpubRejectedFontFace>,
+    chapter_families: HashMap<String, HashSet<String>>,
     decoded_bytes: usize,
 }
 
@@ -111,6 +112,15 @@ impl EpubFontBook {
             .iter()
             .any(|face| face.family.eq_ignore_ascii_case(family))
     }
+    pub(crate) fn contains_family_for_chapter(&self, chapter_path: &str, family: &str) -> bool {
+        self.chapter_families
+            .get(chapter_path)
+            .is_some_and(|families| {
+                families
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(family))
+            })
+    }
 
     pub(crate) fn new(
         chapters: &[Chapter],
@@ -119,6 +129,8 @@ impl EpubFontBook {
         limits: &EpubLimits,
     ) -> Result<Self> {
         if limits.max_font_faces_per_book == 0
+            || limits.max_font_face_descriptors_per_book == 0
+            || limits.max_font_sources_per_face == 0
             || limits.max_decoded_font_bytes == 0
             || limits.max_total_decoded_font_bytes == 0
             || limits.max_font_tables == 0
@@ -130,9 +142,11 @@ impl EpubFontBook {
             registered_ids: Vec::new(),
             faces: Vec::new(),
             rejected_faces: Vec::new(),
+            chapter_families: HashMap::new(),
             decoded_bytes: 0,
         };
-        let mut seen = HashSet::new();
+        let mut inspected = HashMap::<Descriptor, bool>::new();
+        let mut descriptor_limit_reported = false;
         for chapter in chapters {
             let Ok(document) = roxmltree::Document::parse(&chapter.content) else {
                 continue;
@@ -140,21 +154,62 @@ impl EpubFontBook {
             let base = chapter.path.rsplit_once('/').map_or("", |(dir, _)| dir);
             let css =
                 styles.document_css_with_owner(&document, base, Some(&chapter.path), limits)?;
-            for descriptor in parse_faces(&css) {
-                if !seen.insert(descriptor.clone()) {
+            let descriptors = parse_faces(&css, limits, &inspected)?;
+            for descriptor in descriptors {
+                if let Some(admitted) = inspected.get(&descriptor) {
+                    if *admitted {
+                        book.chapter_families
+                            .entry(chapter.path.clone())
+                            .or_default()
+                            .insert(descriptor.family.clone());
+                    }
                     continue;
                 }
-                if seen.len() > limits.max_font_faces_per_book {
+                if inspected.len() >= limits.max_font_face_descriptors_per_book {
+                    if !descriptor_limit_reported {
+                        book.rejected_faces.push(EpubRejectedFontFace {
+                            family: descriptor.family,
+                            attempts: vec![EpubFontAttempt::Rejected {
+                                source: "@font-face".into(),
+                                reason: "per-book font descriptor inspection limit is exhausted"
+                                    .into(),
+                            }],
+                        });
+                        descriptor_limit_reported = true;
+                    }
+                    continue;
+                }
+                if descriptor.sources.len() > limits.max_font_sources_per_face {
                     book.rejected_faces.push(EpubRejectedFontFace {
-                        family: descriptor.family,
+                        family: descriptor.family.clone(),
                         attempts: vec![EpubFontAttempt::Rejected {
                             source: "@font-face".into(),
-                            reason: "per-book font face limit is exhausted".into(),
+                            reason: "font source inspection limit is exhausted".into(),
                         }],
                     });
+                    inspected.insert(descriptor, false);
                     continue;
                 }
-                book.load_descriptor(descriptor, resources, limits);
+                if book.faces.len() >= limits.max_font_faces_per_book {
+                    book.rejected_faces.push(EpubRejectedFontFace {
+                        family: descriptor.family.clone(),
+                        attempts: vec![EpubFontAttempt::Rejected {
+                            source: "@font-face".into(),
+                            reason: "per-book admitted font face limit is exhausted".into(),
+                        }],
+                    });
+                    inspected.insert(descriptor, false);
+                    continue;
+                }
+                let family = descriptor.family.clone();
+                let admitted = book.load_descriptor(descriptor.clone(), resources, limits);
+                inspected.insert(descriptor, admitted);
+                if admitted {
+                    book.chapter_families
+                        .entry(chapter.path.clone())
+                        .or_default()
+                        .insert(family);
+                }
             }
         }
         Ok(book)
@@ -165,7 +220,7 @@ impl EpubFontBook {
         descriptor: Descriptor,
         resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
         limits: &EpubLimits,
-    ) {
+    ) -> bool {
         let mut attempts = Vec::new();
         for source in &descriptor.sources {
             let SourceDescriptor::Url {
@@ -277,12 +332,13 @@ impl EpubFontBook {
                 decoded_bytes,
                 attempts,
             });
-            return;
+            return true;
         }
         self.rejected_faces.push(EpubRejectedFontFace {
             family: descriptor.family,
             attempts,
         });
+        false
     }
 }
 
@@ -320,17 +376,32 @@ enum FormatHint {
 fn text<T: ToCss>(value: &T) -> Option<String> {
     value.to_css_string(Default::default()).ok()
 }
-fn parse_faces(css: &str) -> Vec<Descriptor> {
+fn parse_faces(
+    css: &str,
+    limits: &EpubLimits,
+    globally_inspected: &HashMap<Descriptor, bool>,
+) -> Result<Vec<Descriptor>> {
     let Ok(sheet) = StyleSheet::parse(css, ParserOptions::default()) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    fn collect(rules: &[CssRule<'_>], faces: &mut Vec<Descriptor>) {
+    super::computed_style::validate_stylesheet_complexity(&sheet.rules.0, limits)?;
+    fn collect(
+        rules: &[CssRule<'_>],
+        faces: &mut Vec<Descriptor>,
+        seen: &mut HashSet<Descriptor>,
+        globally_inspected: &HashMap<Descriptor, bool>,
+        remaining_new: &mut usize,
+    ) {
         for rule in rules {
             if let CssRule::Media(media) = rule {
-                if super::computed_style::bounded_media_query(&media.query)
-                    && super::computed_style::screen_media_matches(&media.query)
-                {
-                    collect(&media.rules.0, faces);
+                if super::computed_style::screen_media_matches(&media.query) {
+                    collect(
+                        &media.rules.0,
+                        faces,
+                        seen,
+                        globally_inspected,
+                        remaining_new,
+                    );
                 }
                 continue;
             }
@@ -363,33 +434,35 @@ fn parse_faces(css: &str) -> Vec<Descriptor> {
                             };
                         }
                         FontFaceProperty::Source(values) => {
-                            sources.extend(values.iter().map(|source| match source {
-                                CssSource::Local(v) => {
-                                    SourceDescriptor::Local(text(v).unwrap_or_default())
-                                }
-                                CssSource::Url(v) => SourceDescriptor::Url {
-                                    reference: v.url.url.to_string(),
-                                    format: v.format.as_ref().map_or(
-                                        FormatHint::Absent,
-                                        |f| match f {
-                                            CssFormat::TrueType => {
-                                                FormatHint::Supported(EpubFontFormat::TrueType)
+                            sources = values
+                                .iter()
+                                .map(|source| match source {
+                                    CssSource::Local(v) => {
+                                        SourceDescriptor::Local(text(v).unwrap_or_default())
+                                    }
+                                    CssSource::Url(v) => SourceDescriptor::Url {
+                                        reference: v.url.url.to_string(),
+                                        format: v.format.as_ref().map_or(FormatHint::Absent, |f| {
+                                            match f {
+                                                CssFormat::TrueType => {
+                                                    FormatHint::Supported(EpubFontFormat::TrueType)
+                                                }
+                                                CssFormat::OpenType => {
+                                                    FormatHint::Supported(EpubFontFormat::OpenType)
+                                                }
+                                                CssFormat::WOFF => {
+                                                    FormatHint::Supported(EpubFontFormat::Woff)
+                                                }
+                                                CssFormat::WOFF2 => {
+                                                    FormatHint::Supported(EpubFontFormat::Woff2)
+                                                }
+                                                _ => FormatHint::Unsupported,
                                             }
-                                            CssFormat::OpenType => {
-                                                FormatHint::Supported(EpubFontFormat::OpenType)
-                                            }
-                                            CssFormat::WOFF => {
-                                                FormatHint::Supported(EpubFontFormat::Woff)
-                                            }
-                                            CssFormat::WOFF2 => {
-                                                FormatHint::Supported(EpubFontFormat::Woff2)
-                                            }
-                                            _ => FormatHint::Unsupported,
-                                        },
-                                    ),
-                                    technology: !v.tech.is_empty(),
-                                },
-                            }))
+                                        }),
+                                        technology: !v.tech.is_empty(),
+                                    },
+                                })
+                                .collect()
                         }
                         _ => {}
                     }
@@ -404,12 +477,30 @@ fn parse_faces(css: &str) -> Vec<Descriptor> {
             })() else {
                 continue;
             };
-            faces.push(descriptor);
+            if seen.insert(descriptor.clone())
+                && (globally_inspected.contains_key(&descriptor) || *remaining_new > 0)
+            {
+                if !globally_inspected.contains_key(&descriptor) {
+                    *remaining_new -= 1;
+                }
+                faces.push(descriptor);
+            }
         }
     }
     let mut faces = Vec::new();
-    collect(&sheet.rules.0, &mut faces);
-    faces
+    let mut seen = HashSet::new();
+    let mut remaining_new = limits
+        .max_font_face_descriptors_per_book
+        .saturating_sub(globally_inspected.len())
+        .saturating_add(1);
+    collect(
+        &sheet.rules.0,
+        &mut faces,
+        &mut seen,
+        globally_inspected,
+        &mut remaining_new,
+    );
+    Ok(faces)
 }
 
 fn reject(
@@ -788,6 +879,108 @@ mod tests {
 
         assert_eq!(book.len(), 1, "{:?}", book.rejected_faces());
         assert_eq!(book.faces()[0].family, FAMILY);
+    }
+
+    #[test]
+    fn descriptor_source_and_admitted_face_work_are_independently_bounded() {
+        let descriptors = (0..4)
+            .map(|index| {
+                format!(
+                    r#"@font-face {{ font-family: "Missing {index}"; src: url("missing-{index}.ttf"); }}"#
+                )
+            })
+            .collect::<String>();
+        let bounded_descriptors = font_book(
+            &descriptors,
+            &[],
+            EpubLimits {
+                max_font_face_descriptors_per_book: 1,
+                ..EpubLimits::default()
+            },
+            1,
+        );
+        assert_eq!(bounded_descriptors.rejected_faces().len(), 2);
+        assert!(bounded_descriptors.rejected_faces().iter().any(|face| {
+            matches!(
+                face.attempts.as_slice(),
+                [EpubFontAttempt::Rejected { reason, .. }]
+                    if reason == "per-book font descriptor inspection limit is exhausted"
+            )
+        }));
+
+        let bounded_sources = font_book(
+            &format!(
+                r#"@font-face {{ font-family: "{FAMILY}"; src: url("one.ttf"), url("two.ttf"); }}"#
+            ),
+            &[],
+            EpubLimits {
+                max_font_sources_per_face: 1,
+                ..EpubLimits::default()
+            },
+            1,
+        );
+        assert!(matches!(
+            bounded_sources.rejected_faces()[0].attempts.as_slice(),
+            [EpubFontAttempt::Rejected { reason, .. }]
+                if reason == "font source inspection limit is exhausted"
+        ));
+
+        let two_faces = format!(
+            r#"{}
+                @font-face {{ font-family: "Second"; src: url("../fonts/book-b.ttf"); }}"#,
+            one_face("book-a.ttf", "truetype")
+        );
+        let bounded_faces = font_book(
+            &two_faces,
+            &[
+                ("OPS/fonts/book-a.ttf", BOOK_A_TTF),
+                ("OPS/fonts/book-b.ttf", BOOK_B_TTF),
+            ],
+            EpubLimits {
+                max_font_faces_per_book: 1,
+                ..EpubLimits::default()
+            },
+            1,
+        );
+        assert_eq!(bounded_faces.len(), 1);
+        assert!(bounded_faces.rejected_faces().iter().any(|face| {
+            matches!(
+                face.attempts.as_slice(),
+                [EpubFontAttempt::Rejected { reason, .. }]
+                    if reason == "per-book admitted font face limit is exhausted"
+            )
+        }));
+    }
+
+    #[test]
+    fn stylesheet_complexity_is_validated_before_font_decoding() {
+        let css = one_face("book.ttf", "truetype");
+        let styles = EpubStyles::parse([("OPS/styles/book.css", css.as_str())]);
+        let chapter = Chapter {
+            index: 0,
+            title: None,
+            path: "OPS/Text/chapter.xhtml".into(),
+            content: r#"<html><head><link rel="stylesheet" href="../styles/book.css"/></head><body/></html>"#.into(),
+        };
+        let resources = HashMap::from([(
+            CanonicalEpubPath::new("OPS/fonts/book.ttf").unwrap(),
+            StoredEpubResource {
+                media_type: "font/ttf".into(),
+                bytes: BOOK_A_TTF.to_vec(),
+            },
+        )]);
+
+        let error = EpubFontBook::new(
+            &[chapter],
+            &styles,
+            &resources,
+            &EpubLimits {
+                max_css_rules_per_document: 0,
+                ..EpubLimits::default()
+            },
+        )
+        .expect_err("font admission must share the document CSS rule boundary");
+        assert!(error.to_string().contains("CSS rule limit"));
     }
 
     #[test]

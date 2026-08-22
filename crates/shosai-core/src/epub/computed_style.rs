@@ -88,11 +88,17 @@ impl ComputedDocumentStyles {
         self.node_styles.get(&node.id())
     }
 
-    pub(crate) fn resolve_font_families(&mut self, fonts: Option<&super::font::EpubFontBook>) {
+    pub(crate) fn resolve_font_families(
+        &mut self,
+        chapter_path: Option<&str>,
+        fonts: Option<&super::font::EpubFontBook>,
+    ) {
         for style in self.node_styles.values_mut() {
-            style
-                .font_families
-                .retain(|family| fonts.is_some_and(|fonts| fonts.contains_family(family)));
+            style.font_families.retain(|family| {
+                fonts.is_some_and(|fonts| {
+                    chapter_path.is_some_and(|path| fonts.contains_family_for_chapter(path, family))
+                })
+            });
         }
     }
 }
@@ -605,7 +611,10 @@ struct StylesheetComplexity {
     selector_components: usize,
 }
 
-fn validate_stylesheet_complexity(rules: &[CssRule<'_>], limits: &EpubLimits) -> Result<()> {
+pub(crate) fn validate_stylesheet_complexity(
+    rules: &[CssRule<'_>],
+    limits: &EpubLimits,
+) -> Result<()> {
     fn inspect(
         rules: &[CssRule<'_>],
         complexity: &mut StylesheetComplexity,

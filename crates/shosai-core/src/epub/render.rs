@@ -139,7 +139,7 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     let css = styles.document_css_with_owner(&doc, base_path, chapter_path, limits)?;
     let mut computed_styles =
         super::computed_style::compute_parsed_document_styles(&doc, &css, limits)?;
-    computed_styles.resolve_font_families(fonts);
+    computed_styles.resolve_font_families(chapter_path, fonts);
 
     // Find <body> (or fall back to root).
     let body = doc

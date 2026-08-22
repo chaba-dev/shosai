@@ -53,6 +53,10 @@ pub struct EpubLimits {
     pub max_font_bytes: u64,
     /// Maximum font faces admitted for one EPUB.
     pub max_font_faces_per_book: usize,
+    /// Maximum distinct `@font-face` descriptors inspected for one EPUB.
+    pub max_font_face_descriptors_per_book: usize,
+    /// Maximum fallback sources inspected for one `@font-face` descriptor.
+    pub max_font_sources_per_face: usize,
     /// Maximum decoded size of an individual font.
     pub max_decoded_font_bytes: usize,
     /// Maximum aggregate decoded font bytes retained for one EPUB.
@@ -94,6 +98,8 @@ impl Default for EpubLimits {
             max_css_computed_font_size_px: 512.0,
             max_font_bytes: 16 * MIB,
             max_font_faces_per_book: 64,
+            max_font_face_descriptors_per_book: 256,
+            max_font_sources_per_face: 16,
             max_decoded_font_bytes: 32 * MIB as usize,
             max_total_decoded_font_bytes: 128 * MIB as usize,
             max_font_tables: 256,
