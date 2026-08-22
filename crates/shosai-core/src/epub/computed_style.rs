@@ -177,16 +177,16 @@ struct SpecifiedStyle {
     text_indent: Slot<RelativeLength>,
 }
 
-struct MatchBudget {
+struct ProcessingBudget {
     remaining: usize,
 }
 
-impl MatchBudget {
+impl ProcessingBudget {
     fn step(&mut self) -> Result<()> {
         self.remaining = self
             .remaining
             .checked_sub(1)
-            .context("EPUB document exceeds CSS selector-match step limit")?;
+            .context("EPUB document exceeds CSS processing step limit")?;
         Ok(())
     }
 }
@@ -221,8 +221,8 @@ pub(crate) fn compute_parsed_document_styles(
 
     let mut node_styles = HashMap::new();
     let mut element_styles = HashMap::new();
-    let mut match_budget = MatchBudget {
-        remaining: limits.max_css_match_steps_per_document,
+    let mut processing_budget = ProcessingBudget {
+        remaining: limits.max_css_processing_steps_per_document,
     };
     walk_element(
         document.root_element(),
@@ -231,7 +231,7 @@ pub(crate) fn compute_parsed_document_styles(
         &sheet.rules.0,
         &mut node_styles,
         &mut element_styles,
-        &mut match_budget,
+        &mut processing_budget,
     )?;
     let mut unsupported_selectors = unsupported_selectors.into_iter().collect::<Vec<_>>();
     unsupported_selectors.sort();
@@ -257,14 +257,14 @@ fn walk_element(
     rules: &[CssRule<'_>],
     node_styles: &mut HashMap<NodeId, ComputedStyle>,
     styles: &mut HashMap<String, ComputedStyle>,
-    match_budget: &mut MatchBudget,
+    processing_budget: &mut ProcessingBudget,
 ) -> Result<()> {
     let style = compute_element_style(
         element,
         parent,
         root_font_size.unwrap_or(INITIAL_FONT_SIZE_PX),
         rules,
-        match_budget,
+        processing_budget,
     )?;
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
     node_styles.insert(element.id(), style.clone());
@@ -279,7 +279,7 @@ fn walk_element(
             rules,
             node_styles,
             styles,
-            match_budget,
+            processing_budget,
         )?;
     }
     Ok(())
@@ -290,7 +290,7 @@ fn compute_element_style(
     parent: Option<&ComputedStyle>,
     root_font_size: f32,
     rules: &[CssRule<'_>],
-    match_budget: &mut MatchBudget,
+    processing_budget: &mut ProcessingBudget,
 ) -> Result<ComputedStyle> {
     let inherited = parent.cloned().unwrap_or(ComputedStyle {
         display: DisplayRole::Block,
@@ -324,7 +324,7 @@ fn compute_element_style(
         element,
         &mut specified,
         &mut source_order,
-        match_budget,
+        processing_budget,
     )?;
     if let Some(inline) = element.attribute("style")
         && let Ok(attribute) = StyleAttribute::parse(inline, ParserOptions::default())
@@ -334,7 +334,8 @@ fn compute_element_style(
             INLINE_SPECIFICITY,
             &mut source_order,
             &mut specified,
-        );
+            processing_budget,
+        )?;
     }
 
     let parent_font_size = parent.map_or(INITIAL_FONT_SIZE_PX, |style| style.font_size_px);
@@ -391,15 +392,16 @@ fn apply_rules(
     element: Node<'_, '_>,
     specified: &mut SpecifiedStyle,
     source_order: &mut usize,
-    match_budget: &mut MatchBudget,
+    processing_budget: &mut ProcessingBudget,
 ) -> Result<()> {
     for rule in rules {
+        processing_budget.step()?;
         match rule {
             CssRule::Style(rule) => {
                 let mut specificity = None;
                 for selector in &rule.selectors.0 {
-                    if selector_supported_with_budget(selector, match_budget)?
-                        && selector_matches(selector, element, match_budget)?
+                    if selector_supported_with_budget(selector, processing_budget)?
+                        && selector_matches(selector, element, processing_budget)?
                     {
                         let candidate = selector.specificity();
                         specificity = Some(
@@ -408,16 +410,24 @@ fn apply_rules(
                     }
                 }
                 if let Some(specificity) = specificity {
-                    apply_declarations(&rule.declarations, specificity, source_order, specified);
+                    apply_declarations(
+                        &rule.declarations,
+                        specificity,
+                        source_order,
+                        specified,
+                        processing_budget,
+                    )?;
                 }
             }
-            CssRule::Media(media) if screen_media_matches(&media.query) => {
+            CssRule::Media(media)
+                if screen_media_matches_with_budget(&media.query, processing_budget)? =>
+            {
                 apply_rules(
                     &media.rules.0,
                     element,
                     specified,
                     source_order,
-                    match_budget,
+                    processing_budget,
                 )?;
             }
             _ => {}
@@ -427,18 +437,33 @@ fn apply_rules(
 }
 
 fn screen_media_matches(media: &MediaList<'_>) -> bool {
-    media.media_queries.iter().any(|query| {
-        if query.condition.is_some() {
-            return false;
+    media.media_queries.iter().any(screen_media_query_matches)
+}
+
+fn screen_media_matches_with_budget(
+    media: &MediaList<'_>,
+    processing_budget: &mut ProcessingBudget,
+) -> Result<bool> {
+    for query in &media.media_queries {
+        processing_budget.step()?;
+        if screen_media_query_matches(query) {
+            return Ok(true);
         }
-        matches!(
-            (&query.qualifier, &query.media_type),
-            (
-                None | Some(Qualifier::Only),
-                MediaType::All | MediaType::Screen
-            ) | (Some(Qualifier::Not), MediaType::Print)
-        )
-    })
+    }
+    Ok(false)
+}
+
+fn screen_media_query_matches(query: &lightningcss::media_query::MediaQuery<'_>) -> bool {
+    if query.condition.is_some() {
+        return false;
+    }
+    matches!(
+        (&query.qualifier, &query.media_type),
+        (
+            None | Some(Qualifier::Only),
+            MediaType::All | MediaType::Screen
+        ) | (Some(Qualifier::Not), MediaType::Print)
+    )
 }
 
 fn bounded_media_query(media: &MediaList<'_>) -> bool {
@@ -453,13 +478,17 @@ fn apply_declarations(
     specificity: u32,
     source_order: &mut usize,
     specified: &mut SpecifiedStyle,
-) {
+    processing_budget: &mut ProcessingBudget,
+) -> Result<()> {
     for (important, properties) in [
         (false, &declarations.declarations),
         (true, &declarations.important_declarations),
     ] {
         for property in properties {
-            *source_order += 1;
+            processing_budget.step()?;
+            *source_order = source_order
+                .checked_add(1)
+                .context("EPUB CSS source order overflowed")?;
             let priority = Priority {
                 important,
                 specificity,
@@ -470,6 +499,7 @@ fn apply_declarations(
             }
         }
     }
+    Ok(())
 }
 
 fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut SpecifiedStyle) {
@@ -768,7 +798,7 @@ fn selector_supported(selector: &Selector<'_>) -> bool {
 
 fn selector_supported_with_budget(
     selector: &Selector<'_>,
-    budget: &mut MatchBudget,
+    budget: &mut ProcessingBudget,
 ) -> Result<bool> {
     for component in selector.iter_raw_match_order() {
         budget.step()?;
@@ -810,7 +840,7 @@ fn selector_supported_with_budget(
 fn selector_matches(
     selector: &Selector<'_>,
     element: Node<'_, '_>,
-    budget: &mut MatchBudget,
+    budget: &mut ProcessingBudget,
 ) -> Result<bool> {
     selector_matches_from(selector, element, 0, budget)
 }
@@ -819,7 +849,7 @@ fn selector_matches_from(
     selector: &Selector<'_>,
     element: Node<'_, '_>,
     offset: usize,
-    budget: &mut MatchBudget,
+    budget: &mut ProcessingBudget,
 ) -> Result<bool> {
     for (index, component) in selector.iter_raw_match_order().enumerate().skip(offset) {
         budget.step()?;
@@ -867,7 +897,7 @@ fn selector_matches_from(
 fn component_matches(
     component: &Component<'_>,
     element: Node<'_, '_>,
-    budget: &mut MatchBudget,
+    budget: &mut ProcessingBudget,
 ) -> Result<bool> {
     Ok(match component {
         Component::ExplicitAnyNamespace | Component::ExplicitUniversalType => true,
@@ -1275,10 +1305,10 @@ mod tests {
             ),
             (
                 EpubLimits {
-                    max_css_match_steps_per_document: 0,
+                    max_css_processing_steps_per_document: 0,
                     ..EpubLimits::default()
                 },
-                "selector-match step limit",
+                "CSS processing step limit",
             ),
         ] {
             let error = compute_parsed_document_styles(&document, css, &limits).unwrap_err();
@@ -1287,5 +1317,29 @@ mod tests {
                 "expected {expected:?}, got {error:#}"
             );
         }
+
+        let non_style_rules = "@font-face {}".repeat(3);
+        let error = compute_parsed_document_styles(
+            &document,
+            &non_style_rules,
+            &EpubLimits {
+                max_css_processing_steps_per_document: 8,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("CSS processing step limit"));
+
+        let one_element = roxmltree::Document::parse(r#"<html class="target"/>"#).unwrap();
+        let error = compute_parsed_document_styles(
+            &one_element,
+            ".target { font-weight: bold; font-style: italic; }",
+            &EpubLimits {
+                max_css_processing_steps_per_document: 4,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("CSS processing step limit"));
     }
 }

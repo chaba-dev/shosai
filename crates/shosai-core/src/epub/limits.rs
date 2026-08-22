@@ -39,8 +39,8 @@ pub struct EpubLimits {
     pub max_css_selectors_per_document: usize,
     /// Maximum selector components inspected for one XHTML document.
     pub max_css_selector_components_per_document: usize,
-    /// Maximum selector-match steps performed for one XHTML document.
-    pub max_css_match_steps_per_document: usize,
+    /// Maximum amplified rule, selector, and declaration processing steps per XHTML document.
+    pub max_css_processing_steps_per_document: usize,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
     /// Maximum width or height reported by an admitted image.
@@ -71,7 +71,7 @@ impl Default for EpubLimits {
             max_css_rules_per_document: 50_000,
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
-            max_css_match_steps_per_document: 10_000_000,
+            max_css_processing_steps_per_document: 10_000_000,
             max_font_bytes: 16 * MIB,
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,

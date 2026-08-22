@@ -24,7 +24,7 @@ use shosai_core::search::SearchMatch;
 use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE,
     Page as EpubPage, PageNode as EpubPageNode, content_node_text_len, paginate_epub_chapter,
-    spans_text_len,
+    spans_font_scale, spans_text_len,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
@@ -3712,6 +3712,7 @@ fn render_content_node<'a>(
             for item_spans in items {
                 col = col.push(render_spans_with_prefix(
                     "  \u{2022} ",
+                    font_size * spans_font_scale(item_spans),
                     item_spans,
                     font_size,
                     text_color,
@@ -3730,6 +3731,7 @@ fn render_content_node<'a>(
                 let num_text = format!("  {}. ", start + i);
                 col = col.push(render_spans_with_prefix(
                     &num_text,
+                    font_size * spans_font_scale(item_spans),
                     item_spans,
                     font_size,
                     text_color,
@@ -3997,11 +3999,20 @@ fn render_spans<'a>(
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
-    render_spans_with_prefix("", spans, font_size, text_color, text_offset, highlights)
+    render_spans_with_prefix(
+        "",
+        font_size,
+        spans,
+        font_size,
+        text_color,
+        text_offset,
+        highlights,
+    )
 }
 
 fn render_spans_with_prefix<'a>(
     prefix: &str,
+    prefix_font_size: f32,
     spans: &[shosai_core::epub::render::TextSpan],
     font_size: f32,
     text_color: iced::Color,
@@ -4010,7 +4021,11 @@ fn render_spans_with_prefix<'a>(
 ) -> Element<'a, Message> {
     let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
     if !prefix.is_empty() {
-        rich_spans.push(span(prefix.to_string()).size(font_size).color(text_color));
+        rich_spans.push(
+            span(prefix.to_string())
+                .size(prefix_font_size)
+                .color(text_color),
+        );
     }
 
     let mut span_offset = text_offset;

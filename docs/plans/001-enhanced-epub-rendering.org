@@ -30,7 +30,7 @@ boundaries.
   UA defaults, resolved lengths, and simple screen media rules; and lowers the
   supported property set into native block and inline presentation.  Per-resource
   and per-document byte/application limits plus rule, selector, component, and
-  match-step budgets bound hostile CSS work.  Unsupported selectors,
+  amplified processing-step budgets bound hostile CSS work.  Unsupported selectors,
   declarations, conditional rules, ~@import~, and named namespaces fail soft.
   Font-face application, tables, and MathML remain later milestones.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and

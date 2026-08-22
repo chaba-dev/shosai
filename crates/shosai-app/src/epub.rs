@@ -660,7 +660,7 @@ pub(crate) fn spans_text_len(spans: &[shosai_core::epub::render::TextSpan]) -> u
     spans.iter().map(|span| span.text.chars().count()).sum()
 }
 
-fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) -> f32 {
+pub(crate) fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) -> f32 {
     spans
         .iter()
         .map(|span| span.font_size_multiplier)
@@ -1222,6 +1222,10 @@ mod tests {
             normal.len() < large.len(),
             "large list text should consume more pages"
         );
+        let ContentNode::UnorderedList(items) = list(0.5) else {
+            unreachable!()
+        };
+        assert_eq!(spans_font_scale(&items[0]), 0.5);
     }
 
     #[test]

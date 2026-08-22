@@ -650,10 +650,10 @@ fn configurable_limits_reject_before_unbounded_resource_reads() {
         ),
         (
             EpubLimits {
-                max_css_match_steps_per_document: 0,
+                max_css_processing_steps_per_document: 0,
                 ..EpubLimits::default()
             },
-            "selector-match step limit",
+            "CSS processing step limit",
         ),
     ] {
         let error = EpubDoc::open_with_limits(fixture_path("css-cascade"), limits).unwrap_err();
