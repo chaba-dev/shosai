@@ -3625,9 +3625,17 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
 }
 
 fn content_starts_with_heading(nodes: &[ContentNode], title: &str) -> bool {
-    nodes.first().is_some_and(
-        |node| matches!(node, ContentNode::Heading { text, .. } if text.trim() == title.trim()),
-    )
+    nodes.first().is_some_and(|node| match node {
+        ContentNode::Heading { spans, .. } => {
+            spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>()
+                .trim()
+                == title.trim()
+        }
+        _ => false,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3644,7 +3652,7 @@ fn render_content_node<'a>(
     match node {
         ContentNode::Heading {
             level,
-            text: t,
+            spans,
             style,
         } => {
             let base_size = match level {
@@ -3659,7 +3667,7 @@ fn render_content_node<'a>(
                 .map(|m| base_size * m)
                 .unwrap_or(base_size);
             let align = node_style_to_alignment(style);
-            let heading = render_highlighted_text(t, text_offset, size, text_color, highlights);
+            let heading = render_spans(spans, size, text_color, text_offset, highlights);
             container(heading).width(Length::Fill).align_x(align).into()
         }
 
@@ -4083,23 +4091,6 @@ fn styled_epub_span<'a>(
         rendered = rendered.link(href.clone());
     }
     apply_search_highlight(rendered, highlight)
-}
-
-fn render_highlighted_text<'a>(
-    value: &str,
-    text_offset: usize,
-    font_size: f32,
-    text_color: iced::Color,
-    highlights: &[SearchHighlight],
-) -> Element<'a, Message> {
-    render_highlighted_text_with_font(
-        value,
-        text_offset,
-        font_size,
-        text_color,
-        Font::DEFAULT,
-        highlights,
-    )
 }
 
 fn render_highlighted_text_with_font<'a>(
@@ -7344,7 +7335,15 @@ mod tests {
             children: vec![
                 ContentNode::Heading {
                     level: 2,
-                    text: "A heading".to_string(),
+                    spans: vec![shosai_core::epub::render::TextSpan {
+                        text: "A heading".to_string(),
+                        bold: true,
+                        italic: false,
+                        monospace: false,
+                        font_size_multiplier: 1.0,
+                        preserve_whitespace: false,
+                        link: None,
+                    }],
                     style: Default::default(),
                 },
                 ContentNode::OrderedList {

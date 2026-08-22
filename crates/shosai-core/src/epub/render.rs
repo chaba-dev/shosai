@@ -40,7 +40,7 @@ pub enum ContentNode {
     /// A heading (level 1–6).
     Heading {
         level: u8,
-        text: String,
+        spans: Vec<TextSpan>,
         style: NodeStyle,
     },
     /// A paragraph with mixed inline formatting.
@@ -326,13 +326,15 @@ fn push_heading(
     node_style: &NodeStyle,
     styles: &super::computed_style::ComputedDocumentStyles,
 ) {
-    let text = collect_visible_text_content(element, styles)
-        .trim()
-        .to_string();
-    if !text.is_empty() {
+    let font_size = styles
+        .get(*element)
+        .expect("computed style must exist for heading")
+        .font_size_px;
+    let spans = collect_inline_spans(element, styles, font_size);
+    if !spans.is_empty() {
         nodes.push(ContentNode::Heading {
             level,
-            text,
+            spans,
             style: node_style.clone(),
         });
     }
@@ -568,18 +570,33 @@ mod tests {
 
     #[test]
     fn test_parse_heading() {
-        let xhtml = r#"<html><head><style>h2 { font-size: 16px; }</style></head><body>
-            <h1>Title</h1><h2>Subtitle</h2><h3>Section</h3><h4>Detail</h4>
+        let xhtml = r#"<html><head><style>
+            h1 { font-style: italic; font-family: monospace; }
+            h2 { font-size: 16px; }
+        </style></head><body>
+            <h1>Title <span style="font-weight: normal">plain</span></h1>
+            <h2>Subtitle</h2><h3>Section</h3><h4>Detail</h4>
         </body></html>"#;
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         assert_eq!(nodes.len(), 4);
-        assert!(
-            matches!(&nodes[0], ContentNode::Heading { level: 1, text, style } if
-                text == "Title" && style.font_size_multiplier.is_none())
+        let ContentNode::Heading { spans, style, .. } = &nodes[0] else {
+            panic!("expected heading");
+        };
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Title plain"
         );
+        assert!(spans[0].bold, "UA heading weight must reach presentation");
+        assert!(spans[0].italic);
+        assert!(spans[0].monospace);
+        assert!(!spans[1].bold, "nested heading styles must be preserved");
+        assert!(style.font_size_multiplier.is_none());
         assert!(
-            matches!(&nodes[1], ContentNode::Heading { level: 2, text, style } if
-                text == "Subtitle" && style.font_size_multiplier == Some(0.625))
+            matches!(&nodes[1], ContentNode::Heading { level: 2, spans, style } if
+            spans[0].text == "Subtitle" && style.font_size_multiplier == Some(0.625))
         );
         assert!(
             matches!(&nodes[2], ContentNode::Heading { level: 3, style, .. } if
@@ -757,7 +774,8 @@ mod tests {
 
         let nodes = parse_chapter_xhtml(descendant_xhtml, "", &Default::default());
 
-        assert!(matches!(&nodes[0], ContentNode::Heading { text, .. } if text == "Visible"));
+        assert!(matches!(&nodes[0], ContentNode::Heading { spans, .. } if
+            spans.iter().map(|span| span.text.as_str()).collect::<String>() == "Visible"));
         assert!(matches!(&nodes[1], ContentNode::CodeBlock { code, .. } if code == "Visible"));
 
         let hidden_body = r#"<html><head><style>body { display: none; }</style></head>

@@ -613,7 +613,10 @@ fn estimated_epub_compact_node_height(
     let text_line_height = font_size * TEXT_LINE_HEIGHT;
     match node {
         ContentNode::Heading {
-            text, level, style, ..
+            spans,
+            level,
+            style,
+            ..
         } => {
             let heading_scale = match level {
                 1 => 2.0,
@@ -623,8 +626,8 @@ fn estimated_epub_compact_node_height(
                 _ => 1.0,
             };
             let style_scale = style.font_size_multiplier.unwrap_or(1.0);
-            let scale = heading_scale * style_scale;
-            wrapped(text.chars().count(), scale) * text_line_height * scale
+            let scale = heading_scale * style_scale * spans_font_scale(spans);
+            wrapped(spans_text_len(spans), scale) * text_line_height * scale
         }
         ContentNode::BlockQuote { children, .. } => {
             estimated_epub_blockquote_height(children, chars_per_line, lines_per_page, font_size)
@@ -670,7 +673,7 @@ pub(crate) fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) ->
 
 pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
     match node {
-        ContentNode::Heading { text, .. } => text.chars().count(),
+        ContentNode::Heading { spans, .. } => spans_text_len(spans),
         ContentNode::Paragraph(spans, _) => spans_text_len(spans),
         ContentNode::BlockQuote { children, .. } => children
             .iter()
@@ -947,7 +950,15 @@ mod tests {
         let nodes = vec![
             ContentNode::Heading {
                 level: 1,
-                text: "Previous chapter".to_string(),
+                spans: vec![shosai_core::epub::render::TextSpan {
+                    text: "Previous chapter".to_string(),
+                    bold: true,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
                 style: Default::default(),
             },
             paragraph("Previous summary", None),
@@ -1044,7 +1055,7 @@ mod tests {
 
         fn first_text(node: &ContentNode) -> &str {
             match node {
-                ContentNode::Heading { text, .. } => text,
+                ContentNode::Heading { spans, .. } => &spans[0].text,
                 ContentNode::Paragraph(spans, _) => &spans[0].text,
                 ContentNode::BlockQuote { children, .. } => first_text(&children[0]),
                 node => panic!("expected text content, got {node:?}"),
