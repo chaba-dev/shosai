@@ -3667,7 +3667,14 @@ fn render_content_node<'a>(
         } => {
             let size = epub_heading_font_size(*level, style, font_size);
             let align = node_style_to_alignment(style);
-            let heading = render_spans(spans, size, text_color, text_offset, highlights);
+            let heading = render_spans(
+                spans,
+                style.direction,
+                size,
+                text_color,
+                text_offset,
+                highlights,
+            );
             container(heading).width(Length::Fill).align_x(align).into()
         }
 
@@ -3677,7 +3684,14 @@ fn render_content_node<'a>(
                 .map(|m| font_size * m)
                 .unwrap_or(font_size);
             let align = node_style_to_alignment(style);
-            let rendered = render_spans(spans, size, text_color, text_offset, highlights);
+            let rendered = render_spans(
+                spans,
+                style.direction,
+                size,
+                text_color,
+                text_offset,
+                highlights,
+            );
             let mut c = container(rendered).width(Length::Fill).align_x(align);
             if let Some(margin) = style.margin_left_em {
                 c = c.padding(iced::Padding {
@@ -3722,6 +3736,7 @@ fn render_content_node<'a>(
                     "  \u{2022} ",
                     font_size * spans_font_scale(item_spans),
                     item_spans,
+                    shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
                     text_color,
                     item_offset,
@@ -3741,6 +3756,7 @@ fn render_content_node<'a>(
                     &num_text,
                     font_size * spans_font_scale(item_spans),
                     item_spans,
+                    shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
                     text_color,
                     item_offset,
@@ -4019,6 +4035,7 @@ const CURRENT_SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
 
 fn render_spans<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
+    direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
     text_color: iced::Color,
     text_offset: usize,
@@ -4028,6 +4045,7 @@ fn render_spans<'a>(
         "",
         font_size,
         spans,
+        direction,
         font_size,
         text_color,
         text_offset,
@@ -4035,16 +4053,20 @@ fn render_spans<'a>(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_spans_with_prefix<'a>(
     prefix: &str,
     prefix_font_size: f32,
     spans: &[shosai_core::epub::render::TextSpan],
+    direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
     text_color: iced::Color,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
+    let (isolate, pop_isolate) = text_direction_controls(direction);
+    rich_spans.push(span(isolate.to_string()).size(font_size));
     if !prefix.is_empty() {
         rich_spans.push(
             span(prefix.to_string())
@@ -4063,10 +4085,19 @@ fn render_spans_with_prefix<'a>(
         }
         span_offset += text_span.text.chars().count();
     }
+    rich_spans.push(span(pop_isolate.to_string()).size(font_size));
 
     rich_text(rich_spans)
         .on_link_click(Message::LinkClicked)
         .into()
+}
+
+fn text_direction_controls(direction: shosai_core::epub::style::TextDirection) -> (char, char) {
+    let isolate = match direction {
+        shosai_core::epub::style::TextDirection::Ltr => '\u{2066}',
+        shosai_core::epub::style::TextDirection::Rtl => '\u{2067}',
+    };
+    (isolate, '\u{2069}')
 }
 
 fn styled_epub_span<'a>(
@@ -7443,6 +7474,39 @@ mod tests {
         assert_eq!(overridden_font.family, iced::font::Family::Monospace);
         assert_eq!(overridden_font.weight, iced::font::Weight::Normal);
         assert_eq!(overridden_font.style, iced::font::Style::Italic);
+    }
+
+    #[test]
+    fn declared_rtl_direction_forces_bidi_shaping_when_text_starts_in_english() {
+        use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
+
+        let (isolate, pop_isolate) =
+            text_direction_controls(shosai_core::epub::style::TextDirection::Rtl);
+        let source = "English 123 עברית";
+        let shaped = format!("{isolate}{source}{pop_isolate}");
+        let mut font_system = crate::epub::text_shaping::font_system();
+        let mut buffer = Buffer::new(&mut font_system, Metrics::new(20.0, 28.0));
+        buffer.set_text(
+            &mut font_system,
+            &shaped,
+            &Attrs::new(),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut font_system, false);
+
+        let english = isolate.len_utf8()..isolate.len_utf8() + "English".len();
+        let english_levels = buffer
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter())
+            .filter(|glyph| glyph.start < english.end && glyph.end > english.start)
+            .map(|glyph| glyph.level.number())
+            .collect::<Vec<_>>();
+        assert!(!english_levels.is_empty());
+        assert!(
+            english_levels.iter().all(|level| *level == 2),
+            "English must be nested in the declared RTL embedding, got {english_levels:?}"
+        );
     }
 
     #[test]

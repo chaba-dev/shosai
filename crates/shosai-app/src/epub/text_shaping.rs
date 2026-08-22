@@ -43,7 +43,7 @@ struct ShapingEvidence {
     lines: Vec<LineEvidence>,
 }
 
-pub(super) fn font_system() -> FontSystem {
+pub(crate) fn font_system() -> FontSystem {
     let mut db = Database::new();
     for font in [INTER, INTER_ITALIC, NOTO_ARABIC, NOTO_HEBREW] {
         db.load_font_data(font.to_vec());

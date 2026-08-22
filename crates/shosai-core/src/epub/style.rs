@@ -30,6 +30,14 @@ pub enum TextAlignment {
     Justify,
 }
 
+/// Base text direction consumed by native reader widgets.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextDirection {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
 /// Admitted author stylesheets keyed by canonical archive path.
 #[derive(Debug, Clone, Default)]
 pub struct EpubStyles {

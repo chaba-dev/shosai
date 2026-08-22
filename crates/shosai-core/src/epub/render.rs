@@ -28,6 +28,8 @@ pub struct TextSpan {
 pub struct NodeStyle {
     /// Text alignment override.
     pub text_align: Option<super::style::TextAlignment>,
+    /// Base direction for native bidi shaping.
+    pub direction: super::style::TextDirection,
     /// Font size multiplier override.
     pub font_size_multiplier: Option<f32>,
     /// Left margin in em.
@@ -302,6 +304,10 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
             Alignment::Center => super::style::TextAlignment::Center,
             Alignment::Justify => super::style::TextAlignment::Justify,
         }),
+        direction: match css.direction {
+            Direction::Ltr => super::style::TextDirection::Ltr,
+            Direction::Rtl => super::style::TextDirection::Rtl,
+        },
         font_size_multiplier: ((font_size_multiplier - 1.0).abs() > f32::EPSILON)
             .then_some(font_size_multiplier),
         // A negative text indent commonly cancels the containing margin on
@@ -606,6 +612,20 @@ mod tests {
             matches!(&nodes[3], ContentNode::Heading { level: 4, style, .. } if
             style.font_size_multiplier.is_none())
         );
+    }
+
+    #[test]
+    fn declared_block_direction_reaches_native_presentation() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html><body><p dir="rtl">English 123 עברית</p></body></html>"#,
+            "",
+            &Default::default(),
+        );
+        let ContentNode::Paragraph(_, style) = &nodes[0] else {
+            panic!("expected paragraph");
+        };
+
+        assert_eq!(style.direction, super::super::style::TextDirection::Rtl);
     }
 
     #[test]
