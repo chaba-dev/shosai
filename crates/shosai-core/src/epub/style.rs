@@ -199,6 +199,14 @@ fn normalized_media(source: &str) -> Option<String> {
 
 fn normalized_css(source: &str) -> Option<String> {
     let sheet = StyleSheet::parse(source, ParserOptions::default()).ok()?;
+    if sheet
+        .rules
+        .0
+        .iter()
+        .any(|rule| matches!(rule, CssRule::Namespace(namespace) if namespace.prefix.is_none()))
+    {
+        return None;
+    }
     let mut normalized = String::new();
     for rule in &sheet.rules.0 {
         if matches!(rule, CssRule::Import(_) | CssRule::Namespace(_)) {
@@ -298,6 +306,16 @@ mod tests {
                 .document_css(&document, "OEBPS/Text", &EpubLimits::default())
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn default_namespaces_cannot_broaden_retained_type_selectors() {
+        let css = r#"@namespace "http://www.w3.org/2000/svg"; a { display: none; }"#;
+
+        assert!(
+            normalized_css(css).is_none(),
+            "a stylesheet with a default namespace must be ignored until matching is namespace-aware"
         );
     }
 

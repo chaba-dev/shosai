@@ -609,6 +609,26 @@ mod tests {
     }
 
     #[test]
+    fn default_namespace_stylesheets_cannot_hide_xhtml_with_svg_type_selectors() {
+        let nodes = parse_chapter_xhtml(
+            r#"<html xmlns="http://www.w3.org/1999/xhtml"><head><style>
+                @namespace "http://www.w3.org/2000/svg";
+                a { display: none; }
+            </style></head><body>
+                <p><a href="chapter.xhtml">Visible XHTML link</a></p>
+                <svg xmlns="http://www.w3.org/2000/svg"><a>SVG link</a></svg>
+            </body></html>"#,
+            "",
+            &Default::default(),
+        );
+
+        assert!(
+            crate::search::extract_text_from_nodes(&nodes).contains("Visible XHTML link"),
+            "unsupported default namespaces must fail soft instead of broadening selectors"
+        );
+    }
+
+    #[test]
     fn test_parse_bold_italic() {
         let xhtml =
             r#"<html><body><p>Normal <strong>bold</strong> and <em>italic</em></p></body></html>"#;
