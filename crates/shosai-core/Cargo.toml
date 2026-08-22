@@ -21,6 +21,7 @@ lightningcss = { version = "1.0.0-alpha.71", default-features = false }
 cssparser = "0.33.0"
 brotli-decompressor = "=5.0.3"
 fontdb = "0.23.0"
+cosmic-text = "=0.15.0"
 wuff = { version = "=0.2.8", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["default-formats"] }
 natord = "1.0.9"
