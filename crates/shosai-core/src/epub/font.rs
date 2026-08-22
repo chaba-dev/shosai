@@ -795,6 +795,29 @@ mod tests {
             .unwrap();
         assert_ne!(first_hash, second_hash);
 
+        let first_source = match &first
+            .database
+            .face(first.registered_ids[0])
+            .expect("registered face must remain in its book database")
+            .source
+        {
+            Source::Binary(bytes) => Arc::downgrade(bytes),
+            _ => panic!("book fonts must use in-memory binary sources"),
+        };
+        drop(first);
+        assert!(
+            first_source.upgrade().is_none(),
+            "dropping one book must release its decoded font source"
+        );
+        assert_eq!(second.registered_face_count(), 1);
+        assert_eq!(
+            second
+                .with_face_data(0, |bytes, _| sha2::Sha256::digest(bytes))
+                .unwrap(),
+            second_hash,
+            "dropping one book must not disturb another book's same-family face"
+        );
+
         let exhausted = font_book(
             &css,
             &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
