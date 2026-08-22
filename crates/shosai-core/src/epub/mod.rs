@@ -16,12 +16,17 @@ mod types;
 
 mod computed_style;
 mod limits;
+mod native_text;
 
 pub use font::{
     EpubFontAttempt, EpubFontBook, EpubFontFace, EpubFontFormat, EpubFontStyle, EpubFontWeight,
     EpubRejectedFontFace,
 };
 pub use limits::EpubLimits;
+pub use native_text::{
+    EPUB_TEXT_MAX_SCALARS, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextHit,
+    EpubTextLayout, EpubTextLine, EpubTextRect, EpubTextRequest, EpubTextRun,
+};
 pub use parser::EpubDoc;
 pub use presentation::{EpubChapterPresentation, EpubPresentation};
 pub use resource::{CanonicalEpubPath, EpubReference};

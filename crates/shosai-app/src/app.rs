@@ -16,6 +16,9 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::epub::render::ContentNode;
+use shosai_core::epub::{
+    EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextRequest, EpubTextRun,
+};
 use shosai_core::library::{Book, BookPage, Library};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -1556,6 +1559,7 @@ fn paginate_epub_document(
                 font_size,
                 line_spacing,
                 page_size,
+                Some(document.fonts()),
                 &mut budget,
             )
             .into_iter()
@@ -3373,6 +3377,8 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             false,
                             text_offset,
                             &highlights,
+                            Some(doc.fonts()),
+                            state.window_scale_factor,
                         ))
                         .id(continuous_epub_node_id(
                             tab_id,
@@ -3556,6 +3562,10 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     let mut spread = row![].spacing(PAGE_GUTTER).height(Length::Fill);
     let visible_pages = epub_visible_pages(state);
     let text_width = epub_page_size(state).width;
+    let fonts = match &state.document {
+        Some(OpenDocument::Epub(doc)) => Some(doc.fonts()),
+        _ => None,
+    };
 
     for (visible_index, page_index) in visible_pages.iter().enumerate() {
         let epub_page = &state.epub_pages[*page_index];
@@ -3581,6 +3591,8 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 true,
                 page_node.text_offset,
                 &highlights,
+                fonts,
+                state.window_scale_factor,
             ));
         }
         if !image_only {
@@ -3658,6 +3670,8 @@ fn render_content_node<'a>(
     fill_images: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
+    fonts: Option<&'a EpubFontBook>,
+    scale: f32,
 ) -> Element<'a, Message> {
     match node {
         ContentNode::Heading {
@@ -3674,6 +3688,9 @@ fn render_content_node<'a>(
                 text_color,
                 text_offset,
                 highlights,
+                fonts,
+                scale,
+                style.text_align,
             );
             container(heading).width(Length::Fill).align_x(align).into()
         }
@@ -3691,6 +3708,9 @@ fn render_content_node<'a>(
                 text_color,
                 text_offset,
                 highlights,
+                fonts,
+                scale,
+                style.text_align,
             );
             let mut c = container(rendered).width(Length::Fill).align_x(align);
             if let Some(margin) = style.margin_left_em {
@@ -3715,6 +3735,8 @@ fn render_content_node<'a>(
                     fill_images,
                     child_offset,
                     highlights,
+                    fonts,
+                    scale,
                 ));
                 child_offset += content_node_text_len(child) + 1;
             }
@@ -3741,6 +3763,9 @@ fn render_content_node<'a>(
                     text_color,
                     item_offset,
                     highlights,
+                    fonts,
+                    scale,
+                    None,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -3761,6 +3786,9 @@ fn render_content_node<'a>(
                     text_color,
                     item_offset,
                     highlights,
+                    fonts,
+                    scale,
+                    None,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -4033,6 +4061,7 @@ const CURRENT_SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
     a: 0.82,
 };
 
+#[allow(clippy::too_many_arguments)]
 fn render_spans<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
     direction: shosai_core::epub::style::TextDirection,
@@ -4040,6 +4069,9 @@ fn render_spans<'a>(
     text_color: iced::Color,
     text_offset: usize,
     highlights: &[SearchHighlight],
+    fonts: Option<&'a EpubFontBook>,
+    scale: f32,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
 ) -> Element<'a, Message> {
     render_spans_with_prefix(
         "",
@@ -4050,6 +4082,9 @@ fn render_spans<'a>(
         text_color,
         text_offset,
         highlights,
+        fonts,
+        scale,
+        alignment,
     )
 }
 
@@ -4063,7 +4098,89 @@ fn render_spans_with_prefix<'a>(
     text_color: iced::Color,
     text_offset: usize,
     highlights: &[SearchHighlight],
+    fonts: Option<&'a EpubFontBook>,
+    scale: f32,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
 ) -> Element<'a, Message> {
+    if let Some(fonts) = fonts.filter(|fonts| crate::epub::uses_native_fonts(fonts, spans)) {
+        let rgba = |color: iced::Color| {
+            [
+                (color.r * 255.0).round() as u8,
+                (color.g * 255.0).round() as u8,
+                (color.b * 255.0).round() as u8,
+                (color.a * 255.0).round() as u8,
+            ]
+        };
+        let prefix_scalars = prefix.chars().count();
+        let mut runs = Vec::with_capacity(spans.len() + usize::from(!prefix.is_empty()));
+        if !prefix.is_empty() {
+            runs.push(EpubTextRun {
+                text: prefix.to_owned(),
+                family: None,
+                monospace: false,
+                font_size: prefix_font_size,
+                bold: false,
+                italic: false,
+                foreground: rgba(text_color),
+                link: None,
+            });
+        }
+        runs.extend(spans.iter().map(|span| EpubTextRun {
+            text: span.text.clone(),
+            family: span.font_family.as_deref().map(str::to_owned),
+            monospace: span.monospace,
+            font_size: epub_span_size(font_size, span),
+            bold: span.bold,
+            italic: span.italic,
+            foreground: rgba(if span.link.is_some() {
+                LINK_COLOR
+            } else {
+                text_color
+            }),
+            link: span.link.clone(),
+        }));
+        let text_len = spans_text_len(spans);
+        let native_highlights = highlights
+            .iter()
+            .filter_map(|highlight| {
+                let start = highlight.start.max(text_offset);
+                let end = highlight.end.min(text_offset + text_len);
+                (start < end).then(|| EpubTextHighlight {
+                    scalars: prefix_scalars + start - text_offset
+                        ..prefix_scalars + end - text_offset,
+                    color: rgba(if highlight.current {
+                        CURRENT_SEARCH_HIGHLIGHT_COLOR
+                    } else {
+                        SEARCH_HIGHLIGHT_COLOR
+                    }),
+                })
+            })
+            .collect();
+        let line_height = runs
+            .iter()
+            .map(|run| run.font_size)
+            .fold(font_size, f32::max)
+            * crate::epub::TEXT_LINE_HEIGHT;
+        let request = EpubTextRequest {
+            runs,
+            max_width: 1.0,
+            line_height,
+            scale: scale.max(0.1),
+            align: match alignment {
+                Some(shosai_core::epub::style::TextAlignment::Center) => EpubTextAlign::Center,
+                Some(shosai_core::epub::style::TextAlignment::Right) => EpubTextAlign::Right,
+                Some(shosai_core::epub::style::TextAlignment::Justify) => EpubTextAlign::Justified,
+                _ => EpubTextAlign::Left,
+            },
+            direction: match direction {
+                shosai_core::epub::style::TextDirection::Ltr => EpubTextDirection::LeftToRight,
+                shosai_core::epub::style::TextDirection::Rtl => EpubTextDirection::RightToLeft,
+            },
+            highlights: native_highlights,
+        };
+        return crate::epub::native_text::native_text(fonts, request, Message::LinkClicked);
+    }
+
     let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
     let (isolate, pop_isolate) = text_direction_controls(direction);
     rich_spans.push(span(isolate.to_string()).size(font_size));
@@ -7220,6 +7337,8 @@ mod tests {
             false,
             0,
             &[],
+            None,
+            1.0,
         ));
         cache_epub_image_handles(&mut handles, &nodes, &|path| {
             resources.get(path).map(Vec::as_slice)
@@ -7233,6 +7352,8 @@ mod tests {
             false,
             0,
             &[],
+            None,
+            1.0,
         ));
 
         assert_eq!(handles.get("image.png").unwrap().0.id(), first_id);

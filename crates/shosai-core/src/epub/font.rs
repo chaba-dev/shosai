@@ -5,7 +5,8 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     io::Read,
-    sync::Arc,
+    sync::atomic::{AtomicU64, Ordering as AtomicOrdering},
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Result;
@@ -24,6 +25,7 @@ use unicode_casefold::UnicodeCaseFold;
 use super::{CanonicalEpubPath, Chapter, EpubLimits, style::EpubStyles, types::StoredEpubResource};
 
 const MAX_DIAGNOSTIC_LABEL_BYTES: usize = 256;
+static NEXT_NATIVE_TEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EpubFontFormat {
@@ -113,6 +115,8 @@ pub struct EpubFontBook {
     rejected_faces: Vec<EpubRejectedFontFace>,
     chapter_families: HashMap<String, HashSet<String>>,
     decoded_bytes: usize,
+    native_text_id: u64,
+    pub(super) native: Mutex<super::native_text::NativeTextState>,
 }
 
 impl fmt::Debug for EpubFontBook {
@@ -140,6 +144,10 @@ impl EpubFontBook {
     }
     pub fn registered_face_count(&self) -> usize {
         self.database.len()
+    }
+    /// Stable per-book identity for renderer cache isolation.
+    pub fn native_text_id(&self) -> u64 {
+        self.native_text_id
     }
     /// Borrow one admitted decoded sfnt face without exposing the book-local database.
     pub fn with_face_data<T>(&self, index: usize, read: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
@@ -172,6 +180,8 @@ impl EpubFontBook {
             rejected_faces: Vec::new(),
             chapter_families: HashMap::new(),
             decoded_bytes: 0,
+            native_text_id: NEXT_NATIVE_TEXT_ID.fetch_add(1, AtomicOrdering::Relaxed),
+            native: Mutex::new(super::native_text::NativeTextState::empty()),
         };
         let mut inspected = HashMap::<Descriptor, bool>::new();
         let mut descriptor_limit_reported = false;
@@ -251,6 +261,11 @@ impl EpubFontBook {
                 }
             }
         }
+        book.native = Mutex::new(super::native_text::NativeTextState::new(
+            &book.database,
+            &book.registered_ids,
+            &book.faces,
+        ));
         Ok(book)
     }
 
@@ -829,6 +844,9 @@ mod tests {
     const BOOK_A_WOFF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.woff");
     const BOOK_A_WOFF2: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-a.woff2");
     const BOOK_B_TTF: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/epub/book-b.ttf");
+    const INTER: &[u8] = include_bytes!("../../../shosai-app/tests/fonts/InterVariable.ttf");
+    const INTER_ITALIC: &[u8] =
+        include_bytes!("../../../shosai-app/tests/fonts/InterVariable-Italic.ttf");
     const FAMILY: &str = "Shosai EPUB Fixture";
 
     fn font_book(
@@ -868,7 +886,293 @@ mod tests {
     }
 
     #[test]
+    fn native_layout_is_book_local_bounded_and_retains_unicode_hits() {
+        use super::super::{
+            EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextRequest, EpubTextRun,
+        };
+
+        let css = r#"@font-face { font-family: "Straße"; src: url("../fonts/book.ttf") format("truetype"); }"#;
+        let a = font_book(
+            css,
+            &[("OPS/fonts/book.ttf", INTER)],
+            EpubLimits::default(),
+            1,
+        );
+        let b = font_book(
+            css,
+            &[("OPS/fonts/book.ttf", INTER_ITALIC)],
+            EpubLimits::default(),
+            1,
+        );
+        assert_ne!(a.native_text_id(), b.native_text_id());
+        let a_name = a
+            .native
+            .lock()
+            .unwrap()
+            .matched_postscript_name("Straße", fontdb::Style::Normal)
+            .unwrap()
+            .to_owned();
+        let b_name = b
+            .native
+            .lock()
+            .unwrap()
+            .matched_postscript_name("Straße", fontdb::Style::Normal)
+            .unwrap()
+            .to_owned();
+        assert_ne!(a_name, b_name);
+        let variants = font_book(
+            r#"
+                @font-face { font-family: "Book"; src: url("../fonts/regular.ttf"); }
+                @font-face { font-family: "book"; font-style: italic; src: url("../fonts/italic.ttf"); }
+            "#,
+            &[
+                ("OPS/fonts/regular.ttf", INTER),
+                ("OPS/fonts/italic.ttf", INTER_ITALIC),
+            ],
+            EpubLimits::default(),
+            1,
+        );
+        assert_eq!(
+            variants
+                .native
+                .lock()
+                .unwrap()
+                .matched_postscript_name("BOOK", fontdb::Style::Italic),
+            Some("InterVariableItalic")
+        );
+        let request = EpubTextRequest {
+            runs: vec![
+                EpubTextRun {
+                    text: "AB\nAB ".into(),
+                    family: Some("STRASSE".into()),
+                    monospace: false,
+                    font_size: 28.0,
+                    bold: false,
+                    italic: false,
+                    foreground: [10, 20, 30, 255],
+                    link: Some("chapter.xhtml#target".into()),
+                },
+                EpubTextRun {
+                    text: "é שלום".into(),
+                    family: None,
+                    monospace: false,
+                    font_size: 28.0,
+                    bold: false,
+                    italic: false,
+                    foreground: [10, 20, 30, 255],
+                    link: Some("chapter.xhtml#unicode".into()),
+                },
+            ],
+            max_width: 300.0,
+            line_height: 36.0,
+            scale: 1.0,
+            align: EpubTextAlign::Left,
+            direction: EpubTextDirection::RightToLeft,
+            highlights: vec![EpubTextHighlight {
+                scalars: 6..7,
+                color: [255, 255, 0, 255],
+            }],
+        };
+        let first = a.layout_text(&request).unwrap();
+        assert!(
+            first
+                .lines
+                .iter()
+                .any(|line| line.rgba.iter().any(|v| *v != 0))
+        );
+        assert!(first.links.iter().any(|hit| hit.scalars.start == 0));
+        assert!(first.links.iter().all(|hit| hit.scalars.end <= 12));
+        assert_eq!(first.lines.len(), 2);
+        assert_eq!(first.lines[0].scalars, 0..3);
+        assert_eq!(first.lines[1].scalars, 3..12);
+        assert!(
+            first
+                .lines
+                .iter()
+                .all(|line| line.rgba.iter().any(|value| *value != 0)),
+            "every visual line must rasterize into its own local bitmap"
+        );
+        assert!(first.lines.iter().any(|line| {
+            line.rgba
+                .chunks_exact(4)
+                .any(|pixel| pixel[0] > 200 && pixel[1] > 200 && pixel[3] > 0)
+        }));
+        drop(a);
+        let second = b.layout_text(&request).unwrap();
+        assert!(second.lines[0].rgba.iter().any(|value| *value != 0));
+        assert_ne!(
+            first.lines[0].rgba, second.lines[0].rgba,
+            "same CSS alias in two books must retain each book's distinct glyph raster"
+        );
+
+        let mut separator = request.clone();
+        separator.runs = vec![EpubTextRun {
+            text: "A\u{2029}B".into(),
+            family: Some("STRASSE".into()),
+            monospace: false,
+            font_size: 28.0,
+            bold: false,
+            italic: false,
+            foreground: [10, 20, 30, 255],
+            link: None,
+        }];
+        separator.direction = EpubTextDirection::LeftToRight;
+        separator.highlights.clear();
+        let separated = b.layout_text(&separator).unwrap();
+        assert_eq!(
+            separated
+                .lines
+                .iter()
+                .map(|line| line.scalars.clone())
+                .collect::<Vec<_>>(),
+            vec![0..2, 2..3]
+        );
+        assert!(
+            separated
+                .lines
+                .iter()
+                .all(|line| line.rgba.iter().any(|value| *value != 0))
+        );
+
+        let mut invalid = request.clone();
+        invalid.scale = f32::NAN;
+        assert!(b.layout_text(&invalid).is_err());
+        invalid.scale = 1.0;
+        invalid.max_width = 1_000_000.0;
+        invalid.line_height = 1_000_000.0;
+        assert!(b.layout_text(&invalid).is_err());
+    }
+
+    #[test]
+    fn native_raster_cache_does_not_grow_across_requests() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", INTER)],
+            EpubLimits::default(),
+            1,
+        );
+        for size in 10..40 {
+            book.layout_text(&EpubTextRequest {
+                runs: vec![EpubTextRun {
+                    text: "Retained glyph bitmap".into(),
+                    family: Some("Book".into()),
+                    monospace: false,
+                    font_size: size as f32,
+                    bold: false,
+                    italic: false,
+                    foreground: [0, 0, 0, 255],
+                    link: None,
+                }],
+                max_width: 500.0,
+                line_height: 48.0,
+                scale: 1.0,
+                align: EpubTextAlign::Left,
+                direction: EpubTextDirection::LeftToRight,
+                highlights: Vec::new(),
+            })
+            .unwrap();
+        }
+        assert_eq!(
+            book.native.lock().unwrap().retained_raster_image_count(),
+            0,
+            "per-book state must not retain glyph images across raster requests"
+        );
+    }
+
+    #[test]
+    fn native_layout_bounds_input_and_forces_each_paragraph_direction() {
+        use super::super::{
+            EPUB_TEXT_MAX_SCALARS, EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun,
+        };
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", INTER)],
+            EpubLimits::default(),
+            1,
+        );
+        let request = |text: String| EpubTextRequest {
+            runs: vec![EpubTextRun {
+                text,
+                family: Some("Book".into()),
+                monospace: false,
+                font_size: 20.0,
+                bold: false,
+                italic: false,
+                foreground: [0, 0, 0, 255],
+                link: Some("target".into()),
+            }],
+            max_width: 400.0,
+            line_height: 28.0,
+            scale: 1.0,
+            align: EpubTextAlign::Left,
+            direction: EpubTextDirection::RightToLeft,
+            highlights: Vec::new(),
+        };
+        let layout = book.layout_text(&request("אבג\nABC".into())).unwrap();
+        assert_eq!(layout.lines.len(), 2);
+        assert!(layout.lines.iter().all(|line| line.rtl));
+        assert_eq!(layout.lines[0].scalars, 0..4);
+        assert_eq!(layout.lines[1].scalars, 4..7);
+        assert!(layout.links.iter().all(|hit| hit.scalars.end <= 7));
+
+        assert!(
+            book.measure_text(&request("x".repeat(EPUB_TEXT_MAX_SCALARS + 1)))
+                .is_err()
+        );
+        assert!(
+            book.measure_text(&request("\n".repeat(4 * 1024 + 1)))
+                .is_err(),
+            "paragraph splitting must be bounded before allocating child requests"
+        );
+    }
+
+    #[test]
+    fn static_regular_face_synthesizes_requested_bold() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
+        let book = font_book(
+            r#"@font-face { font-family: "Book"; font-weight: 400; src: url("../fonts/book.ttf"); }"#,
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+        let request = |bold| EpubTextRequest {
+            runs: vec![EpubTextRun {
+                text: "Static face".into(),
+                family: Some("Book".into()),
+                monospace: false,
+                font_size: 32.0,
+                bold,
+                italic: false,
+                foreground: [0, 0, 0, 255],
+                link: None,
+            }],
+            max_width: 300.0,
+            line_height: 40.0,
+            scale: 1.0,
+            align: EpubTextAlign::Left,
+            direction: EpubTextDirection::LeftToRight,
+            highlights: Vec::new(),
+        };
+        let regular = book.layout_text(&request(false)).unwrap();
+        let bold = book.layout_text(&request(true)).unwrap();
+        let opacity = |layout: &super::super::EpubTextLayout| {
+            layout.lines[0]
+                .rgba
+                .chunks_exact(4)
+                .map(|pixel| u64::from(pixel[3]))
+                .sum::<u64>()
+        };
+        assert!(opacity(&bold) > opacity(&regular));
+    }
+
+    #[test]
     fn ttf_otf_woff_and_woff2_are_admitted_into_book_local_databases() {
+        use super::super::{EpubTextAlign, EpubTextDirection, EpubTextRequest, EpubTextRun};
+
         for (path, format, bytes, expected) in [
             (
                 "book-a.ttf",
@@ -899,6 +1203,33 @@ mod tests {
             assert_eq!(book.faces()[0].weight.min(), 700.0, "{path}");
             assert_eq!(book.faces()[0].weight.max(), 700.0, "{path}");
             assert!(book.with_face_data(0, |data, _| !data.is_empty()).unwrap());
+            let layout = book
+                .layout_text(&EpubTextRequest {
+                    runs: vec![EpubTextRun {
+                        text: "AB".into(),
+                        family: Some(FAMILY.into()),
+                        monospace: false,
+                        font_size: 28.0,
+                        bold: true,
+                        italic: true,
+                        foreground: [20, 30, 40, 255],
+                        link: None,
+                    }],
+                    max_width: 120.0,
+                    line_height: 36.0,
+                    scale: 1.0,
+                    align: EpubTextAlign::Left,
+                    direction: EpubTextDirection::LeftToRight,
+                    highlights: Vec::new(),
+                })
+                .unwrap_or_else(|error| panic!("{path} failed native rendering: {error:#}"));
+            assert!(
+                layout
+                    .lines
+                    .iter()
+                    .any(|line| line.rgba.iter().any(|value| *value != 0)),
+                "{path} produced no embedded-font pixels"
+            );
         }
     }
 

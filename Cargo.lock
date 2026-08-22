@@ -5114,6 +5114,7 @@ dependencies = [
  "anyhow",
  "brotli-decompressor",
  "bytes",
+ "cosmic-text",
  "cssparser 0.33.0",
  "flate2",
  "fontdb",

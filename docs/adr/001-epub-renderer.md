@@ -601,21 +601,44 @@ the same alias, and releasing one book's binary source without disturbing the
 other. The old test-only loading adapter was removed after this production
 admission path superseded its evidence.
 
-Admission does not yet mean displayed glyph consumption. Iced 0.14 loads font
-bytes into a process-global renderer database, requires `&'static str` for named
-families, and exposes no unload operation.  Shōsai retains several live EPUB
-tabs, so global loading would leak bytes and aliases until process exit and
-would not isolate same-family declarations.  Iced's raw cosmic-text primitive
-does not solve this: both WGPU and Tiny Skia rasterize raw buffers against the
-same global font system, so IDs shaped by a private database are unsafe there.
+Iced 0.14 still cannot own these fonts safely: it loads font bytes into a
+process-global renderer database, requires `&'static str` for named families,
+and exposes no unload operation.  The production native path therefore keeps a
+private cosmic-text font system and Swash scaler in each `EpubFontBook`, but
+rasterizes glyph images through the uncached API so bitmap variants cannot
+accumulate for the lifetime of an open book. Each
+Unicode-caseless CSS alias maps to a collision-checked synthetic family that is
+visible only in that private database, preventing installed fonts or another
+open book from capturing the alias. System faces remain available solely for
+missing-glyph and non-embedded-run fallback.
 
-Consequently M2 is split. M2a owns bounded admission, alias metadata, and book
-lifecycle and is complete.  M2b must make a per-book native path own shaping,
-measurement, rasterization, and caching together.  Its metrics must also drive
-pagination, while logical source ranges continue to support link hit-testing
-and search highlights.  Until M2b lands, production rendering deliberately
-uses its readable system-font fallback and must not claim that embedded font
-bytes, aliases, variants, or metrics are rendered.
+The core shapes rich runs with advanced bidi shaping and word-or-glyph wrapping,
+applies the requested base direction independently to every bidi paragraph,
+retains contiguous Unicode-scalar line partitions and link rectangles, and can
+either measure or produce bounded transparent RGBA line images. Italic matching
+prefers an admitted italic face, then a real oblique face, then synthesizes from
+normal; a static face whose admitted weight range excludes bold receives a
+bounded one-pixel raster emboldening. Native requests stop at 65,536 Unicode
+scalars and 4,096 bidi paragraphs. Pagination shapes at most 4,096 scalars per
+chunk and adapts later windows to the preceding page fragment instead of
+repeatedly shaping an entire remaining suffix. A cumulative per-paragraph work
+budget falls back transactionally to heuristic pagination on exhaustion. The app uses the same
+measurements for pagination and remeasures every selected page fragment in the
+exact context that it renders, avoiding contextual-script and wrap changes
+between a full paragraph and its page slices. Search highlights are painted by
+logical scalar intersection before glyph rasterization.
+
+An Iced widget measures eagerly but rasterizes only after viewport intersection.
+Its tree cache is keyed by the per-book identity and the complete request; owned
+image handles and their pixel permit disappear when that tree or book is
+replaced. A shared per-book 16-million-pixel retained-raster budget prevents a
+continuous document from multiplying the per-call ceiling. Successful native
+measurement owns widget height so rendered geometry matches pagination. If
+native shaping fails, the widget uses Iced's measured system layout; if late
+raster admission fails, it draws each native line as nonwrapping system text in
+the already paginated line bounds rather than clipping a differently wrapped
+paragraph. No embedded bytes, aliases, or shaped font IDs enter Iced's global
+font system.
 
 These are byte-stream and retained-output limits, not a total allocator or CPU
 ceiling.  Brotli and transformed-glyph decoding can allocate scratch space;
