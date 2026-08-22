@@ -651,6 +651,12 @@ fn validate_spine_size(spine_ids: &[String], limits: &EpubLimits) -> Result<()> 
             limits.max_spine_items
         );
     }
+    let mut unique = HashSet::with_capacity(spine_ids.len());
+    for id in spine_ids {
+        if !unique.insert(id) {
+            anyhow::bail!("EPUB contains duplicate spine reference: {id}");
+        }
+    }
     Ok(())
 }
 
@@ -1185,16 +1191,9 @@ mod tests {
         </package>"#;
         let (_, _, spine) = parse_opf(opf, "OEBPS").unwrap();
         assert_eq!(spine, ["chapter", "chapter"]);
-        let error = validate_spine_size(
-            &spine,
-            &EpubLimits {
-                max_spine_items: 1,
-                ..EpubLimits::default()
-            },
-        )
-        .unwrap_err();
+        let error = validate_spine_size(&spine, &EpubLimits::default()).unwrap_err();
 
-        assert!(error.to_string().contains("spine exceeds item limit"));
+        assert!(error.to_string().contains("duplicate spine reference"));
     }
 
     #[test]
