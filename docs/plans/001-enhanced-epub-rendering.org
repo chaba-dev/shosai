@@ -308,10 +308,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   relative inline font sizes into native rendering and pagination.  Module docs
   list the exact selector/property surface and fail-soft exclusions.  CSS
   resource, selection, complexity, and matching budgets reject work beyond the
-  configured admission boundary; bounded ~@import~ resolution remains the next
-  separate M1 item.
-- [ ] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
-  with cycle, depth, origin, and size limits.
+  configured admission boundary.
+- [X] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
+  with cycle, depth, origin, and size limits.  Imports now retain owner-relative
+  source order and media conditions while sharing per-document application and
+  selected-byte budgets; cycles stop at the active edge and excessive nesting
+  rejects the document.  Supported resource URLs are rewritten to canonical
+  isolated-book URIs before the owning stylesheet path is discarded.
 
 ** M2 — Embedded Fonts and ~@font-face~
 
