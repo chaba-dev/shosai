@@ -892,9 +892,6 @@ pub(crate) mod text_shaping;
 mod table_layout;
 
 #[cfg(test)]
-mod font_loading;
-
-#[cfg(test)]
 mod math_layout;
 
 #[cfg(test)]

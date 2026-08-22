@@ -5083,15 +5083,12 @@ name = "shosai-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "brotli-decompressor",
  "bytes",
  "cosmic-text",
- "flate2",
  "fluent-templates",
  "gtk",
  "iced",
  "image",
- "lightningcss",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
@@ -5107,7 +5104,6 @@ dependencies = [
  "unic-langid",
  "winit",
  "wry",
- "wuff",
  "x11-dl",
 ]
 
