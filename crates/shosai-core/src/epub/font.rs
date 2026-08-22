@@ -730,6 +730,113 @@ mod tests {
     }
 
     #[test]
+    fn later_src_descriptor_replaces_earlier_sources() {
+        let css = format!(
+            r#"@font-face {{
+                font-family: "{FAMILY}";
+                src: url("../fonts/old.ttf") format("truetype");
+                src: url("../fonts/current.ttf") format("truetype");
+            }}"#
+        );
+        let book = font_book(
+            &css,
+            &[
+                ("OPS/fonts/old.ttf", BOOK_A_TTF),
+                ("OPS/fonts/current.ttf", BOOK_B_TTF),
+            ],
+            EpubLimits::default(),
+            1,
+        );
+
+        assert_eq!(book.len(), 1);
+        assert_eq!(book.faces()[0].path.as_str(), "OPS/fonts/current.ttf");
+        assert_eq!(book.faces()[0].attempts.len(), 1);
+    }
+
+    #[test]
+    fn matching_member_of_mixed_media_list_admits_font_face() {
+        let css = format!(
+            r#"@media screen, (min-width: 1px) {{ {} }}"#,
+            one_face("book.ttf", "truetype")
+        );
+        let book = font_book(
+            &css,
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits::default(),
+            1,
+        );
+
+        assert_eq!(book.len(), 1, "{:?}", book.rejected_faces());
+    }
+
+    #[test]
+    fn rejected_face_does_not_consume_admitted_face_budget() {
+        let css = format!(
+            r#"@font-face {{ font-family: "Missing"; src: url("../fonts/missing.ttf"); }}
+                {}"#,
+            one_face("book.ttf", "truetype")
+        );
+        let book = font_book(
+            &css,
+            &[("OPS/fonts/book.ttf", BOOK_A_TTF)],
+            EpubLimits {
+                max_font_faces_per_book: 1,
+                ..EpubLimits::default()
+            },
+            1,
+        );
+
+        assert_eq!(book.len(), 1, "{:?}", book.rejected_faces());
+        assert_eq!(book.faces()[0].family, FAMILY);
+    }
+
+    #[test]
+    fn admitted_aliases_remain_scoped_to_their_chapter_stylesheets() {
+        let declaring_css = one_face("book.ttf", "truetype");
+        let other_css = format!(r#"p {{ font-family: "{FAMILY}"; }}"#);
+        let styles = EpubStyles::parse([
+            ("OPS/styles/declaring.css", declaring_css.as_str()),
+            ("OPS/styles/other.css", other_css.as_str()),
+        ]);
+        let chapters = [
+            Chapter {
+                index: 0,
+                title: None,
+                path: "OPS/Text/declaring.xhtml".into(),
+                content: r#"<html><head><link rel="stylesheet" href="../styles/declaring.css"/></head><body><p>Declared</p></body></html>"#.into(),
+            },
+            Chapter {
+                index: 1,
+                title: None,
+                path: "OPS/Text/other.xhtml".into(),
+                content: r#"<html><head><link rel="stylesheet" href="../styles/other.css"/></head><body><p>Fallback</p></body></html>"#.into(),
+            },
+        ];
+        let resources = HashMap::from([(
+            CanonicalEpubPath::new("OPS/fonts/book.ttf").unwrap(),
+            StoredEpubResource {
+                media_type: "font/ttf".into(),
+                bytes: BOOK_A_TTF.to_vec(),
+            },
+        )]);
+        let limits = EpubLimits::default();
+        let fonts = EpubFontBook::new(&chapters, &styles, &resources, &limits).unwrap();
+        let nodes = super::super::render::parse_chapter_xhtml_at_path_with_limits(
+            &chapters[1].content,
+            &chapters[1].path,
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .unwrap();
+        let super::super::render::ContentNode::Paragraph(spans, _) = &nodes[0] else {
+            panic!("fixture paragraph must be retained");
+        };
+
+        assert_eq!(spans[0].font_family, None);
+    }
+
+    #[test]
     fn malformed_mismatched_format_and_decoded_limits_fail_closed() {
         let mismatch = font_book(
             &one_face("book-a.ttf", "opentype"),
@@ -764,6 +871,45 @@ mod tests {
             1,
         );
         assert!(bounded.is_empty());
+    }
+
+    #[test]
+    fn encoded_table_and_corrupt_font_limits_report_rejection_reasons() {
+        for (limits, bytes, expected) in [
+            (
+                EpubLimits {
+                    max_font_bytes: (BOOK_A_TTF.len() - 1) as u64,
+                    ..EpubLimits::default()
+                },
+                BOOK_A_TTF,
+                "encoded font exceeds the input limit",
+            ),
+            (
+                EpubLimits {
+                    max_font_tables: 1,
+                    ..EpubLimits::default()
+                },
+                BOOK_A_TTF,
+                "font table count exceeds the limit",
+            ),
+            (
+                EpubLimits::default(),
+                b"corrupt font",
+                "unsupported font signature",
+            ),
+        ] {
+            let book = font_book(
+                &one_face("book.ttf", "truetype"),
+                &[("OPS/fonts/book.ttf", bytes)],
+                limits,
+                1,
+            );
+            assert!(book.is_empty());
+            assert!(matches!(
+                book.rejected_faces()[0].attempts.as_slice(),
+                [EpubFontAttempt::Rejected { reason, .. }] if reason == expected
+            ));
+        }
     }
 
     #[test]
