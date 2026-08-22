@@ -362,24 +362,29 @@ fn paginate_epub_list(
 ) {
     let mut consumed_items = 0;
     let mut consumed_text = 0;
-    let text_line_height = font_size * TEXT_LINE_HEIGHT;
     let block_spacing = font_size * line_spacing;
 
     while consumed_items < items.len() {
-        if *remaining < text_line_height + block_spacing
+        let first_scale = spans_font_scale(&items[consumed_items]);
+        let first_line_height = font_size * TEXT_LINE_HEIGHT * first_scale;
+        if *remaining < first_line_height + block_spacing
             && page_has_content(pages, first_page_has_title)
         {
             pages.push(Vec::new());
             *remaining = page_height;
         }
 
-        let available_height = (*remaining - block_spacing).max(text_line_height);
+        let available_height = (*remaining - block_spacing).max(first_line_height);
         let mut chunk_height = 0.0;
         let mut take = 0;
         for item in &items[consumed_items..] {
-            let item_lines = (spans_text_len(item) + 4).div_ceil(chars_per_line).max(1);
+            let scale = spans_font_scale(item);
+            let item_chars_per_line = scaled_characters_per_line(chars_per_line, scale);
+            let item_lines = (spans_text_len(item) + 4)
+                .div_ceil(item_chars_per_line)
+                .max(1);
             let item_spacing = if take == 0 { 0.0 } else { 4.0 };
-            let item_height = item_lines as f32 * text_line_height;
+            let item_height = item_lines as f32 * font_size * TEXT_LINE_HEIGHT * scale;
             if take > 0 && chunk_height + item_spacing + item_height > available_height {
                 break;
             }
@@ -627,7 +632,10 @@ fn estimated_epub_compact_node_height(
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items
                 .iter()
-                .map(|item| wrapped(spans_text_len(item) + 4, 1.0) * text_line_height)
+                .map(|item| {
+                    let scale = spans_font_scale(item);
+                    wrapped(spans_text_len(item) + 4, scale) * text_line_height * scale
+                })
                 .sum::<f32>()
                 + 4.0 * items.len().saturating_sub(1) as f32
         }
@@ -656,7 +664,8 @@ fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) -> f32 {
     spans
         .iter()
         .map(|span| span.font_size_multiplier)
-        .fold(1.0, f32::max)
+        .reduce(f32::max)
+        .unwrap_or(1.0)
 }
 
 pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
@@ -1177,6 +1186,42 @@ mod tests {
         let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 110.0));
 
         assert!(pages.len() > 1, "enlarged text must use its scaled width");
+    }
+
+    #[test]
+    fn epub_paginator_uses_inherited_list_font_sizes_for_geometry() {
+        let list = |scale| {
+            ContentNode::UnorderedList(
+                (0..4)
+                    .map(|_| {
+                        vec![shosai_core::epub::render::TextSpan {
+                            text: "A list item with enough text to wrap across lines".to_string(),
+                            bold: false,
+                            italic: false,
+                            monospace: false,
+                            font_size_multiplier: scale,
+                            preserve_whitespace: false,
+                            link: None,
+                        }]
+                    })
+                    .collect(),
+            )
+        };
+        let paginate =
+            |scale| paginate_epub_chapter(&[list(scale)], None, 16.0, 1.6, Size::new(240.0, 180.0));
+
+        let small = paginate(0.5);
+        let normal = paginate(1.0);
+        let large = paginate(2.0);
+
+        assert!(
+            small.len() < normal.len(),
+            "small list text should pack tighter"
+        );
+        assert!(
+            normal.len() < large.len(),
+            "large list text should consume more pages"
+        );
     }
 
     #[test]
