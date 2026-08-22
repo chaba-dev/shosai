@@ -1,7 +1,10 @@
 //! Parsed EPUB chapter content shared by search and reader presentation.
 
-use super::render::{ContentNode, parse_chapter_xhtml};
-use super::style::StyleMap;
+use anyhow::Result;
+
+use super::EpubLimits;
+use super::render::{ContentNode, parse_chapter_xhtml_with_limits};
+use super::style::EpubStyles;
 use super::types::Chapter;
 
 /// Parsed content and searchable text for one spine chapter.
@@ -30,21 +33,26 @@ pub struct EpubPresentation {
 }
 
 impl EpubPresentation {
-    pub(crate) fn parse(chapters: &[Chapter], styles: &StyleMap) -> Self {
+    pub(crate) fn parse(
+        chapters: &[Chapter],
+        styles: &EpubStyles,
+        limits: &EpubLimits,
+    ) -> Result<Self> {
         let chapters = chapters
             .iter()
-            .map(|chapter| {
+            .map(|chapter| -> Result<_> {
                 let base_path = chapter
                     .path
                     .rsplit_once('/')
                     .map(|(directory, _)| directory)
                     .unwrap_or("");
-                let nodes = parse_chapter_xhtml(&chapter.content, base_path, styles);
+                let nodes =
+                    parse_chapter_xhtml_with_limits(&chapter.content, base_path, styles, limits)?;
                 let search_text = crate::search::extract_text_from_nodes(&nodes);
-                EpubChapterPresentation { nodes, search_text }
+                Ok(EpubChapterPresentation { nodes, search_text })
             })
-            .collect();
-        Self { chapters }
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self { chapters })
     }
 
     /// Parsed chapters in spine order.

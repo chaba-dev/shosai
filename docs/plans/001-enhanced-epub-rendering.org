@@ -22,10 +22,17 @@ boundaries.
   XML, fonts, and image dimensions before resources reach presentation
   backends.  A canonical resolver validates archive names and same-book paths
   before parser or custom-protocol lookup.
-- ~crates/shosai-core/src/epub/style.rs~ uses ~lightningcss~, but extracts class
-  tokens from serialized selectors into a small-property ~StyleMap~.  It does
-  not implement selector matching, the cascade, inheritance, layout, or
-  ~@font-face~.
+- ~crates/shosai-core/src/epub/style.rs~ retains admitted stylesheets by
+  canonical archive path and applies linked and inline styles in each chapter's
+  document order.  The bounded native computed-style engine matches type,
+  class, ID, structural-combinator, and supported functional-pseudo selectors;
+  applies importance, specificity, source order, inheritance, inline styles,
+  UA defaults, resolved lengths, and simple screen media rules; and lowers the
+  supported property set into native block and inline presentation.  Per-resource
+  and per-document byte/application limits plus rule, selector, component, and
+  amplified processing-step budgets bound hostile CSS work.  Unsupported selectors,
+  declarations, conditional rules, ~@import~, and named namespaces fail soft.
+  Font-face application, tables, and MathML remain later milestones.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Each ~EpubDoc~ parses that model once into an immutable chapter
   presentation shared by search, pagination, and continuous rendering.  Tables
@@ -293,9 +300,16 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** M1 — CSS and Resource Correctness
 
-- [ ] For the native route, replace class-only ~StyleMap~ with selector matching,
+- [X] For the native route, replace class-only ~StyleMap~ with selector matching,
   cascade, inheritance, inline style, relevant at-rules, and computed values in
-  ~epub/style.rs~; add explicit supported-property documentation.
+  ~epub/style.rs~; add explicit supported-property documentation.  Production
+  chapter lowering now consumes one document-scoped computed-style map, honors
+  linked/inline stylesheet order and bounded screen media rules, and carries
+  relative inline font sizes into native rendering and pagination.  Module docs
+  list the exact selector/property surface and fail-soft exclusions.  CSS
+  resource, selection, complexity, and matching budgets reject work beyond the
+  configured admission boundary; bounded ~@import~ resolution remains the next
+  separate M1 item.
 - [ ] Resolve stylesheet ~@import~ and ~url(...)~ relative to each stylesheet,
   with cycle, depth, origin, and size limits.
 

@@ -1,52 +1,27 @@
-//! Tier 1 CSS style extraction for EPUB rendering.
+//! Native EPUB stylesheet ownership and supported CSS surface.
 //!
-//! Parses CSS stylesheets from EPUB resources and builds a map from class
-//! names to a simplified [`EpubStyle`] that the renderer can apply. Only
-//! simple `.class` selectors are matched; combinators and pseudo-classes are
-//! ignored.
+//! Stylesheets are retained by canonical archive path and selected in each
+//! XHTML document's source order. The computed-style engine supports type,
+//! class, ID, child, descendant, adjacent-sibling, and general-sibling
+//! selectors, plus `:root`, `:empty`, `:is()`, `:where()`, and `:not()`.
+//! Supported declarations are `display`, `font-family`, `font-size`,
+//! `font-style`, `font-weight`, `text-align`, `direction`, `white-space`,
+//! `text-indent`, and `margin-left`. Unconditional `screen`, `all`, and inverse
+//! `print` media rules participate in the cascade. Unsupported selectors,
+//! declarations, and conditional rules are ignored rather than aborting the
+//! book. `@import` resolution is a separate bounded-resource milestone.
 
 use std::collections::HashMap;
 
-use lightningcss::properties::Property;
-use lightningcss::properties::display::{Display, DisplayKeyword};
-use lightningcss::properties::font::{
-    AbsoluteFontWeight, FontFamily, FontSize, FontStyle as CssFontStyle, FontWeight,
-};
-use lightningcss::properties::text::{TextAlign, WhiteSpace};
+use anyhow::{Context, Result};
 use lightningcss::rules::CssRule;
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 use lightningcss::traits::ToCss;
-use lightningcss::values::length::LengthPercentageOrAuto;
-use lightningcss::values::length::LengthValue;
-use lightningcss::values::percentage::DimensionPercentage;
+use roxmltree::Node;
 
-/// Simplified style extracted from CSS.
-///
-/// Each field is `Option` — `None` means the property wasn't set by this rule,
-/// so the default or inherited value applies.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct EpubStyle {
-    /// `font-weight: bold`
-    pub bold: Option<bool>,
-    /// `font-style: italic`
-    pub italic: Option<bool>,
-    /// `font-family` contains a monospace family
-    pub monospace: Option<bool>,
-    /// Font size as a multiplier relative to the base size (e.g. 1.5 = 150%).
-    pub font_size_multiplier: Option<f32>,
-    /// `text-align`
-    pub text_align: Option<TextAlignment>,
-    /// `display: none`
-    pub hidden: Option<bool>,
-    /// `text-indent` in em.
-    pub text_indent_em: Option<f32>,
-    /// `margin-left` in em.
-    pub margin_left_em: Option<f32>,
-    /// `white-space: pre` or `pre-wrap`
-    pub preserve_whitespace: Option<bool>,
-}
+use super::{CanonicalEpubPath, EpubLimits};
 
-/// Simplified text alignment.
+/// Simplified text alignment consumed by native reader widgets.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TextAlignment {
     Left,
@@ -55,225 +30,215 @@ pub enum TextAlignment {
     Justify,
 }
 
-/// A map from CSS class name to extracted style.
-pub type StyleMap = HashMap<String, EpubStyle>;
-
-/// Parse all CSS resources from an EPUB and build a class → style map.
-///
-/// `css_sources` is an iterator of `(path, css_text)` pairs.
-pub fn parse_epub_styles<'a>(
-    css_sources: impl IntoIterator<Item = (&'a str, &'a str)>,
-) -> StyleMap {
-    let mut map = StyleMap::new();
-
-    for (_path, css_text) in css_sources {
-        let Ok(sheet) = StyleSheet::parse(css_text, ParserOptions::default()) else {
-            continue;
-        };
-
-        extract_rules(&sheet.rules.0, &mut map);
-    }
-
-    map
+/// Base text direction consumed by native reader widgets.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextDirection {
+    #[default]
+    Ltr,
+    Rtl,
 }
 
-/// Recursively extract style rules.
-fn extract_rules<'i>(rules: &[CssRule<'i>], map: &mut StyleMap) {
-    for rule in rules {
-        match rule {
-            CssRule::Style(style_rule) => {
-                let style = extract_style(&style_rule.declarations);
-                if style == EpubStyle::default() {
-                    continue;
-                }
+/// Admitted author stylesheets keyed by canonical archive path.
+#[derive(Debug, Clone, Default)]
+pub struct EpubStyles {
+    sources: HashMap<CanonicalEpubPath, String>,
+}
 
-                // Extract class names from selectors.
-                // Serialize the full selector and extract .class patterns.
-                for selector in style_rule.selectors.0.iter() {
-                    let selector_str = selector
-                        .to_css_string(Default::default())
-                        .unwrap_or_default();
-                    for class_name in extract_class_names_from_str(&selector_str) {
-                        let entry = map.entry(class_name).or_default();
-                        merge_style(entry, &style);
+impl EpubStyles {
+    /// Retain UTF-8 stylesheets for document-scoped matching and cascade.
+    pub fn parse<'a>(css_sources: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        Self::parse_with_limits(css_sources, &EpubLimits::default()).unwrap_or_default()
+    }
+
+    pub(crate) fn parse_with_limits<'a>(
+        css_sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+        limits: &EpubLimits,
+    ) -> Result<Self> {
+        let sources = css_sources
+            .into_iter()
+            .map(|(path, css)| -> Result<Option<_>> {
+                if css.len() as u64 > limits.max_css_resource_bytes {
+                    anyhow::bail!(
+                        "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
+                        css.len(),
+                        limits.max_css_resource_bytes
+                    );
+                }
+                let Ok(path) = CanonicalEpubPath::new(path) else {
+                    return Ok(None);
+                };
+                let Some(css) = normalized_css(css) else {
+                    return Ok(None);
+                };
+                Ok(Some((path, css)))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        Ok(Self { sources })
+    }
+
+    pub(crate) fn document_css(
+        &self,
+        document: &roxmltree::Document<'_>,
+        base_path: &str,
+        limits: &EpubLimits,
+    ) -> Result<String> {
+        let mut css = String::new();
+        let mut applications = 0_usize;
+        for element in document.descendants().filter(Node::is_element) {
+            match element.tag_name().name() {
+                "link" if is_stylesheet_link(element) => {
+                    let Some(href) = element.attribute("href") else {
+                        continue;
+                    };
+                    let Ok(reference) = CanonicalEpubPath::resolve(base_path, href) else {
+                        continue;
+                    };
+                    if let Some(source) = self.sources.get(&reference.path) {
+                        let _ = append_stylesheet(
+                            &mut css,
+                            source,
+                            element.attribute("media"),
+                            &mut applications,
+                            limits,
+                        )?;
                     }
                 }
+                "style" => {
+                    let source = element.children().filter_map(|child| child.text()).fold(
+                        String::new(),
+                        |mut source, text| {
+                            source.push_str(text);
+                            source
+                        },
+                    );
+                    if let Some(source) = normalized_css(&source) {
+                        let _ = append_stylesheet(
+                            &mut css,
+                            &source,
+                            element.attribute("media"),
+                            &mut applications,
+                            limits,
+                        )?;
+                    }
+                }
+                _ => {}
             }
-            CssRule::Media(media) => extract_rules(&media.rules.0, map),
-            CssRule::Supports(supports) => extract_rules(&supports.rules.0, map),
-            _ => {}
         }
+        Ok(css)
+    }
+
+    /// Number of admitted external stylesheet resources.
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    /// Whether no external stylesheet resources were admitted.
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
     }
 }
 
-/// Extract relevant CSS properties from a declaration block into an EpubStyle.
-fn extract_style(declarations: &lightningcss::declaration::DeclarationBlock) -> EpubStyle {
-    let mut style = EpubStyle::default();
+fn append_stylesheet(
+    target: &mut String,
+    source: &str,
+    media: Option<&str>,
+    applications: &mut usize,
+    limits: &EpubLimits,
+) -> Result<bool> {
+    let media = match media.filter(|media| !media.trim().is_empty()) {
+        Some(media) => {
+            let Some(media) = normalized_media(media) else {
+                return Ok(false);
+            };
+            Some(media)
+        }
+        None => None,
+    };
+    let next_applications = applications
+        .checked_add(1)
+        .context("EPUB stylesheet application count overflowed")?;
+    if next_applications > limits.max_css_stylesheets_per_document {
+        anyhow::bail!(
+            "EPUB document exceeds stylesheet application limit ({next_applications} > {})",
+            limits.max_css_stylesheets_per_document
+        );
+    }
+    let wrapper_bytes = media.as_ref().map_or(1, |media| 10 + media.len());
+    let next_bytes = target
+        .len()
+        .checked_add(source.len())
+        .and_then(|bytes| bytes.checked_add(wrapper_bytes))
+        .context("EPUB selected CSS byte count overflowed")?;
+    if next_bytes as u64 > limits.max_css_bytes_per_document {
+        anyhow::bail!(
+            "EPUB document exceeds selected CSS byte limit ({next_bytes} > {})",
+            limits.max_css_bytes_per_document
+        );
+    }
 
-    for prop in declarations
-        .declarations
+    if let Some(media) = media {
+        target.push_str("@media ");
+        target.push_str(&media);
+        target.push('{');
+        target.push_str(source);
+        target.push_str("}\n");
+    } else {
+        target.push_str(source);
+        target.push('\n');
+    }
+    *applications = next_applications;
+    Ok(true)
+}
+
+fn normalized_media(source: &str) -> Option<String> {
+    let wrapper = format!("@media {source} {{}}");
+    let sheet = StyleSheet::parse(&wrapper, ParserOptions::default()).ok()?;
+    let [CssRule::Media(rule)] = sheet.rules.0.as_slice() else {
+        return None;
+    };
+    if !rule.rules.0.is_empty() {
+        return None;
+    }
+    rule.query.to_css_string(Default::default()).ok()
+}
+
+fn normalized_css(source: &str) -> Option<String> {
+    let sheet = StyleSheet::parse(source, ParserOptions::default()).ok()?;
+    if sheet
+        .rules
+        .0
         .iter()
-        .chain(declarations.important_declarations.iter())
+        .any(|rule| matches!(rule, CssRule::Namespace(namespace) if namespace.prefix.is_none()))
     {
-        match prop {
-            Property::FontWeight(fw) => {
-                style.bold = Some(is_bold(fw));
-            }
-            Property::FontStyle(fs) => {
-                style.italic = Some(matches!(
-                    fs,
-                    CssFontStyle::Italic | CssFontStyle::Oblique(_)
-                ));
-            }
-            Property::FontFamily(families) => {
-                style.monospace = Some(has_monospace_family(families));
-            }
-            Property::FontSize(size) => {
-                style.font_size_multiplier = font_size_to_multiplier(size);
-            }
-            Property::TextAlign(ta) => {
-                style.text_align = Some(match ta {
-                    TextAlign::Left => TextAlignment::Left,
-                    TextAlign::Center => TextAlignment::Center,
-                    TextAlign::Right => TextAlignment::Right,
-                    TextAlign::Justify => TextAlignment::Justify,
-                    _ => TextAlignment::Left,
-                });
-            }
-            Property::Display(display) => {
-                style.hidden = Some(matches!(display, Display::Keyword(DisplayKeyword::None)));
-            }
-            Property::TextIndent(indent) => {
-                style.text_indent_em = dim_percentage_to_em(&indent.value);
-            }
-            Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(lp)) => {
-                style.margin_left_em = dim_percentage_to_em(lp);
-            }
-            Property::WhiteSpace(ws) => {
-                style.preserve_whitespace = Some(matches!(
-                    ws,
-                    WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::BreakSpaces
-                ));
-            }
-            _ => {}
-        }
+        return None;
     }
-
-    style
+    let mut normalized = String::new();
+    for rule in &sheet.rules.0 {
+        if matches!(rule, CssRule::Import(_) | CssRule::Namespace(_)) {
+            continue;
+        }
+        normalized.push_str(&rule.to_css_string(Default::default()).ok()?);
+        normalized.push('\n');
+    }
+    Some(normalized)
 }
 
-fn is_bold(fw: &FontWeight) -> bool {
-    match fw {
-        FontWeight::Absolute(AbsoluteFontWeight::Weight(w)) => *w >= 600.0,
-        FontWeight::Absolute(AbsoluteFontWeight::Bold) => true,
-        FontWeight::Bolder => true,
-        _ => false,
+fn is_stylesheet_link(element: Node<'_, '_>) -> bool {
+    if element.attribute("disabled").is_some() {
+        return false;
     }
-}
-
-fn has_monospace_family(families: &[FontFamily]) -> bool {
-    families.iter().any(|f| {
-        match f {
-            FontFamily::Generic(g) => {
-                use lightningcss::properties::font::GenericFontFamily;
-                matches!(
-                    g,
-                    GenericFontFamily::Monospace | GenericFontFamily::UIMonospace
-                )
-            }
-            FontFamily::FamilyName(name) => {
-                // FamilyName.0 is private, use ToCss to get the string.
-                let s = name.to_css_string(Default::default()).unwrap_or_default();
-                let lower = s.to_lowercase();
-                lower.contains("mono")
-                    || lower.contains("courier")
-                    || lower.contains("consolas")
-                    || lower == "\"menlo\""
-                    || lower == "menlo"
-            }
-        }
+    element.attribute("rel").is_some_and(|relations| {
+        let relations = relations.split_ascii_whitespace().collect::<Vec<_>>();
+        relations
+            .iter()
+            .any(|relation| relation.eq_ignore_ascii_case("stylesheet"))
+            && !relations
+                .iter()
+                .any(|relation| relation.eq_ignore_ascii_case("alternate"))
     })
-}
-
-fn font_size_to_multiplier(size: &FontSize) -> Option<f32> {
-    match size {
-        FontSize::Length(lp) => dim_percentage_to_multiplier(lp),
-        _ => None,
-    }
-}
-
-fn dim_percentage_to_em(lp: &DimensionPercentage<LengthValue>) -> Option<f32> {
-    match lp {
-        DimensionPercentage::Dimension(lv) => length_value_to_em(lv),
-        DimensionPercentage::Percentage(p) => Some(p.0),
-        _ => None,
-    }
-}
-
-fn dim_percentage_to_multiplier(lp: &DimensionPercentage<LengthValue>) -> Option<f32> {
-    match lp {
-        DimensionPercentage::Dimension(lv) => length_value_to_multiplier(lv),
-        DimensionPercentage::Percentage(p) => Some(p.0),
-        _ => None,
-    }
-}
-
-fn length_value_to_em(lv: &LengthValue) -> Option<f32> {
-    match *lv {
-        LengthValue::Em(v) => Some(v),
-        LengthValue::Rem(v) => Some(v),
-        LengthValue::Px(v) => Some(v / 16.0),
-        LengthValue::Pt(v) => Some(v / 12.0),
-        _ => None,
-    }
-}
-
-fn length_value_to_multiplier(lv: &LengthValue) -> Option<f32> {
-    match *lv {
-        LengthValue::Em(v) => Some(v),
-        LengthValue::Rem(v) => Some(v),
-        LengthValue::Px(v) => Some(v / 16.0),
-        LengthValue::Pt(v) => Some(v / 12.0),
-        _ => None,
-    }
-}
-
-/// Extract class names from a serialized selector string.
-///
-/// Finds `.classname` patterns, handling compound selectors like `p.foo.bar`.
-fn extract_class_names_from_str(selector: &str) -> Vec<String> {
-    let mut classes = Vec::new();
-    for part in selector.split([' ', '>', '+', '~', ',']) {
-        let part = part.trim();
-        for segment in part.split('.').skip(1) {
-            // segment may contain further selectors like "foo:hover" or "foo[attr]"
-            let class = segment.split([':', '[', '#']).next().unwrap_or("").trim();
-            if !class.is_empty() {
-                classes.push(class.to_string());
-            }
-        }
-    }
-    classes
-}
-
-/// Merge `source` into `target`, overriding only the fields that `source` sets.
-fn merge_style(target: &mut EpubStyle, source: &EpubStyle) {
-    macro_rules! merge_field {
-        ($field:ident) => {
-            if source.$field.is_some() {
-                target.$field = source.$field;
-            }
-        };
-    }
-    merge_field!(bold);
-    merge_field!(italic);
-    merge_field!(monospace);
-    merge_field!(font_size_multiplier);
-    merge_field!(text_align);
-    merge_field!(hidden);
-    merge_field!(text_indent_em);
-    merge_field!(margin_left_em);
-    merge_field!(preserve_whitespace);
 }
 
 #[cfg(test)]
@@ -281,133 +246,164 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_bold() {
-        let css = r#".bold-text { font-weight: bold; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let style = map.get("bold-text").expect("should find bold-text class");
-        assert_eq!(style.bold, Some(true));
+    fn document_styles_follow_link_and_inline_source_order() {
+        let styles = EpubStyles::parse([
+            ("OEBPS/Styles/first.css", ".target { font-style: italic; }"),
+            ("OEBPS/Styles/second.css", ".target { font-style: normal; }"),
+        ]);
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="../Styles/first.css"/>
+                <style>.target { font-weight: bold; }</style>
+                <link rel="stylesheet" href="../Styles/second.css"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+
+        let css = styles
+            .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+            .unwrap();
+        let italic = css.find("font-style: italic").unwrap();
+        let bold = css.find("font-weight: bold").unwrap();
+        let normal = css.find("font-style: normal").unwrap();
+        assert!(italic < bold && bold < normal);
     }
 
     #[test]
-    fn test_parse_italic() {
-        let css = r#".em { font-style: italic; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("em").unwrap().italic, Some(true));
+    fn document_styles_preserve_media_without_accepting_css_injection() {
+        let styles = EpubStyles::parse([
+            ("OEBPS/Styles/print.css", ".target { display: none; }"),
+            (
+                "OEBPS/Styles/injected.css",
+                ".target { font-weight: normal; }",
+            ),
+        ]);
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="../Styles/print.css" media="print"/>
+                <style media="screen">.target { font-weight: bold; }</style>
+                <link rel="stylesheet" href="../Styles/injected.css"
+                      media="screen} .target { display: none }"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+
+        let css = styles
+            .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+            .unwrap();
+        assert!(css.contains("@media print"));
+        assert!(css.contains("@media screen"));
+        assert!(css.contains("font-weight: bold"));
+        assert!(!css.contains("font-weight: normal"));
+        assert_eq!(css.matches("display: none").count(), 1);
     }
 
     #[test]
-    fn test_parse_monospace() {
-        let css = r#".code { font-family: "Liberation Mono", monospace; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("code").unwrap().monospace, Some(true));
-    }
+    fn foreign_and_missing_stylesheet_links_are_ignored() {
+        let styles = EpubStyles::default();
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="https://example.com/book.css"/>
+                <link rel="stylesheet" href="../../../escape.css"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
 
-    #[test]
-    fn test_parse_font_size_em() {
-        let css = r#".big { font-size: 2em; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let m = map.get("big").unwrap().font_size_multiplier.unwrap();
-        assert!((m - 2.0).abs() < 0.01, "expected 2.0, got {m}");
-    }
-
-    #[test]
-    fn test_parse_font_size_percent() {
-        let css = r#".small { font-size: 75%; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let m = map.get("small").unwrap().font_size_multiplier.unwrap();
-        assert!((m - 0.75).abs() < 0.01, "expected 0.75, got {m}");
-    }
-
-    #[test]
-    fn test_parse_text_align_center() {
-        let css = r#".centered { text-align: center; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(
-            map.get("centered").unwrap().text_align,
-            Some(TextAlignment::Center)
+        assert!(
+            styles
+                .document_css(&document, "OEBPS/Text", &EpubLimits::default())
+                .unwrap()
+                .is_empty()
         );
     }
 
     #[test]
-    fn test_parse_display_none() {
-        let css = r#".hidden { display: none; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("hidden").unwrap().hidden, Some(true));
+    fn default_namespaces_cannot_broaden_retained_type_selectors() {
+        let css = r#"@namespace "http://www.w3.org/2000/svg"; a { display: none; }"#;
+
+        assert!(
+            normalized_css(css).is_none(),
+            "a stylesheet with a default namespace must be ignored until matching is namespace-aware"
+        );
     }
 
     #[test]
-    fn test_parse_display_block_not_hidden() {
-        let css = r#".visible { display: block; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("visible").unwrap().hidden, Some(false));
-    }
+    fn stylesheet_resource_selection_is_bounded_before_amplification() {
+        let source = ".target { font-weight: bold; }";
+        let document = roxmltree::Document::parse(
+            r#"<html><head>
+                <link rel="stylesheet" href="style.css"/>
+                <link rel="stylesheet" href="style.css"/>
+            </head><body/></html>"#,
+        )
+        .unwrap();
+        let styles = EpubStyles::parse([("style.css", source)]);
 
-    #[test]
-    fn test_parse_whitespace_pre() {
-        let css = r#".pre { white-space: pre-wrap; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("pre").unwrap().preserve_whitespace, Some(true));
-    }
+        let application_error = styles
+            .document_css(
+                &document,
+                "",
+                &EpubLimits {
+                    max_css_stylesheets_per_document: 1,
+                    ..EpubLimits::default()
+                },
+            )
+            .unwrap_err();
+        assert!(application_error.to_string().contains("application limit"));
 
-    #[test]
-    fn test_parse_multiple_classes() {
-        let css = r#"
-            .a { font-weight: bold; }
-            .b { font-style: italic; }
-        "#;
-        let map = parse_epub_styles([("style.css", css)]);
-        assert_eq!(map.get("a").unwrap().bold, Some(true));
-        assert_eq!(map.get("b").unwrap().italic, Some(true));
-    }
+        let byte_error = styles
+            .document_css(
+                &document,
+                "",
+                &EpubLimits {
+                    max_css_bytes_per_document: source.len() as u64,
+                    ..EpubLimits::default()
+                },
+            )
+            .unwrap_err();
+        assert!(byte_error.to_string().contains("selected CSS byte limit"));
 
-    #[test]
-    fn test_merge_rules_for_same_class() {
-        let css = r#"
-            .foo { font-weight: bold; }
-            .foo { font-style: italic; }
-        "#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let style = map.get("foo").unwrap();
-        assert_eq!(style.bold, Some(true));
-        assert_eq!(style.italic, Some(true));
-    }
+        let resource_error = EpubStyles::parse_with_limits(
+            [("style.css", source)],
+            &EpubLimits {
+                max_css_resource_bytes: 1,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(resource_error.to_string().contains("CSS resource exceeds"));
 
-    #[test]
-    fn test_compound_selector_extracts_class() {
-        let css = r#"p.indent { text-indent: 1.5em; }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let style = map.get("indent").unwrap();
-        assert!((style.text_indent_em.unwrap() - 1.5).abs() < 0.01);
-    }
+        let mut target = "existing".to_string();
+        let mut applications = 0;
+        let existing_bytes = target.len() as u64;
+        let error = append_stylesheet(
+            &mut target,
+            source,
+            None,
+            &mut applications,
+            &EpubLimits {
+                max_css_bytes_per_document: existing_bytes,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("selected CSS byte limit"));
+        assert_eq!(target, "existing");
+        assert_eq!(applications, 0);
 
-    #[test]
-    fn test_calibre_code_class() {
-        let css = r#".calibre14 {
-            display: block;
-            font-family: "Liberation Mono", monospace;
-            font-size: 0.77778em;
-            white-space: pre-wrap;
-        }"#;
-        let map = parse_epub_styles([("style.css", css)]);
-        let style = map.get("calibre14").unwrap();
-        assert_eq!(style.monospace, Some(true));
-        assert_eq!(style.preserve_whitespace, Some(true));
-        assert!(style.font_size_multiplier.is_some());
-    }
-
-    #[test]
-    fn test_malformed_css_skipped() {
-        let css = r#"this is not { valid css @@@ "#;
-        let map = parse_epub_styles([("bad.css", css)]);
-        let _ = map;
-    }
-
-    #[test]
-    fn test_multiple_css_files() {
-        let css1 = r#".a { font-weight: bold; }"#;
-        let css2 = r#".b { font-style: italic; }"#;
-        let map = parse_epub_styles([("a.css", css1), ("b.css", css2)]);
-        assert!(map.contains_key("a"));
-        assert!(map.contains_key("b"));
+        let error = append_stylesheet(
+            &mut target,
+            source,
+            None,
+            &mut applications,
+            &EpubLimits {
+                max_css_stylesheets_per_document: 0,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("application limit"));
+        assert_eq!(target, "existing");
+        assert_eq!(applications, 0);
     }
 }

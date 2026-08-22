@@ -103,6 +103,7 @@ impl EpubDoc {
         let opf_xml = read_archive_entry(&mut archive, &opf_path, &limits)
             .with_context(|| format!("failed to read OPF file: {opf_path}"))?;
         let (metadata, manifest, spine_ids) = parse_opf(&opf_xml, &opf_dir)?;
+        validate_spine_size(&spine_ids, &limits)?;
 
         // 3. Try to parse the TOC (NCX or nav document).
         let toc = parse_toc(&mut archive, &manifest, &opf_dir, &limits)?;
@@ -123,7 +124,7 @@ impl EpubDoc {
             &limits,
         )?;
 
-        // 6. Parse CSS stylesheets into a class → style map.
+        // 6. Retain admitted CSS stylesheets for document-scoped cascade.
         let css_sources: Vec<(&str, &str)> = manifest
             .values()
             .filter(|item| item.media_type == "text/css")
@@ -135,10 +136,12 @@ impl EpubDoc {
             })
             .collect();
 
-        let styles =
-            super::style::parse_epub_styles(css_sources.iter().map(|(path, css)| (*path, *css)));
+        let styles = super::style::EpubStyles::parse_with_limits(
+            css_sources.iter().map(|(path, css)| (*path, *css)),
+            &limits,
+        )?;
 
-        let presentation = EpubPresentation::parse(&chapters, &styles);
+        let presentation = EpubPresentation::parse(&chapters, &styles, &limits)?;
 
         Ok(Self {
             content: EpubContent {
@@ -640,6 +643,23 @@ fn parse_opf(
     Ok((metadata, manifest, spine_ids))
 }
 
+fn validate_spine_size(spine_ids: &[String], limits: &EpubLimits) -> Result<()> {
+    if spine_ids.len() > limits.max_spine_items {
+        anyhow::bail!(
+            "EPUB spine exceeds item limit ({} > {})",
+            spine_ids.len(),
+            limits.max_spine_items
+        );
+    }
+    let mut unique = HashSet::with_capacity(spine_ids.len());
+    for id in spine_ids {
+        if !unique.insert(id) {
+            anyhow::bail!("EPUB contains duplicate spine reference: {id}");
+        }
+    }
+    Ok(())
+}
+
 /// Try to parse the table of contents (NCX or EPUB3 nav).
 fn parse_toc(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
@@ -906,6 +926,7 @@ mod tests {
     use super::EpubLimits;
     use super::declared_archive_entry_count;
     use super::parse_opf;
+    use super::validate_spine_size;
 
     fn archive_with_entries(names: &[&str]) -> Vec<u8> {
         let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
@@ -1158,6 +1179,21 @@ mod tests {
             error.to_string().contains("duplicate EPUB archive entry"),
             "unexpected error: {error:#}"
         );
+    }
+
+    #[test]
+    fn duplicate_spine_references_cannot_amplify_presentation_pages() {
+        let opf = r#"<package xmlns="http://www.idpf.org/2007/opf">
+            <manifest>
+                <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+            </manifest>
+            <spine><itemref idref="chapter"/><itemref idref="chapter"/></spine>
+        </package>"#;
+        let (_, _, spine) = parse_opf(opf, "OEBPS").unwrap();
+        assert_eq!(spine, ["chapter", "chapter"]);
+        let error = validate_spine_size(&spine, &EpubLimits::default()).unwrap_err();
+
+        assert!(error.to_string().contains("duplicate spine reference"));
     }
 
     #[test]

@@ -13,7 +13,6 @@ mod resource;
 pub mod style;
 mod types;
 
-#[cfg(test)]
 mod computed_style;
 mod limits;
 

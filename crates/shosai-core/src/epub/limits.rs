@@ -27,6 +27,26 @@ pub struct EpubLimits {
     pub max_xml_depth: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
+    /// Maximum number of reading-order items admitted from the OPF spine.
+    pub max_spine_items: usize,
+    /// Maximum encoded size of an individual CSS resource.
+    pub max_css_resource_bytes: u64,
+    /// Maximum stylesheet applications selected by one XHTML document.
+    pub max_css_stylesheets_per_document: usize,
+    /// Maximum aggregate selected CSS bytes for one XHTML document.
+    pub max_css_bytes_per_document: u64,
+    /// Maximum CSS rules inspected for one XHTML document.
+    pub max_css_rules_per_document: usize,
+    /// Maximum selectors inspected for one XHTML document.
+    pub max_css_selectors_per_document: usize,
+    /// Maximum selector components inspected for one XHTML document.
+    pub max_css_selector_components_per_document: usize,
+    /// Maximum amplified rule, selector, and declaration processing steps per XHTML document.
+    pub max_css_processing_steps_per_document: usize,
+    /// Minimum computed CSS font size admitted into native presentation.
+    pub min_css_computed_font_size_px: f32,
+    /// Maximum computed CSS font size admitted into native presentation.
+    pub max_css_computed_font_size_px: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
     /// Maximum width or height reported by an admitted image.
@@ -51,6 +71,16 @@ impl Default for EpubLimits {
             max_xml_bytes: 8 * MIB,
             max_xml_depth: 128,
             max_xml_text_bytes: 4 * MIB,
+            max_spine_items: 10_000,
+            max_css_resource_bytes: 8 * MIB,
+            max_css_stylesheets_per_document: 256,
+            max_css_bytes_per_document: 16 * MIB,
+            max_css_rules_per_document: 50_000,
+            max_css_selectors_per_document: 100_000,
+            max_css_selector_components_per_document: 1_000_000,
+            max_css_processing_steps_per_document: 10_000_000,
+            min_css_computed_font_size_px: 1.0,
+            max_css_computed_font_size_px: 512.0,
             max_font_bytes: 16 * MIB,
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,
@@ -146,6 +176,13 @@ pub(crate) fn validate_resource(
     limits: &EpubLimits,
 ) -> Result<()> {
     let media_type_essence = mime_essence(media_type);
+    if media_type_essence == "text/css" && bytes.len() as u64 > limits.max_css_resource_bytes {
+        anyhow::bail!(
+            "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
+            bytes.len(),
+            limits.max_css_resource_bytes
+        );
+    }
     if (is_font(&media_type_essence) || has_font_signature(bytes))
         && bytes.len() as u64 > limits.max_font_bytes
     {
@@ -198,6 +235,12 @@ pub(crate) fn validate_declared_resource_size(
     bytes: u64,
     limits: &EpubLimits,
 ) -> Result<()> {
+    if mime_essence(media_type) == "text/css" && bytes > limits.max_css_resource_bytes {
+        anyhow::bail!(
+            "EPUB CSS resource exceeds byte limit: {path} ({bytes} > {})",
+            limits.max_css_resource_bytes
+        );
+    }
     if is_font(media_type) && bytes > limits.max_font_bytes {
         anyhow::bail!(
             "EPUB font resource exceeds byte limit: {path} ({bytes} > {})",
@@ -214,7 +257,9 @@ pub(crate) fn validate_declared_resource_size(
 }
 
 pub(crate) fn resource_read_limit(media_type: &str, limits: &EpubLimits) -> u64 {
-    if is_xml(media_type) {
+    if mime_essence(media_type) == "text/css" {
+        limits.max_css_resource_bytes.min(limits.max_entry_bytes)
+    } else if is_xml(media_type) {
         limits.max_xml_bytes.min(limits.max_entry_bytes)
     } else if is_font(media_type) {
         limits.max_font_bytes.min(limits.max_entry_bytes)

@@ -87,7 +87,7 @@ pub fn extract_text_from_nodes(nodes: &[ContentNode]) -> String {
 
 fn extract_node_text(node: &ContentNode, out: &mut String) {
     match node {
-        ContentNode::Heading { text, .. } => out.push_str(text),
+        ContentNode::Heading { spans, .. } => extract_spans_text(spans, out),
         ContentNode::Paragraph(spans, _) => extract_spans_text(spans, out),
         ContentNode::BlockQuote { children, .. } => {
             for child in children {
@@ -272,7 +272,15 @@ mod tests {
         let nodes = vec![
             ContentNode::Heading {
                 level: 1,
-                text: "Chapter One".to_string(),
+                spans: vec![TextSpan {
+                    text: "Chapter One".to_string(),
+                    bold: true,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
                 style: Default::default(),
             },
             ContentNode::Paragraph(
@@ -282,6 +290,7 @@ mod tests {
                         bold: false,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     },
@@ -290,6 +299,7 @@ mod tests {
                         bold: true,
                         italic: false,
                         monospace: false,
+                        font_size_multiplier: 1.0,
                         preserve_whitespace: false,
                         link: None,
                     },
