@@ -51,6 +51,14 @@ pub struct EpubLimits {
     pub max_css_computed_font_size_px: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
+    /// Maximum font faces admitted for one EPUB.
+    pub max_font_faces_per_book: usize,
+    /// Maximum decoded size of an individual font.
+    pub max_decoded_font_bytes: usize,
+    /// Maximum aggregate decoded font bytes retained for one EPUB.
+    pub max_total_decoded_font_bytes: usize,
+    /// Maximum table count admitted from one decoded font.
+    pub max_font_tables: usize,
     /// Maximum width or height reported by an admitted image.
     pub max_image_dimension: u32,
     /// Maximum pixel count reported by an admitted image.
@@ -85,6 +93,10 @@ impl Default for EpubLimits {
             min_css_computed_font_size_px: 1.0,
             max_css_computed_font_size_px: 512.0,
             max_font_bytes: 16 * MIB,
+            max_font_faces_per_book: 64,
+            max_decoded_font_bytes: 32 * MIB as usize,
+            max_total_decoded_font_bytes: 128 * MIB as usize,
+            max_font_tables: 256,
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,
             max_decoded_image_bytes: 160 * MIB,

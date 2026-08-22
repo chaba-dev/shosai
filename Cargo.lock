@@ -5116,8 +5116,10 @@ name = "shosai-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "brotli-decompressor",
  "bytes",
  "flate2",
+ "fontdb",
  "image",
  "lightningcss",
  "natord",
@@ -5132,6 +5134,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "unicode-casefold",
+ "wuff",
  "zip",
 ]
 

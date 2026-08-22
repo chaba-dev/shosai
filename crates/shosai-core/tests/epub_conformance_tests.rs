@@ -4,7 +4,8 @@ use std::process::Command;
 
 use roxmltree::{Document, Node};
 use sha2::{Digest, Sha256};
-use shosai_core::epub::{CanonicalEpubPath, EpubDoc, EpubLimits};
+use shosai_core::epub::render::ContentNode;
+use shosai_core::epub::{CanonicalEpubPath, EpubDoc, EpubFontFormat, EpubLimits};
 use zip::{CompressionMethod, ZipArchive};
 
 const FIXTURE_IDS: &[&str] = &[
@@ -262,6 +263,31 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
 #[test]
 fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
     let fonts = open("fonts");
+    let admitted_formats = fonts
+        .fonts()
+        .faces()
+        .iter()
+        .map(|face| face.format)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        admitted_formats,
+        std::collections::HashSet::from([
+            EpubFontFormat::TrueType,
+            EpubFontFormat::OpenType,
+            EpubFontFormat::Woff,
+            EpubFontFormat::Woff2,
+        ]),
+        "font admission diagnostics: {:?}",
+        fonts.fonts()
+    );
+    assert!(fonts.presentation().chapters().iter().any(|chapter| {
+        chapter.nodes().iter().any(|node| match node {
+            ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => spans
+                .iter()
+                .any(|span| span.font_family.as_deref() == Some("FixtureTtf")),
+            _ => false,
+        })
+    }));
     for (path, signature) in [
         ("OEBPS/Fonts/book-a.woff", b"wOFF".as_slice()),
         ("OEBPS/Fonts/book-a.woff2", b"wOF2".as_slice()),
@@ -303,6 +329,16 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
     assert!(font_css.contains(".italic { font-family: FixtureTtf; font-style: italic; }"));
 
     let isolated_fonts = open("fonts-isolation");
+    assert!(isolated_fonts.fonts().contains_family("FixtureTtf"));
+    let loaded_book_a = fonts
+        .fonts()
+        .with_face_data(0, |bytes, _| Sha256::digest(bytes))
+        .unwrap();
+    let loaded_book_b = isolated_fonts
+        .fonts()
+        .with_face_data(0, |bytes, _| Sha256::digest(bytes))
+        .unwrap();
+    assert_ne!(loaded_book_a, loaded_book_b);
     let book_a = resource_bytes(&fonts, "OEBPS/Fonts/book-a.ttf").unwrap();
     let book_b = resource_bytes(&isolated_fonts, "OEBPS/Fonts/book-b.ttf").unwrap();
     assert_ne!(book_a, book_b);

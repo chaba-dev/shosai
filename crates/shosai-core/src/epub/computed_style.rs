@@ -60,6 +60,7 @@ pub(crate) struct ComputedStyle {
     pub(crate) bold: bool,
     pub(crate) italic: bool,
     pub(crate) monospace: bool,
+    pub(crate) font_families: Vec<String>,
     pub(crate) alignment: Alignment,
     pub(crate) direction: Direction,
     pub(crate) preserve_whitespace: bool,
@@ -85,6 +86,14 @@ pub(crate) struct ComputedDocumentStyles {
 impl ComputedDocumentStyles {
     pub(crate) fn get(&self, node: Node<'_, '_>) -> Option<&ComputedStyle> {
         self.node_styles.get(&node.id())
+    }
+
+    pub(crate) fn resolve_font_families(&mut self, fonts: Option<&super::font::EpubFontBook>) {
+        for style in self.node_styles.values_mut() {
+            style
+                .font_families
+                .retain(|family| fonts.is_some_and(|fonts| fonts.contains_family(family)));
+        }
     }
 }
 
@@ -170,6 +179,7 @@ struct SpecifiedStyle {
     bold: Slot<bool>,
     italic: Slot<bool>,
     monospace: Slot<bool>,
+    font_families: Slot<Vec<String>>,
     alignment: Slot<SpecifiedAlignment>,
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
@@ -322,6 +332,7 @@ fn compute_element_style(
         bold: false,
         italic: false,
         monospace: false,
+        font_families: Vec::new(),
         alignment: Alignment::Start,
         direction: Direction::Ltr,
         preserve_whitespace: false,
@@ -377,6 +388,9 @@ fn compute_element_style(
     }
     if let Some(value) = specified.monospace.value() {
         style.monospace = value;
+    }
+    if let Some(value) = specified.font_families.value() {
+        style.font_families = value;
     }
     if let Some(value) = specified.alignment.value() {
         style.alignment = match value {
@@ -460,7 +474,7 @@ fn apply_rules(
     Ok(())
 }
 
-fn screen_media_matches(media: &MediaList<'_>) -> bool {
+pub(crate) fn screen_media_matches(media: &MediaList<'_>) -> bool {
     media.media_queries.iter().any(screen_media_query_matches)
 }
 
@@ -490,7 +504,7 @@ fn screen_media_query_matches(query: &lightningcss::media_query::MediaQuery<'_>)
     )
 }
 
-fn bounded_media_query(media: &MediaList<'_>) -> bool {
+pub(crate) fn bounded_media_query(media: &MediaList<'_>) -> bool {
     media
         .media_queries
         .iter()
@@ -543,9 +557,14 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             priority,
             matches!(style, FontStyle::Italic | FontStyle::Oblique(_)),
         ),
-        Property::FontFamily(families) => specified
-            .monospace
-            .offer(priority, has_monospace_family(families)),
+        Property::FontFamily(families) => {
+            specified
+                .monospace
+                .offer(priority, has_monospace_family(families));
+            specified
+                .font_families
+                .offer(priority, named_font_families(families));
+        }
         Property::TextAlign(alignment) => {
             specified
                 .alignment
@@ -1101,6 +1120,19 @@ fn has_monospace_family(families: &[FontFamily]) -> bool {
             .to_ascii_lowercase()
             .contains("mono"),
     })
+}
+
+fn named_font_families(families: &[FontFamily]) -> Vec<String> {
+    families
+        .iter()
+        .filter_map(|family| match family {
+            FontFamily::FamilyName(name) => name
+                .to_css_string(Default::default())
+                .ok()
+                .map(|name| name.trim_matches(['\'', '"']).to_owned()),
+            FontFamily::Generic(_) => None,
+        })
+        .collect()
 }
 
 fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {

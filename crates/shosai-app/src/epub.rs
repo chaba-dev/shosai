@@ -906,6 +906,7 @@ mod tests {
         let text = "This is a linked sentence that should wrap cleanly. ".repeat(30);
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.clone(),
+            font_family: None,
             bold: true,
             italic: false,
             monospace: false,
@@ -950,6 +951,7 @@ mod tests {
         let text = "é".repeat(MAX_EPUB_PAGES + 20);
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.clone(),
+            font_family: None,
             bold: true,
             italic: true,
             monospace: true,
@@ -1000,6 +1002,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: character.to_string().repeat(20),
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1072,6 +1075,7 @@ mod tests {
             .map(|index| {
                 vec![shosai_core::epub::render::TextSpan {
                     text: format!("List item {index}"),
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1119,6 +1123,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1154,6 +1159,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Short paragraph {index}"),
+                        font_family: None,
                         bold: false,
                         italic: false,
                         monospace: false,
@@ -1179,6 +1185,7 @@ mod tests {
                 children: vec![ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Section 1.{index}"),
+                        font_family: None,
                         bold: false,
                         italic: false,
                         monospace: false,
@@ -1207,6 +1214,7 @@ mod tests {
                 vec![shosai_core::epub::render::TextSpan {
                     link: Some(format!("{}.xhtml", text.replace(' ', "-"))),
                     text,
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1249,6 +1257,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1267,6 +1276,7 @@ mod tests {
                 level: 1,
                 spans: vec![shosai_core::epub::render::TextSpan {
                     text: "Previous chapter".to_string(),
+                    font_family: None,
                     bold: true,
                     italic: false,
                     monospace: false,
@@ -1314,6 +1324,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Quoted paragraph {index}"),
+                        font_family: None,
                         bold: false,
                         italic: false,
                         monospace: false,
@@ -1357,6 +1368,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text,
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1413,6 +1425,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text,
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -1462,6 +1475,7 @@ mod tests {
         let nodes = vec![ContentNode::Paragraph(
             vec![shosai_core::epub::render::TextSpan {
                 text: "Body text".to_string(),
+                font_family: None,
                 bold: false,
                 italic: false,
                 monospace: false,
@@ -1499,6 +1513,7 @@ mod tests {
         let nodes = vec![ContentNode::Paragraph(
             vec![shosai_core::epub::render::TextSpan {
                 text: text.to_string(),
+                font_family: None,
                 bold: false,
                 italic: false,
                 monospace: false,
@@ -1522,6 +1537,7 @@ mod tests {
                     .map(|_| {
                         vec![shosai_core::epub::render::TextSpan {
                             text: "A list item with enough text to wrap across lines".to_string(),
+                            font_family: None,
                             bold: false,
                             italic: false,
                             monospace: false,
@@ -1561,6 +1577,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: "Text before the image".to_string(),
+                        font_family: None,
                         bold: false,
                         italic: false,
                         monospace: false,

@@ -6984,6 +6984,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    font_family: None,
                     bold: false,
                     italic: false,
                     monospace: false,
@@ -7392,6 +7393,7 @@ mod tests {
                     level: 2,
                     spans: vec![shosai_core::epub::render::TextSpan {
                         text: "A heading".to_string(),
+                        font_family: None,
                         bold: true,
                         italic: false,
                         monospace: false,
@@ -7404,6 +7406,7 @@ mod tests {
                 ContentNode::OrderedList {
                     items: vec![vec![shosai_core::epub::render::TextSpan {
                         text: "list item".to_string(),
+                        font_family: None,
                         bold: true,
                         italic: false,
                         monospace: false,
