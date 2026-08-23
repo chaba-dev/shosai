@@ -11,19 +11,6 @@ pub const ACCENT: Color = Color::from_rgb8(0x4D, 0x5E, 0x86);
 pub const ACCENT_HOVERED: Color = Color::from_rgb8(0x3F, 0x4F, 0x76);
 pub const ACCENT_SOFT: Color = Color::from_rgb8(0xE2, 0xE6, 0xF0);
 
-const SEARCH_HIGHLIGHT: Color = Color {
-    r: 1.0,
-    g: 0.88,
-    b: 0.28,
-    a: 0.7,
-};
-const CURRENT_SEARCH_HIGHLIGHT: Color = Color {
-    r: 1.0,
-    g: 0.55,
-    b: 0.18,
-    a: 0.82,
-};
-
 pub const RADIUS_SMALL: f32 = 6.0;
 pub const RADIUS_MEDIUM: f32 = 10.0;
 
@@ -53,10 +40,10 @@ impl ReaderTheme {
             background: self.background(),
             text: self.text_color(),
             link: self.link_color(),
-            search_highlight: SEARCH_HIGHLIGHT,
-            current_search_highlight: CURRENT_SEARCH_HIGHLIGHT,
+            search_highlight: self.search_highlight(false),
+            current_search_highlight: self.search_highlight(true),
             table_header_background: self.table_header_background(),
-            table_header_border: self.table_header_background(),
+            table_header_border: self.table_header_border(),
         }
     }
 
@@ -89,6 +76,25 @@ impl ReaderTheme {
             Self::Light => Color::from_rgb8(0xE8, 0xEE, 0xF8),
             Self::Dark => Color::from_rgb8(0x2B, 0x34, 0x45),
             Self::Sepia => Color::from_rgb8(0xE5, 0xD6, 0xBA),
+        }
+    }
+
+    fn search_highlight(self, current: bool) -> Color {
+        match (self, current) {
+            (Self::Light, false) => Color::from_rgba8(0xFF, 0xF3, 0xA3, 0.50),
+            (Self::Light, true) => Color::from_rgba8(0xFF, 0xE0, 0x66, 0.45),
+            (Self::Dark, false) => Color::from_rgba8(0x4C, 0x3B, 0x00, 0.55),
+            (Self::Dark, true) => Color::from_rgba8(0x5C, 0x45, 0x00, 0.50),
+            (Self::Sepia, false) => Color::from_rgba8(0xFF, 0xE6, 0x9A, 0.45),
+            (Self::Sepia, true) => Color::from_rgba8(0xF4, 0xCF, 0x64, 0.35),
+        }
+    }
+
+    fn table_header_border(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0x59, 0x6B, 0x89),
+            Self::Dark => Color::from_rgb8(0x87, 0x97, 0xB2),
+            Self::Sepia => Color::from_rgb8(0x6B, 0x54, 0x2E),
         }
     }
 
