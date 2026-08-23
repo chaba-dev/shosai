@@ -4225,11 +4225,7 @@ fn render_spans_with_prefix<'a>(
                 (start < end).then(|| EpubTextHighlight {
                     scalars: prefix_scalars + start - text_offset
                         ..prefix_scalars + end - text_offset,
-                    color: color_rgba(if highlight.current {
-                        palette.current_search_highlight
-                    } else {
-                        palette.search_highlight
-                    }),
+                    color: native_epub_highlight_color(palette, highlight.current),
                 })
             })
             .collect();
@@ -4314,6 +4310,14 @@ fn native_epub_run(
         }),
         link: span.link.clone(),
     }
+}
+
+fn native_epub_highlight_color(palette: ReaderPalette, current: bool) -> [u8; 4] {
+    color_rgba(if current {
+        palette.current_search_highlight
+    } else {
+        palette.search_highlight
+    })
 }
 
 fn epub_link_clicked(href: String) -> Message {
@@ -7550,18 +7554,80 @@ mod tests {
             };
             (lighter + 0.05) / (darker + 0.05)
         }
+        fn composite(foreground: iced::Color, background: iced::Color) -> iced::Color {
+            iced::Color {
+                r: foreground.r * foreground.a + background.r * (1.0 - foreground.a),
+                g: foreground.g * foreground.a + background.g * (1.0 - foreground.a),
+                b: foreground.b * foreground.a + background.b * (1.0 - foreground.a),
+                a: 1.0,
+            }
+        }
 
         for theme in [ReaderTheme::Light, ReaderTheme::Dark, ReaderTheme::Sepia] {
-            assert!(contrast(theme.text_color(), theme.background()) >= 4.5);
+            let palette = theme.palette();
+            for surface in [palette.background, palette.table_header_background] {
+                assert!(contrast(palette.text, surface) >= 4.5);
+                assert!(contrast(palette.link, surface) >= 4.5);
+                for highlight in [palette.search_highlight, palette.current_search_highlight] {
+                    let highlighted_surface = composite(highlight, surface);
+                    assert!(
+                        contrast(palette.text, highlighted_surface) >= 4.5,
+                        "{theme:?} highlighted text must remain readable"
+                    );
+                    assert!(
+                        contrast(palette.link, highlighted_surface) >= 4.5,
+                        "{theme:?} highlighted links must remain readable"
+                    );
+                }
+            }
             assert!(
-                contrast(theme.link_color(), theme.background()) >= 4.5,
-                "{theme:?} link contrast must remain readable"
-            );
-            assert!(
-                contrast(theme.text_color(), theme.table_header_background()) >= 4.5,
-                "{theme:?} table header contrast must remain readable"
+                contrast(palette.table_header_border, palette.background) >= 3.0,
+                "{theme:?} table headers need a perceivable non-text cue"
             );
         }
+    }
+
+    #[test]
+    fn rich_and_native_epub_links_use_shared_palette_highlights_and_dispatch() {
+        use shosai_core::epub::render::TextSpan;
+
+        let href = "chapter.xhtml#note";
+        let linked = TextSpan {
+            text: "note".into(),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: Some(href.into()),
+        };
+        let palette = ReaderTheme::Dark.palette();
+
+        let rich = styled_epub_span(&linked, linked.text.clone(), 16.0, palette, Some(true));
+        assert_eq!(rich.link.as_deref(), Some(href));
+        assert_eq!(rich.color, Some(palette.link));
+        assert_eq!(
+            rich.highlight
+                .and_then(|highlight| match highlight.background {
+                    iced::Background::Color(color) => Some(color),
+                    _ => None,
+                }),
+            Some(palette.current_search_highlight)
+        );
+
+        let native = native_epub_run(&linked, 16.0, palette);
+        assert_eq!(native.link.as_deref(), Some(href));
+        assert_eq!(native.foreground, color_rgba(palette.link));
+        assert_eq!(
+            native_epub_highlight_color(palette, true),
+            color_rgba(palette.current_search_highlight)
+        );
+
+        assert!(matches!(
+            epub_link_clicked(href.into()),
+            Message::LinkClicked(link) if link == href
+        ));
     }
 
     #[test]
