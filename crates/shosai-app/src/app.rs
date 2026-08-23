@@ -3384,6 +3384,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             state.theme.text_color(),
                             &state.epub_image_handles,
                             false,
+                            (state.window_size.width - 40.0).clamp(120.0, 800.0),
                             text_offset,
                             &highlights,
                             Some(doc.fonts()),
@@ -3598,6 +3599,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 text_color,
                 &state.epub_image_handles,
                 true,
+                text_width,
                 page_node.text_offset,
                 &highlights,
                 fonts,
@@ -3677,6 +3679,7 @@ fn render_content_node<'a>(
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
+    available_width: f32,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -3742,6 +3745,7 @@ fn render_content_node<'a>(
                     text_color,
                     image_handles,
                     fill_images,
+                    (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
                     child_offset,
                     highlights,
                     fonts,
@@ -3800,6 +3804,7 @@ fn render_content_node<'a>(
                             text_color,
                             image_handles,
                             fill_images,
+                            available_width,
                             table_offset,
                             highlights,
                             fonts,
@@ -3819,14 +3824,20 @@ fn render_content_node<'a>(
                 table = table.push(rendered_row);
                 table_offset += 1;
             }
-            let mut table = container(table).width(Length::Fill);
+            let table_width = crate::epub::epub_table_layout_width(row_groups, available_width);
+            let mut table = container(table).width(Length::Fixed(table_width));
             if let Some(margin) = style.margin_left_em {
                 table = table.padding(iced::Padding {
                     left: margin * font_size,
                     ..iced::Padding::ZERO
                 });
             }
-            table.into()
+            scrollable(table)
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::default(),
+                ))
+                .width(Length::Fill)
+                .into()
         }
 
         ContentNode::UnorderedList(items) => {
@@ -7439,6 +7450,7 @@ mod tests {
             iced::Color::BLACK,
             &handles,
             false,
+            600.0,
             0,
             &[],
             None,
@@ -7454,6 +7466,7 @@ mod tests {
             iced::Color::BLACK,
             &handles,
             false,
+            600.0,
             0,
             &[],
             None,

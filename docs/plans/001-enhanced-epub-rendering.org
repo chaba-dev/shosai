@@ -365,8 +365,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   explicit and implicit row groups, header/accessibility attributes, styled
   captions and cell text/links, nested image resources, shared search offsets,
   and a readable native row fallback instead of flattening tables to prose.
-- [ ] Define overflow behavior for tables wider than the viewport and ensure
-  cells are not split into unusable fragments in paginated mode.
+- [X] Define overflow behavior for tables wider than the viewport and ensure
+  cells are not split into unusable fragments in paginated mode.  Production
+  table fallbacks now use a horizontally scrollable, width-bounded surface;
+  pagination fragments only between complete row-span bands, retains source
+  offsets, and keeps an over-tall band intact rather than splitting its cells.
 - [ ] Verify theme contrast, nested content, links/images in cells, and screen
   reader/header semantics in the native accessibility model.
 
