@@ -699,7 +699,7 @@ tests prove that:
   source-order text fallback; split token text is retained while nested and
   multiline tokens are rejected, and `semantics` requires one presentation
   child followed only by annotations;
-- one allocation-free subtree preflight counts rows, cells, annotations, and
+- one bounded subtree preflight counts rows, cells, annotations, and
   annotation descendants; enforces the MathML namespace except beneath
   `annotation-xml`; and rejects more than 64 elements, 16 levels, or 1,024 bytes
   of aggregate visible token/fence text before creating fonts or math boxes; and
