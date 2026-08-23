@@ -581,10 +581,16 @@ surface use bounded horizontal overflow rather than compressing or discarding
 cells. Paginated tables group complete row-span bands into one scroll surface
 per actual page fragment and keep the original text offsets. Pagination and
 rendering share cell-padding and row/child-spacing geometry; a band taller than
-one page remains intact rather than splitting cell content.
+one page remains intact rather than splitting cell content. Reader links use
+theme-specific contrast-safe colors through both rich and embedded-font text;
+header cells use a contrast-safe theme surface. Nested table links and images
+continue through the shared link dispatch and book-local image cache paths.
 The test-only explicit Grid remains evidence for the next production step, not
-the current layout engine. Full grid placement and native accessibility
-exposure remain the open M3 boundaries.
+the current layout engine. Full grid placement remains open. Native table and
+header accessibility exposure is also open because the Iced 0.14 API available
+to this repository provides no accessibility-tree/AccessKit integration point;
+implementing honest screen-reader roles therefore requires an upstream
+capability or framework upgrade.
 
 ## Native EPUB font admission and renderer boundary
 
