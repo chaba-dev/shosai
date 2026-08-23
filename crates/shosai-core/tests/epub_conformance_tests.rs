@@ -417,6 +417,34 @@ fn font_and_math_fixtures_cover_declared_formats_and_fallbacks() {
 }
 
 #[test]
+fn mathml_fixture_enters_bounded_presentation_and_shared_search_text() {
+    let math = open("mathml");
+    let chapter = math.presentation().chapter(0).unwrap();
+    let expressions = chapter
+        .nodes()
+        .iter()
+        .filter_map(|node| match node {
+            ContentNode::Math { content, .. } => Some(content),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(expressions.len(), 6);
+    assert!(expressions.iter().any(|content| {
+        content.display == shosai_core::epub::MathDisplay::Block
+            && content.fallback == "root(x, 3)"
+            && content.expression.is_some()
+    }));
+    assert!(expressions.iter().any(|content| {
+        content.fallback == "1" && content.expression.is_none()
+    }));
+    assert!(chapter.search_text().contains("root(x, 3)"));
+    assert!(chapter.search_text().contains("x_1^2"));
+    assert!(chapter.search_text().contains('π'));
+    assert!(!chapter.search_text().contains("\\pi"));
+}
+
+#[test]
 fn bidi_and_link_fixtures_retain_logical_source_contracts() {
     let bidi = open("bidi");
     let chapter = chapter_document(&bidi, 0);
