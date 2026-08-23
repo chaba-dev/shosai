@@ -3384,7 +3384,10 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             state.theme.text_color(),
                             &state.epub_image_handles,
                             false,
-                            (state.window_size.width - 40.0).clamp(120.0, 800.0),
+                            continuous_epub_content_width(
+                                state.window_size.width,
+                                state.show_bookmarks_panel,
+                            ),
                             text_offset,
                             &highlights,
                             Some(doc.fonts()),
@@ -3449,6 +3452,10 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
         }
         None => welcome_view(state),
     }
+}
+
+fn continuous_epub_content_width(window_width: f32, _show_bookmarks_panel: bool) -> f32 {
+    (window_width - 40.0).clamp(120.0, 800.0)
 }
 
 fn pdf_page_view(state: &State) -> Element<'_, Message> {
@@ -5006,6 +5013,12 @@ mod tests {
         state.show_search_bar = false;
         state.show_reader_more = true;
         assert_eq!(baseline - available_reader_size(&state).height, 84.0);
+    }
+
+    #[test]
+    fn continuous_epub_width_tracks_the_actual_reader_surface() {
+        assert_eq!(continuous_epub_content_width(900.0, false), 760.0);
+        assert_eq!(continuous_epub_content_width(900.0, true), 560.0);
     }
 
     #[test]

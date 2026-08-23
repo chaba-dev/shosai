@@ -1583,6 +1583,51 @@ mod math_layout;
 mod tests {
     use super::*;
 
+    fn one_line_table(rows: usize) -> ContentNode {
+        use shosai_core::epub::render::{
+            NodeStyle, TableCell, TableRow, TableRowGroup, TableRowGroupKind, TextSpan,
+        };
+
+        let paragraph = || {
+            ContentNode::Paragraph(
+                vec![TextSpan {
+                    text: "cell".into(),
+                    font_family: None,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                NodeStyle::default(),
+            )
+        };
+        ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: (0..rows)
+                    .map(|_| TableRow {
+                        cells: vec![TableCell {
+                            id: None,
+                            header: false,
+                            scope: None,
+                            headers: Vec::new(),
+                            row_span: 1,
+                            column_span: 1,
+                            children: vec![paragraph()],
+                            block_starts: Vec::new(),
+                            style: NodeStyle::default(),
+                        }],
+                    })
+                    .collect(),
+            }],
+            style: NodeStyle::default(),
+        }
+    }
+
     #[test]
     fn nested_blockquote_and_paragraph_margins_reduce_shaping_width() {
         let block = shosai_core::epub::render::NodeStyle {
@@ -1728,6 +1773,37 @@ mod tests {
         assert_eq!(
             last_offset + content_node_text_len(last),
             content_node_text_len(table)
+        );
+    }
+
+    #[test]
+    fn table_height_estimation_includes_rendered_padding_and_spacing() {
+        let one_row = one_line_table(1);
+        let height = estimated_epub_compact_node_height(&one_row, 40, 20, 16.0);
+
+        assert!((height - (16.0 * TEXT_LINE_HEIGHT + 12.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn fitting_rowspan_bands_share_one_paginated_table_surface() {
+        let table = one_line_table(3);
+        let pages = paginate_epub_chapter(
+            std::slice::from_ref(&table),
+            None,
+            16.0,
+            1.4,
+            Size::new(360.0, 300.0),
+        );
+        let fragments = pages
+            .iter()
+            .flatten()
+            .filter(|page_node| matches!(page_node.node, ContentNode::Table { .. }))
+            .collect::<Vec<_>>();
+
+        assert_eq!(fragments.len(), 1);
+        assert_eq!(
+            content_node_text_len(&fragments[0].node),
+            content_node_text_len(&table)
         );
     }
 
