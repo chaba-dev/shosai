@@ -6,6 +6,8 @@ use shosai_core::epub::{
     EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest, EpubTextRun,
 };
 
+pub(crate) mod math_layout;
+pub(crate) mod math_widget;
 pub(crate) mod native_text;
 
 pub(crate) const BLOCKQUOTE_SPACING: f32 = 8.0;
@@ -1523,10 +1525,18 @@ fn measured_epub_compact_node_height(
                 preserve_whitespace: false,
                 link: None,
             };
+            let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            if let Some(layout) = content
+                .expression
+                .as_ref()
+                .and_then(|expression| math_layout::layout_math_for_width(expression, size, width))
+            {
+                return Some(layout.height);
+            }
             measure_epub_spans(
                 fonts,
                 std::slice::from_ref(&span),
-                font_size * style.font_size_multiplier.unwrap_or(1.0),
+                size,
                 width,
                 style.direction,
                 style.text_align,
@@ -1669,9 +1679,6 @@ pub(crate) mod text_shaping;
 mod table_layout;
 
 #[cfg(test)]
-mod math_layout;
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1785,6 +1792,76 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn standalone_math_pagination_uses_the_native_painted_height() {
+        use shosai_core::epub::render::NodeStyle;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let expression = MathExpression::Fraction(
+            Box::new(MathExpression::Token("a".into())),
+            Box::new(MathExpression::SquareRoot(vec![MathExpression::Token(
+                "b".into(),
+            )])),
+        );
+        let node = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: Some(expression.clone()),
+                fallback: "(a)/(sqrt(b))".into(),
+            },
+            style: NodeStyle::default(),
+        };
+        let native = math_layout::layout_math_for_width(&expression, 20.0, 600.0)
+            .expect("supported standalone math should use native geometry");
+
+        assert_eq!(
+            measured_epub_compact_node_height(None, &node, 20.0, 600.0),
+            Some(native.height),
+            "pagination and painting must consume the same geometry"
+        );
+        assert_eq!(
+            content_node_text_len(&node),
+            "(a)/(sqrt(b))".chars().count(),
+            "native presentation must not change shared source offsets"
+        );
+    }
+
+    #[test]
+    fn unsupported_or_overwide_math_keeps_the_readable_text_path() {
+        use shosai_core::epub::render::NodeStyle;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let unsupported = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: None,
+                fallback: "readable fallback".into(),
+            },
+            style: NodeStyle::default(),
+        };
+        let overwide = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: Some(MathExpression::Token("wide expression".into())),
+                fallback: "wide expression".into(),
+            },
+            style: NodeStyle::default(),
+        };
+
+        assert!(
+            estimated_epub_compact_node_height(&unsupported, 40, 20, 20.0) > 0.0,
+            "unsupported math must remain measurable through its fallback"
+        );
+        let ContentNode::Math { content, .. } = &overwide else {
+            unreachable!();
+        };
+        assert!(
+            math_layout::layout_math_for_width(content.expression.as_ref().unwrap(), 20.0, 1.0)
+                .is_none()
+        );
+        assert!(estimated_epub_compact_node_height(&overwide, 1, 20, 20.0) > 0.0);
     }
 
     #[test]

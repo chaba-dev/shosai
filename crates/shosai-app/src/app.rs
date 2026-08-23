@@ -3916,6 +3916,24 @@ fn render_content_node<'a>(
 
         ContentNode::Math { content, style } => {
             let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            let highlighted = highlights.iter().any(|highlight| {
+                highlight.start < text_offset + content.fallback.chars().count()
+                    && highlight.end > text_offset
+            });
+            if !highlighted
+                && let Some(layout) = content.expression.as_ref().and_then(|expression| {
+                    crate::epub::math_layout::layout_math_for_width(
+                        expression,
+                        size,
+                        available_width,
+                    )
+                })
+            {
+                return container(crate::epub::math_widget::math(layout, palette.text))
+                    .width(Length::Fill)
+                    .align_x(node_style_to_alignment(style))
+                    .into();
+            }
             let rendered = render_highlighted_text_with_font(
                 &content.fallback,
                 text_offset,

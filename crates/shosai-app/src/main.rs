@@ -63,6 +63,7 @@ fn main() -> iced::Result {
         .title(app::title)
         .theme(theme::application())
         .subscription(app::subscription)
+        .font(epub::math_layout::MATH_FONT_BYTES)
         .window(iced::window::Settings {
             icon: window_icon(),
             size: window_size,
