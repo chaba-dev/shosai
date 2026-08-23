@@ -1623,6 +1623,32 @@ mod tests {
     }
 
     #[test]
+    fn preformatted_monospace_css_cannot_bypass_mathml_admission() {
+        let xhtml = format!(
+            r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+                <math xmlns="http://www.w3.org/1998/Math/MathML"
+                    style="font-family: monospace; white-space: pre"><mi>x</mi></math>
+                <math xmlns="http://www.w3.org/1998/Math/MathML"
+                    style="font-family: monospace; white-space: pre"><mtext>{}</mtext></math>
+            </body></html>"#,
+            "x".repeat(1025)
+        );
+        let nodes = parse_chapter_xhtml(&xhtml, "", &Default::default());
+
+        assert!(matches!(
+            &nodes[0],
+            ContentNode::Math { content, .. }
+                if content.expression.is_some() && content.fallback == "x"
+        ));
+        assert!(matches!(
+            &nodes[1],
+            ContentNode::Math { content, .. }
+                if content.expression.is_none()
+                    && content.fallback == "[math expression omitted]"
+        ));
+    }
+
+    #[test]
     fn test_parse_link() {
         let xhtml = r#"<html><body><p>Visit <a href="https://example.com">our site</a> today</p></body></html>"#;
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());

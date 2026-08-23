@@ -450,12 +450,42 @@ mod tests {
     }
 
     #[test]
+    fn malformed_supported_constructs_use_source_order_fallback() {
+        let fraction = parse(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><mfrac>before<mi>a</mi><mi>b</mi>after</mfrac></math>"#,
+        );
+        assert!(fraction.expression.is_none());
+        assert_eq!(fraction.fallback, "before a b after");
+
+        let nested_token = parse(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><mi>before<mtext>inside</mtext>after</mi></math>"#,
+        );
+        assert!(nested_token.expression.is_none());
+        assert_eq!(nested_token.fallback, "before inside after");
+
+        let semantics_text = parse(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics>before<mi>x</mi><annotation>ignored</annotation></semantics></math>"#,
+        );
+        assert!(semantics_text.expression.is_none());
+        assert_eq!(semantics_text.fallback, "[math expression omitted]");
+    }
+
+    #[test]
     fn semantics_uses_presentation_content_and_suppresses_annotations() {
         let content = parse(
             r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>c</mi><mn>2</mn></msup><annotation encoding="application/x-tex">secret annotation</annotation></semantics></math>"#,
         );
         assert_eq!(content.fallback, "c^2");
         assert!(!content.fallback.contains("secret"));
+        assert!(content.expression.is_some());
+    }
+
+    #[test]
+    fn foreign_annotation_content_is_opaque_to_mathml_validation() {
+        let content = parse(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>x</mi><annotation-xml><svg xmlns="http://www.w3.org/2000/svg"><semantics/></svg></annotation-xml></semantics></math>"#,
+        );
+        assert_eq!(content.fallback, "x");
         assert!(content.expression.is_some());
     }
 }
