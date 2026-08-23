@@ -14,6 +14,99 @@ pub const ACCENT_SOFT: Color = Color::from_rgb8(0xE2, 0xE6, 0xF0);
 pub const RADIUS_SMALL: f32 = 6.0;
 pub const RADIUS_MEDIUM: f32 = 10.0;
 
+/// Color theme for EPUB reader content.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ReaderTheme {
+    #[default]
+    Light,
+    Dark,
+    Sepia,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReaderPalette {
+    pub background: Color,
+    pub text: Color,
+    pub link: Color,
+    pub search_highlight: Color,
+    pub current_search_highlight: Color,
+    pub table_header_background: Color,
+    pub table_header_border: Color,
+}
+
+impl ReaderTheme {
+    pub fn palette(self) -> ReaderPalette {
+        ReaderPalette {
+            background: self.background(),
+            text: self.text_color(),
+            link: self.link_color(),
+            search_highlight: self.search_highlight(false),
+            current_search_highlight: self.search_highlight(true),
+            table_header_background: self.table_header_background(),
+            table_header_border: self.table_header_border(),
+        }
+    }
+
+    pub fn background(self) -> Color {
+        match self {
+            Self::Light => Color::WHITE,
+            Self::Dark => Color::from_rgb(0.12, 0.12, 0.14),
+            Self::Sepia => Color::from_rgb(0.96, 0.92, 0.84),
+        }
+    }
+
+    pub fn text_color(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb(0.1, 0.1, 0.1),
+            Self::Dark => Color::from_rgb(0.85, 0.85, 0.85),
+            Self::Sepia => Color::from_rgb(0.3, 0.2, 0.1),
+        }
+    }
+
+    pub fn link_color(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0x17, 0x4E, 0xA6),
+            Self::Dark => Color::from_rgb8(0x8A, 0xB4, 0xF8),
+            Self::Sepia => Color::from_rgb8(0x68, 0x3D, 0x00),
+        }
+    }
+
+    pub fn table_header_background(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0xE8, 0xEE, 0xF8),
+            Self::Dark => Color::from_rgb8(0x2B, 0x34, 0x45),
+            Self::Sepia => Color::from_rgb8(0xE5, 0xD6, 0xBA),
+        }
+    }
+
+    fn search_highlight(self, current: bool) -> Color {
+        match (self, current) {
+            (Self::Light, false) => Color::from_rgba8(0xFF, 0xF3, 0xA3, 0.50),
+            (Self::Light, true) => Color::from_rgba8(0xFF, 0xE0, 0x66, 0.45),
+            (Self::Dark, false) => Color::from_rgba8(0x4C, 0x3B, 0x00, 0.55),
+            (Self::Dark, true) => Color::from_rgba8(0x5C, 0x45, 0x00, 0.50),
+            (Self::Sepia, false) => Color::from_rgba8(0xFF, 0xE6, 0x9A, 0.45),
+            (Self::Sepia, true) => Color::from_rgba8(0xF4, 0xCF, 0x64, 0.35),
+        }
+    }
+
+    fn table_header_border(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0x59, 0x6B, 0x89),
+            Self::Dark => Color::from_rgb8(0x87, 0x97, 0xB2),
+            Self::Sepia => Color::from_rgb8(0x6B, 0x54, 0x2E),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Light => Self::Dark,
+            Self::Dark => Self::Sepia,
+            Self::Sepia => Self::Light,
+        }
+    }
+}
+
 pub fn application() -> Theme {
     Theme::custom(
         "Shosai",

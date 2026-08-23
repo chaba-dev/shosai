@@ -371,8 +371,14 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   pagination groups complete row-span bands into one surface per actual page
   fragment, retains source offsets, accounts for the renderer's exact padding
   and spacing, and keeps an over-tall band intact rather than splitting cells.
-- [ ] Verify theme contrast, nested content, links/images in cells, and screen
-  reader/header semantics in the native accessibility model.
+- [X] Verify theme contrast and nested links/images in cells.  Reader links now
+  use theme-specific contrast-safe colors in both rich and embedded-font text,
+  header cells have a contrast-safe theme surface, and nested table resources
+  continue through the shared link dispatch and book-local image cache paths.
+- [ ] Expose table and header semantics to screen readers.  Iced 0.14 exposes no
+  accessibility-tree/AccessKit API to this application, so this requires an
+  upstream framework capability or upgrade rather than an untestable widget
+  approximation.
 
 ** M4 — MathML
 
