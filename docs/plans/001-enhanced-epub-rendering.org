@@ -368,8 +368,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [X] Define overflow behavior for tables wider than the viewport and ensure
   cells are not split into unusable fragments in paginated mode.  Production
   table fallbacks now use a horizontally scrollable, width-bounded surface;
-  pagination fragments only between complete row-span bands, retains source
-  offsets, and keeps an over-tall band intact rather than splitting its cells.
+  pagination groups complete row-span bands into one surface per actual page
+  fragment, retains source offsets, accounts for the renderer's exact padding
+  and spacing, and keeps an over-tall band intact rather than splitting cells.
 - [ ] Verify theme contrast, nested content, links/images in cells, and screen
   reader/header semantics in the native accessibility model.
 

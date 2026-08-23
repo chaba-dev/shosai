@@ -15,6 +15,9 @@ pub(crate) const MAX_CHARACTERS_PER_LINE: usize = 72;
 pub(crate) const PAGE_NUMBER_SIZE: f32 = 11.0;
 pub(crate) const MAX_EPUB_PAGES: usize = 10_000;
 pub(crate) const MIN_EPUB_TABLE_WIDTH: f32 = 360.0;
+pub(crate) const EPUB_TABLE_CELL_PADDING: f32 = 6.0;
+pub(crate) const EPUB_TABLE_CELL_SPACING: f32 = 4.0;
+pub(crate) const EPUB_TABLE_ROW_SPACING: f32 = 8.0;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
@@ -541,11 +544,14 @@ fn paginate_epub_table(
     };
     let mut fragment_offset = text_offset;
     let mut include_caption = !caption.is_empty();
-    let mut emitted = false;
+    let mut pending = None;
+    let mut pending_height = 0.0;
+    let mut fragment_capacity = *remaining;
+    let mut page_budget_exhausted = false;
 
     for group in row_groups {
         for rows in table_row_bands(&group.rows) {
-            let fragment = ContentNode::Table {
+            let band = ContentNode::Table {
                 caption: if include_caption {
                     caption.clone()
                 } else {
@@ -562,32 +568,69 @@ fn paginate_epub_table(
                 }],
                 style: style.clone(),
             };
-            let fragment_height = estimated_epub_node_height(
-                &fragment,
+            include_caption = false;
+
+            let mut candidate = pending.clone().unwrap_or_else(|| band.clone());
+            if pending.is_some() {
+                append_table_band(&mut candidate, group.kind, rows);
+            }
+            let candidate_height = estimated_epub_node_height(
+                &candidate,
                 chars_per_line,
                 lines_per_page,
                 font_size,
                 line_spacing,
             );
-            if fragment_height > *remaining
+
+            if pending.is_some() && candidate_height > fragment_capacity && !page_budget_exhausted {
+                if budget.remaining_page_breaks == 0 {
+                    page_budget_exhausted = true;
+                    pending = Some(candidate);
+                    pending_height = candidate_height;
+                    continue;
+                }
+                let fragment = pending.take().expect("pending table fragment must exist");
+                let fragment_len = content_node_text_len(&fragment);
+                pages.last_mut().unwrap().push(PageNode {
+                    node: fragment,
+                    text_offset: fragment_offset,
+                });
+                fragment_offset += fragment_len;
+                *remaining = (fragment_capacity - pending_height).max(0.0);
+                let _ = push_epub_page(pages, budget);
+                *remaining = page_height;
+                fragment_capacity = *remaining;
+                pending_height = estimated_epub_node_height(
+                    &band,
+                    chars_per_line,
+                    lines_per_page,
+                    font_size,
+                    line_spacing,
+                );
+                pending = Some(band);
+                continue;
+            }
+
+            if pending.is_none()
+                && candidate_height > *remaining
                 && page_has_content(pages, first_page_has_title)
                 && push_epub_page(pages, budget)
             {
                 *remaining = page_height;
+                fragment_capacity = *remaining;
             }
-            let fragment_len = content_node_text_len(&fragment);
-            pages.last_mut().unwrap().push(PageNode {
-                node: fragment,
-                text_offset: fragment_offset,
-            });
-            fragment_offset += fragment_len;
-            *remaining = (*remaining - fragment_height).max(0.0);
-            include_caption = false;
-            emitted = true;
+            pending = Some(candidate);
+            pending_height = candidate_height;
         }
     }
 
-    if !emitted && !caption.is_empty() {
+    if let Some(fragment) = pending {
+        pages.last_mut().unwrap().push(PageNode {
+            node: fragment,
+            text_offset: fragment_offset,
+        });
+        *remaining = (fragment_capacity - pending_height).max(0.0);
+    } else if !caption.is_empty() {
         let height = estimated_epub_node_height(
             table,
             chars_per_line,
@@ -606,6 +649,24 @@ fn paginate_epub_table(
             text_offset,
         });
         *remaining = (*remaining - height).max(0.0);
+    }
+}
+
+fn append_table_band(
+    fragment: &mut ContentNode,
+    kind: shosai_core::epub::render::TableRowGroupKind,
+    rows: &[TableRow],
+) {
+    let ContentNode::Table { row_groups, .. } = fragment else {
+        unreachable!("table bands can only be appended to table fragments");
+    };
+    if let Some(group) = row_groups.last_mut().filter(|group| group.kind == kind) {
+        group.rows.extend_from_slice(rows);
+    } else {
+        row_groups.push(TableRowGroup {
+            kind,
+            rows: rows.to_vec(),
+        });
     }
 }
 
@@ -1351,31 +1412,36 @@ fn estimated_epub_compact_node_height(
                     .unwrap_or(1.0)
                     * spans_font_scale(caption);
                 wrapped(spans_text_len(caption), scale) * text_line_height * scale
-                    + BLOCKQUOTE_SPACING
             });
+            let row_heights = row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .map(|row| {
+                    row.cells
+                        .iter()
+                        .map(|cell| {
+                            cell.children
+                                .iter()
+                                .map(|child| {
+                                    estimated_epub_compact_node_height(
+                                        child,
+                                        chars_per_line,
+                                        lines_per_page,
+                                        font_size,
+                                    )
+                                })
+                                .sum::<f32>()
+                                + EPUB_TABLE_CELL_SPACING
+                                    * cell.children.len().saturating_sub(1) as f32
+                                + 2.0 * EPUB_TABLE_CELL_PADDING
+                        })
+                        .fold(2.0 * EPUB_TABLE_CELL_PADDING, f32::max)
+                })
+                .collect::<Vec<_>>();
+            let table_children = row_heights.len() + usize::from(caption_height.is_some());
             caption_height.unwrap_or(0.0)
-                + row_groups
-                    .iter()
-                    .flat_map(|group| &group.rows)
-                    .map(|row| {
-                        row.cells
-                            .iter()
-                            .map(|cell| {
-                                cell.children
-                                    .iter()
-                                    .map(|child| {
-                                        estimated_epub_compact_node_height(
-                                            child,
-                                            chars_per_line,
-                                            lines_per_page,
-                                            font_size,
-                                        )
-                                    })
-                                    .sum::<f32>()
-                            })
-                            .fold(text_line_height, f32::max)
-                    })
-                    .sum::<f32>()
+                + row_heights.into_iter().sum::<f32>()
+                + EPUB_TABLE_ROW_SPACING * table_children.saturating_sub(1) as f32
         }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items

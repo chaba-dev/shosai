@@ -25,7 +25,8 @@ use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 
 use crate::epub::{
-    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
+    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
+    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
     PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, PageNode as EpubPageNode,
     content_node_text_len, paginate_epub_chapter_with_budget, spans_font_scale, spans_text_len,
 };
@@ -3454,8 +3455,13 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
     }
 }
 
-fn continuous_epub_content_width(window_width: f32, _show_bookmarks_panel: bool) -> f32 {
-    (window_width - 40.0).clamp(120.0, 800.0)
+fn continuous_epub_content_width(window_width: f32, show_bookmarks_panel: bool) -> f32 {
+    let panel_width = if show_bookmarks_panel && !uses_compact_reader_layout(window_width) {
+        BOOKMARKS_PANEL_WIDTH
+    } else {
+        0.0
+    };
+    ((window_width - panel_width).min(800.0) - 40.0).max(120.0)
 }
 
 fn pdf_page_view(state: &State) -> Element<'_, Message> {
@@ -3776,7 +3782,7 @@ fn render_content_node<'a>(
             row_groups,
             style,
         } => {
-            let mut table = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
+            let mut table = column![].spacing(EPUB_TABLE_ROW_SPACING);
             let mut table_offset = text_offset;
             if !caption.is_empty() {
                 let caption_style = caption_style.as_ref().unwrap_or(style);
@@ -3799,7 +3805,7 @@ fn render_content_node<'a>(
             for table_row in row_groups.iter().flat_map(|group| &group.rows) {
                 let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
                 for (cell_index, cell) in table_row.cells.iter().enumerate() {
-                    let mut rendered_cell = column![].spacing(4);
+                    let mut rendered_cell = column![].spacing(EPUB_TABLE_CELL_SPACING);
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
                             table_offset += 1;
@@ -3822,7 +3828,7 @@ fn render_content_node<'a>(
                     rendered_row = rendered_row.push(
                         container(rendered_cell)
                             .width(Length::FillPortion(cell.column_span.max(1)))
-                            .padding(6),
+                            .padding(EPUB_TABLE_CELL_PADDING),
                     );
                     if cell_index + 1 < table_row.cells.len() {
                         table_offset += 1;
