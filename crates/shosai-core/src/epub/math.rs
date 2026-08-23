@@ -102,14 +102,10 @@ fn preflight(
     }
     let suppress_text = suppress_text || is_annotation(node);
     if !suppress_text {
-        for text in node.children().filter(Node::is_text) {
-            budget.visible_text_bytes = budget
-                .visible_text_bytes
-                .checked_add(text.text().unwrap_or_default().trim().len())
-                .ok_or(())?;
-            if budget.visible_text_bytes > MAX_VISIBLE_TEXT_BYTES {
-                return Err(());
-            }
+        add_visible_bytes(trimmed_direct_text_bytes(node), budget)?;
+        if name == "mfenced" {
+            add_visible_bytes(node.attribute("open").unwrap_or("(").len(), budget)?;
+            add_visible_bytes(node.attribute("close").unwrap_or(")").len(), budget)?;
         }
     }
     let allow_foreign = allow_foreign || name == "annotation-xml";
@@ -117,6 +113,37 @@ fn preflight(
         preflight(child, depth + 1, allow_foreign, suppress_text, budget)?;
     }
     Ok(())
+}
+
+fn trimmed_direct_text_bytes(node: Node<'_, '_>) -> usize {
+    let mut bytes = 0usize;
+    let mut pending_whitespace = 0usize;
+    let mut visible = false;
+    for character in node
+        .children()
+        .filter(Node::is_text)
+        .flat_map(|text| text.text().unwrap_or_default().chars())
+    {
+        if character.is_whitespace() {
+            if visible {
+                pending_whitespace = pending_whitespace.saturating_add(character.len_utf8());
+            }
+        } else {
+            bytes = bytes
+                .saturating_add(pending_whitespace)
+                .saturating_add(character.len_utf8());
+            pending_whitespace = 0;
+            visible = true;
+        }
+    }
+    bytes
+}
+
+fn add_visible_bytes(bytes: usize, budget: &mut Budget) -> Result<(), ()> {
+    budget.visible_text_bytes = budget.visible_text_bytes.checked_add(bytes).ok_or(())?;
+    (budget.visible_text_bytes <= MAX_VISIBLE_TEXT_BYTES)
+        .then_some(())
+        .ok_or(())
 }
 
 fn expression(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<MathExpression, ()> {
@@ -236,22 +263,19 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
                 fallback(*a, depth + 1, count)?,
                 fallback(*b, depth + 1, count)?
             )),
-            _ => fallback_children(children, depth, count),
+            _ => fallback_children(node, depth, count),
         },
-        "msqrt" => Ok(format!(
-            "sqrt({})",
-            fallback_children(children, depth, count)?
-        )),
+        "msqrt" => Ok(format!("sqrt({})", fallback_children(node, depth, count)?)),
         "mroot" => match children.as_slice() {
             [a, b] => Ok(format!(
                 "root({}, {})",
                 fallback(*a, depth + 1, count)?,
                 fallback(*b, depth + 1, count)?
             )),
-            _ => fallback_children(children, depth, count),
+            _ => fallback_children(node, depth, count),
         },
-        "msub" => fallback_script(children, "_", depth, count),
-        "msup" => fallback_script(children, "^", depth, count),
+        "msub" => fallback_script(node, "_", depth, count),
+        "msup" => fallback_script(node, "^", depth, count),
         "msubsup" => match children.as_slice() {
             [base, sub, sup] => Ok(format!(
                 "{}_{}^{}",
@@ -259,13 +283,13 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
                 fallback(*sub, depth + 1, count)?,
                 fallback(*sup, depth + 1, count)?
             )),
-            _ => fallback_children(children, depth, count),
+            _ => fallback_children(node, depth, count),
         },
         "annotation" | "annotation-xml" => Ok(String::new()),
         "mfenced" => Ok(format!(
             "{}{}{}",
             node.attribute("open").unwrap_or("("),
-            fallback_children(children, depth, count)?,
+            fallback_children(node, depth, count)?,
             node.attribute("close").unwrap_or(")")
         )),
         "semantics" => children
@@ -273,35 +297,39 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
             .copied()
             .ok_or(())
             .and_then(|child| fallback(child, depth + 1, count)),
-        _ => fallback_children(children, depth, count),
+        _ => fallback_children(node, depth, count),
     }
 }
 
 fn fallback_script(
-    children: Vec<Node<'_, '_>>,
+    node: Node<'_, '_>,
     operator: &str,
     depth: usize,
     count: &mut usize,
 ) -> Result<String, ()> {
+    let children = elements(node);
     match children.as_slice() {
         [base, script] => Ok(format!(
             "{}{operator}{}",
             fallback(*base, depth + 1, count)?,
             fallback(*script, depth + 1, count)?
         )),
-        _ => fallback_children(children, depth, count),
+        _ => fallback_children(node, depth, count),
     }
 }
 
-fn fallback_children(
-    children: Vec<Node<'_, '_>>,
-    depth: usize,
-    count: &mut usize,
-) -> Result<String, ()> {
-    children
-        .into_iter()
-        .filter(|child| !is_annotation(*child))
-        .map(|child| fallback(child, depth + 1, count))
+fn fallback_children(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<String, ()> {
+    node.children()
+        .filter_map(|child| {
+            if child.is_text() {
+                let text = child.text().unwrap_or_default().trim();
+                (!text.is_empty()).then(|| Ok(text.to_owned()))
+            } else if child.is_element() && !is_annotation(child) {
+                Some(fallback(child, depth + 1, count))
+            } else {
+                None
+            }
+        })
         .collect::<Result<Vec<_>, _>>()
         .map(|parts| {
             parts
