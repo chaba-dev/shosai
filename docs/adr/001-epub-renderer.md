@@ -569,6 +569,18 @@ yet position an image among shaped glyphs. Promoting this route would therefore
 require a documented EPUB table subset or a fuller maintained table algorithm;
 Grid alone cannot justify browser-equivalent fidelity.
 
+Production parsing now retains tables as explicit caption, row-group, row, and
+cell nodes rather than flattening their descendants into paragraphs. Header
+roles, `scope`, `headers`, `rowspan`, `colspan`, styled links, nested image
+references, source block boundaries, and source-order searchable text survive
+in the shared chapter presentation. Numeric spans saturate at the HTML semantic
+limits (`rowspan` 65,534 and `colspan` 1,000), and rejected image references
+retain alt text without entering the canonical resource model. The app consumes
+this model through a readable row/cell fallback;
+the test-only explicit Grid remains evidence for the next production step, not
+the current layout engine. Wide-table overflow, row-span placement, pagination,
+and native accessibility exposure remain the open M3 boundaries.
+
 ## Native EPUB font admission and renderer boundary
 
 The production EPUB document now admits author-supplied fonts after canonical

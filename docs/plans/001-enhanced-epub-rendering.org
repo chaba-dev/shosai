@@ -32,11 +32,14 @@ boundaries.
   and per-document byte/application limits plus rule, selector, component, and
   amplified processing-step budgets bound hostile CSS work.  Unsupported selectors,
   declarations, conditional rules, ~@import~, and named namespaces fail soft.
-  Font-face application, tables, and MathML remain later milestones.
+  Book-local ~@font-face~ rules feed bounded native shaping, and table parsing
+  retains semantic captions, row groups, rows, cells, spans, and ordered nested
+  content.  MathML remains a later milestone.
 - ~crates/shosai-core/src/epub/render.rs~ converts XHTML to ~ContentNode~ and
   ~NodeStyle~.  Each ~EpubDoc~ parses that model once into an immutable chapter
   presentation shared by search, pagination, and continuous rendering.  Tables
-  and MathML have no fidelity-preserving model.
+  have a semantic model and readable native fallback; full table layout and
+  MathML remain incomplete.
 - ~crates/shosai-app/src/epub.rs~ owns heuristic pagination geometry, while
   ~app.rs~ derives paginated layout and directly creates Iced widgets for both
   reader modes from the shared chapter presentation.  Pagination runs on a
@@ -357,8 +360,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** M3 — Tables
 
-- [ ] Preserve ~table~, caption, row groups, rows, cells, headers, ~colspan~, and
-  ~rowspan~ in the core/native model.
+- [X] Preserve ~table~, caption, row groups, rows, cells, headers, ~colspan~, and
+  ~rowspan~ in the core/native model.  Production chapter parsing now retains
+  explicit and implicit row groups, header/accessibility attributes, styled
+  captions and cell text/links, nested image resources, shared search offsets,
+  and a readable native row fallback instead of flattening tables to prose.
 - [ ] Define overflow behavior for tables wider than the viewport and ensure
   cells are not split into unusable fragments in paginated mode.
 - [ ] Verify theme contrast, nested content, links/images in cells, and screen

@@ -258,6 +258,52 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
             .attribute("href"),
         Some("#spanning-table")
     );
+
+    let rendered = table_doc.presentation().chapter(0).unwrap().nodes();
+    let tables = rendered
+        .iter()
+        .filter_map(|node| match node {
+            shosai_core::epub::render::ContentNode::Table {
+                caption,
+                row_groups,
+                ..
+            } => Some((caption, row_groups)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tables.len(), 2);
+    assert_eq!(
+        tables[0]
+            .0
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>(),
+        "Quarterly results"
+    );
+    assert_eq!(
+        tables[0]
+            .1
+            .iter()
+            .map(|group| group.kind)
+            .collect::<Vec<_>>(),
+        [
+            shosai_core::epub::render::TableRowGroupKind::Head,
+            shosai_core::epub::render::TableRowGroupKind::Body,
+        ]
+    );
+    let body = &tables[0].1[1];
+    assert!(body.rows[0].cells[0].header);
+    assert_eq!(body.rows[0].cells[0].row_span, 2);
+    assert_eq!(body.rows[2].cells[0].column_span, 2);
+    assert!(matches!(
+        body.rows[1].cells[0].children.last(),
+        Some(shosai_core::epub::render::ContentNode::Image { src, alt })
+            if src == "OEBPS/Images/pixel.png" && alt == "Q2 chart"
+    ));
+    let search_text = table_doc.presentation().chapter(0).unwrap().search_text();
+    assert!(search_text.contains("Quarter\tValue"));
+    assert!(search_text.contains("First half\tQ1 link"));
+    assert!(search_text.contains("Q2 chart"));
 }
 
 #[test]

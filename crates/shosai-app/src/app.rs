@@ -1415,6 +1415,15 @@ fn cache_epub_image_handles<'a, F>(
             ContentNode::BlockQuote { children, .. } => {
                 cache_epub_image_handles(handles, children, resource_bytes);
             }
+            ContentNode::Table { row_groups, .. } => {
+                for cell in row_groups
+                    .iter()
+                    .flat_map(|group| &group.rows)
+                    .flat_map(|row| &row.cells)
+                {
+                    cache_epub_image_handles(handles, &cell.children, resource_bytes);
+                }
+            }
             _ => {}
         }
     }
@@ -3750,6 +3759,76 @@ fn render_content_node<'a>(
                 .into()
         }
 
+        ContentNode::Table {
+            caption,
+            caption_style,
+            row_groups,
+            style,
+        } => {
+            let mut table = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
+            let mut table_offset = text_offset;
+            if !caption.is_empty() {
+                let caption_style = caption_style.as_ref().unwrap_or(style);
+                let caption_size = caption_style
+                    .font_size_multiplier
+                    .map_or(font_size, |multiplier| font_size * multiplier);
+                table = table.push(render_spans(
+                    caption,
+                    caption_style.direction,
+                    caption_size,
+                    text_color,
+                    table_offset,
+                    highlights,
+                    fonts,
+                    scale,
+                    caption_style.text_align,
+                ));
+                table_offset += spans_text_len(caption) + 1;
+            }
+            for table_row in row_groups.iter().flat_map(|group| &group.rows) {
+                let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
+                for (cell_index, cell) in table_row.cells.iter().enumerate() {
+                    let mut rendered_cell = column![].spacing(4);
+                    for (child_index, child) in cell.children.iter().enumerate() {
+                        if cell.block_starts.contains(&child_index) {
+                            table_offset += 1;
+                        }
+                        rendered_cell = rendered_cell.push(render_content_node(
+                            child,
+                            i18n,
+                            font_size,
+                            text_color,
+                            image_handles,
+                            fill_images,
+                            table_offset,
+                            highlights,
+                            fonts,
+                            scale,
+                        ));
+                        table_offset += content_node_text_len(child);
+                    }
+                    rendered_row = rendered_row.push(
+                        container(rendered_cell)
+                            .width(Length::FillPortion(cell.column_span.max(1)))
+                            .padding(6),
+                    );
+                    if cell_index + 1 < table_row.cells.len() {
+                        table_offset += 1;
+                    }
+                }
+                table = table.push(rendered_row);
+                table_offset += 1;
+            }
+            let mut table = container(table).width(Length::Fill);
+            if let Some(margin) = style.margin_left_em {
+                table = table.padding(iced::Padding {
+                    left: margin * font_size,
+                    ..iced::Padding::ZERO
+                });
+            }
+            table.into()
+        }
+
         ContentNode::UnorderedList(items) => {
             let mut col = column![].spacing(4);
             let mut item_offset = text_offset;
@@ -3882,6 +3961,20 @@ fn render_epub_image<'a>(
         if fill {
             image_container = image_container.height(Length::Fill);
         }
+        if image_alt_highlight(alt, text_offset, highlights).is_some() {
+            return column![
+                image_container,
+                render_highlighted_text_with_font(
+                    alt,
+                    text_offset,
+                    font_size,
+                    text_color,
+                    Font::DEFAULT,
+                    highlights,
+                )
+            ]
+            .into();
+        }
         return image_container.into();
     }
 
@@ -3900,6 +3993,17 @@ fn render_epub_image<'a>(
     );
     spans.push(span("]".to_string()).size(font_size).color(text_color));
     rich_text(spans).into()
+}
+
+fn image_alt_highlight(
+    alt: &str,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
+) -> Option<bool> {
+    highlighted_fragments(alt, text_offset, highlights)
+        .into_iter()
+        .filter_map(|(_, highlight)| highlight)
+        .max()
 }
 
 /// Render a code block with optional syntax highlighting.
@@ -7357,6 +7461,74 @@ mod tests {
         ));
 
         assert_eq!(handles.get("image.png").unwrap().0.id(), first_id);
+    }
+
+    #[test]
+    fn table_cell_images_are_loaded_into_the_book_local_cache() {
+        use shosai_core::epub::render::{TableCell, TableRow, TableRowGroup, TableRowGroupKind};
+
+        let mut image_bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            2,
+            3,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(
+            &mut std::io::Cursor::new(&mut image_bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+        let resources = HashMap::from([("table.png".to_string(), image_bytes)]);
+        let nodes = vec![ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![TableCell {
+                        id: None,
+                        header: false,
+                        scope: None,
+                        headers: Vec::new(),
+                        row_span: 1,
+                        column_span: 1,
+                        children: vec![ContentNode::Image {
+                            src: "table.png".to_string(),
+                            alt: "diagram".to_string(),
+                        }],
+                        block_starts: Vec::new(),
+                        style: Default::default(),
+                    }],
+                }],
+            }],
+            style: Default::default(),
+        }];
+        let mut handles = HashMap::new();
+
+        cache_epub_image_handles(&mut handles, &nodes, &|path| {
+            resources.get(path).map(Vec::as_slice)
+        });
+
+        assert!(handles.contains_key("table.png"));
+    }
+
+    #[test]
+    fn cached_image_alt_matches_remain_visibly_highlighted() {
+        let highlights = [
+            SearchHighlight {
+                start: 11,
+                end: 13,
+                current: false,
+            },
+            SearchHighlight {
+                start: 12,
+                end: 14,
+                current: true,
+            },
+        ];
+
+        assert_eq!(image_alt_highlight("diagram", 10, &highlights), Some(true));
+        assert_eq!(image_alt_highlight("diagram", 20, &highlights), None);
     }
 
     #[test]

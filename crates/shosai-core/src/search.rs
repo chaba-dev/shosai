@@ -95,6 +95,30 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
                 out.push('\n');
             }
         }
+        ContentNode::Table {
+            caption,
+            row_groups,
+            ..
+        } => {
+            extract_spans_text(caption, out);
+            if !caption.is_empty() {
+                out.push('\n');
+            }
+            for row in row_groups.iter().flat_map(|group| &group.rows) {
+                for (index, cell) in row.cells.iter().enumerate() {
+                    for (child_index, child) in cell.children.iter().enumerate() {
+                        if cell.block_starts.contains(&child_index) {
+                            out.push('\n');
+                        }
+                        extract_node_text(child, out);
+                    }
+                    if index + 1 < row.cells.len() {
+                        out.push('\t');
+                    }
+                }
+                out.push('\n');
+            }
+        }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             for item_spans in items {
                 extract_spans_text(item_spans, out);

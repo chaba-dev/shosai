@@ -1188,6 +1188,45 @@ fn estimated_epub_compact_node_height(
         ContentNode::BlockQuote { children, .. } => {
             estimated_epub_blockquote_height(children, chars_per_line, lines_per_page, font_size)
         }
+        ContentNode::Table {
+            caption,
+            caption_style,
+            row_groups,
+            ..
+        } => {
+            let caption_height = (!caption.is_empty()).then(|| {
+                let scale = caption_style
+                    .as_ref()
+                    .and_then(|style| style.font_size_multiplier)
+                    .unwrap_or(1.0)
+                    * spans_font_scale(caption);
+                wrapped(spans_text_len(caption), scale) * text_line_height * scale
+                    + BLOCKQUOTE_SPACING
+            });
+            caption_height.unwrap_or(0.0)
+                + row_groups
+                    .iter()
+                    .flat_map(|group| &group.rows)
+                    .map(|row| {
+                        row.cells
+                            .iter()
+                            .map(|cell| {
+                                cell.children
+                                    .iter()
+                                    .map(|child| {
+                                        estimated_epub_compact_node_height(
+                                            child,
+                                            chars_per_line,
+                                            lines_per_page,
+                                            font_size,
+                                        )
+                                    })
+                                    .sum::<f32>()
+                            })
+                            .fold(text_line_height, f32::max)
+                    })
+                    .sum::<f32>()
+        }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items
                 .iter()
@@ -1340,6 +1379,35 @@ pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
             .iter()
             .map(|child| content_node_text_len(child) + 1)
             .sum(),
+        ContentNode::Table {
+            caption,
+            row_groups,
+            ..
+        } => {
+            let caption_len = spans_text_len(caption) + usize::from(!caption.is_empty());
+            caption_len
+                + row_groups
+                    .iter()
+                    .flat_map(|group| &group.rows)
+                    .map(|row| {
+                        row.cells
+                            .iter()
+                            .map(|cell| {
+                                cell.children
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, child)| {
+                                        content_node_text_len(child)
+                                            + usize::from(cell.block_starts.contains(&index))
+                                    })
+                                    .sum::<usize>()
+                            })
+                            .sum::<usize>()
+                            + row.cells.len().saturating_sub(1)
+                            + 1
+                    })
+                    .sum::<usize>()
+        }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items.iter().map(|spans| spans_text_len(spans) + 1).sum()
         }
@@ -1405,6 +1473,31 @@ mod tests {
         }];
 
         assert!(!uses_native_fonts(epub.fonts(), &spans));
+    }
+
+    #[test]
+    fn semantic_table_lengths_match_shared_search_offsets() {
+        let epub = shosai_core::epub::EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/table.epub").to_vec(),
+        )
+        .expect("table fixture should be a valid EPUB");
+        let chapter = epub.presentation().chapter(0).unwrap();
+        let retained = chapter
+            .nodes()
+            .iter()
+            .map(content_node_text_len)
+            .sum::<usize>()
+            + chapter.nodes().len();
+
+        assert_eq!(retained, chapter.search_text().chars().count());
+        assert_eq!(
+            chapter
+                .nodes()
+                .iter()
+                .filter(|node| matches!(node, ContentNode::Table { .. }))
+                .count(),
+            2
+        );
     }
 
     #[test]
