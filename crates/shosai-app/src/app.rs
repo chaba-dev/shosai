@@ -568,6 +568,22 @@ impl ReaderTheme {
         }
     }
 
+    fn link_color(&self) -> iced::Color {
+        match self {
+            ReaderTheme::Light => iced::Color::from_rgb8(0x17, 0x4E, 0xA6),
+            ReaderTheme::Dark => iced::Color::from_rgb8(0x8A, 0xB4, 0xF8),
+            ReaderTheme::Sepia => iced::Color::from_rgb8(0x68, 0x3D, 0x00),
+        }
+    }
+
+    fn table_header_background(&self) -> iced::Color {
+        match self {
+            ReaderTheme::Light => iced::Color::from_rgb8(0xE8, 0xEE, 0xF8),
+            ReaderTheme::Dark => iced::Color::from_rgb8(0x2B, 0x34, 0x45),
+            ReaderTheme::Sepia => iced::Color::from_rgb8(0xE5, 0xD6, 0xBA),
+        }
+    }
+
     fn next(&self) -> Self {
         match self {
             ReaderTheme::Light => ReaderTheme::Dark,
@@ -3383,6 +3399,8 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             &state.i18n,
                             state.font_size,
                             state.theme.text_color(),
+                            state.theme.link_color(),
+                            state.theme.table_header_background(),
                             &state.epub_image_handles,
                             false,
                             continuous_epub_content_width(
@@ -3610,6 +3628,8 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &state.i18n,
                 font_size,
                 text_color,
+                state.theme.link_color(),
+                state.theme.table_header_background(),
                 &state.epub_image_handles,
                 true,
                 text_width,
@@ -3690,6 +3710,8 @@ fn render_content_node<'a>(
     i18n: &I18n,
     font_size: f32,
     text_color: iced::Color,
+    link_color: iced::Color,
+    table_header_background: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
     available_width: f32,
@@ -3711,6 +3733,7 @@ fn render_content_node<'a>(
                 style.direction,
                 size,
                 text_color,
+                link_color,
                 text_offset,
                 highlights,
                 fonts,
@@ -3731,6 +3754,7 @@ fn render_content_node<'a>(
                 style.direction,
                 size,
                 text_color,
+                link_color,
                 text_offset,
                 highlights,
                 fonts,
@@ -3756,6 +3780,8 @@ fn render_content_node<'a>(
                     i18n,
                     font_size,
                     text_color,
+                    link_color,
+                    table_header_background,
                     image_handles,
                     fill_images,
                     (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
@@ -3794,6 +3820,7 @@ fn render_content_node<'a>(
                     caption_style.direction,
                     caption_size,
                     text_color,
+                    link_color,
                     table_offset,
                     highlights,
                     fonts,
@@ -3815,6 +3842,8 @@ fn render_content_node<'a>(
                             i18n,
                             font_size,
                             text_color,
+                            link_color,
+                            table_header_background,
                             image_handles,
                             fill_images,
                             available_width,
@@ -3825,10 +3854,16 @@ fn render_content_node<'a>(
                         ));
                         table_offset += content_node_text_len(child);
                     }
+                    let header = cell.header;
                     rendered_row = rendered_row.push(
                         container(rendered_cell)
                             .width(Length::FillPortion(cell.column_span.max(1)))
-                            .padding(EPUB_TABLE_CELL_PADDING),
+                            .padding(EPUB_TABLE_CELL_PADDING)
+                            .style(move |_| container::Style {
+                                background: header
+                                    .then_some(iced::Background::Color(table_header_background)),
+                                ..Default::default()
+                            }),
                     );
                     if cell_index + 1 < table_row.cells.len() {
                         table_offset += 1;
@@ -3864,6 +3899,7 @@ fn render_content_node<'a>(
                     shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
                     text_color,
+                    link_color,
                     item_offset,
                     highlights,
                     fonts,
@@ -3887,6 +3923,7 @@ fn render_content_node<'a>(
                     shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
                     text_color,
+                    link_color,
                     item_offset,
                     highlights,
                     fonts,
@@ -4168,13 +4205,6 @@ fn node_style_to_alignment(
     }
 }
 
-const LINK_COLOR: iced::Color = iced::Color {
-    r: 0.2,
-    g: 0.5,
-    b: 0.9,
-    a: 1.0,
-};
-
 const SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
     r: 1.0,
     g: 0.88,
@@ -4195,6 +4225,7 @@ fn render_spans<'a>(
     direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
     text_color: iced::Color,
+    link_color: iced::Color,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -4208,6 +4239,7 @@ fn render_spans<'a>(
         direction,
         font_size,
         text_color,
+        link_color,
         text_offset,
         highlights,
         fonts,
@@ -4224,6 +4256,7 @@ fn render_spans_with_prefix<'a>(
     direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
     text_color: iced::Color,
+    link_color: iced::Color,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -4261,7 +4294,7 @@ fn render_spans_with_prefix<'a>(
             bold: span.bold,
             italic: span.italic,
             foreground: rgba(if span.link.is_some() {
-                LINK_COLOR
+                link_color
             } else {
                 text_color
             }),
@@ -4325,7 +4358,7 @@ fn render_spans_with_prefix<'a>(
         for (fragment, highlight) in highlighted_fragments(&text_span.text, span_offset, highlights)
         {
             rich_spans.push(styled_epub_span(
-                text_span, fragment, font_size, text_color, highlight,
+                text_span, fragment, font_size, text_color, link_color, highlight,
             ));
         }
         span_offset += text_span.text.chars().count();
@@ -4350,11 +4383,12 @@ fn styled_epub_span<'a>(
     fragment: String,
     font_size: f32,
     text_color: iced::Color,
+    link_color: iced::Color,
     highlight: Option<bool>,
 ) -> iced::widget::text::Span<'a, String> {
     let is_link = text_span.link.is_some();
     let font = epub_span_font(text_span);
-    let color = if is_link { LINK_COLOR } else { text_color };
+    let color = if is_link { link_color } else { text_color };
     let mut rendered = span(fragment)
         .size(epub_span_size(font_size, text_span))
         .font(font)
@@ -7467,6 +7501,8 @@ mod tests {
             &I18n::new(LanguagePreference::English),
             16.0,
             iced::Color::BLACK,
+            ReaderTheme::Light.link_color(),
+            ReaderTheme::Light.table_header_background(),
             &handles,
             false,
             600.0,
@@ -7483,6 +7519,8 @@ mod tests {
             &I18n::new(LanguagePreference::English),
             16.0,
             iced::Color::BLACK,
+            ReaderTheme::Light.link_color(),
+            ReaderTheme::Light.table_header_background(),
             &handles,
             false,
             600.0,
@@ -7568,8 +7606,12 @@ mod tests {
         for theme in [ReaderTheme::Light, ReaderTheme::Dark, ReaderTheme::Sepia] {
             assert!(contrast(theme.text_color(), theme.background()) >= 4.5);
             assert!(
-                contrast(LINK_COLOR, theme.background()) >= 4.5,
+                contrast(theme.link_color(), theme.background()) >= 4.5,
                 "{theme:?} link contrast must remain readable"
+            );
+            assert!(
+                contrast(theme.text_color(), theme.table_header_background()) >= 4.5,
+                "{theme:?} table header contrast must remain readable"
             );
         }
     }
