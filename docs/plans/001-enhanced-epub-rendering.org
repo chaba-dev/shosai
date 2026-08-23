@@ -382,15 +382,19 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** M4 — MathML
 
-- [ ] Define the bounded native MathML implementation and fallback; JavaScript,
+- [X] Define the bounded native MathML implementation and fallback; JavaScript,
   a webview, and CDN fetching are not acceptable implicit dependencies.
   Production chapter parsing now admits a 64-node, 16-level, 1,024-visible-byte
   Presentation MathML model for rows, tokens, fractions, roots, scripts,
   fences, matrices, and semantics.  Unsupported markup retains bounded readable
   source-order fallback; over-budget subtrees stop at a fixed omission label.
-  Native mathematical geometry remains the next boundary.
-- [ ] Support inline versus display math, fallback text for unsupported markup,
-  scaling with reader font size, theme contrast, and pagination boundaries.
+  Standalone native geometry now consumes that retained model directly for the
+  supported subset and shares one bounded layout between pagination and Iced
+  painting.  Unsupported, uncovered-glyph, overwide, and highlighted expressions
+  preserve the readable text path; search and source offsets remain fallback-based.
+- [ ] Support inline versus display math.  Standalone math now scales with the
+  reader font size, uses theme contrast, and owns exact pagination boundaries;
+  MathML embedded inside paragraph text remains open.
 - [ ] Test common operators, fractions, roots, scripts, matrices, annotations,
   malformed MathML, and books that declare MathML manifest properties.
 

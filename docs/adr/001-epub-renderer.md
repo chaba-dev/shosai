@@ -668,7 +668,7 @@ ceiling.  Brotli and transformed-glyph decoding can allocate scratch space;
 Wuff exposes opaque decode failures; and hostile-font fuzzing or process
 isolation remains release hardening rather than a guarantee of this boundary.
 
-## Native MathML and mixed-script spike
+## Native standalone MathML geometry
 
 Production chapter parsing now retains direct MathML expressions as a bounded,
 renderer-independent semantic model rather than flattening them irreversibly.
@@ -677,18 +677,27 @@ supported rows, tokens, fractions, roots, scripts, fences, matrices, and
 semantics retain structure. Unsupported but bounded markup keeps readable
 source-order fallback, annotations do not leak into visible/search text, and an
 over-budget subtree becomes a fixed omission label. Search, pagination, and the
-app fallback consume that same bounded fallback. Inline MathML embedded inside
-an XHTML text block and native mathematical geometry remain open production
-boundaries.
+app fallback consume that same bounded fallback.
+
+The application now lowers the retained model—not the source XML—into bounded
+native geometry for standalone rows, tokens, fractions, roots, scripts, fences,
+and matrices. One shared layout owns both pagination height and Iced painting,
+uses reader font scaling, and paints text and rules with the active reader
+theme's contrast-safe text color. The bundled OFL-licensed Inter font makes
+measurement and painting deterministic. Expressions that exceed the available
+width, contain an uncovered glyph, have no supported expression model, or need
+an active search highlight retain the readable text path. Search and source
+offsets always remain based on the original bounded fallback. Inline MathML
+embedded inside an XHTML text block remains open.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
 square and indexed roots, subscript/superscript operators, a two-by-two matrix,
 presentation markup with a TeX annotation, a structurally invalid fraction, and
-an unsupported `menclose`. A test-only bounded adapter uses the existing
-`roxmltree` and `cosmic-text` dev dependencies to lower a narrow Presentation
-MathML subset into positioned text and horizontal-rule primitives. Semantic
-tests prove that:
+an unsupported `menclose`. The earlier test-only XML adapter established the
+layout formulas; production geometry now consumes the admitted semantic model
+directly and uses `cosmic-text` to emit positioned text and horizontal-rule
+primitives. Semantic tests prove that:
 
 - supported inline/display expressions produce finite positive width, height,
   baseline, and in-bounds primitive geometry, including compound roots and
@@ -707,14 +716,13 @@ tests prove that:
   while Japanese still produces a missing glyph, keeping the known CJK font
   coverage gap visible rather than claiming legibility.
 
-This is geometry evidence, not standards-conforming MathML rendering. The fixed
+This is a bounded native subset, not standards-conforming MathML rendering. The fixed
 heuristics do not read OpenType MATH tables, operator dictionaries, or MathML
 style attributes; assemble stretchy glyphs; perform math line breaking; connect
-to computed CSS, painting, pagination, selection, or accessibility; or bound the
-initial XML parse independently of EPUB resource limits. The primitives are not
-Iced widgets or pixels. Token shaping is deliberately single-line and requires
-every source byte to map to a non-missing glyph. Production would need all of
-those boundaries plus a complete fallback and font policy.
+to computed CSS, selection, or accessibility; or bound the initial XML parse
+independently of EPUB resource limits. Token shaping is deliberately single-line
+and requires every source byte to map to a non-missing glyph. Unsupported cases
+therefore use readable fallback rather than approximating standards coverage.
 
 Dependency inspection found no maintained permissively licensed Rust library
 that accepts existing Presentation MathML and emits native geometry. `mathml`
