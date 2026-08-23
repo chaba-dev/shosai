@@ -32,6 +32,7 @@ use crate::epub::{
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
+use crate::theme::{ReaderPalette, ReaderTheme};
 use crate::{theme as app_theme, widgets};
 
 mod dispatch;
@@ -540,57 +541,6 @@ pub struct State {
     window_geometry_saving: bool,
     close_after_geometry_save: Option<window::Id>,
     performance: perf::Performance,
-}
-
-/// Color theme for the EPUB reader.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ReaderTheme {
-    #[default]
-    Light,
-    Dark,
-    Sepia,
-}
-
-impl ReaderTheme {
-    fn background(&self) -> iced::Color {
-        match self {
-            ReaderTheme::Light => iced::Color::WHITE,
-            ReaderTheme::Dark => iced::Color::from_rgb(0.12, 0.12, 0.14),
-            ReaderTheme::Sepia => iced::Color::from_rgb(0.96, 0.92, 0.84),
-        }
-    }
-
-    fn text_color(&self) -> iced::Color {
-        match self {
-            ReaderTheme::Light => iced::Color::from_rgb(0.1, 0.1, 0.1),
-            ReaderTheme::Dark => iced::Color::from_rgb(0.85, 0.85, 0.85),
-            ReaderTheme::Sepia => iced::Color::from_rgb(0.3, 0.2, 0.1),
-        }
-    }
-
-    fn link_color(&self) -> iced::Color {
-        match self {
-            ReaderTheme::Light => iced::Color::from_rgb8(0x17, 0x4E, 0xA6),
-            ReaderTheme::Dark => iced::Color::from_rgb8(0x8A, 0xB4, 0xF8),
-            ReaderTheme::Sepia => iced::Color::from_rgb8(0x68, 0x3D, 0x00),
-        }
-    }
-
-    fn table_header_background(&self) -> iced::Color {
-        match self {
-            ReaderTheme::Light => iced::Color::from_rgb8(0xE8, 0xEE, 0xF8),
-            ReaderTheme::Dark => iced::Color::from_rgb8(0x2B, 0x34, 0x45),
-            ReaderTheme::Sepia => iced::Color::from_rgb8(0xE5, 0xD6, 0xBA),
-        }
-    }
-
-    fn next(&self) -> Self {
-        match self {
-            ReaderTheme::Light => ReaderTheme::Dark,
-            ReaderTheme::Dark => ReaderTheme::Sepia,
-            ReaderTheme::Sepia => ReaderTheme::Light,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3398,9 +3348,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             node,
                             &state.i18n,
                             state.font_size,
-                            state.theme.text_color(),
-                            state.theme.link_color(),
-                            state.theme.table_header_background(),
+                            state.theme.palette(),
                             &state.epub_image_handles,
                             false,
                             continuous_epub_content_width(
@@ -3627,9 +3575,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &page_node.node,
                 &state.i18n,
                 font_size,
-                text_color,
-                state.theme.link_color(),
-                state.theme.table_header_background(),
+                state.theme.palette(),
                 &state.epub_image_handles,
                 true,
                 text_width,
@@ -3709,9 +3655,7 @@ fn render_content_node<'a>(
     node: &ContentNode,
     i18n: &I18n,
     font_size: f32,
-    text_color: iced::Color,
-    link_color: iced::Color,
-    table_header_background: iced::Color,
+    palette: ReaderPalette,
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
     available_width: f32,
@@ -3720,6 +3664,7 @@ fn render_content_node<'a>(
     fonts: Option<&'a EpubFontBook>,
     scale: f32,
 ) -> Element<'a, Message> {
+    let text_color = palette.text;
     match node {
         ContentNode::Heading {
             level,
@@ -3732,8 +3677,7 @@ fn render_content_node<'a>(
                 spans,
                 style.direction,
                 size,
-                text_color,
-                link_color,
+                palette,
                 text_offset,
                 highlights,
                 fonts,
@@ -3753,8 +3697,7 @@ fn render_content_node<'a>(
                 spans,
                 style.direction,
                 size,
-                text_color,
-                link_color,
+                palette,
                 text_offset,
                 highlights,
                 fonts,
@@ -3779,9 +3722,7 @@ fn render_content_node<'a>(
                     child,
                     i18n,
                     font_size,
-                    text_color,
-                    link_color,
-                    table_header_background,
+                    palette,
                     image_handles,
                     fill_images,
                     (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
@@ -3819,8 +3760,7 @@ fn render_content_node<'a>(
                     caption,
                     caption_style.direction,
                     caption_size,
-                    text_color,
-                    link_color,
+                    palette,
                     table_offset,
                     highlights,
                     fonts,
@@ -3841,9 +3781,7 @@ fn render_content_node<'a>(
                             child,
                             i18n,
                             font_size,
-                            text_color,
-                            link_color,
-                            table_header_background,
+                            palette,
                             image_handles,
                             fill_images,
                             available_width,
@@ -3860,9 +3798,15 @@ fn render_content_node<'a>(
                             .width(Length::FillPortion(cell.column_span.max(1)))
                             .padding(EPUB_TABLE_CELL_PADDING)
                             .style(move |_| container::Style {
-                                background: header
-                                    .then_some(iced::Background::Color(table_header_background)),
-                                ..Default::default()
+                                background: header.then_some(iced::Background::Color(
+                                    palette.table_header_background,
+                                )),
+                                border: iced::Border {
+                                    color: palette.table_header_border,
+                                    width: if header { 1.0 } else { 0.0 },
+                                    ..Default::default()
+                                },
+                                ..container::Style::default()
                             }),
                     );
                     if cell_index + 1 < table_row.cells.len() {
@@ -3898,8 +3842,7 @@ fn render_content_node<'a>(
                     item_spans,
                     shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
-                    text_color,
-                    link_color,
+                    palette,
                     item_offset,
                     highlights,
                     fonts,
@@ -3922,8 +3865,7 @@ fn render_content_node<'a>(
                     item_spans,
                     shosai_core::epub::style::TextDirection::Ltr,
                     font_size,
-                    text_color,
-                    link_color,
+                    palette,
                     item_offset,
                     highlights,
                     fonts,
@@ -3939,7 +3881,7 @@ fn render_content_node<'a>(
             code,
             language.as_deref(),
             font_size,
-            text_color,
+            palette,
             text_offset,
             highlights,
         ),
@@ -3954,7 +3896,7 @@ fn render_content_node<'a>(
                 code_text,
                 text_offset,
                 font_size * 0.9,
-                text_color,
+                palette,
                 mono_font,
                 highlights,
             )
@@ -3965,7 +3907,7 @@ fn render_content_node<'a>(
             alt,
             i18n,
             font_size,
-            text_color,
+            palette,
             image_handles,
             fill_images,
             text_offset,
@@ -4003,12 +3945,13 @@ fn render_epub_image<'a>(
     alt: &str,
     i18n: &I18n,
     font_size: f32,
-    text_color: iced::Color,
+    palette: ReaderPalette,
     image_handles: &HashMap<String, EpubImageHandle>,
     fill: bool,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
+    let text_color = palette.text;
     if let Some(handle) = image_handles.get(src) {
         let mut rendered = image(&handle.0)
             .content_fit(iced::ContentFit::ScaleDown)
@@ -4029,7 +3972,7 @@ fn render_epub_image<'a>(
                     alt,
                     text_offset,
                     font_size,
-                    text_color,
+                    palette,
                     Font::DEFAULT,
                     highlights,
                 )
@@ -4049,7 +3992,11 @@ fn render_epub_image<'a>(
         highlighted_fragments(alt, text_offset, highlights)
             .into_iter()
             .map(|(fragment, highlight)| {
-                apply_search_highlight(span(fragment).size(font_size).color(text_color), highlight)
+                apply_search_highlight(
+                    span(fragment).size(font_size).color(text_color),
+                    highlight,
+                    palette,
+                )
             }),
     );
     spans.push(span("]".to_string()).size(font_size).color(text_color));
@@ -4072,12 +4019,13 @@ fn render_code_block<'a>(
     code: &str,
     language: Option<&str>,
     font_size: f32,
-    text_color: iced::Color,
+    palette: ReaderPalette,
     text_offset: usize,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
     use shosai_core::highlight;
 
+    let text_color = palette.text;
     let mono_font = Font {
         family: iced::font::Family::Monospace,
         ..Font::DEFAULT
@@ -4116,6 +4064,7 @@ fn render_code_block<'a>(
                                 .font(font)
                                 .color(iced::Color::from_rgb8(r, g, b)),
                             fragment.search_highlight,
+                            palette,
                         )
                     })
                     .collect();
@@ -4142,7 +4091,7 @@ fn render_code_block<'a>(
         code,
         text_offset,
         code_size,
-        text_color,
+        palette,
         mono_font,
         highlights,
     ))
@@ -4205,27 +4154,12 @@ fn node_style_to_alignment(
     }
 }
 
-const SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
-    r: 1.0,
-    g: 0.88,
-    b: 0.28,
-    a: 0.7,
-};
-
-const CURRENT_SEARCH_HIGHLIGHT_COLOR: iced::Color = iced::Color {
-    r: 1.0,
-    g: 0.55,
-    b: 0.18,
-    a: 0.82,
-};
-
 #[allow(clippy::too_many_arguments)]
 fn render_spans<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
     direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
-    text_color: iced::Color,
-    link_color: iced::Color,
+    palette: ReaderPalette,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -4238,8 +4172,7 @@ fn render_spans<'a>(
         spans,
         direction,
         font_size,
-        text_color,
-        link_color,
+        palette,
         text_offset,
         highlights,
         fonts,
@@ -4255,23 +4188,15 @@ fn render_spans_with_prefix<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
     direction: shosai_core::epub::style::TextDirection,
     font_size: f32,
-    text_color: iced::Color,
-    link_color: iced::Color,
+    palette: ReaderPalette,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
     scale: f32,
     alignment: Option<shosai_core::epub::style::TextAlignment>,
 ) -> Element<'a, Message> {
+    let text_color = palette.text;
     if let Some(fonts) = fonts.filter(|fonts| crate::epub::uses_native_fonts(fonts, spans)) {
-        let rgba = |color: iced::Color| {
-            [
-                (color.r * 255.0).round() as u8,
-                (color.g * 255.0).round() as u8,
-                (color.b * 255.0).round() as u8,
-                (color.a * 255.0).round() as u8,
-            ]
-        };
         let prefix_scalars = prefix.chars().count();
         let mut runs = Vec::with_capacity(spans.len() + usize::from(!prefix.is_empty()));
         if !prefix.is_empty() {
@@ -4282,24 +4207,15 @@ fn render_spans_with_prefix<'a>(
                 font_size: prefix_font_size,
                 bold: false,
                 italic: false,
-                foreground: rgba(text_color),
+                foreground: color_rgba(text_color),
                 link: None,
             });
         }
-        runs.extend(spans.iter().map(|span| EpubTextRun {
-            text: span.text.clone(),
-            family: span.font_family.as_deref().map(str::to_owned),
-            monospace: span.monospace,
-            font_size: epub_span_size(font_size, span),
-            bold: span.bold,
-            italic: span.italic,
-            foreground: rgba(if span.link.is_some() {
-                link_color
-            } else {
-                text_color
-            }),
-            link: span.link.clone(),
-        }));
+        runs.extend(
+            spans
+                .iter()
+                .map(|span| native_epub_run(span, font_size, palette)),
+        );
         let text_len = spans_text_len(spans);
         let native_highlights = highlights
             .iter()
@@ -4309,10 +4225,10 @@ fn render_spans_with_prefix<'a>(
                 (start < end).then(|| EpubTextHighlight {
                     scalars: prefix_scalars + start - text_offset
                         ..prefix_scalars + end - text_offset,
-                    color: rgba(if highlight.current {
-                        CURRENT_SEARCH_HIGHLIGHT_COLOR
+                    color: color_rgba(if highlight.current {
+                        palette.current_search_highlight
                     } else {
-                        SEARCH_HIGHLIGHT_COLOR
+                        palette.search_highlight
                     }),
                 })
             })
@@ -4339,7 +4255,7 @@ fn render_spans_with_prefix<'a>(
             },
             highlights: native_highlights,
         };
-        return crate::epub::native_text::native_text(fonts, request, Message::LinkClicked);
+        return crate::epub::native_text::native_text(fonts, request, epub_link_clicked);
     }
 
     let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
@@ -4358,7 +4274,7 @@ fn render_spans_with_prefix<'a>(
         for (fragment, highlight) in highlighted_fragments(&text_span.text, span_offset, highlights)
         {
             rich_spans.push(styled_epub_span(
-                text_span, fragment, font_size, text_color, link_color, highlight,
+                text_span, fragment, font_size, palette, highlight,
             ));
         }
         span_offset += text_span.text.chars().count();
@@ -4366,8 +4282,42 @@ fn render_spans_with_prefix<'a>(
     rich_spans.push(span(pop_isolate.to_string()).size(font_size));
 
     rich_text(rich_spans)
-        .on_link_click(Message::LinkClicked)
+        .on_link_click(epub_link_clicked)
         .into()
+}
+
+fn color_rgba(color: iced::Color) -> [u8; 4] {
+    [
+        (color.r * 255.0).round() as u8,
+        (color.g * 255.0).round() as u8,
+        (color.b * 255.0).round() as u8,
+        (color.a * 255.0).round() as u8,
+    ]
+}
+
+fn native_epub_run(
+    span: &shosai_core::epub::render::TextSpan,
+    font_size: f32,
+    palette: ReaderPalette,
+) -> EpubTextRun {
+    EpubTextRun {
+        text: span.text.clone(),
+        family: span.font_family.as_deref().map(str::to_owned),
+        monospace: span.monospace,
+        font_size: epub_span_size(font_size, span),
+        bold: span.bold,
+        italic: span.italic,
+        foreground: color_rgba(if span.link.is_some() {
+            palette.link
+        } else {
+            palette.text
+        }),
+        link: span.link.clone(),
+    }
+}
+
+fn epub_link_clicked(href: String) -> Message {
+    Message::LinkClicked(href)
 }
 
 fn text_direction_controls(direction: shosai_core::epub::style::TextDirection) -> (char, char) {
@@ -4382,13 +4332,12 @@ fn styled_epub_span<'a>(
     text_span: &shosai_core::epub::render::TextSpan,
     fragment: String,
     font_size: f32,
-    text_color: iced::Color,
-    link_color: iced::Color,
+    palette: ReaderPalette,
     highlight: Option<bool>,
 ) -> iced::widget::text::Span<'a, String> {
     let is_link = text_span.link.is_some();
     let font = epub_span_font(text_span);
-    let color = if is_link { link_color } else { text_color };
+    let color = if is_link { palette.link } else { palette.text };
     let mut rendered = span(fragment)
         .size(epub_span_size(font_size, text_span))
         .font(font)
@@ -4399,7 +4348,7 @@ fn styled_epub_span<'a>(
     if let Some(href) = &text_span.link {
         rendered = rendered.link(href.clone());
     }
-    apply_search_highlight(rendered, highlight)
+    apply_search_highlight(rendered, highlight, palette)
 }
 
 fn epub_span_font(text_span: &shosai_core::epub::render::TextSpan) -> Font {
@@ -4431,16 +4380,18 @@ fn render_highlighted_text_with_font<'a>(
     value: &str,
     text_offset: usize,
     font_size: f32,
-    text_color: iced::Color,
+    palette: ReaderPalette,
     font: Font,
     highlights: &[SearchHighlight],
 ) -> Element<'a, Message> {
+    let text_color = palette.text;
     let spans = highlighted_fragments(value, text_offset, highlights)
         .into_iter()
         .map(|(fragment, highlight)| {
             apply_search_highlight(
                 span(fragment).size(font_size).font(font).color(text_color),
                 highlight,
+                palette,
             )
         })
         .collect::<Vec<iced::widget::text::Span<'a, String>>>();
@@ -4450,10 +4401,11 @@ fn render_highlighted_text_with_font<'a>(
 fn apply_search_highlight<'a, Link>(
     text_span: iced::widget::text::Span<'a, Link>,
     highlight: Option<bool>,
+    palette: ReaderPalette,
 ) -> iced::widget::text::Span<'a, Link> {
     match highlight {
-        Some(true) => text_span.background(CURRENT_SEARCH_HIGHLIGHT_COLOR),
-        Some(false) => text_span.background(SEARCH_HIGHLIGHT_COLOR),
+        Some(true) => text_span.background(palette.current_search_highlight),
+        Some(false) => text_span.background(palette.search_highlight),
         None => text_span,
     }
 }
@@ -7500,9 +7452,7 @@ mod tests {
             &nodes[0],
             &I18n::new(LanguagePreference::English),
             16.0,
-            iced::Color::BLACK,
-            ReaderTheme::Light.link_color(),
-            ReaderTheme::Light.table_header_background(),
+            ReaderTheme::Light.palette(),
             &handles,
             false,
             600.0,
@@ -7518,9 +7468,7 @@ mod tests {
             &nodes[0],
             &I18n::new(LanguagePreference::English),
             16.0,
-            iced::Color::BLACK,
-            ReaderTheme::Light.link_color(),
-            ReaderTheme::Light.table_header_background(),
+            ReaderTheme::Light.palette(),
             &handles,
             false,
             600.0,

@@ -11,8 +11,95 @@ pub const ACCENT: Color = Color::from_rgb8(0x4D, 0x5E, 0x86);
 pub const ACCENT_HOVERED: Color = Color::from_rgb8(0x3F, 0x4F, 0x76);
 pub const ACCENT_SOFT: Color = Color::from_rgb8(0xE2, 0xE6, 0xF0);
 
+const SEARCH_HIGHLIGHT: Color = Color {
+    r: 1.0,
+    g: 0.88,
+    b: 0.28,
+    a: 0.7,
+};
+const CURRENT_SEARCH_HIGHLIGHT: Color = Color {
+    r: 1.0,
+    g: 0.55,
+    b: 0.18,
+    a: 0.82,
+};
+
 pub const RADIUS_SMALL: f32 = 6.0;
 pub const RADIUS_MEDIUM: f32 = 10.0;
+
+/// Color theme for EPUB reader content.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ReaderTheme {
+    #[default]
+    Light,
+    Dark,
+    Sepia,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReaderPalette {
+    pub background: Color,
+    pub text: Color,
+    pub link: Color,
+    pub search_highlight: Color,
+    pub current_search_highlight: Color,
+    pub table_header_background: Color,
+    pub table_header_border: Color,
+}
+
+impl ReaderTheme {
+    pub fn palette(self) -> ReaderPalette {
+        ReaderPalette {
+            background: self.background(),
+            text: self.text_color(),
+            link: self.link_color(),
+            search_highlight: SEARCH_HIGHLIGHT,
+            current_search_highlight: CURRENT_SEARCH_HIGHLIGHT,
+            table_header_background: self.table_header_background(),
+            table_header_border: self.table_header_background(),
+        }
+    }
+
+    pub fn background(self) -> Color {
+        match self {
+            Self::Light => Color::WHITE,
+            Self::Dark => Color::from_rgb(0.12, 0.12, 0.14),
+            Self::Sepia => Color::from_rgb(0.96, 0.92, 0.84),
+        }
+    }
+
+    pub fn text_color(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb(0.1, 0.1, 0.1),
+            Self::Dark => Color::from_rgb(0.85, 0.85, 0.85),
+            Self::Sepia => Color::from_rgb(0.3, 0.2, 0.1),
+        }
+    }
+
+    pub fn link_color(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0x17, 0x4E, 0xA6),
+            Self::Dark => Color::from_rgb8(0x8A, 0xB4, 0xF8),
+            Self::Sepia => Color::from_rgb8(0x68, 0x3D, 0x00),
+        }
+    }
+
+    pub fn table_header_background(self) -> Color {
+        match self {
+            Self::Light => Color::from_rgb8(0xE8, 0xEE, 0xF8),
+            Self::Dark => Color::from_rgb8(0x2B, 0x34, 0x45),
+            Self::Sepia => Color::from_rgb8(0xE5, 0xD6, 0xBA),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Light => Self::Dark,
+            Self::Dark => Self::Sepia,
+            Self::Sepia => Self::Light,
+        }
+    }
+}
 
 pub fn application() -> Theme {
     Theme::custom(
