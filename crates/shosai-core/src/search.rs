@@ -119,6 +119,7 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
                 out.push('\n');
             }
         }
+        ContentNode::Math { content, .. } => out.push_str(&content.fallback),
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             for item_spans in items {
                 extract_spans_text(item_spans, out);

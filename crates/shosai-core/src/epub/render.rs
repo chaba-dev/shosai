@@ -102,6 +102,11 @@ pub enum ContentNode {
         row_groups: Vec<TableRowGroup>,
         style: NodeStyle,
     },
+    /// A bounded Presentation MathML expression with readable text fallback.
+    Math {
+        content: super::MathContent,
+        style: NodeStyle,
+    },
     /// An unordered list.
     UnorderedList(Vec<Vec<TextSpan>>),
     /// An ordered list.
@@ -291,6 +296,13 @@ fn parse_block_children(
                 if let Some(table) = parse_table(&child, base_path, styles, node_style) {
                     nodes.push(table);
                 }
+            }
+
+            "math" if super::math::is_math(child) => {
+                nodes.push(ContentNode::Math {
+                    content: super::math::parse_math(child),
+                    style: node_style,
+                });
             }
 
             "ul" => {
@@ -1576,6 +1588,38 @@ mod tests {
             }
             other => panic!("expected Paragraph, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn mathml_blocks_retain_bounded_structure_display_and_search_fallback() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+                <mroot><mi>x</mi><mn>3</mn></mroot>
+            </math>
+            <math xmlns="http://www.w3.org/1998/Math/MathML">
+                <menclose><mtext>readable fallback</mtext></menclose>
+            </math>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        assert!(matches!(
+            &nodes[0],
+            ContentNode::Math { content, .. }
+                if content.display == super::super::MathDisplay::Block
+                    && content.expression.is_some()
+                    && content.fallback == "root(x, 3)"
+        ));
+        assert!(matches!(
+            &nodes[1],
+            ContentNode::Math { content, .. }
+                if content.display == super::super::MathDisplay::Inline
+                    && content.expression.is_none()
+                    && content.fallback == "readable fallback"
+        ));
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "root(x, 3)\nreadable fallback\n"
+        );
     }
 
     #[test]
