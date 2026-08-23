@@ -394,6 +394,34 @@ mod tests {
     }
 
     #[test]
+    fn fence_attributes_and_segmented_tokens_cannot_bypass_visible_text_budget() {
+        let oversized_fence = format!(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><mfenced open="{}"><mi>x</mi></mfenced></math>"#,
+            "(".repeat(MAX_VISIBLE_TEXT_BYTES + 1)
+        );
+        let oversized_fence = parse(&oversized_fence);
+        assert!(oversized_fence.expression.is_none());
+        assert_eq!(oversized_fence.fallback, "[math expression omitted]");
+
+        let segmented = format!(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><mtext>a<!-- split -->{}b</mtext></math>"#,
+            " ".repeat(MAX_VISIBLE_TEXT_BYTES)
+        );
+        let segmented = parse(&segmented);
+        assert!(segmented.expression.is_none());
+        assert_eq!(segmented.fallback, "[math expression omitted]");
+    }
+
+    #[test]
+    fn unsupported_fallback_preserves_direct_text_in_source_order() {
+        let unsupported = parse(
+            r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><menclose>before<mtext>inside</mtext>after</menclose></math>"#,
+        );
+        assert!(unsupported.expression.is_none());
+        assert_eq!(unsupported.fallback, "before inside after");
+    }
+
+    #[test]
     fn semantics_uses_presentation_content_and_suppresses_annotations() {
         let content = parse(
             r#"<math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msup><mi>c</mi><mn>2</mn></msup><annotation encoding="application/x-tex">secret annotation</annotation></semantics></math>"#,

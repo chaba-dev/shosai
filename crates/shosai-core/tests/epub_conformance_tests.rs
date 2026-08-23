@@ -435,9 +435,11 @@ fn mathml_fixture_enters_bounded_presentation_and_shared_search_text() {
             && content.fallback == "root(x, 3)"
             && content.expression.is_some()
     }));
-    assert!(expressions.iter().any(|content| {
-        content.fallback == "1" && content.expression.is_none()
-    }));
+    assert!(
+        expressions
+            .iter()
+            .any(|content| { content.fallback == "1" && content.expression.is_none() })
+    );
     assert!(chapter.search_text().contains("root(x, 3)"));
     assert!(chapter.search_text().contains("x_1^2"));
     assert!(chapter.search_text().contains('π'));
