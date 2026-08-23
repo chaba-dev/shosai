@@ -25,7 +25,8 @@ use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 
 use crate::epub::{
-    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
+    BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
+    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
     PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, PageNode as EpubPageNode,
     content_node_text_len, paginate_epub_chapter_with_budget, spans_font_scale, spans_text_len,
 };
@@ -3384,6 +3385,10 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                             state.theme.text_color(),
                             &state.epub_image_handles,
                             false,
+                            continuous_epub_content_width(
+                                state.window_size.width,
+                                state.show_bookmarks_panel,
+                            ),
                             text_offset,
                             &highlights,
                             Some(doc.fonts()),
@@ -3448,6 +3453,15 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
         }
         None => welcome_view(state),
     }
+}
+
+fn continuous_epub_content_width(window_width: f32, show_bookmarks_panel: bool) -> f32 {
+    let panel_width = if show_bookmarks_panel && !uses_compact_reader_layout(window_width) {
+        BOOKMARKS_PANEL_WIDTH
+    } else {
+        0.0
+    };
+    ((window_width - panel_width).min(800.0) - 40.0).max(120.0)
 }
 
 fn pdf_page_view(state: &State) -> Element<'_, Message> {
@@ -3598,6 +3612,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 text_color,
                 &state.epub_image_handles,
                 true,
+                text_width,
                 page_node.text_offset,
                 &highlights,
                 fonts,
@@ -3677,6 +3692,7 @@ fn render_content_node<'a>(
     text_color: iced::Color,
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
+    available_width: f32,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -3742,6 +3758,7 @@ fn render_content_node<'a>(
                     text_color,
                     image_handles,
                     fill_images,
+                    (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
                     child_offset,
                     highlights,
                     fonts,
@@ -3765,7 +3782,7 @@ fn render_content_node<'a>(
             row_groups,
             style,
         } => {
-            let mut table = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
+            let mut table = column![].spacing(EPUB_TABLE_ROW_SPACING);
             let mut table_offset = text_offset;
             if !caption.is_empty() {
                 let caption_style = caption_style.as_ref().unwrap_or(style);
@@ -3788,7 +3805,7 @@ fn render_content_node<'a>(
             for table_row in row_groups.iter().flat_map(|group| &group.rows) {
                 let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
                 for (cell_index, cell) in table_row.cells.iter().enumerate() {
-                    let mut rendered_cell = column![].spacing(4);
+                    let mut rendered_cell = column![].spacing(EPUB_TABLE_CELL_SPACING);
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
                             table_offset += 1;
@@ -3800,6 +3817,7 @@ fn render_content_node<'a>(
                             text_color,
                             image_handles,
                             fill_images,
+                            available_width,
                             table_offset,
                             highlights,
                             fonts,
@@ -3810,7 +3828,7 @@ fn render_content_node<'a>(
                     rendered_row = rendered_row.push(
                         container(rendered_cell)
                             .width(Length::FillPortion(cell.column_span.max(1)))
-                            .padding(6),
+                            .padding(EPUB_TABLE_CELL_PADDING),
                     );
                     if cell_index + 1 < table_row.cells.len() {
                         table_offset += 1;
@@ -3819,14 +3837,20 @@ fn render_content_node<'a>(
                 table = table.push(rendered_row);
                 table_offset += 1;
             }
-            let mut table = container(table).width(Length::Fill);
+            let table_width = crate::epub::epub_table_layout_width(row_groups, available_width);
+            let mut table = container(table).width(Length::Fixed(table_width));
             if let Some(margin) = style.margin_left_em {
                 table = table.padding(iced::Padding {
                     left: margin * font_size,
                     ..iced::Padding::ZERO
                 });
             }
-            table.into()
+            scrollable(table)
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::default(),
+                ))
+                .width(Length::Fill)
+                .into()
         }
 
         ContentNode::UnorderedList(items) => {
@@ -4995,6 +5019,12 @@ mod tests {
         state.show_search_bar = false;
         state.show_reader_more = true;
         assert_eq!(baseline - available_reader_size(&state).height, 84.0);
+    }
+
+    #[test]
+    fn continuous_epub_width_tracks_the_actual_reader_surface() {
+        assert_eq!(continuous_epub_content_width(900.0, false), 760.0);
+        assert_eq!(continuous_epub_content_width(900.0, true), 560.0);
     }
 
     #[test]
@@ -7439,6 +7469,7 @@ mod tests {
             iced::Color::BLACK,
             &handles,
             false,
+            600.0,
             0,
             &[],
             None,
@@ -7454,6 +7485,7 @@ mod tests {
             iced::Color::BLACK,
             &handles,
             false,
+            600.0,
             0,
             &[],
             None,

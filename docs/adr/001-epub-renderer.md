@@ -576,10 +576,15 @@ references, source block boundaries, and source-order searchable text survive
 in the shared chapter presentation. Numeric spans saturate at the HTML semantic
 limits (`rowspan` 65,534 and `colspan` 1,000), and rejected image references
 retain alt text without entering the canonical resource model. The app consumes
-this model through a readable row/cell fallback;
-the test-only explicit Grid remains evidence for the next production step, not
-the current layout engine. Wide-table overflow, row-span placement, pagination,
-and native accessibility exposure remain the open M3 boundaries.
+this model through a readable row/cell fallback. Tables wider than the reader
+surface use bounded horizontal overflow rather than compressing or discarding
+cells. Paginated tables group complete row-span bands into one scroll surface
+per actual page fragment and keep the original text offsets. Pagination and
+rendering share cell-padding and row/child-spacing geometry; a band taller than
+one page remains intact rather than splitting cell content.
+The test-only explicit Grid remains evidence for the next production step, not
+the current layout engine. Full grid placement and native accessibility
+exposure remain the open M3 boundaries.
 
 ## Native EPUB font admission and renderer boundary
 
