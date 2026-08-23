@@ -1501,6 +1501,76 @@ mod tests {
     }
 
     #[test]
+    fn paginated_tables_split_only_between_complete_rowspan_bands() {
+        let epub = shosai_core::epub::EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/table.epub").to_vec(),
+        )
+        .expect("table fixture should be a valid EPUB");
+        let table = epub
+            .presentation()
+            .chapter(0)
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|node| matches!(node, ContentNode::Table { .. }))
+            .expect("fixture must retain a semantic table");
+        let expected_rows = match table {
+            ContentNode::Table { row_groups, .. } => row_groups
+                .iter()
+                .map(|group| group.rows.len())
+                .sum::<usize>(),
+            _ => unreachable!(),
+        };
+
+        let pages = paginate_epub_chapter(
+            std::slice::from_ref(table),
+            None,
+            16.0,
+            1.4,
+            Size::new(240.0, 72.0),
+        );
+        let fragments = pages
+            .iter()
+            .flatten()
+            .map(|page_node| (&page_node.node, page_node.text_offset))
+            .collect::<Vec<_>>();
+
+        assert!(pages.len() > 1, "tall tables must fragment by row bands");
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|(node, _)| match node {
+                    ContentNode::Table { row_groups, .. } => row_groups
+                        .iter()
+                        .map(|group| group.rows.len())
+                        .sum::<usize>(),
+                    other => panic!("expected table fragment, got {other:?}"),
+                })
+                .sum::<usize>(),
+            expected_rows
+        );
+        for (node, _) in &fragments {
+            let ContentNode::Table { row_groups, .. } = node else {
+                unreachable!();
+            };
+            for group in row_groups {
+                for (row_index, row) in group.rows.iter().enumerate() {
+                    let required_rows = row
+                        .cells
+                        .iter()
+                        .map(|cell| usize::from(cell.row_span.max(1)))
+                        .max()
+                        .unwrap_or(1);
+                    assert!(row_index + required_rows <= group.rows.len());
+                }
+            }
+        }
+        for pair in fragments.windows(2) {
+            assert_eq!(pair[1].1, pair[0].1 + content_node_text_len(pair[0].0));
+        }
+    }
+
+    #[test]
     fn epub_paginator_splits_long_paragraphs_without_losing_formatting() {
         let text = "This is a linked sentence that should wrap cleanly. ".repeat(30);
         let spans = vec![shosai_core::epub::render::TextSpan {
