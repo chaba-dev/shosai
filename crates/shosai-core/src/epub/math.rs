@@ -92,10 +92,12 @@ fn preflight(
         return Err(());
     }
     let name = node.tag_name().name();
-    if name == "semantics" {
+    let is_mathml = node.tag_name().namespace() == Some(MATHML_NAMESPACE);
+    if !suppress_text && is_mathml && name == "semantics" {
         let children = elements(node);
         if children.first().is_none_or(|child| is_annotation(*child))
             || children.iter().skip(1).any(|child| !is_annotation(*child))
+            || has_non_whitespace_direct_text(node)
         {
             return Err(());
         }
@@ -103,12 +105,12 @@ fn preflight(
     let suppress_text = suppress_text || is_annotation(node);
     if !suppress_text {
         add_visible_bytes(trimmed_direct_text_bytes(node), budget)?;
-        if name == "mfenced" {
+        if is_mathml && name == "mfenced" {
             add_visible_bytes(node.attribute("open").unwrap_or("(").len(), budget)?;
             add_visible_bytes(node.attribute("close").unwrap_or(")").len(), budget)?;
         }
     }
-    let allow_foreign = allow_foreign || name == "annotation-xml";
+    let allow_foreign = allow_foreign || is_annotation_xml(node);
     for child in elements(node) {
         preflight(child, depth + 1, allow_foreign, suppress_text, budget)?;
     }
@@ -149,7 +151,11 @@ fn add_visible_bytes(bytes: usize, budget: &mut Budget) -> Result<(), ()> {
 fn expression(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<MathExpression, ()> {
     admit(depth, count)?;
     let children = elements(node);
-    match node.tag_name().name() {
+    let name = node.tag_name().name();
+    if !matches!(name, "mi" | "mn" | "mo" | "mtext") && has_non_whitespace_direct_text(node) {
+        return Err(());
+    }
+    match name {
         "math" | "mrow" | "mstyle" | "mtd" => row_expression(children, depth, count),
         "mi" | "mn" | "mo" | "mtext" => token(node).map(MathExpression::Token),
         "mfrac" => match children.as_slice() {
@@ -234,7 +240,7 @@ fn table_expression(
 ) -> Result<MathExpression, ()> {
     rows.into_iter()
         .map(|row| {
-            if row.tag_name().name() != "mtr" {
+            if row.tag_name().name() != "mtr" || has_non_whitespace_direct_text(row) {
                 return Err(());
             }
             admit(depth + 1, count)?;
@@ -256,8 +262,10 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
     admit(depth, count)?;
     let children = elements(node);
     match node.tag_name().name() {
-        "mi" | "mn" | "mo" | "mtext" => token(node),
-        "mfrac" => match children.as_slice() {
+        "mi" | "mn" | "mo" | "mtext" => {
+            token(node).or_else(|_| fallback_children(node, depth, count))
+        }
+        "mfrac" if has_supported_expression(node) => match children.as_slice() {
             [a, b] => Ok(format!(
                 "({})/({})",
                 fallback(*a, depth + 1, count)?,
@@ -265,8 +273,12 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
             )),
             _ => fallback_children(node, depth, count),
         },
-        "msqrt" => Ok(format!("sqrt({})", fallback_children(node, depth, count)?)),
-        "mroot" => match children.as_slice() {
+        "mfrac" => fallback_children(node, depth, count),
+        "msqrt" if has_supported_expression(node) => {
+            Ok(format!("sqrt({})", fallback_children(node, depth, count)?))
+        }
+        "msqrt" => fallback_children(node, depth, count),
+        "mroot" if has_supported_expression(node) => match children.as_slice() {
             [a, b] => Ok(format!(
                 "root({}, {})",
                 fallback(*a, depth + 1, count)?,
@@ -274,9 +286,12 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
             )),
             _ => fallback_children(node, depth, count),
         },
-        "msub" => fallback_script(node, "_", depth, count),
-        "msup" => fallback_script(node, "^", depth, count),
-        "msubsup" => match children.as_slice() {
+        "mroot" => fallback_children(node, depth, count),
+        "msub" if has_supported_expression(node) => fallback_script(node, "_", depth, count),
+        "msub" => fallback_children(node, depth, count),
+        "msup" if has_supported_expression(node) => fallback_script(node, "^", depth, count),
+        "msup" => fallback_children(node, depth, count),
+        "msubsup" if has_supported_expression(node) => match children.as_slice() {
             [base, sub, sup] => Ok(format!(
                 "{}_{}^{}",
                 fallback(*base, depth + 1, count)?,
@@ -285,13 +300,15 @@ fn fallback(node: Node<'_, '_>, depth: usize, count: &mut usize) -> Result<Strin
             )),
             _ => fallback_children(node, depth, count),
         },
+        "msubsup" => fallback_children(node, depth, count),
         "annotation" | "annotation-xml" => Ok(String::new()),
-        "mfenced" => Ok(format!(
+        "mfenced" if has_supported_expression(node) => Ok(format!(
             "{}{}{}",
             node.attribute("open").unwrap_or("("),
             fallback_children(node, depth, count)?,
             node.attribute("close").unwrap_or(")")
         )),
+        "mfenced" => fallback_children(node, depth, count),
         "semantics" => children
             .first()
             .copied()
@@ -355,6 +372,16 @@ fn token(node: Node<'_, '_>) -> Result<String, ()> {
         .ok_or(())
 }
 
+fn has_supported_expression(node: Node<'_, '_>) -> bool {
+    expression(node, 0, &mut 0).is_ok()
+}
+
+fn has_non_whitespace_direct_text(node: Node<'_, '_>) -> bool {
+    node.children()
+        .filter(Node::is_text)
+        .any(|child| child.text().is_some_and(|text| !text.trim().is_empty()))
+}
+
 fn admit(depth: usize, count: &mut usize) -> Result<(), ()> {
     if depth > MAX_DEPTH {
         return Err(());
@@ -371,7 +398,13 @@ fn elements<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
 }
 
 fn is_annotation(node: Node<'_, '_>) -> bool {
-    matches!(node.tag_name().name(), "annotation" | "annotation-xml")
+    node.tag_name().namespace() == Some(MATHML_NAMESPACE)
+        && matches!(node.tag_name().name(), "annotation" | "annotation-xml")
+}
+
+fn is_annotation_xml(node: Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some(MATHML_NAMESPACE)
+        && node.tag_name().name() == "annotation-xml"
 }
 
 #[cfg(test)]

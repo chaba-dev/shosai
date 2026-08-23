@@ -254,6 +254,7 @@ fn parse_block_children(
         if !matches!(child.tag_name().name(), "pre" | "code")
             && css_style.monospace
             && css_style.preserve_whitespace
+            && !super::math::is_math(child)
         {
             let code = collect_visible_text_content(&child, styles);
             if !code.trim().is_empty() {
