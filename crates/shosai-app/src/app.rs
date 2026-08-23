@@ -7545,6 +7545,76 @@ mod tests {
     }
 
     #[test]
+    fn reader_text_and_links_meet_contrast_targets_in_every_theme() {
+        fn linear(channel: f32) -> f32 {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        fn luminance(color: iced::Color) -> f32 {
+            0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+        }
+        fn contrast(left: iced::Color, right: iced::Color) -> f32 {
+            let (lighter, darker) = if luminance(left) >= luminance(right) {
+                (luminance(left), luminance(right))
+            } else {
+                (luminance(right), luminance(left))
+            };
+            (lighter + 0.05) / (darker + 0.05)
+        }
+
+        for theme in [ReaderTheme::Light, ReaderTheme::Dark, ReaderTheme::Sepia] {
+            assert!(contrast(theme.text_color(), theme.background()) >= 4.5);
+            assert!(
+                contrast(LINK_COLOR, theme.background()) >= 4.5,
+                "{theme:?} link contrast must remain readable"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_table_nested_links_and_images_reach_shared_app_paths() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/table.epub").to_vec(),
+        )
+        .expect("table fixture should be a valid EPUB");
+        let table = epub
+            .presentation()
+            .chapter(0)
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|node| matches!(node, ContentNode::Table { .. }))
+            .expect("fixture must retain a semantic table");
+        let ContentNode::Table { row_groups, .. } = table else {
+            unreachable!();
+        };
+        let nested = row_groups
+            .iter()
+            .flat_map(|group| &group.rows)
+            .flat_map(|row| &row.cells)
+            .flat_map(|cell| &cell.children)
+            .collect::<Vec<_>>();
+        assert!(nested.iter().any(|node| {
+            matches!(node, ContentNode::Paragraph(spans, _) if
+                spans.iter().any(|span| span.link.as_deref() == Some("#spanning-table")))
+        }));
+        let image_path = nested.iter().find_map(|node| match node {
+            ContentNode::Image { src, .. } => Some(src.as_str()),
+            _ => None,
+        });
+        assert_eq!(image_path, Some("OEBPS/Images/pixel.png"));
+
+        let mut handles = HashMap::new();
+        cache_epub_image_handles(&mut handles, std::iter::once(table), &|path| {
+            epub.resource(path).map(|resource| resource.bytes())
+        });
+        assert!(handles.contains_key("OEBPS/Images/pixel.png"));
+    }
+
+    #[test]
     fn cached_image_alt_matches_remain_visibly_highlighted() {
         let highlights = [
             SearchHighlight {
