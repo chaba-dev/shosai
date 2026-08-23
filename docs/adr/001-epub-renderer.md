@@ -670,6 +670,17 @@ isolation remains release hardening rather than a guarantee of this boundary.
 
 ## Native MathML and mixed-script spike
 
+Production chapter parsing now retains direct MathML expressions as a bounded,
+renderer-independent semantic model rather than flattening them irreversibly.
+Admission is limited to 64 nodes, 16 levels, and 1,024 bytes of visible text;
+supported rows, tokens, fractions, roots, scripts, fences, matrices, and
+semantics retain structure. Unsupported but bounded markup keeps readable
+source-order fallback, annotations do not leak into visible/search text, and an
+over-budget subtree becomes a fixed omission label. Search, pagination, and the
+app fallback consume that same bounded fallback. Inline MathML embedded inside
+an XHTML text block and native mathematical geometry remain open production
+boundaries.
+
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
 square and indexed roots, subscript/superscript operators, a two-by-two matrix,
@@ -688,7 +699,7 @@ tests prove that:
   source-order text fallback; split token text is retained while nested and
   multiline tokens are rejected, and `semantics` requires one presentation
   child followed only by annotations;
-- one allocation-free subtree preflight counts rows, cells, annotations, and
+- one bounded subtree preflight counts rows, cells, annotations, and
   annotation descendants; enforces the MathML namespace except beneath
   `annotation-xml`; and rejects more than 64 elements, 16 levels, or 1,024 bytes
   of aggregate visible token/fence text before creating fonts or math boxes; and

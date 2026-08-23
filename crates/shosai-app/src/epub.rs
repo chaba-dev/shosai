@@ -1443,6 +1443,10 @@ fn estimated_epub_compact_node_height(
                 + row_heights.into_iter().sum::<f32>()
                 + EPUB_TABLE_ROW_SPACING * table_children.saturating_sub(1) as f32
         }
+        ContentNode::Math { content, style } => {
+            let scale = style.font_size_multiplier.unwrap_or(1.0);
+            wrapped(content.fallback.chars().count(), scale) * text_line_height * scale
+        }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items
                 .iter()
@@ -1508,6 +1512,27 @@ fn measured_epub_compact_node_height(
             style.text_align,
         )
         .map(|layout| layout.height),
+        ContentNode::Math { content, style } => {
+            let span = shosai_core::epub::render::TextSpan {
+                text: content.fallback.clone(),
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            };
+            measure_epub_spans(
+                fonts,
+                std::slice::from_ref(&span),
+                font_size * style.font_size_multiplier.unwrap_or(1.0),
+                width,
+                style.direction,
+                style.text_align,
+            )
+            .map(|layout| layout.height)
+        }
         ContentNode::UnorderedList(items) => {
             measured_epub_list_height(fonts, items, None, font_size, width)
         }
@@ -1629,6 +1654,7 @@ pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
         }
         ContentNode::CodeBlock { code, .. } | ContentNode::InlineCode(code) => code.chars().count(),
         ContentNode::Image { alt, .. } => alt.chars().count(),
+        ContentNode::Math { content, .. } => content.fallback.chars().count(),
         ContentNode::HorizontalRule => 0,
     }
 }

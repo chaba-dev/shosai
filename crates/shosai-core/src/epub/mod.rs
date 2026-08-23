@@ -7,6 +7,7 @@
 //! - CSS stylesheets, images, fonts, and other resources
 
 mod font;
+mod math;
 mod parser;
 mod presentation;
 pub mod render;
@@ -23,6 +24,7 @@ pub use font::{
     EpubRejectedFontFace,
 };
 pub use limits::EpubLimits;
+pub use math::{MathContent, MathDisplay, MathExpression};
 pub use native_text::{
     EPUB_TEXT_MAX_SCALARS, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextHit,
     EpubTextLayout, EpubTextLine, EpubTextRect, EpubTextRequest, EpubTextRun,

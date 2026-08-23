@@ -3914,6 +3914,22 @@ fn render_content_node<'a>(
             highlights,
         ),
 
+        ContentNode::Math { content, style } => {
+            let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            let rendered = render_highlighted_text_with_font(
+                &content.fallback,
+                text_offset,
+                size,
+                palette,
+                Font::DEFAULT,
+                highlights,
+            );
+            container(rendered)
+                .width(Length::Fill)
+                .align_x(node_style_to_alignment(style))
+                .into()
+        }
+
         ContentNode::HorizontalRule => text("───────────────────")
             .size(font_size)
             .color(text_color)
