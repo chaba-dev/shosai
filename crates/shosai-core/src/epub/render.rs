@@ -1446,6 +1446,46 @@ mod tests {
     }
 
     #[test]
+    fn chapter_anchors_include_body_empty_markers_and_table_descendants() {
+        let xhtml = r#"<html><body id="body-top">
+            <a id="empty-marker" name="legacy-marker"></a><p id="empty-paragraph"></p>
+            <p>before</p>
+            <table><caption id="caption"><span id="caption-child">cap</span></caption>
+              <tr id="row"><td><span id="cell-child">cell</span></td></tr>
+            </table>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "before\ncap\ncell\n\n"
+        );
+        for anchor in [
+            "body-top",
+            "empty-marker",
+            "legacy-marker",
+            "empty-paragraph",
+        ] {
+            assert_eq!(parsed.anchor_offsets.get(anchor), Some(&0), "{anchor}");
+        }
+        assert_eq!(parsed.anchor_offsets.get("caption"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("caption-child"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("row"), Some(&11));
+        assert_eq!(parsed.anchor_offsets.get("cell-child"), Some(&11));
+    }
+
+    #[test]
     fn test_parse_paragraph() {
         let xhtml = r#"<html><body><p>Hello world</p></body></html>"#;
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
