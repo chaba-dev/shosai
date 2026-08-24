@@ -161,8 +161,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             *cache.raster.get_mut() = None;
         }
         let height = layout_height(cache.layout.as_ref(), cache.fallback_height);
-        let intrinsic_width =
-            native_text_intrinsic_width(cache.layout.as_ref(), width, self.request.scale);
+        let intrinsic_width = native_text_intrinsic_width(cache.layout.as_ref(), width);
         layout::Node::new(limits.resolve(
             self.width,
             Length::Fixed(height),
@@ -295,18 +294,8 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
     }
 }
 
-fn native_text_intrinsic_width(
-    layout: Option<&EpubTextLayout>,
-    fallback_width: f32,
-    scale: f32,
-) -> f32 {
-    layout.map_or(fallback_width, |layout| {
-        layout
-            .lines
-            .iter()
-            .map(|line| line.pixel_width as f32 / scale)
-            .fold(0.0, f32::max)
-    })
+fn native_text_intrinsic_width(layout: Option<&EpubTextLayout>, fallback_width: f32) -> f32 {
+    layout.map_or(fallback_width, |layout| layout.width)
 }
 
 fn layout_height(native: Option<&EpubTextLayout>, fallback: f32) -> f32 {
@@ -509,7 +498,7 @@ mod tests {
         };
 
         assert_eq!(
-            native_text_intrinsic_width(Some(&layout), 360.0, 1.0),
+            native_text_intrinsic_width(Some(&layout), 360.0),
             42.0,
             "wrapping rows must size embedded-font words by glyph extent, not the full raster surface"
         );
