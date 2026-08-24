@@ -402,7 +402,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   justified, over-bound, over-three-line-height, and unsupported cases retain
   word-or-glyph-wrapped splittable fallback.  Local
   regressions also cover wrapped-page height, blockquote slicing, bounded mixed
-  embedded-font flow, table search separators, and hit-tested pointer dispatch.
+  embedded-font flow, aggregate pagination work, table-cell display geometry,
+  table search separators, and hit-tested pointer dispatch through the Iced
+  widget shell.
   Packaged native-app validation on Apple Silicon/macOS and Framework 16 Linux
   verified inline/display layout, fallback bounds, and repeatable linked inline
   and promoted-display activation.

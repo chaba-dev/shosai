@@ -707,7 +707,10 @@ fallback text flow. Right-to-left and justified paragraphs deliberately retain
 readable linear fallback until the native flow can preserve full paragraph-level
 bidi and justification semantics. Unit tests synthesize hit-tested widget pointer
 events and cover retained link dispatch; repeatable activation in packaged native
-apps remains release-validation evidence.
+apps remains release-validation evidence. Math links use the reader's existing
+chapter-level EPUB navigation: a path target opens the target chapter at offset
+zero, while fragment-only and cross-chapter anchor offsets remain unsupported
+until M5 adds production element-ID-to-source-offset anchors.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
