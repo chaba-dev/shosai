@@ -249,7 +249,9 @@ fn parse_chapter_xhtml_with_owner_and_limits(
         });
     }
 
-    Ok(parse_block_children(body, base_path, &computed_styles))
+    let mut parsed = parse_block_children(body, base_path, &computed_styles);
+    record_element_anchors(&body, 0, &mut parsed.anchor_offsets);
+    Ok(parsed)
 }
 
 /// Parse block-level children of an element.
@@ -303,6 +305,7 @@ fn parse_block_children(
         let child_text_offset = text_offset;
         let first_child_node = nodes.len();
         let mut nested_anchors = HashMap::new();
+        record_element_anchors(&child, child_text_offset, &mut anchor_offsets);
 
         // If the CSS says monospace + preserve-whitespace, treat as code block
         // regardless of the HTML tag (handles Calibre-generated classes).
@@ -407,7 +410,7 @@ fn parse_block_children(
 
             "table" => {
                 if let Some(table) = parse_table(&child, base_path, styles, node_style) {
-                    nested_anchors = table_cell_anchor_offsets(&table);
+                    nested_anchors = table_anchor_offsets(&child, &table, base_path, styles);
                     nodes.push(table);
                 }
             }
@@ -489,18 +492,17 @@ fn parse_block_children(
 
             _ => {
                 let inline = collect_inline_content(&child, styles, css_style.font_size_px);
+                nested_anchors = inline.anchors;
                 if !inline.spans.is_empty() {
-                    nested_anchors = inline.anchors;
                     nodes.push(ContentNode::Paragraph(inline.spans, node_style));
                 }
             }
         }
 
+        for (name, offset) in nested_anchors {
+            record_anchor_name(&name, child_text_offset + offset, &mut anchor_offsets);
+        }
         if nodes.len() > first_child_node {
-            record_element_anchors(&child, child_text_offset, &mut anchor_offsets);
-            for (name, offset) in nested_anchors {
-                record_anchor_name(&name, child_text_offset + offset, &mut anchor_offsets);
-            }
             text_offset += crate::search::extract_text_from_nodes(&nodes[first_child_node..])
                 .chars()
                 .count();
@@ -539,7 +541,12 @@ fn record_anchor_name(name: &str, offset: usize, anchors: &mut HashMap<String, u
     anchors.entry(name.to_owned()).or_insert(offset);
 }
 
-fn table_cell_anchor_offsets(table: &ContentNode) -> HashMap<String, usize> {
+fn table_anchor_offsets(
+    source: &roxmltree::Node<'_, '_>,
+    table: &ContentNode,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> HashMap<String, usize> {
     let ContentNode::Table {
         caption,
         row_groups,
@@ -549,15 +556,59 @@ fn table_cell_anchor_offsets(table: &ContentNode) -> HashMap<String, usize> {
         return HashMap::new();
     };
     let mut anchors = HashMap::new();
+    if let Some(source_caption) = source.children().find(|child| {
+        child.is_element()
+            && child.tag_name().name() == "caption"
+            && styles
+                .get(*child)
+                .is_none_or(|style| style.display != super::computed_style::DisplayRole::None)
+    }) {
+        record_element_anchors(&source_caption, 0, &mut anchors);
+        let font_size = styles
+            .get(source_caption)
+            .expect("computed style must exist for table caption")
+            .font_size_px;
+        for (name, offset) in collect_inline_content(&source_caption, styles, font_size).anchors {
+            record_anchor_name(&name, offset, &mut anchors);
+        }
+    }
     let mut offset = caption
         .iter()
         .map(|span| span.text.chars().count())
         .sum::<usize>();
     offset += usize::from(!caption.is_empty());
-    for row in row_groups.iter().flat_map(|group| &group.rows) {
-        for (cell_index, cell) in row.cells.iter().enumerate() {
-            if let Some(id) = &cell.id {
-                record_anchor_name(id, offset, &mut anchors);
+
+    let source_rows = visible_table_rows(source, styles);
+    let rows = row_groups.iter().flat_map(|group| &group.rows);
+    for (source_row, row) in source_rows.into_iter().zip(rows) {
+        record_element_anchors(&source_row, offset, &mut anchors);
+        let source_cells = source_row.children().filter(|cell| {
+            cell.is_element()
+                && matches!(cell.tag_name().name(), "th" | "td")
+                && styles
+                    .get(*cell)
+                    .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+        });
+        for (cell_index, (source_cell, cell)) in source_cells.zip(&row.cells).enumerate() {
+            record_element_anchors(&source_cell, offset, &mut anchors);
+            let has_block_children = source_cell.children().any(|child| {
+                child.is_element()
+                    && styles.get(child).is_some_and(|style| {
+                        style.display != super::computed_style::DisplayRole::None
+                            && style.display != super::computed_style::DisplayRole::Inline
+                    })
+            });
+            let nested = if has_block_children {
+                parse_block_children(source_cell, base_path, styles).anchor_offsets
+            } else {
+                let font_size = styles
+                    .get(source_cell)
+                    .expect("computed style must exist for table cell")
+                    .font_size_px;
+                collect_inline_content(&source_cell, styles, font_size).anchors
+            };
+            for (name, nested_offset) in nested {
+                record_anchor_name(&name, offset + nested_offset, &mut anchors);
             }
             for (child_index, child) in cell.children.iter().enumerate() {
                 if cell.block_starts.contains(&child_index) {
@@ -573,6 +624,38 @@ fn table_cell_anchor_offsets(table: &ContentNode) -> HashMap<String, usize> {
         offset += 1;
     }
     anchors
+}
+
+fn visible_table_rows<'a>(
+    table: &roxmltree::Node<'a, 'a>,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> Vec<roxmltree::Node<'a, 'a>> {
+    let visible_row = |row: roxmltree::Node<'a, 'a>| {
+        row.is_element()
+            && row.tag_name().name() == "tr"
+            && styles
+                .get(row)
+                .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+            && row.children().any(|cell| {
+                cell.is_element()
+                    && matches!(cell.tag_name().name(), "th" | "td")
+                    && styles.get(cell).is_some_and(|style| {
+                        style.display != super::computed_style::DisplayRole::None
+                    })
+            })
+    };
+    table
+        .children()
+        .filter(roxmltree::Node::is_element)
+        .flat_map(|child| match child.tag_name().name() {
+            "tr" => visible_row(child).then_some(child).into_iter().collect(),
+            "thead" | "tbody" | "tfoot" => child
+                .children()
+                .filter(|row| visible_row(*row))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect()
 }
 
 fn parse_table(
