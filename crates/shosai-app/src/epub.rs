@@ -20,6 +20,7 @@ pub(crate) const MIN_EPUB_TABLE_WIDTH: f32 = 360.0;
 pub(crate) const EPUB_TABLE_CELL_PADDING: f32 = 6.0;
 pub(crate) const EPUB_TABLE_CELL_SPACING: f32 = 4.0;
 pub(crate) const EPUB_TABLE_ROW_SPACING: f32 = 8.0;
+pub(crate) const INLINE_MATH_WRAP_SPACING: f32 = 0.25;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
@@ -2054,6 +2055,12 @@ mod tests {
         let layout = layout_inline_math_span(&math_span, 16.0, 180.0, 150.0)
             .expect("supported inline math must retain native geometry");
         assert!(layout.height > 16.0 * TEXT_LINE_HEIGHT);
+        let geometry_extra = layout.height - 16.0 * TEXT_LINE_HEIGHT;
+        assert!(
+            inline_math_height_reserve(&spans, 16.0, 180.0, 150.0)
+                >= geometry_extra + 16.0 * INLINE_MATH_WRAP_SPACING,
+            "wrapped native math must reserve inter-line clearance in addition to geometry"
+        );
         let mut display_span = math_span.clone();
         display_span.math.as_mut().unwrap().display = MathDisplay::Block;
         assert!(layout_inline_math_span(&display_span, 16.0, 180.0, 150.0).is_none());
