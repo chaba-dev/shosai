@@ -180,7 +180,6 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 remaining = page_size.height;
             }
         }
-
         let text_len = content_node_text_len(node);
         match node {
             ContentNode::Paragraph(spans, style) => {
@@ -1880,6 +1879,178 @@ mod tests {
             .is_none()
         );
         assert!(estimated_epub_compact_node_height(&overwide, 1, 20, 20.0) > 0.0);
+    }
+
+    #[test]
+    fn dense_math_sequence_moves_complete_matrix_and_fallback_between_pages() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let label = |text: &str| {
+            ContentNode::Paragraph(
+                vec![TextSpan {
+                    text: text.into(),
+                    font_family: None,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                NodeStyle::default(),
+            )
+        };
+        let math = |expression: Option<MathExpression>, fallback: &str| ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression,
+                fallback: fallback.into(),
+            },
+            style: NodeStyle {
+                font_size_multiplier: Some(1.5),
+                ..NodeStyle::default()
+            },
+        };
+        let token = |text: &str| MathExpression::Token(text.into());
+        let matrix = MathExpression::Fenced {
+            open: "(".into(),
+            close: ")".into(),
+            content: vec![MathExpression::Table(vec![
+                vec![token("1"), token("0")],
+                vec![token("0"), token("1")],
+            ])],
+        };
+        let nodes = vec![
+            label("Native MathML geometry — fraction:"),
+            math(
+                Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Row(vec![
+                        token("a"),
+                        token("+"),
+                        token("b"),
+                    ])),
+                    Box::new(MathExpression::Row(vec![
+                        token("c"),
+                        token("+"),
+                        token("d"),
+                    ])),
+                )),
+                "(a+b)/(c+d)",
+            ),
+            label("Indexed root and sub/superscript:"),
+            math(
+                Some(MathExpression::Row(vec![
+                    MathExpression::Root(Box::new(token("x")), Box::new(token("3"))),
+                    token("+"),
+                    MathExpression::SubSuperscript {
+                        base: Box::new(token("y")),
+                        subscript: Box::new(token("i")),
+                        superscript: Box::new(token("2")),
+                    },
+                ])),
+                "root(x, 3) + y_i^2",
+            ),
+            label("Fence:"),
+            math(
+                Some(MathExpression::Fenced {
+                    open: "[".into(),
+                    close: "]".into(),
+                    content: vec![MathExpression::Row(vec![
+                        token("p"),
+                        token("+"),
+                        token("q"),
+                    ])],
+                }),
+                "[p + q]",
+            ),
+            label("Fenced 2 x 2 matrix:"),
+            math(Some(matrix.clone()), "(1 0; 0 1)"),
+            label("Unsupported case remains readable:"),
+            math(None, "Readable unsupported fallback"),
+        ];
+        let page_size = Size::new(420.0, 500.0);
+        let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, page_size);
+
+        assert!(
+            pages.len() > 1,
+            "dense fixture must exercise a page boundary"
+        );
+        assert_eq!(
+            pages.iter().map(Vec::len).sum::<usize>(),
+            nodes.len(),
+            "pagination must retain every label, expression, and fallback"
+        );
+        let mut expected_offset = 0;
+        for (page_node, source_node) in pages.iter().flatten().zip(&nodes) {
+            assert_eq!(page_node.text_offset, expected_offset);
+            assert_eq!(&page_node.node, source_node);
+            expected_offset += content_node_text_len(source_node) + 1;
+        }
+        let matrix_page = pages
+            .iter()
+            .position(|page| {
+                page.iter().any(|node| {
+                    matches!(
+                        &node.node,
+                        ContentNode::Math { content, .. }
+                            if content.expression.as_ref() == Some(&matrix)
+                    )
+                })
+            })
+            .expect("matrix must remain on one page");
+        assert!(matches!(
+            pages[matrix_page].as_slice(),
+            [
+                PageNode {
+                    node: ContentNode::Paragraph(spans, _),
+                    ..
+                },
+                PageNode {
+                    node: ContentNode::Math { content, .. },
+                    ..
+                },
+                ..
+            ] if spans.iter().any(|span| span.text == "Fenced 2 x 2 matrix:")
+                && content.expression.as_ref() == Some(&matrix)
+        ));
+        let matrix_layout = math_layout::layout_math_for_bounds(&matrix, 24.0, 420.0, 500.0)
+            .expect("matrix must retain native geometry");
+        assert!(matrix_layout.primitives.iter().all(|primitive| {
+            primitive.x >= 0.0
+                && primitive.y >= 0.0
+                && primitive.x + primitive.width <= matrix_layout.width
+                && primitive.y + primitive.height <= matrix_layout.height
+        }));
+        for value in ["1", "0"] {
+            assert!(matrix_layout.primitives.iter().any(|primitive| {
+                matches!(&primitive.kind, math_layout::MathPrimitiveKind::Text(text) if text == value)
+            }));
+        }
+        let zero_rows = matrix_layout
+            .primitives
+            .iter()
+            .filter(|primitive| {
+                matches!(&primitive.kind, math_layout::MathPrimitiveKind::Text(text) if text == "0")
+            })
+            .map(|primitive| primitive.y)
+            .collect::<Vec<_>>();
+        assert_eq!(zero_rows.len(), 2);
+        assert_ne!(
+            zero_rows[0], zero_rows[1],
+            "both matrix rows must be positioned"
+        );
+        assert!(
+            pages[matrix_page..]
+                .iter()
+                .any(|page| page.iter().any(|node| {
+                    matches!(
+                        &node.node,
+                        ContentNode::Math { content, .. }
+                            if content.fallback == "Readable unsupported fallback"
+                    )
+                }))
+        );
     }
 
     #[test]
