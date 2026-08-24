@@ -2083,6 +2083,259 @@ mod tests {
     }
 
     #[test]
+    fn native_inline_admission_controls_atomic_pagination_and_reserve() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::style::{TextAlignment, TextDirection};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let math_span = |expression: MathExpression, fallback: String| TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(expression),
+                fallback,
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let fraction = || {
+            math_span(
+                MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                ),
+                "(a)/(b)".into(),
+            )
+        };
+        let retained_math = |node: &ContentNode| match node {
+            ContentNode::Paragraph(spans, _) => {
+                spans.iter().filter(|span| span.math.is_some()).count()
+            }
+            _ => 0,
+        };
+        let page_size = Size::new(180.0, 120.0);
+        let fallback_cases = [
+            (
+                fraction(),
+                NodeStyle {
+                    direction: TextDirection::Rtl,
+                    ..Default::default()
+                },
+            ),
+            (
+                fraction(),
+                NodeStyle {
+                    text_align: Some(TextAlignment::Justify),
+                    ..Default::default()
+                },
+            ),
+            (
+                math_span(
+                    MathExpression::Token("overwide".repeat(80)),
+                    "overwide".repeat(80),
+                ),
+                NodeStyle::default(),
+            ),
+            (
+                math_span(
+                    MathExpression::Fraction(
+                        Box::new(MathExpression::Fraction(
+                            Box::new(MathExpression::Token("a".into())),
+                            Box::new(MathExpression::Token("b".into())),
+                        )),
+                        Box::new(MathExpression::Fraction(
+                            Box::new(MathExpression::Token("c".into())),
+                            Box::new(MathExpression::Token("d".into())),
+                        )),
+                    ),
+                    "((a)/(b))/((c)/(d))".into(),
+                ),
+                NodeStyle::default(),
+            ),
+            (
+                math_span(MathExpression::Token("\u{10ffff}".into()), "missing".into()),
+                NodeStyle::default(),
+            ),
+        ];
+
+        for (span, style) in fallback_cases {
+            let height = if span.text == "((a)/(b))/((c)/(d))" {
+                20.0
+            } else {
+                page_size.height
+            };
+            let pages = paginate_epub_chapter(
+                &[ContentNode::Paragraph(vec![span], style)],
+                None,
+                16.0,
+                1.6,
+                Size::new(page_size.width, height),
+            );
+            assert_eq!(
+                pages
+                    .iter()
+                    .flatten()
+                    .map(|page| retained_math(&page.node))
+                    .sum::<usize>(),
+                0,
+                "fallback presentation must remain splittable instead of carrying atomic geometry"
+            );
+        }
+
+        let native = ContentNode::Paragraph(vec![fraction()], NodeStyle::default());
+        let native_pages = paginate_epub_chapter(&[native], None, 16.0, 1.6, page_size);
+        assert_eq!(
+            native_pages
+                .iter()
+                .flatten()
+                .map(|page| retained_math(&page.node))
+                .sum::<usize>(),
+            1,
+            "admitted native geometry must remain one atomic span"
+        );
+    }
+
+    #[test]
+    fn paragraph_pagination_accounts_for_inline_geometry_at_page_boundaries() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let plain = |text: String| TextSpan {
+            text,
+            math: None,
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let mut spans = Vec::new();
+        for index in 0..8 {
+            spans.push(plain(format!("segment {index} before ")));
+            spans.push(TextSpan {
+                text: "(a)/(b)".into(),
+                math: Some(MathContent {
+                    display: MathDisplay::Inline,
+                    expression: Some(MathExpression::Fraction(
+                        Box::new(MathExpression::Token("a".into())),
+                        Box::new(MathExpression::Token("b".into())),
+                    )),
+                    fallback: "(a)/(b)".into(),
+                }),
+                ..plain(String::new())
+            });
+            spans.push(plain(" after. ".into()));
+        }
+        let plain_spans = spans
+            .iter()
+            .cloned()
+            .map(|mut span| {
+                span.math = None;
+                span
+            })
+            .collect::<Vec<_>>();
+        let source = spans
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+        let size = Size::new(180.0, 120.0);
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(spans, NodeStyle::default())],
+            None,
+            20.0,
+            1.6,
+            size,
+        );
+        let plain_pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(plain_spans, NodeStyle::default())],
+            None,
+            20.0,
+            1.6,
+            size,
+        );
+
+        assert!(
+            pages.len() > plain_pages.len(),
+            "native geometry and wrap clearance must affect actual page placement"
+        );
+        let fragments = pages.iter().flatten().collect::<Vec<_>>();
+        assert_eq!(
+            fragments
+                .iter()
+                .flat_map(|page| match &page.node {
+                    ContentNode::Paragraph(spans, _) => spans,
+                    _ => unreachable!(),
+                })
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            source
+        );
+        let mut expected_offset = 0;
+        for page in fragments {
+            assert_eq!(page.text_offset, expected_offset);
+            expected_offset += content_node_text_len(&page.node);
+        }
+    }
+
+    #[test]
+    fn blockquote_splits_do_not_duplicate_fallback_math_metadata() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let fallback = "fallback ".repeat(80);
+        let math = TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Token(fallback.clone())),
+                fallback: fallback.clone(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let pages = paginate_epub_chapter(
+            &[ContentNode::BlockQuote {
+                children: vec![ContentNode::Paragraph(vec![math], NodeStyle::default())],
+                style: NodeStyle::default(),
+            }],
+            None,
+            16.0,
+            1.6,
+            Size::new(180.0, 120.0),
+        );
+        let mut text = String::new();
+        let mut retained_math = 0;
+        for page in pages.iter().flatten() {
+            let ContentNode::BlockQuote { children, .. } = &page.node else {
+                unreachable!();
+            };
+            for child in children {
+                if let ContentNode::Paragraph(spans, _) = child {
+                    text.extend(spans.iter().map(|span| span.text.as_str()));
+                    retained_math += spans.iter().filter(|span| span.math.is_some()).count();
+                }
+            }
+        }
+        assert_eq!(text, fallback);
+        assert_eq!(
+            retained_math, 0,
+            "splittable fallback must not clone native metadata"
+        );
+    }
+
+    #[test]
     fn unsupported_or_overwide_math_keeps_the_readable_text_path() {
         use shosai_core::epub::render::NodeStyle;
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
