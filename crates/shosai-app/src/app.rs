@@ -1145,26 +1145,6 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
     Task::none()
 }
 
-/// Handle a link click from the EPUB reader.
-fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
-    // External links: open in system browser.
-    if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("mailto:") {
-        if let Err(e) = open::that(href) {
-            eprintln!("warning: failed to open URL: {e}");
-        }
-        return Task::none();
-    }
-
-    // Internal EPUB links: navigate to the stable chapter/character location.
-    if let Some(OpenDocument::Epub(doc)) = &state.document
-        && let Some((chapter, offset)) = doc.resolve_location(state.current_page, href)
-    {
-        return navigate_to_epub_location(state, chapter, offset);
-    }
-
-    Task::none()
-}
-
 /// Refresh the visible content for the current page/chapter.
 fn refresh_content(state: &mut State) -> Task<Message> {
     update_bookmark_status(state);
@@ -2890,6 +2870,26 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
         .into()
 }
 
+fn epub_toc_locations(document: &EpubDoc) -> Vec<(usize, String, usize, usize)> {
+    fn collect(
+        document: &EpubDoc,
+        entries: &[shosai_core::epub::TocEntry],
+        depth: usize,
+        locations: &mut Vec<(usize, String, usize, usize)>,
+    ) {
+        for entry in entries {
+            if let Some((chapter, offset)) = document.resolve_toc_location(&entry.href) {
+                locations.push((depth, entry.title.clone(), chapter, offset));
+            }
+            collect(document, &entry.children, depth + 1, locations);
+        }
+    }
+
+    let mut locations = Vec::new();
+    collect(document, document.toc(), 0, &mut locations);
+    locations
+}
+
 fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
     let heading = row![
         column![
@@ -2911,23 +2911,40 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                 .size(12)
                 .color(app_theme::TEXT_MUTED),
         );
-        for (index, chapter) in document.content().chapters.iter().enumerate() {
-            let title = chapter
-                .title
-                .clone()
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| {
-                    state
-                        .i18n
-                        .text_with_args("chapter-number", [("number", (index + 1).into())])
-                });
-            panel = panel.push(
-                button(text(truncate_reader_label(&title, 38)).size(12))
-                    .on_press(Message::GoToBookmark(index, None))
-                    .padding([6, 8])
-                    .width(Length::Fill)
-                    .style(app_theme::bookmark_link),
-            );
+        let toc = epub_toc_locations(document);
+        if toc.is_empty() {
+            for (index, chapter) in document.content().chapters.iter().enumerate() {
+                let title = chapter
+                    .title
+                    .clone()
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        state
+                            .i18n
+                            .text_with_args("chapter-number", [("number", (index + 1).into())])
+                    });
+                panel = panel.push(
+                    button(text(truncate_reader_label(&title, 38)).size(12))
+                        .on_press(Message::GoToBookmark(index, None))
+                        .padding([6, 8])
+                        .width(Length::Fill)
+                        .style(app_theme::bookmark_link),
+                );
+            }
+        } else {
+            for (depth, title, chapter, offset) in toc {
+                panel = panel.push(
+                    row![
+                        iced::widget::Space::new().width((depth * 12) as f32),
+                        button(text(truncate_reader_label(&title, 38)).size(12))
+                            .on_press(Message::GoToBookmark(chapter, Some(offset)))
+                            .padding([6, 8])
+                            .width(Length::Fill)
+                            .style(app_theme::bookmark_link),
+                    ]
+                    .width(Length::Fill),
+                );
+            }
         }
     }
 
@@ -7510,6 +7527,24 @@ mod tests {
         assert!(task.units() > 0);
         assert_eq!((state.current_page, state.epub_offset), (1, 12));
         assert_eq!(state.page_input, "2");
+    }
+
+    #[test]
+    fn epub_contents_panel_uses_resolved_toc_locations() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+
+        let locations = epub_toc_locations(&epub);
+
+        assert_eq!(
+            locations,
+            vec![
+                (0, "Chapter 1: Introduction".to_string(), 0, 0),
+                (0, "Chapter 2: Getting Started".to_string(), 1, 0),
+            ]
+        );
     }
 
     #[test]

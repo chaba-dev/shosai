@@ -198,6 +198,19 @@ impl EpubDoc {
                 .map_or("", |(directory, _)| directory);
             CanonicalEpubPath::resolve(base_path, href).ok()?
         };
+        self.resolve_reference_location(reference)
+    }
+
+    /// Resolve a canonical same-book table-of-contents target.
+    pub fn resolve_toc_location(&self, href: &str) -> Option<(usize, usize)> {
+        let reference = CanonicalEpubPath::resolve("", href).ok()?;
+        self.resolve_reference_location(reference)
+    }
+
+    fn resolve_reference_location(
+        &self,
+        reference: super::EpubReference,
+    ) -> Option<(usize, usize)> {
         let chapter = self
             .content
             .chapters

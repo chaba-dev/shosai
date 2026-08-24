@@ -1,5 +1,45 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EpubLinkTarget {
+    Internal,
+    External,
+    Unsupported,
+}
+
+fn classify_link_target(href: &str) -> EpubLinkTarget {
+    let Some((scheme, _)) = href.split_once(':') else {
+        return EpubLinkTarget::Internal;
+    };
+    if ["http", "https", "mailto"]
+        .iter()
+        .any(|allowed| scheme.eq_ignore_ascii_case(allowed))
+    {
+        EpubLinkTarget::External
+    } else {
+        EpubLinkTarget::Unsupported
+    }
+}
+
+pub(super) fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
+    match classify_link_target(href) {
+        EpubLinkTarget::External => {
+            if let Err(error) = open::that(href) {
+                eprintln!("warning: failed to open URL: {error}");
+            }
+        }
+        EpubLinkTarget::Internal => {
+            if let Some(OpenDocument::Epub(document)) = &state.document
+                && let Some((chapter, offset)) = document.resolve_location(state.current_page, href)
+            {
+                return navigate_to_epub_location(state, chapter, offset);
+            }
+        }
+        EpubLinkTarget::Unsupported => {}
+    }
+    Task::none()
+}
+
 pub(super) fn navigate_to_epub_location(
     state: &mut State,
     chapter: usize,
@@ -77,4 +117,31 @@ pub(super) fn epub_page_for_pages(pages: &[EpubPage], chapter: usize, offset: us
         .next_back()
         .or_else(|| pages.iter().position(|page| page.chapter == chapter))
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epub_links_allow_only_internal_http_https_and_mail_targets() {
+        for href in ["#note", "chapter.xhtml#note", "../chapter.xhtml"] {
+            assert_eq!(classify_link_target(href), EpubLinkTarget::Internal);
+        }
+        for href in [
+            "https://example.com",
+            "HTTP://example.com",
+            "mailto:reader@example.com",
+        ] {
+            assert_eq!(classify_link_target(href), EpubLinkTarget::External);
+        }
+        for href in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "data:text/html,unsafe",
+            "ftp://example.com/book",
+        ] {
+            assert_eq!(classify_link_target(href), EpubLinkTarget::Unsupported);
+        }
+    }
 }
