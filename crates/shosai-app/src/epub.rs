@@ -2093,6 +2093,78 @@ mod tests {
     }
 
     #[test]
+    fn table_math_admission_uses_the_padded_cell_width() {
+        use shosai_core::epub::render::{
+            NodeStyle, TableCell, TableRow, TableRowGroupKind, TextSpan,
+        };
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let token = "abcdefghijklmnopqrstuvwxyzabcdefghij";
+        let fallback = format!("({token})/({token})");
+        let math = TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token(token.into())),
+                    Box::new(MathExpression::Token(token.into())),
+                )),
+                fallback,
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let paragraph = |span: TextSpan| ContentNode::Paragraph(vec![span], NodeStyle::default());
+        let cell = |child| TableCell {
+            id: None,
+            header: false,
+            scope: None,
+            headers: Vec::new(),
+            row_span: 1,
+            column_span: 1,
+            children: vec![child],
+            block_starts: Vec::new(),
+            style: NodeStyle::default(),
+        };
+        let second = TextSpan {
+            text: "second cell".into(),
+            math: None,
+            ..math.clone()
+        };
+        let table = |first| ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![cell(first), cell(paragraph(second.clone()))],
+                }],
+            }],
+            style: NodeStyle::default(),
+        };
+        let outer_width = 400.0;
+        let inner_width = (outer_width - BLOCKQUOTE_SPACING) / 2.0 - 2.0 * EPUB_TABLE_CELL_PADDING;
+        assert!(layout_inline_math_span(&math, 16.0, outer_width, 300.0).is_some());
+        assert!(layout_inline_math_span(&math, 16.0, inner_width, 300.0).is_none());
+        let native = table(paragraph(math.clone()));
+        let mut fallback_span = math;
+        fallback_span.math = None;
+        let fallback = table(paragraph(fallback_span));
+        let chars_per_line = (outer_width / (16.0 * AVERAGE_CHARACTER_WIDTH)) as usize;
+
+        assert_eq!(
+            estimated_epub_compact_node_height(&native, chars_per_line, 20, 16.0),
+            estimated_epub_compact_node_height(&fallback, chars_per_line, 20, 16.0),
+            "math that does not fit the padded cell must use the same fallback measurement as painting"
+        );
+    }
+
+    #[test]
     fn standalone_math_pagination_uses_the_native_painted_height() {
         use shosai_core::epub::render::NodeStyle;
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
