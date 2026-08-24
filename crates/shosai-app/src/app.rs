@@ -4441,6 +4441,10 @@ fn color_rgba(color: iced::Color) -> [u8; 4] {
     ]
 }
 
+fn epub_fallback_wrapping() -> iced::widget::text::Wrapping {
+    iced::widget::text::Wrapping::default()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_inline_math_spans<'a>(
     spans: &[shosai_core::epub::render::TextSpan],
@@ -8006,10 +8010,10 @@ mod tests {
         );
         let tree = Tree::new(element.as_widget());
 
-        assert!(
-            tree.children.len() <= 18,
-            "mixed flow must be bounded by source spans instead of creating one fill-width widget per word; got {} children",
-            tree.children.len()
+        assert_eq!(
+            tree.children.len(),
+            241,
+            "ordinary mixed-flow words must remain independent shrink-width wrap items"
         );
         assert_eq!(
             spans
@@ -8017,6 +8021,36 @@ mod tests {
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
             format!("{}(a)/(b){}", "before ".repeat(120), " after".repeat(120))
+        );
+
+        let oversized = vec![prose("bounded ".repeat(300)), spans[1].clone()];
+        let element = render_inline_math_spans(
+            &oversized,
+            0,
+            shosai_core::epub::style::TextDirection::Ltr,
+            18.0,
+            ReaderTheme::Light.palette(),
+            0,
+            &[],
+            Some(epub.fonts()),
+            1.0,
+            None,
+            360.0,
+            Some(500.0),
+        );
+        let tree = Tree::new(element.as_widget());
+        assert!(
+            tree.children.len() <= 1,
+            "flows above the explicit item budget must use one readable fallback widget"
+        );
+    }
+
+    #[test]
+    fn pathological_fallback_wraps_at_glyphs_in_narrow_containers() {
+        assert_eq!(
+            epub_fallback_wrapping(),
+            iced::widget::text::Wrapping::WordOrGlyph,
+            "unbroken MathML fallback must wrap instead of painting through table cells or page edges"
         );
     }
 
