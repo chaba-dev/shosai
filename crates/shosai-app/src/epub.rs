@@ -1733,14 +1733,25 @@ fn inline_math_height_reserve(
     width: f32,
     height: f32,
 ) -> f32 {
-    spans
+    let geometry = spans
         .iter()
         .filter_map(|span| {
             let layout = layout_inline_math_span(span, base_size, width, height)?;
             let line_height = base_size * span.font_size_multiplier * TEXT_LINE_HEIGHT;
             Some((layout.height - line_height).max(0.0))
         })
-        .sum()
+        .sum::<f32>();
+    if !spans.iter().any(|span| span.math.is_some()) {
+        return 0.0;
+    }
+    let scale = spans_font_scale(spans);
+    let chars_per_line = (width / (base_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+        .floor()
+        .max(1.0) as usize;
+    let lines = spans_text_len(spans)
+        .div_ceil(scaled_characters_per_line(chars_per_line, scale))
+        .max(1);
+    geometry + lines.saturating_sub(1) as f32 * base_size * INLINE_MATH_WRAP_SPACING
 }
 
 pub(crate) fn layout_inline_math_span(

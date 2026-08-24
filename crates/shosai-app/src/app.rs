@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, grid, image, mouse_area, responsive, rich_text, row,
-    scrollable, sensor, span, text, text_input,
+    button, center, column, container, grid, image, responsive, rich_text, row, scrollable, sensor,
+    span, text, text_input,
 };
 use iced::{Element, Font, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -4444,9 +4444,10 @@ fn render_inline_math_spans<'a>(
             ))
             .into();
             flow = flow.push(if let Some(link) = &source.link {
-                mouse_area(math)
+                button(math)
                     .on_press(Message::LinkClicked(link.clone()))
-                    .interaction(iced::mouse::Interaction::Pointer)
+                    .padding(0)
+                    .style(button::text)
                     .into()
             } else {
                 math
@@ -4484,7 +4485,7 @@ fn render_inline_math_spans<'a>(
     }
 
     flow.wrap()
-        .vertical_spacing(0)
+        .vertical_spacing(font_size * crate::epub::INLINE_MATH_WRAP_SPACING)
         .align_x(match alignment {
             Some(shosai_core::epub::style::TextAlignment::Center) => {
                 iced::alignment::Horizontal::Center
