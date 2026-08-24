@@ -524,4 +524,15 @@ mod tests {
         assert!(layout_math(&token("日本語"), 20.0).is_none());
         assert!(layout_math(&token(&"W".repeat(1024)), 256.0).is_none());
     }
+
+    #[test]
+    fn native_math_must_fit_both_page_dimensions() {
+        let tall_matrix =
+            MathExpression::Table((0..20).map(|row| vec![token(&format!("r{row}"))]).collect());
+        let unconstrained = layout_math(&tall_matrix, 48.0).expect("bounded matrix should lay out");
+        assert!(unconstrained.height > 700.0);
+
+        assert!(layout_math_for_bounds(&tall_matrix, 48.0, 600.0, 700.0).is_none());
+        assert!(layout_math_for_bounds(&tall_matrix, 48.0, 600.0, unconstrained.height,).is_some());
+    }
 }

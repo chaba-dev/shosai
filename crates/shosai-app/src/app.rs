@@ -7622,6 +7622,33 @@ mod tests {
     }
 
     #[test]
+    fn highlighted_native_math_keeps_geometry_and_uses_theme_background() {
+        let highlights = [SearchHighlight {
+            start: 12,
+            end: 13,
+            current: true,
+        }];
+        let expression = shosai_core::epub::MathExpression::Fraction(
+            Box::new(shosai_core::epub::MathExpression::Token("a".into())),
+            Box::new(shosai_core::epub::MathExpression::Token("b".into())),
+        );
+        let before =
+            crate::epub::math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0)
+                .unwrap();
+
+        assert_eq!(math_highlight_state(&highlights, 10, 7), Some(true));
+        assert_eq!(
+            math_highlight_color(ReaderTheme::Sepia.palette(), Some(true)),
+            Some(ReaderTheme::Sepia.palette().current_search_highlight)
+        );
+        assert_eq!(
+            crate::epub::math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0,),
+            Some(before),
+            "highlighting must not replace native geometry with differently sized fallback text"
+        );
+    }
+
+    #[test]
     fn rich_and_native_epub_links_use_shared_palette_highlights_and_dispatch() {
         use shosai_core::epub::render::TextSpan;
 
