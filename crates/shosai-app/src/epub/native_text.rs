@@ -81,6 +81,7 @@ pub(crate) struct NativeText<'a, Message> {
     fonts: &'a EpubFontBook,
     request: EpubTextRequest,
     on_link: fn(String) -> Message,
+    width: Length,
 }
 
 pub(crate) fn native_text<'a, Message: 'a>(
@@ -92,6 +93,20 @@ pub(crate) fn native_text<'a, Message: 'a>(
         fonts,
         request,
         on_link,
+        width: Length::Fill,
+    })
+}
+
+pub(crate) fn native_text_shrink<'a, Message: 'a>(
+    fonts: &'a EpubFontBook,
+    request: EpubTextRequest,
+    on_link: fn(String) -> Message,
+) -> Element<'a, Message> {
+    Element::new(NativeText {
+        fonts,
+        request,
+        on_link,
+        width: Length::Shrink,
     })
 }
 
@@ -120,7 +135,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
     }
 
     fn size(&self) -> Size<Length> {
-        Size::new(Length::Fill, Length::Shrink)
+        Size::new(self.width, Length::Shrink)
     }
 
     fn layout(
@@ -146,7 +161,18 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             *cache.raster.get_mut() = None;
         }
         let height = layout_height(cache.layout.as_ref(), cache.fallback_height);
-        layout::Node::new(limits.resolve(Length::Fill, Length::Fixed(height), Size::ZERO))
+        let intrinsic_width = cache.layout.as_ref().map_or(width, |layout| {
+            layout
+                .lines
+                .iter()
+                .map(|line| line.pixel_width as f32 / self.request.scale)
+                .fold(0.0, f32::max)
+        });
+        layout::Node::new(limits.resolve(
+            self.width,
+            Length::Fixed(height),
+            Size::new(intrinsic_width, height),
+        ))
     }
 
     fn draw(

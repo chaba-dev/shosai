@@ -3861,6 +3861,7 @@ fn render_content_node<'a>(
                     None,
                     available_width,
                     available_height,
+                    false,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -3886,6 +3887,7 @@ fn render_content_node<'a>(
                     None,
                     available_width,
                     available_height,
+                    false,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -4278,6 +4280,7 @@ fn render_spans<'a>(
         alignment,
         available_width,
         available_height,
+        false,
     )
 }
 
@@ -4296,6 +4299,7 @@ fn render_spans_with_prefix<'a>(
     alignment: Option<shosai_core::epub::style::TextAlignment>,
     available_width: f32,
     available_height: Option<f32>,
+    shrink_native: bool,
 ) -> Element<'a, Message> {
     if direction == shosai_core::epub::style::TextDirection::Ltr
         && alignment != Some(shosai_core::epub::style::TextAlignment::Justify)
@@ -4387,7 +4391,11 @@ fn render_spans_with_prefix<'a>(
             },
             highlights: native_highlights,
         };
-        return crate::epub::native_text::native_text(fonts, request, epub_link_clicked);
+        return if shrink_native {
+            crate::epub::native_text::native_text_shrink(fonts, request, epub_link_clicked)
+        } else {
+            crate::epub::native_text::native_text(fonts, request, epub_link_clicked)
+        };
     }
 
     let mut rich_spans: Vec<iced::widget::text::Span<'a, String>> = Vec::new();
@@ -4483,14 +4491,16 @@ fn render_inline_math_spans<'a>(
             continue;
         }
 
-        for piece in source.text.split_inclusive(char::is_whitespace) {
+        for piece in inline_flow_text_pieces(&source.text) {
             if piece.is_empty() {
                 continue;
             }
             let mut text_span = source.clone();
             text_span.text = piece.to_owned();
             text_span.math = None;
-            flow = flow.push(render_spans(
+            flow = flow.push(render_spans_with_prefix(
+                "",
+                font_size,
                 std::slice::from_ref(&text_span),
                 direction,
                 font_size,
@@ -4502,6 +4512,7 @@ fn render_inline_math_spans<'a>(
                 None,
                 available_width,
                 available_height,
+                true,
             ));
             if !is_prefix {
                 source_offset += piece.chars().count();
@@ -4521,6 +4532,38 @@ fn render_inline_math_spans<'a>(
             _ => iced::alignment::Horizontal::Left,
         })
         .into()
+}
+
+const MAX_INLINE_FLOW_TEXT_PIECES: usize = 8;
+
+fn inline_flow_text_pieces(text: &str) -> Vec<&str> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let target = text
+        .chars()
+        .count()
+        .div_ceil(MAX_INLINE_FLOW_TEXT_PIECES)
+        .max(1);
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut characters = 0;
+    for (index, character) in text.char_indices() {
+        characters += 1;
+        if pieces.len() + 1 < MAX_INLINE_FLOW_TEXT_PIECES
+            && characters >= target
+            && character.is_whitespace()
+        {
+            let end = index + character.len_utf8();
+            pieces.push(&text[start..end]);
+            start = end;
+            characters = 0;
+        }
+    }
+    if start < text.len() {
+        pieces.push(&text[start..]);
+    }
+    pieces
 }
 
 fn native_epub_run(
