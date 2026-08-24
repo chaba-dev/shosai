@@ -133,6 +133,7 @@
               fileset = pkgs.lib.fileset.unions [
                 ./Cargo.lock
                 ./Cargo.toml
+                ./assets/fonts
                 ./assets/shosai-dev-icon.png
                 ./assets/shosai-icon.png
                 ./crates
@@ -175,12 +176,16 @@
               + pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
                 wrapProgram "$out/bin/shosai" \
                   --prefix DYLD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath packageRuntimeDeps}
+              ''
+              + ''
+                install -Dm644 assets/fonts/LICENSE-Inter \
+                  "$out/share/licenses/shosai/INTER-LICENSE"
               '';
 
             meta = {
               description = "Native desktop ebook reader for PDF, EPUB, and CBZ files";
               homepage = workspacePackage.repository;
-              license = pkgs.lib.licenses.asl20;
+              license = with pkgs.lib.licenses; [ asl20 ofl ];
               mainProgram = "shosai";
               platforms = pkgs.pdfium-binaries.meta.platforms;
             };
