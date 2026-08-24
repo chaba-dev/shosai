@@ -708,9 +708,13 @@ readable linear fallback until the native flow can preserve full paragraph-level
 bidi and justification semantics. Unit tests synthesize hit-tested widget pointer
 events and cover retained link dispatch; repeatable activation in packaged native
 apps remains release-validation evidence. Math links use the reader's existing
-stable EPUB navigation: canonical same-book paths and decoded fragments resolve
-to bounded element-ID or legacy-name character offsets in the shared chapter
-presentation, then select the containing paginated page or continuous item.
+stable EPUB navigation: canonical same-book paths and single-decoded fragments
+resolve to bounded element-ID or legacy-name character offsets in the shared
+chapter presentation, including visible body, empty, and table-descendant
+anchors, then select the containing paginated page or continuous item. TOC
+targets use the same indexed canonical chapter lookup, resolve relative to the
+nav or NCX resource that declared them, and preserve navigable descendants of
+grouping entries.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
