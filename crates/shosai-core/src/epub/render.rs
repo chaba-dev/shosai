@@ -5,6 +5,7 @@
 //! supported computed styles onto block and inline presentation values.
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::EpubLimits;
@@ -177,6 +178,24 @@ pub(crate) fn parse_chapter_xhtml_at_path_with_limits(
         Some(fonts),
         limits,
     )
+}
+
+pub(crate) struct ParsedChapterContent {
+    pub(crate) nodes: Vec<ContentNode>,
+    pub(crate) anchor_offsets: HashMap<String, usize>,
+}
+
+pub(crate) fn parse_chapter_content_at_path_with_limits(
+    xhtml: &str,
+    chapter_path: &str,
+    styles: &super::style::EpubStyles,
+    fonts: &super::font::EpubFontBook,
+    limits: &EpubLimits,
+) -> Result<ParsedChapterContent> {
+    Ok(ParsedChapterContent {
+        nodes: parse_chapter_xhtml_at_path_with_limits(xhtml, chapter_path, styles, fonts, limits)?,
+        anchor_offsets: HashMap::new(),
+    })
 }
 
 fn parse_chapter_xhtml_with_owner_and_limits(
@@ -1098,6 +1117,38 @@ fn resolve_relative(base: &str, href: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_anchors_follow_search_text_character_offsets() {
+        let xhtml = r#"<html><body>
+            <p>before</p>
+            <section id="section"><p id="second">alpha <a name="middle"></a>beta <span id="target">gamma</span></p></section>
+            <p><span id="duplicate">first</span></p>
+            <p id="duplicate">second</p>
+            <p style="display:none" id="hidden">hidden</p>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+        let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
+
+        assert_eq!(search_text, "before\nalpha beta gamma\nfirst\nsecond\n");
+        assert_eq!(parsed.anchor_offsets.get("section"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("second"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("middle"), Some(&13));
+        assert_eq!(parsed.anchor_offsets.get("target"), Some(&18));
+        assert_eq!(parsed.anchor_offsets.get("duplicate"), Some(&24));
+        assert!(!parsed.anchor_offsets.contains_key("hidden"));
+    }
 
     #[test]
     fn test_parse_paragraph() {
