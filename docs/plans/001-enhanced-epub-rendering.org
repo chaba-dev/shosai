@@ -53,7 +53,8 @@ boundaries.
   reading-state writes off the UI thread.
   The writer is flushed before shutdown.  Release app-action-to-present
   measurements are recorded in ADR 001; the remaining Iced widget rebuild is
-  included in those measurements.  Internal-link fragments are ignored;
+  included in those measurements.  Internal same-book links resolve canonical
+  chapter paths and bounded element-ID/legacy-name character offsets;
   user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
@@ -421,6 +422,9 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 - [ ] Preserve chapter/fragment navigation, TOC, search and highlighting,
   bookmarks, progress restoration, themes, font sizing, continuous/paginated
   modes, multiple documents, and keyboard controls in ~shosai-app/src/app.rs~.
+  Production chapter presentations now retain bounded decoded fragment anchors
+  in the shared search-offset coordinate space; canonical same- and
+  cross-chapter links select those offsets in paginated and continuous modes.
 - [ ] Establish the shared parsed-chapter/layout cache and stable-location model
   before backend adapters so chapter switches and preference changes do not
   repeatedly parse every chapter.
