@@ -1016,6 +1016,10 @@ mod tests {
             Some((1, 12))
         );
         assert_eq!(document.resolve_location(0, "two.xhtml"), Some((1, 0)));
+        assert_eq!(
+            document.resolve_toc_location("OPS/Text/two.xhtml#cross%20target"),
+            Some((1, 12))
+        );
         assert_eq!(document.resolve_location(0, "#missing"), None);
         assert_eq!(
             document.resolve_location(0, "../../outside.xhtml#same"),
