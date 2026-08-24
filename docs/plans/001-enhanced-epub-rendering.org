@@ -419,12 +419,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** M5 — Reader Integration and Release
 
-- [ ] Preserve chapter/fragment navigation, TOC, search and highlighting,
+- [X] Preserve chapter/fragment navigation, TOC, search and highlighting,
   bookmarks, progress restoration, themes, font sizing, continuous/paginated
   modes, multiple documents, and keyboard controls in ~shosai-app/src/app.rs~.
   Production chapter presentations now retain bounded decoded fragment anchors
   in the shared search-offset coordinate space; canonical same- and
   cross-chapter links select those offsets in paginated and continuous modes.
+  The contents panel resolves nested EPUB TOC entries, including fragment
+  targets, to the same stable locations and retains chapter fallback for books
+  without a usable TOC.
 - [X] Establish the shared parsed-chapter/layout cache and stable-location model
   before backend adapters so chapter switches and preference changes do not
   repeatedly parse every chapter.  ~EpubPresentation~ parses each admitted
@@ -479,8 +482,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   subject to its security and license boundaries.
 - [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
   semantic and visual expectations on every supported platform.
-- [ ] No book content triggers network access or script execution by default;
+- [X] No book content triggers network access or script execution by default;
   user-activated external links obey the documented confirmation/allow policy.
+  Native presentation has no script or network loader; explicit link activation
+  allows only same-book targets plus HTTP(S) and mail handlers, while all other
+  schemes remain inert.
 - [ ] Corrupt/oversized resources degrade safely with actionable errors.
 - [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
   reading modes pass regression tests.
