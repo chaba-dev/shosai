@@ -180,6 +180,50 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 remaining = page_size.height;
             }
         }
+        if page_has_content(&pages, first_page_has_title)
+            && matches!(node, ContentNode::Paragraph(..))
+            && let Some(ContentNode::Math { content, style }) = nodes.get(node_index + 1)
+            && content.expression.is_some()
+        {
+            let label_height =
+                measured_epub_compact_node_height(fonts, node, font_size, page_size.width)
+                    .map(|height| height + block_spacing)
+                    .unwrap_or_else(|| {
+                        estimated_epub_node_height(
+                            node,
+                            chars_per_line,
+                            lines_per_page,
+                            font_size,
+                            line_spacing,
+                        )
+                    });
+            let math_height = measured_epub_compact_node_height_bounded(
+                fonts,
+                &nodes[node_index + 1],
+                font_size,
+                page_size.width,
+                page_size.height,
+            )
+            .map(|height| height + block_spacing)
+            .unwrap_or_else(|| {
+                estimated_epub_node_height(
+                    &nodes[node_index + 1],
+                    chars_per_line,
+                    lines_per_page,
+                    font_size,
+                    line_spacing,
+                )
+            });
+            // Default-font paragraph heights are estimated. Keep one scaled math line in reserve so
+            // measurement drift cannot clip an atomic native widget at the bottom of the page.
+            let fit_reserve =
+                font_size * TEXT_LINE_HEIGHT * style.font_size_multiplier.unwrap_or(1.0);
+            if label_height + math_height + fit_reserve > remaining
+                && push_epub_page(&mut pages, budget)
+            {
+                remaining = page_size.height;
+            }
+        }
         let text_len = content_node_text_len(node);
         match node {
             ContentNode::Paragraph(spans, style) => {
