@@ -423,13 +423,21 @@ fn mathml_fixture_enters_bounded_presentation_and_shared_search_text() {
     let expressions = chapter
         .nodes()
         .iter()
-        .filter_map(|node| match node {
-            ContentNode::Math { content, .. } => Some(content),
-            _ => None,
+        .flat_map(|node| match node {
+            ContentNode::Math { content, .. } => vec![content],
+            ContentNode::Paragraph(spans, _) => {
+                spans.iter().filter_map(|span| span.math.as_ref()).collect()
+            }
+            _ => Vec::new(),
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(expressions.len(), 6);
+    assert_eq!(expressions.len(), 7);
+    assert!(expressions.iter().any(|content| {
+        content.display == shosai_core::epub::MathDisplay::Inline
+            && content.fallback == "(1)/(2)"
+            && content.expression.is_some()
+    }));
     assert!(expressions.iter().any(|content| {
         content.display == shosai_core::epub::MathDisplay::Block
             && content.fallback == "root(x, 3)"

@@ -394,11 +394,27 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   preserve the readable text path; highlighted native expressions retain their
   geometry and use the active theme highlight.  Search and source offsets remain
   fallback-based.
-- [ ] Support inline versus display math.  Standalone math now scales with the
-  reader font size, uses theme contrast, and owns exact pagination boundaries;
-  MathML embedded inside paragraph text remains open.
-- [ ] Test common operators, fractions, roots, scripts, matrices, annotations,
-  malformed MathML, and books that declare MathML manifest properties.
+- [X] Support inline versus display math.  Production rendering retains MathML
+  semantics independently of native admission, promotes supported and unsupported
+  explicit display math without dropping enclosing links, and admits atomic
+  inline geometry only when the shared pagination/painting check succeeds for the
+  effective container bounds, direction, alignment, and glyph coverage.  RTL,
+  justified, over-bound, over-three-line-height, and unsupported cases retain
+  word-or-glyph-wrapped splittable fallback.  Local
+  regressions also cover wrapped-page height, blockquote slicing, bounded mixed
+  embedded-font flow, aggregate pagination work, table-cell display geometry,
+  table search separators, and hit-tested pointer dispatch through the Iced
+  widget shell.
+  Packaged native-app validation on Apple Silicon/macOS and Framework 16 Linux
+  verified inline/display layout, fallback bounds, and repeatable linked inline
+  and promoted-display activation.
+- [X] Test common operators, fractions, roots, scripts, matrices, annotations,
+  malformed MathML, and books that declare MathML manifest properties.  The
+  generated MathML fixture now verifies retained inline fractions alongside the
+  existing display, operator, script, matrix, annotation, malformed, and manifest
+  evidence; app regressions cover admitted atomic pagination, shared geometry,
+  highlights, hit-tested link-message dispatch, and source offsets.  Packaged-app
+  pointer activation remains part of native release validation.
 
 ** M5 — Reader Integration and Release
 

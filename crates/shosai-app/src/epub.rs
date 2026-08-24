@@ -20,6 +20,9 @@ pub(crate) const MIN_EPUB_TABLE_WIDTH: f32 = 360.0;
 pub(crate) const EPUB_TABLE_CELL_PADDING: f32 = 6.0;
 pub(crate) const EPUB_TABLE_CELL_SPACING: f32 = 4.0;
 pub(crate) const EPUB_TABLE_ROW_SPACING: f32 = 8.0;
+pub(crate) const INLINE_MATH_WRAP_SPACING: f32 = 0.25;
+pub(crate) const MAX_INLINE_MATH_FLOW_ITEMS: usize = 256;
+const MAX_INLINE_MATH_LINE_HEIGHTS: f32 = 3.0;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
@@ -182,7 +185,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
         }
         if page_has_content(&pages, first_page_has_title)
             && matches!(node, ContentNode::Paragraph(..))
-            && let Some(ContentNode::Math { content, style }) = nodes.get(node_index + 1)
+            && let Some(ContentNode::Math { content, style, .. }) = nodes.get(node_index + 1)
             && content.expression.is_some()
         {
             let label_height =
@@ -227,17 +230,30 @@ pub(crate) fn paginate_epub_chapter_with_budget(
         let text_len = content_node_text_len(node);
         match node {
             ContentNode::Paragraph(spans, style) => {
+                let base_size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+                let effective_width = paragraph_width(page_size.width, font_size, style);
+                let pagination_spans = pagination_inline_spans(
+                    spans,
+                    base_size,
+                    effective_width,
+                    page_size.height,
+                    style.direction,
+                    style.text_align,
+                );
+                let spans = pagination_spans.as_slice();
                 let measure = |spans: &[shosai_core::epub::render::TextSpan]| {
                     measure_epub_spans(
                         fonts,
                         spans,
-                        font_size * style.font_size_multiplier.unwrap_or(1.0),
-                        paragraph_width(page_size.width, font_size, style),
+                        base_size,
+                        effective_width,
                         style.direction,
                         style.text_align,
                     )
                 };
-                if fonts.is_some_and(|fonts| uses_native_fonts(fonts, spans)) {
+                if !spans.iter().any(|span| span.math.is_some())
+                    && fonts.is_some_and(|fonts| uses_native_fonts(fonts, spans))
+                {
                     let saved_page_count = pages.len();
                     let saved_last_page_nodes = pages.last().map_or(0, Vec::len);
                     let saved_remaining = remaining;
@@ -282,21 +298,44 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                             at_page_limit = true;
                         }
                     }
-                    let available_lines = ((remaining - block_spacing).max(text_line_height)
+                    let mut available_lines = ((remaining - block_spacing).max(text_line_height)
                         / text_line_height)
                         .floor()
                         .max(1.0) as usize;
-                    let available_chars = if at_page_limit {
-                        cursor.remaining()
-                    } else {
-                        paragraph_chars_per_line * available_lines
+                    let (take, chunk_height) = loop {
+                        let available_chars = if at_page_limit {
+                            cursor.remaining()
+                        } else {
+                            paragraph_chars_per_line * available_lines
+                        };
+                        let take = cursor.split_length(available_chars);
+                        let mut preview = cursor.clone();
+                        let chunk = preview.take(take);
+                        let chunk_height = take.div_ceil(paragraph_chars_per_line).max(1) as f32
+                            * text_line_height
+                            + inline_math_height_reserve_for_context(
+                                &chunk,
+                                base_size,
+                                effective_width,
+                                page_size.height,
+                                style.direction,
+                                style.text_align,
+                            )
+                            + block_spacing;
+                        if chunk_height <= remaining || available_lines == 1 || at_page_limit {
+                            break (take, chunk_height);
+                        }
+                        available_lines -= 1;
                     };
-                    let take = cursor.split_length(available_chars);
+                    if chunk_height > remaining
+                        && page_has_content(&pages, first_page_has_title)
+                        && push_epub_page(&mut pages, budget)
+                    {
+                        remaining = page_size.height;
+                        continue;
+                    }
                     let consumed = cursor.consumed();
                     let chunk = cursor.take(take);
-                    let chunk_height = take.div_ceil(paragraph_chars_per_line).max(1) as f32
-                        * text_line_height
-                        + block_spacing;
                     pages.last_mut().unwrap().push(PageNode {
                         node: ContentNode::Paragraph(chunk, style.clone()),
                         text_offset: text_offset + consumed,
@@ -506,6 +545,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 lines_per_page,
                 font_size,
                 line_spacing,
+                page_size.width,
                 page_size.height,
                 first_page_has_title,
                 &mut pages,
@@ -577,6 +617,7 @@ fn paginate_epub_table(
     lines_per_page: usize,
     font_size: f32,
     line_spacing: f32,
+    page_width: f32,
     page_height: f32,
     first_page_has_title: bool,
     pages: &mut Vec<PageNodes>,
@@ -624,12 +665,14 @@ fn paginate_epub_table(
             if pending.is_some() {
                 append_table_band(&mut candidate, group.kind, rows);
             }
-            let candidate_height = estimated_epub_node_height(
+            let candidate_height = estimated_epub_node_height_bounded(
                 &candidate,
                 chars_per_line,
                 lines_per_page,
                 font_size,
                 line_spacing,
+                page_width,
+                page_height,
             );
 
             if pending.is_some() && candidate_height > fragment_capacity && !page_budget_exhausted {
@@ -650,12 +693,14 @@ fn paginate_epub_table(
                 let _ = push_epub_page(pages, budget);
                 *remaining = page_height;
                 fragment_capacity = *remaining;
-                pending_height = estimated_epub_node_height(
+                pending_height = estimated_epub_node_height_bounded(
                     &band,
                     chars_per_line,
                     lines_per_page,
                     font_size,
                     line_spacing,
+                    page_width,
+                    page_height,
                 );
                 pending = Some(band);
                 continue;
@@ -681,12 +726,14 @@ fn paginate_epub_table(
         });
         *remaining = (fragment_capacity - pending_height).max(0.0);
     } else if !caption.is_empty() {
-        let height = estimated_epub_node_height(
+        let height = estimated_epub_node_height_bounded(
             table,
             chars_per_line,
             lines_per_page,
             font_size,
             line_spacing,
+            page_width,
+            page_height,
         );
         if height > *remaining
             && page_has_content(pages, first_page_has_title)
@@ -759,6 +806,23 @@ pub(crate) fn epub_table_layout_width(row_groups: &[TableRowGroup], available_wi
         .max(MIN_EPUB_TABLE_WIDTH)
         .max(available_width)
         .min(MAX_EPUB_TABLE_WIDTH)
+}
+
+pub(crate) fn epub_table_cell_content_width(
+    row: &TableRow,
+    cell_index: usize,
+    table_width: f32,
+) -> f32 {
+    let portions = row
+        .cells
+        .iter()
+        .map(|cell| f32::from(cell.column_span.max(1)))
+        .sum::<f32>()
+        .max(1.0);
+    let available =
+        (table_width - BLOCKQUOTE_SPACING * row.cells.len().saturating_sub(1) as f32).max(1.0);
+    let portion = f32::from(row.cells[cell_index].column_span.max(1));
+    (available * portion / portions - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0)
 }
 
 fn measure_epub_spans(
@@ -838,7 +902,7 @@ fn measure_epub_spans_with_prefix(
         .ok()
 }
 
-fn paragraph_width(
+pub(crate) fn paragraph_width(
     width: f32,
     font_size: f32,
     style: &shosai_core::epub::render::NodeStyle,
@@ -991,6 +1055,20 @@ fn paginate_epub_list(
     remaining: &mut f32,
     budget: &mut EpubPaginationBudget,
 ) {
+    let pagination_items = items
+        .iter()
+        .map(|item| {
+            pagination_inline_spans(
+                item,
+                font_size,
+                page_width,
+                page_height,
+                shosai_core::epub::style::TextDirection::Ltr,
+                None,
+            )
+        })
+        .collect::<Vec<_>>();
+    let items = pagination_items.as_slice();
     let mut consumed_items = 0;
     let mut consumed_text = 0;
     let block_spacing = font_size * line_spacing;
@@ -1030,20 +1108,21 @@ fn paginate_epub_list(
                 || "  \u{2022} ".to_owned(),
                 |start| format!("  {}. ", start + absolute_index),
             );
-            let item_height = measure_epub_spans_with_prefix(
-                fonts,
-                &prefix,
-                font_size * scale,
-                item,
-                font_size,
-                page_width,
-                shosai_core::epub::style::TextDirection::Ltr,
-                None,
-            )
-            .map_or(
-                item_lines as f32 * font_size * TEXT_LINE_HEIGHT * scale,
-                |layout| layout.height,
-            );
+            let item_height =
+                measure_epub_spans_with_prefix(
+                    fonts,
+                    &prefix,
+                    font_size * scale,
+                    item,
+                    font_size,
+                    page_width,
+                    shosai_core::epub::style::TextDirection::Ltr,
+                    None,
+                )
+                .map_or(
+                    item_lines as f32 * font_size * TEXT_LINE_HEIGHT * scale,
+                    |layout| layout.height,
+                ) + inline_math_height_reserve(item, font_size, page_width, page_height);
             if take > 0 && chunk_height + item_spacing + item_height > available_height {
                 break;
             }
@@ -1103,6 +1182,7 @@ fn epub_list_node(
     }
 }
 
+#[derive(Clone)]
 struct EpubSpanCursor<'a> {
     spans: &'a [shosai_core::epub::render::TextSpan],
     span_index: usize,
@@ -1138,6 +1218,14 @@ impl<'a> EpubSpanCursor<'a> {
         let mut last_whitespace = None;
         for (index, span) in self.spans[self.span_index..].iter().enumerate() {
             let start = if index == 0 { self.byte_offset } else { 0 };
+            if span.math.is_some() {
+                let span_len = span.text[start..].chars().count();
+                if length + span_len > maximum {
+                    return if length == 0 { span_len } else { length };
+                }
+                length += span_len;
+                continue;
+            }
             for character in span.text[start..].chars() {
                 if length == maximum {
                     break;
@@ -1231,6 +1319,9 @@ fn slice_epub_spans(
                     .skip(local_start)
                     .take(local_end - local_start)
                     .collect();
+                if local_start != 0 || local_end != span_len {
+                    sliced.math = None;
+                }
                 sliced
             })
         })
@@ -1246,6 +1337,26 @@ fn estimated_epub_node_height(
 ) -> f32 {
     estimated_epub_compact_node_height(node, chars_per_line, lines_per_page, font_size)
         + font_size * line_spacing
+}
+
+#[allow(clippy::too_many_arguments)]
+fn estimated_epub_node_height_bounded(
+    node: &ContentNode,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    font_size: f32,
+    line_spacing: f32,
+    width: f32,
+    height: f32,
+) -> f32 {
+    estimated_epub_compact_node_height_bounded(
+        node,
+        chars_per_line,
+        lines_per_page,
+        font_size,
+        width,
+        height,
+    ) + font_size * line_spacing
 }
 
 fn estimated_epub_blockquote_height(
@@ -1338,6 +1449,16 @@ fn split_epub_blockquote_prefix(
             let style_scale = style.font_size_multiplier.unwrap_or(1.0);
             let line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
             let paragraph_chars_per_line = scaled_characters_per_line(chars_per_line, style_scale);
+            let effective_width = paragraph_width(page_width, font_size, style);
+            let pagination_spans = pagination_inline_spans(
+                spans,
+                font_size * style_scale,
+                effective_width,
+                paragraph_available.max(1.0),
+                style.direction,
+                style.text_align,
+            );
+            let spans = pagination_spans.as_slice();
             let available_lines = (paragraph_available / line_height).floor().max(0.0) as usize;
             let maximum = paragraph_chars_per_line * available_lines;
             let text_len = spans_text_len(spans);
@@ -1345,7 +1466,7 @@ fn split_epub_blockquote_prefix(
                 fonts,
                 spans,
                 font_size * style_scale,
-                paragraph_width(page_width, font_size, style),
+                effective_width,
                 style.direction,
                 style.text_align,
             );
@@ -1367,7 +1488,7 @@ fn split_epub_blockquote_prefix(
                     fonts,
                     &candidate,
                     font_size * style_scale,
-                    paragraph_width(page_width, font_size, style),
+                    effective_width,
                     style.direction,
                     style.text_align,
                 ) else {
@@ -1393,11 +1514,18 @@ fn split_epub_blockquote_prefix(
             if take > 0 && take < text_len {
                 let prefix_spans = slice_epub_spans(spans, 0, take);
                 let remaining_spans = slice_epub_spans(spans, take, text_len - take);
-                prefix.push(ContentNode::Paragraph(prefix_spans, style.clone()));
                 let paragraph_height = reshaped.or(measured).map_or_else(
                     || take.div_ceil(paragraph_chars_per_line).max(1) as f32 * line_height,
                     |layout| layout.height,
+                ) + inline_math_height_reserve_for_context(
+                    &prefix_spans,
+                    font_size * style_scale,
+                    effective_width,
+                    paragraph_available.max(1.0),
+                    style.direction,
+                    style.text_align,
                 );
+                prefix.push(ContentNode::Paragraph(prefix_spans, style.clone()));
                 prefix_height += spacing + paragraph_height;
                 let mut remaining = vec![ContentNode::Paragraph(remaining_spans, style.clone())];
                 remaining.extend_from_slice(&children[index + 1..]);
@@ -1422,6 +1550,24 @@ fn estimated_epub_compact_node_height(
     lines_per_page: usize,
     font_size: f32,
 ) -> f32 {
+    estimated_epub_compact_node_height_bounded(
+        node,
+        chars_per_line,
+        lines_per_page,
+        font_size,
+        chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
+        lines_per_page as f32 * font_size * TEXT_LINE_HEIGHT,
+    )
+}
+
+fn estimated_epub_compact_node_height_bounded(
+    node: &ContentNode,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    font_size: f32,
+    width: f32,
+    height: f32,
+) -> f32 {
     let wrapped = |characters: usize, scale: f32| {
         characters
             .div_ceil(scaled_characters_per_line(chars_per_line, scale))
@@ -1445,6 +1591,12 @@ fn estimated_epub_compact_node_height(
             let style_scale = style.font_size_multiplier.unwrap_or(1.0);
             let scale = heading_scale * style_scale * spans_font_scale(spans);
             wrapped(spans_text_len(spans), scale) * text_line_height * scale
+                + inline_math_height_reserve(
+                    spans,
+                    font_size * heading_scale * style_scale,
+                    width,
+                    height,
+                )
         }
         ContentNode::BlockQuote { children, .. } => {
             estimated_epub_blockquote_height(children, chars_per_line, lines_per_page, font_size)
@@ -1453,8 +1605,11 @@ fn estimated_epub_compact_node_height(
             caption,
             caption_style,
             row_groups,
-            ..
+            style,
         } => {
+            let table_width = epub_table_layout_width(row_groups, width);
+            let table_content_width =
+                (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let caption_height = (!caption.is_empty()).then(|| {
                 let scale = caption_style
                     .as_ref()
@@ -1462,6 +1617,16 @@ fn estimated_epub_compact_node_height(
                     .unwrap_or(1.0)
                     * spans_font_scale(caption);
                 wrapped(spans_text_len(caption), scale) * text_line_height * scale
+                    + inline_math_height_reserve(
+                        caption,
+                        font_size
+                            * caption_style
+                                .as_ref()
+                                .and_then(|style| style.font_size_multiplier)
+                                .unwrap_or(1.0),
+                        table_content_width,
+                        height,
+                    )
             });
             let row_heights = row_groups
                 .iter()
@@ -1469,15 +1634,24 @@ fn estimated_epub_compact_node_height(
                 .map(|row| {
                     row.cells
                         .iter()
-                        .map(|cell| {
+                        .enumerate()
+                        .map(|(cell_index, cell)| {
+                            let cell_width =
+                                epub_table_cell_content_width(row, cell_index, table_content_width);
+                            let cell_chars_per_line =
+                                (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+                                    .floor()
+                                    .max(1.0) as usize;
                             cell.children
                                 .iter()
                                 .map(|child| {
-                                    estimated_epub_compact_node_height(
+                                    estimated_epub_compact_node_height_bounded(
                                         child,
-                                        chars_per_line,
+                                        cell_chars_per_line,
                                         lines_per_page,
                                         font_size,
+                                        cell_width,
+                                        height,
                                     )
                                 })
                                 .sum::<f32>()
@@ -1493,9 +1667,19 @@ fn estimated_epub_compact_node_height(
                 + row_heights.into_iter().sum::<f32>()
                 + EPUB_TABLE_ROW_SPACING * table_children.saturating_sub(1) as f32
         }
-        ContentNode::Math { content, style } => {
+        ContentNode::Math { content, style, .. } => {
             let scale = style.font_size_multiplier.unwrap_or(1.0);
-            wrapped(content.fallback.chars().count(), scale) * text_line_height * scale
+            let size = font_size * scale;
+            content
+                .expression
+                .as_ref()
+                .and_then(|expression| {
+                    math_layout::layout_math_for_bounds(expression, size, width, height)
+                })
+                .map_or_else(
+                    || wrapped(content.fallback.chars().count(), scale) * text_line_height * scale,
+                    |layout| layout.height,
+                )
         }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items
@@ -1503,6 +1687,7 @@ fn estimated_epub_compact_node_height(
                 .map(|item| {
                     let scale = spans_font_scale(item);
                     wrapped(spans_text_len(item) + 4, scale) * text_line_height * scale
+                        + inline_math_height_reserve(item, font_size, width, height)
                 })
                 .sum::<f32>()
                 + 4.0 * items.len().saturating_sub(1) as f32
@@ -1520,6 +1705,12 @@ fn estimated_epub_compact_node_height(
         ContentNode::Paragraph(spans, style) => {
             let scale = style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
             wrapped(spans_text_len(spans), scale) * text_line_height * scale
+                + inline_math_height_reserve(
+                    spans,
+                    font_size * style.font_size_multiplier.unwrap_or(1.0),
+                    width,
+                    height,
+                )
         }
     }
 }
@@ -1561,20 +1752,45 @@ fn measured_epub_compact_node_height_bounded(
                 style.direction,
                 style.text_align,
             )
-            .map(|layout| layout.height)
+            .map(|layout| {
+                layout.height
+                    + inline_math_height_reserve_for_context(
+                        spans,
+                        font_size * heading_scale,
+                        width,
+                        height,
+                        style.direction,
+                        style.text_align,
+                    )
+            })
         }
-        ContentNode::Paragraph(spans, style) => measure_epub_spans(
-            fonts,
-            spans,
-            font_size * style.font_size_multiplier.unwrap_or(1.0),
-            paragraph_width(width, font_size, style),
-            style.direction,
-            style.text_align,
-        )
-        .map(|layout| layout.height),
-        ContentNode::Math { content, style } => {
+        ContentNode::Paragraph(spans, style) => {
+            let base_size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            measure_epub_spans(
+                fonts,
+                spans,
+                base_size,
+                paragraph_width(width, font_size, style),
+                style.direction,
+                style.text_align,
+            )
+            .map(|layout| {
+                let effective_width = paragraph_width(width, font_size, style);
+                layout.height
+                    + inline_math_height_reserve_for_context(
+                        spans,
+                        base_size,
+                        effective_width,
+                        height,
+                        style.direction,
+                        style.text_align,
+                    )
+            })
+        }
+        ContentNode::Math { content, style, .. } => {
             let span = shosai_core::epub::render::TextSpan {
                 text: content.fallback.clone(),
+                math: None,
                 font_family: None,
                 bold: false,
                 italic: false,
@@ -1659,7 +1875,7 @@ fn measured_epub_list_height(
             .map_or(fallback, |layout| {
                 any = true;
                 layout.height
-            })
+            }) + inline_math_height_reserve(item, font_size, width, f32::MAX)
         })
         .sum::<f32>()
         + 4.0 * items.len().saturating_sub(1) as f32;
@@ -1676,6 +1892,123 @@ pub(crate) fn spans_font_scale(spans: &[shosai_core::epub::render::TextSpan]) ->
         .map(|span| span.font_size_multiplier)
         .reduce(f32::max)
         .unwrap_or(1.0)
+}
+
+fn inline_math_height_reserve(
+    spans: &[shosai_core::epub::render::TextSpan],
+    base_size: f32,
+    width: f32,
+    height: f32,
+) -> f32 {
+    inline_math_height_reserve_for_context(
+        spans,
+        base_size,
+        width,
+        height,
+        shosai_core::epub::style::TextDirection::Ltr,
+        None,
+    )
+}
+
+fn inline_math_height_reserve_for_context(
+    spans: &[shosai_core::epub::render::TextSpan],
+    base_size: f32,
+    width: f32,
+    height: f32,
+    direction: shosai_core::epub::style::TextDirection,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
+) -> f32 {
+    let geometry = spans
+        .iter()
+        .filter_map(|span| {
+            let layout = layout_inline_math_span_for_context(
+                span, base_size, width, height, direction, alignment,
+            )?;
+            let line_height = base_size * span.font_size_multiplier * TEXT_LINE_HEIGHT;
+            Some((layout.height - line_height).max(0.0))
+        })
+        .sum::<f32>();
+    if geometry == 0.0 {
+        return 0.0;
+    }
+    let scale = spans_font_scale(spans);
+    let chars_per_line = (width / (base_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+        .floor()
+        .max(1.0) as usize;
+    let lines = spans_text_len(spans)
+        .div_ceil(scaled_characters_per_line(chars_per_line, scale))
+        .max(1);
+    geometry + lines.saturating_sub(1) as f32 * base_size * INLINE_MATH_WRAP_SPACING
+}
+
+pub(crate) fn layout_inline_math_span(
+    span: &shosai_core::epub::render::TextSpan,
+    base_size: f32,
+    width: f32,
+    height: f32,
+) -> Option<math_layout::MathLayout> {
+    let math = span.math.as_ref()?;
+    if math.display != shosai_core::epub::MathDisplay::Inline {
+        return None;
+    }
+    let expression = math.expression.as_ref()?;
+    let size = base_size * span.font_size_multiplier;
+    math_layout::layout_math_for_bounds(
+        expression,
+        size,
+        width,
+        height.min(size * TEXT_LINE_HEIGHT * MAX_INLINE_MATH_LINE_HEIGHTS),
+    )
+}
+
+pub(crate) fn layout_inline_math_span_for_context(
+    span: &shosai_core::epub::render::TextSpan,
+    base_size: f32,
+    width: f32,
+    height: f32,
+    direction: shosai_core::epub::style::TextDirection,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
+) -> Option<math_layout::MathLayout> {
+    if direction != shosai_core::epub::style::TextDirection::Ltr
+        || alignment == Some(shosai_core::epub::style::TextAlignment::Justify)
+    {
+        return None;
+    }
+    layout_inline_math_span(span, base_size, width, height)
+}
+
+fn pagination_inline_spans(
+    spans: &[shosai_core::epub::render::TextSpan],
+    base_size: f32,
+    width: f32,
+    height: f32,
+    direction: shosai_core::epub::style::TextDirection,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
+) -> Vec<shosai_core::epub::render::TextSpan> {
+    let admit_flow = inline_math_flow_is_admitted(spans);
+    spans
+        .iter()
+        .cloned()
+        .map(|mut span| {
+            if !admit_flow
+                || layout_inline_math_span_for_context(
+                    &span, base_size, width, height, direction, alignment,
+                )
+                .is_none()
+            {
+                span.math = None;
+            }
+            span
+        })
+        .collect()
+}
+
+pub(crate) fn inline_math_flow_is_admitted(spans: &[shosai_core::epub::render::TextSpan]) -> bool {
+    spans
+        .iter()
+        .map(|span| span.text.split_inclusive(char::is_whitespace).count())
+        .sum::<usize>()
+        <= MAX_INLINE_MATH_FLOW_ITEMS
 }
 
 pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
@@ -1747,6 +2080,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![TextSpan {
                     text: "cell".into(),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -1813,6 +2147,7 @@ mod tests {
         assert!(epub.fonts().is_empty());
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: "This must remain visible".into(),
+            math: None,
             font_family: Some("serif".into()),
             bold: false,
             italic: false,
@@ -1851,6 +2186,190 @@ mod tests {
     }
 
     #[test]
+    fn table_math_admission_uses_the_padded_cell_width() {
+        use shosai_core::epub::render::{
+            NodeStyle, TableCell, TableRow, TableRowGroupKind, TextSpan,
+        };
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let token = "abcdefghijklmnopqrstuvwxyzabcdefghij";
+        let fallback = format!("({token})/({token})");
+        let math = TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token(token.into())),
+                    Box::new(MathExpression::Token(token.into())),
+                )),
+                fallback,
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let paragraph = |span: TextSpan| ContentNode::Paragraph(vec![span], NodeStyle::default());
+        let cell = |child| TableCell {
+            id: None,
+            header: false,
+            scope: None,
+            headers: Vec::new(),
+            row_span: 1,
+            column_span: 1,
+            children: vec![child],
+            block_starts: Vec::new(),
+            style: NodeStyle::default(),
+        };
+        let second = TextSpan {
+            text: "second cell".into(),
+            math: None,
+            ..math.clone()
+        };
+        let table = |first| ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![cell(first), cell(paragraph(second.clone()))],
+                }],
+            }],
+            style: NodeStyle::default(),
+        };
+        let outer_width = 400.0;
+        let inner_width = (outer_width - BLOCKQUOTE_SPACING) / 2.0 - 2.0 * EPUB_TABLE_CELL_PADDING;
+        assert!(layout_inline_math_span(&math, 16.0, outer_width, 300.0).is_some());
+        assert!(layout_inline_math_span(&math, 16.0, inner_width, 300.0).is_none());
+        let native = table(paragraph(math.clone()));
+        let mut fallback_span = math;
+        fallback_span.math = None;
+        let fallback = table(paragraph(fallback_span));
+        let chars_per_line = (outer_width / (16.0 * AVERAGE_CHARACTER_WIDTH)) as usize;
+
+        assert_eq!(
+            estimated_epub_compact_node_height(&native, chars_per_line, 20, 16.0),
+            estimated_epub_compact_node_height(&fallback, chars_per_line, 20, 16.0),
+            "math that does not fit the padded cell must use the same fallback measurement as painting"
+        );
+    }
+
+    #[test]
+    fn table_display_math_height_uses_native_geometry() {
+        use shosai_core::epub::render::{
+            NodeStyle, TableCell, TableRow, TableRowGroup, TableRowGroupKind,
+        };
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let expression = MathExpression::Fraction(
+            Box::new(MathExpression::Token("a".into())),
+            Box::new(MathExpression::SquareRoot(vec![MathExpression::Token(
+                "b".into(),
+            )])),
+        );
+        let table = ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![TableCell {
+                        id: None,
+                        header: false,
+                        scope: None,
+                        headers: Vec::new(),
+                        row_span: 1,
+                        column_span: 1,
+                        children: vec![ContentNode::Math {
+                            content: MathContent {
+                                display: MathDisplay::Block,
+                                expression: Some(expression.clone()),
+                                fallback: "(a)/(sqrt(b))".into(),
+                            },
+                            style: NodeStyle::default(),
+                            link: None,
+                        }],
+                        block_starts: Vec::new(),
+                        style: NodeStyle::default(),
+                    }],
+                }],
+            }],
+            style: NodeStyle::default(),
+        };
+        let font_size = 16.0;
+        let outer_width = 360.0;
+        let cell_width = outer_width - 2.0 * EPUB_TABLE_CELL_PADDING;
+        let native_height =
+            math_layout::layout_math_for_bounds(&expression, font_size, cell_width, 240.0)
+                .expect("fixture math should fit the table cell")
+                .height;
+        let chars_per_line = (outer_width / (font_size * AVERAGE_CHARACTER_WIDTH)).floor() as usize;
+
+        assert!(
+            estimated_epub_compact_node_height(&table, chars_per_line, 20, font_size)
+                >= native_height + 2.0 * EPUB_TABLE_CELL_PADDING,
+            "table pagination must reserve the native display-math height painted in the cell"
+        );
+    }
+
+    #[test]
+    fn oversized_inline_math_flow_falls_back_before_pagination_layout() {
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let mut spans = (0..256)
+            .map(|_| TextSpan {
+                text: "word ".into(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            })
+            .collect::<Vec<_>>();
+        spans.push(TextSpan {
+            text: "(a)/(b)".into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                )),
+                fallback: "(a)/(b)".into(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: Some("chapter.xhtml#proof".into()),
+        });
+        let pagination = pagination_inline_spans(
+            &spans,
+            16.0,
+            360.0,
+            500.0,
+            shosai_core::epub::style::TextDirection::Ltr,
+            None,
+        );
+
+        assert!(pagination.iter().all(|span| span.math.is_none()));
+        assert_eq!(
+            pagination.last().and_then(|span| span.link.as_deref()),
+            Some("chapter.xhtml#proof"),
+            "aggregate fallback must retain source links"
+        );
+        assert_eq!(spans_text_len(&pagination), spans_text_len(&spans));
+    }
+
+    #[test]
     fn standalone_math_pagination_uses_the_native_painted_height() {
         use shosai_core::epub::render::NodeStyle;
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
@@ -1868,6 +2387,7 @@ mod tests {
                 fallback: "(a)/(sqrt(b))".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
         let native = math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0)
             .expect("supported standalone math should use native geometry");
@@ -1885,6 +2405,413 @@ mod tests {
     }
 
     #[test]
+    fn inline_math_is_atomic_and_uses_shared_geometry_during_pagination() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let text_span = |text: &str| TextSpan {
+            text: text.into(),
+            math: None,
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let fallback = "(numerator)/(denominator)";
+        let math_span = TextSpan {
+            text: fallback.into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token("numerator".into())),
+                    Box::new(MathExpression::Token("denominator".into())),
+                )),
+                fallback: fallback.into(),
+            }),
+            ..text_span("")
+        };
+        let spans = vec![
+            text_span(&"before ".repeat(24)),
+            math_span.clone(),
+            text_span(&" after".repeat(24)),
+        ];
+        let plain = ContentNode::Paragraph(
+            spans
+                .iter()
+                .cloned()
+                .map(|mut span| {
+                    span.math = None;
+                    span
+                })
+                .collect(),
+            NodeStyle::default(),
+        );
+        let paragraph = ContentNode::Paragraph(spans.clone(), NodeStyle::default());
+        let pages = paginate_epub_chapter(
+            std::slice::from_ref(&paragraph),
+            None,
+            16.0,
+            1.6,
+            Size::new(180.0, 150.0),
+        );
+        let fragments = pages.iter().flatten().collect::<Vec<_>>();
+        let retained_math = fragments
+            .iter()
+            .filter_map(|page_node| match &page_node.node {
+                ContentNode::Paragraph(spans, _) => spans.iter().find(|span| span.math.is_some()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(retained_math, vec![&math_span]);
+        assert_eq!(
+            fragments
+                .iter()
+                .flat_map(|page_node| match &page_node.node {
+                    ContentNode::Paragraph(spans, _) => spans,
+                    _ => unreachable!(),
+                })
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>()
+        );
+        let mut expected_offset = 0;
+        for page_node in fragments {
+            assert_eq!(page_node.text_offset, expected_offset);
+            expected_offset += content_node_text_len(&page_node.node);
+        }
+        let layout = layout_inline_math_span(&math_span, 16.0, 180.0, 150.0)
+            .expect("supported inline math must retain native geometry");
+        assert!(layout.height > 16.0 * TEXT_LINE_HEIGHT);
+        let geometry_extra = layout.height - 16.0 * TEXT_LINE_HEIGHT;
+        assert!(
+            inline_math_height_reserve(&spans, 16.0, 180.0, 150.0)
+                >= geometry_extra + 16.0 * INLINE_MATH_WRAP_SPACING,
+            "wrapped native math must reserve inter-line clearance in addition to geometry"
+        );
+        let mut display_span = math_span.clone();
+        display_span.math.as_mut().unwrap().display = MathDisplay::Block;
+        assert!(layout_inline_math_span(&display_span, 16.0, 180.0, 150.0).is_none());
+        assert!(
+            estimated_epub_compact_node_height(&paragraph, 20, 10, 16.0)
+                > estimated_epub_compact_node_height(&plain, 20, 10, 16.0)
+        );
+    }
+
+    #[test]
+    fn native_inline_admission_controls_atomic_pagination_and_reserve() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::style::{TextAlignment, TextDirection};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let math_span = |expression: MathExpression, fallback: String| TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(expression),
+                fallback,
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let fraction = || {
+            math_span(
+                MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                ),
+                "(a)/(b)".into(),
+            )
+        };
+        let retained_math = |node: &ContentNode| match node {
+            ContentNode::Paragraph(spans, _) => {
+                spans.iter().filter(|span| span.math.is_some()).count()
+            }
+            _ => 0,
+        };
+        let page_size = Size::new(180.0, 120.0);
+        let fallback_cases = [
+            (
+                fraction(),
+                NodeStyle {
+                    direction: TextDirection::Rtl,
+                    ..Default::default()
+                },
+            ),
+            (
+                fraction(),
+                NodeStyle {
+                    text_align: Some(TextAlignment::Justify),
+                    ..Default::default()
+                },
+            ),
+            (
+                math_span(
+                    MathExpression::Token("overwide".repeat(80)),
+                    "overwide".repeat(80),
+                ),
+                NodeStyle::default(),
+            ),
+            (
+                math_span(
+                    MathExpression::Fraction(
+                        Box::new(MathExpression::Fraction(
+                            Box::new(MathExpression::Token("a".into())),
+                            Box::new(MathExpression::Token("b".into())),
+                        )),
+                        Box::new(MathExpression::Fraction(
+                            Box::new(MathExpression::Token("c".into())),
+                            Box::new(MathExpression::Token("d".into())),
+                        )),
+                    ),
+                    "((a)/(b))/((c)/(d))".into(),
+                ),
+                NodeStyle::default(),
+            ),
+            (
+                math_span(MathExpression::Token("\u{10ffff}".into()), "missing".into()),
+                NodeStyle::default(),
+            ),
+        ];
+
+        for (span, style) in fallback_cases {
+            let height = if span.text == "((a)/(b))/((c)/(d))" {
+                20.0
+            } else {
+                page_size.height
+            };
+            let pages = paginate_epub_chapter(
+                &[ContentNode::Paragraph(vec![span], style)],
+                None,
+                16.0,
+                1.6,
+                Size::new(page_size.width, height),
+            );
+            assert_eq!(
+                pages
+                    .iter()
+                    .flatten()
+                    .map(|page| retained_math(&page.node))
+                    .sum::<usize>(),
+                0,
+                "fallback presentation must remain splittable instead of carrying atomic geometry"
+            );
+        }
+
+        let native = ContentNode::Paragraph(vec![fraction()], NodeStyle::default());
+        let native_pages = paginate_epub_chapter(&[native], None, 16.0, 1.6, page_size);
+        assert_eq!(
+            native_pages
+                .iter()
+                .flatten()
+                .map(|page| retained_math(&page.node))
+                .sum::<usize>(),
+            1,
+            "admitted native geometry must remain one atomic span"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_inline_fraction_uses_readable_fallback() {
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let token = |text: &str| MathExpression::Token(text.into());
+        let fraction = |top, bottom| MathExpression::Fraction(Box::new(top), Box::new(bottom));
+        let expression = fraction(
+            fraction(
+                fraction(token("a"), token("b")),
+                fraction(token("c"), token("d")),
+            ),
+            fraction(
+                fraction(token("e"), token("f")),
+                fraction(token("g"), token("h")),
+            ),
+        );
+        let fallback = "(((a)/(b))/((c)/(d)))/(((e)/(f))/((g)/(h)))";
+        let span = TextSpan {
+            text: fallback.into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(expression),
+                fallback: fallback.into(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+
+        assert!(
+            layout_inline_math_span(&span, 20.0, 388.0, 500.0).is_none(),
+            "inline geometry spanning several text lines must use readable fallback even when it fits the page"
+        );
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(vec![span], Default::default())],
+            None,
+            20.0,
+            1.6,
+            Size::new(388.0, 500.0),
+        );
+        assert!(pages.iter().flatten().all(|page| {
+            matches!(
+                &page.node,
+                ContentNode::Paragraph(spans, _)
+                    if spans.iter().all(|span| span.math.is_none())
+            )
+        }));
+    }
+
+    #[test]
+    fn paragraph_pagination_accounts_for_inline_geometry_at_page_boundaries() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let plain = |text: String| TextSpan {
+            text,
+            math: None,
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let mut spans = Vec::new();
+        for index in 0..8 {
+            spans.push(plain(format!("segment {index} before ")));
+            spans.push(TextSpan {
+                text: "(a)/(b)".into(),
+                math: Some(MathContent {
+                    display: MathDisplay::Inline,
+                    expression: Some(MathExpression::Fraction(
+                        Box::new(MathExpression::Token("a".into())),
+                        Box::new(MathExpression::Token("b".into())),
+                    )),
+                    fallback: "(a)/(b)".into(),
+                }),
+                ..plain(String::new())
+            });
+            spans.push(plain(" after. ".into()));
+        }
+        let plain_spans = spans
+            .iter()
+            .cloned()
+            .map(|mut span| {
+                span.math = None;
+                span
+            })
+            .collect::<Vec<_>>();
+        let source = spans
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+        let size = Size::new(180.0, 120.0);
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(spans, NodeStyle::default())],
+            None,
+            20.0,
+            1.6,
+            size,
+        );
+        let plain_pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(plain_spans, NodeStyle::default())],
+            None,
+            20.0,
+            1.6,
+            size,
+        );
+
+        assert!(
+            pages.len() > plain_pages.len(),
+            "native geometry and wrap clearance must affect actual page placement"
+        );
+        let fragments = pages.iter().flatten().collect::<Vec<_>>();
+        assert_eq!(
+            fragments
+                .iter()
+                .flat_map(|page| match &page.node {
+                    ContentNode::Paragraph(spans, _) => spans,
+                    _ => unreachable!(),
+                })
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            source
+        );
+        let mut expected_offset = 0;
+        for page in fragments {
+            assert_eq!(page.text_offset, expected_offset);
+            expected_offset += content_node_text_len(&page.node);
+        }
+    }
+
+    #[test]
+    fn blockquote_splits_do_not_duplicate_fallback_math_metadata() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let fallback = "fallback ".repeat(80);
+        let math = TextSpan {
+            text: fallback.clone(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Token(fallback.clone())),
+                fallback: fallback.clone(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let pages = paginate_epub_chapter(
+            &[ContentNode::BlockQuote {
+                children: vec![ContentNode::Paragraph(vec![math], NodeStyle::default())],
+                style: NodeStyle::default(),
+            }],
+            None,
+            16.0,
+            1.6,
+            Size::new(180.0, 120.0),
+        );
+        let mut text = String::new();
+        let mut retained_math = 0;
+        for page in pages.iter().flatten() {
+            let ContentNode::BlockQuote { children, .. } = &page.node else {
+                unreachable!();
+            };
+            for child in children {
+                if let ContentNode::Paragraph(spans, _) = child {
+                    text.extend(spans.iter().map(|span| span.text.as_str()));
+                    retained_math += spans.iter().filter(|span| span.math.is_some()).count();
+                }
+            }
+        }
+        assert_eq!(text, fallback);
+        assert_eq!(
+            retained_math, 0,
+            "splittable fallback must not clone native metadata"
+        );
+    }
+
+    #[test]
     fn unsupported_or_overwide_math_keeps_the_readable_text_path() {
         use shosai_core::epub::render::NodeStyle;
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
@@ -1896,6 +2823,7 @@ mod tests {
                 fallback: "readable fallback".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
         let overwide = ContentNode::Math {
             content: MathContent {
@@ -1904,6 +2832,7 @@ mod tests {
                 fallback: "wide expression".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
 
         assert!(
@@ -1934,6 +2863,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![TextSpan {
                     text: text.into(),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -1955,6 +2885,7 @@ mod tests {
                 font_size_multiplier: Some(1.5),
                 ..NodeStyle::default()
             },
+            link: None,
         };
         let token = |text: &str| MathExpression::Token(text.into());
         let matrix = MathExpression::Fenced {
@@ -2240,6 +3171,7 @@ mod tests {
         let text = "This is a linked sentence that should wrap cleanly. ".repeat(30);
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.clone(),
+            math: None,
             font_family: None,
             bold: true,
             italic: false,
@@ -2285,6 +3217,7 @@ mod tests {
         let text = "é".repeat(MAX_EPUB_PAGES + 20);
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.clone(),
+            math: None,
             font_family: None,
             bold: true,
             italic: true,
@@ -2336,6 +3269,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: character.to_string().repeat(20),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2411,6 +3345,7 @@ mod tests {
             .map(|index| {
                 vec![shosai_core::epub::render::TextSpan {
                     text: format!("List item {index}"),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2459,6 +3394,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2495,6 +3431,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Short paragraph {index}"),
+                        math: None,
                         font_family: None,
                         bold: false,
                         italic: false,
@@ -2521,6 +3458,7 @@ mod tests {
                 children: vec![ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Section 1.{index}"),
+                        math: None,
                         font_family: None,
                         bold: false,
                         italic: false,
@@ -2550,6 +3488,7 @@ mod tests {
                 vec![shosai_core::epub::render::TextSpan {
                     link: Some(format!("{}.xhtml", text.replace(' ', "-"))),
                     text,
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2593,6 +3532,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2612,6 +3552,7 @@ mod tests {
                 level: 1,
                 spans: vec![shosai_core::epub::render::TextSpan {
                     text: "Previous chapter".to_string(),
+                    math: None,
                     font_family: None,
                     bold: true,
                     italic: false,
@@ -2660,6 +3601,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: format!("Quoted paragraph {index}"),
+                        math: None,
                         font_family: None,
                         bold: false,
                         italic: false,
@@ -2704,6 +3646,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text,
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2761,6 +3704,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text,
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -2811,6 +3755,7 @@ mod tests {
         let nodes = vec![ContentNode::Paragraph(
             vec![shosai_core::epub::render::TextSpan {
                 text: "Body text".to_string(),
+                math: None,
                 font_family: None,
                 bold: false,
                 italic: false,
@@ -2849,6 +3794,7 @@ mod tests {
         let nodes = vec![ContentNode::Paragraph(
             vec![shosai_core::epub::render::TextSpan {
                 text: text.to_string(),
+                math: None,
                 font_family: None,
                 bold: false,
                 italic: false,
@@ -2873,6 +3819,7 @@ mod tests {
                     .map(|_| {
                         vec![shosai_core::epub::render::TextSpan {
                             text: "A list item with enough text to wrap across lines".to_string(),
+                            math: None,
                             font_family: None,
                             bold: false,
                             italic: false,
@@ -2913,6 +3860,7 @@ mod tests {
                 ContentNode::Paragraph(
                     vec![shosai_core::epub::render::TextSpan {
                         text: "Text before the image".to_string(),
+                        math: None,
                         font_family: None,
                         bold: false,
                         italic: false,
@@ -2949,6 +3897,7 @@ mod tests {
         let text = "Aé 👩\u{200d}🔬 B";
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.into(),
+            math: None,
             font_family: Some("Book Alias".into()),
             bold: false,
             italic: false,
@@ -3059,6 +4008,7 @@ mod tests {
         let text = "x".repeat(EPUB_PAGINATION_SHAPE_CHUNK * 3 + 17);
         let spans = vec![shosai_core::epub::render::TextSpan {
             text: text.clone(),
+            math: None,
             font_family: Some("Book".into()),
             bold: false,
             italic: false,
