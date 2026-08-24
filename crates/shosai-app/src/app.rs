@@ -3815,6 +3815,7 @@ fn render_content_node<'a>(
                         container(rendered_cell)
                             .width(Length::FillPortion(cell.column_span.max(1)))
                             .padding(EPUB_TABLE_CELL_PADDING)
+                            .clip(true)
                             .style(move |_| container::Style {
                                 background: header.then_some(iced::Background::Color(
                                     palette.table_header_background,
@@ -4428,6 +4429,7 @@ fn render_spans_with_prefix<'a>(
     rich_spans.push(span(pop_isolate.to_string()).size(font_size));
 
     rich_text(rich_spans)
+        .wrapping(epub_fallback_wrapping())
         .on_link_click(epub_link_clicked)
         .into()
 }
@@ -4442,7 +4444,7 @@ fn color_rgba(color: iced::Color) -> [u8; 4] {
 }
 
 fn epub_fallback_wrapping() -> iced::widget::text::Wrapping {
-    iced::widget::text::Wrapping::default()
+    iced::widget::text::Wrapping::WordOrGlyph
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4460,6 +4462,32 @@ fn render_inline_math_spans<'a>(
     available_width: f32,
     available_height: Option<f32>,
 ) -> Element<'a, Message> {
+    if inline_math_flow_item_count(spans) > MAX_INLINE_MATH_FLOW_ITEMS {
+        let prefix = spans[..source_prefix_spans]
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+        let mut fallback = spans[source_prefix_spans..].to_vec();
+        for span in &mut fallback {
+            span.math = None;
+        }
+        return render_spans_with_prefix(
+            &prefix,
+            font_size,
+            &fallback,
+            direction,
+            font_size,
+            palette,
+            text_offset,
+            highlights,
+            fonts,
+            scale,
+            alignment,
+            available_width,
+            available_height,
+            false,
+        );
+    }
     let mut flow = row![]
         .spacing(0)
         .align_y(iced::Alignment::End)
@@ -4544,36 +4572,17 @@ fn render_inline_math_spans<'a>(
         .into()
 }
 
-const MAX_INLINE_FLOW_TEXT_PIECES: usize = 8;
+const MAX_INLINE_MATH_FLOW_ITEMS: usize = 256;
+
+fn inline_math_flow_item_count(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
+    spans
+        .iter()
+        .map(|span| span.text.split_inclusive(char::is_whitespace).count())
+        .sum()
+}
 
 fn inline_flow_text_pieces(text: &str) -> Vec<&str> {
-    if text.is_empty() {
-        return Vec::new();
-    }
-    let target = text
-        .chars()
-        .count()
-        .div_ceil(MAX_INLINE_FLOW_TEXT_PIECES)
-        .max(1);
-    let mut pieces = Vec::new();
-    let mut start = 0;
-    let mut characters = 0;
-    for (index, character) in text.char_indices() {
-        characters += 1;
-        if pieces.len() + 1 < MAX_INLINE_FLOW_TEXT_PIECES
-            && characters >= target
-            && character.is_whitespace()
-        {
-            let end = index + character.len_utf8();
-            pieces.push(&text[start..end]);
-            start = end;
-            characters = 0;
-        }
-    }
-    if start < text.len() {
-        pieces.push(&text[start..]);
-    }
-    pieces
+    text.split_inclusive(char::is_whitespace).collect()
 }
 
 fn native_epub_run(
@@ -8012,7 +8021,7 @@ mod tests {
 
         assert_eq!(
             tree.children.len(),
-            241,
+            242,
             "ordinary mixed-flow words must remain independent shrink-width wrap items"
         );
         assert_eq!(
