@@ -1019,6 +1019,28 @@ mod tests {
         ])
     }
 
+    fn nested_navigation_epub() -> Vec<u8> {
+        archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">toc-anchors</dc:identifier><dc:title>TOC Anchors</dc:title><dc:language>en</dc:language></metadata><manifest><item id="nav" href="Nav/toc.xhtml" media-type="application/xhtml+xml"/><item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            (
+                "OPS/Nav/toc.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><span>Part</span><ol><li><a href="../Text/chapter.xhtml#literal%2520id">Literal percent</a></li></ol></li></ol></nav></body></html>"##,
+            ),
+            (
+                "OPS/Text/chapter.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>before</p><p id="literal%20id">target</p></body></html>"##,
+            ),
+        ])
+    }
+
     #[test]
     fn epub_locations_resolve_same_and_cross_chapter_fragments_canonically() {
         let document = EpubDoc::from_bytes(linked_chapter_epub()).expect("fixture should open");
@@ -1038,6 +1060,19 @@ mod tests {
             document.resolve_location(0, "../../outside.xhtml#same"),
             None
         );
+    }
+
+    #[test]
+    fn parsed_toc_keeps_nested_navigation_base_and_literal_percent_fragment() {
+        let document =
+            EpubDoc::from_bytes(nested_navigation_epub()).expect("fixture should open");
+
+        assert_eq!(document.toc().len(), 1);
+        assert_eq!(document.toc()[0].title, "Part");
+        assert_eq!(document.toc()[0].children.len(), 1);
+        let target = &document.toc()[0].children[0];
+        assert_eq!(target.title, "Literal percent");
+        assert_eq!(document.resolve_toc_location(&target.href), Some((0, 7)));
     }
 
     fn forge_declared_uncompressed_size(archive: &mut [u8], forged_size: u32) {
