@@ -394,11 +394,19 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   preserve the readable text path; highlighted native expressions retain their
   geometry and use the active theme highlight.  Search and source offsets remain
   fallback-based.
-- [ ] Support inline versus display math.  Standalone math now scales with the
-  reader font size, uses theme contrast, and owns exact pagination boundaries;
-  MathML embedded inside paragraph text remains open.
-- [ ] Test common operators, fractions, roots, scripts, matrices, annotations,
-  malformed MathML, and books that declare MathML manifest properties.
+- [X] Support inline versus display math.  Supported inline expressions now
+  remain in paragraph source order as atomic wrapping-row items, share native
+  geometry with pagination and painting, preserve fallback-based search offsets,
+  highlights, links, font scaling, and theme contrast, and promote explicit
+  display math nested in a paragraph to a standalone block.  RTL and justified
+  paragraphs retain readable fallback until native mixed-flow bidi and
+  justification can be preserved without reordering source offsets.
+- [X] Test common operators, fractions, roots, scripts, matrices, annotations,
+  malformed MathML, and books that declare MathML manifest properties.  The
+  generated MathML fixture now verifies retained inline fractions alongside the
+  existing display, operator, script, matrix, annotation, malformed, and manifest
+  evidence; app regressions cover atomic pagination, shared geometry, highlights,
+  links, and source offsets.
 
 ** M5 — Reader Integration and Release
 

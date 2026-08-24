@@ -668,7 +668,7 @@ ceiling.  Brotli and transformed-glyph decoding can allocate scratch space;
 Wuff exposes opaque decode failures; and hostile-font fuzzing or process
 isolation remains release hardening rather than a guarantee of this boundary.
 
-## Native standalone MathML geometry
+## Native MathML geometry
 
 Production chapter parsing now retains direct MathML expressions as a bounded,
 renderer-independent semantic model rather than flattening them irreversibly.
@@ -680,8 +680,12 @@ over-budget subtree becomes a fixed omission label. Search, pagination, and the
 app fallback consume that same bounded fallback.
 
 The application now lowers the retained model—not the source XML—into bounded
-native geometry for standalone rows, tokens, fractions, roots, scripts, fences,
-and matrices. One shared layout owns both pagination height and Iced painting,
+native geometry for rows, tokens, fractions, roots, scripts, fences, and
+matrices. Direct display math remains an atomic block. Supported inline math is
+retained in paragraph source order, participates as an atomic wrapping-row item,
+and uses the same geometry inside headings, captions, lists, and table-cell text.
+Explicit display math nested in a paragraph is promoted to a block between the
+surrounding text fragments. One shared layout owns both pagination height and Iced painting,
 uses reader font scaling, and paints text and rules with the active reader
 theme's contrast-safe text color. The bundled OFL-licensed Inter font makes
 measurement and painting deterministic; release archives, installers, and Nix
@@ -690,7 +694,10 @@ available page width or height, contain an uncovered glyph, or have no supported
 expression model retain the readable text path. Search highlights paint the
 native box with the active theme highlight instead of changing its paginated
 geometry. Search and source offsets always remain based on the original bounded
-fallback. Inline MathML embedded inside an XHTML text block remains open.
+fallback. Inline expressions remain indivisible during pagination; their native
+height is reserved in addition to fallback text flow. Right-to-left and justified
+paragraphs deliberately retain readable linear fallback until the native flow can
+preserve full paragraph-level bidi and justification semantics.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
@@ -721,7 +728,7 @@ primitives. Semantic tests prove that:
 This is a bounded native subset, not standards-conforming MathML rendering. The fixed
 heuristics do not read OpenType MATH tables, operator dictionaries, or MathML
 style attributes; assemble stretchy glyphs; perform math line breaking; connect
-to computed CSS, selection, or accessibility; or bound the initial XML parse
+to full computed MathML styling, selection, or accessibility; or bound the initial XML parse
 independently of EPUB resource limits. Token shaping is deliberately single-line
 and requires every source byte to map to a non-missing glyph. Unsupported cases
 therefore use readable fallback rather than approximating standards coverage.
