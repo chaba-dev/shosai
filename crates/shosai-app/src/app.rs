@@ -7904,6 +7904,74 @@ mod tests {
     }
 
     #[test]
+    fn mixed_embedded_font_math_flow_has_a_bounded_widget_count() {
+        use iced::advanced::widget::Tree;
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let epub = shosai_core::epub::EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/fonts.epub").to_vec(),
+        )
+        .expect("font fixture should be valid");
+        let prose = |text: String| TextSpan {
+            text,
+            math: None,
+            font_family: Some("FixtureTtf".into()),
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+        let math = TextSpan {
+            text: "(a)/(b)".into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                )),
+                fallback: "(a)/(b)".into(),
+            }),
+            ..prose(String::new())
+        };
+        let spans = vec![
+            prose("before ".repeat(120)),
+            math,
+            prose(" after".repeat(120)),
+        ];
+        let element = render_inline_math_spans(
+            &spans,
+            0,
+            shosai_core::epub::style::TextDirection::Ltr,
+            18.0,
+            ReaderTheme::Light.palette(),
+            0,
+            &[],
+            Some(epub.fonts()),
+            1.0,
+            None,
+            360.0,
+            Some(500.0),
+        );
+        let tree = Tree::new(element.as_widget());
+
+        assert!(
+            tree.children.len() <= 18,
+            "mixed flow must be bounded by source spans instead of creating one fill-width widget per word; got {} children",
+            tree.children.len()
+        );
+        assert_eq!(
+            spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            format!("{}(a)/(b){}", "before ".repeat(120), " after".repeat(120))
+        );
+    }
+
+    #[test]
     fn rich_and_native_epub_links_use_shared_palette_highlights_and_dispatch() {
         use shosai_core::epub::render::TextSpan;
 
