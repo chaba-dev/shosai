@@ -186,6 +186,33 @@ impl EpubDoc {
         &self.presentation
     }
 
+    /// Resolve a same-book link to a spine chapter and stable character offset.
+    pub fn resolve_location(&self, current_chapter: usize, href: &str) -> Option<(usize, usize)> {
+        let current_path = CanonicalEpubPath::new(&self.chapter(current_chapter)?.path).ok()?;
+        let reference = if let Some(fragment) = href.strip_prefix('#') {
+            current_path.with_fragment(fragment).ok()?
+        } else {
+            let base_path = current_path
+                .as_str()
+                .rsplit_once('/')
+                .map_or("", |(directory, _)| directory);
+            CanonicalEpubPath::resolve(base_path, href).ok()?
+        };
+        let chapter = self
+            .content
+            .chapters
+            .iter()
+            .position(|chapter| chapter.path == reference.path.as_str())?;
+        let offset = match reference.fragment {
+            Some(fragment) => self
+                .presentation
+                .chapter(chapter)?
+                .anchor_offset(&fragment)?,
+            None => 0,
+        };
+        Some((chapter, offset))
+    }
+
     /// Book-local embedded fonts admitted from author stylesheets.
     pub fn fonts(&self) -> &super::font::EpubFontBook {
         &self.fonts
@@ -955,6 +982,45 @@ mod tests {
             archive.write_all(bytes).unwrap();
         }
         archive.finish().unwrap().into_inner()
+    }
+
+    fn linked_chapter_epub() -> Vec<u8> {
+        archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">anchors</dc:identifier><dc:title>Anchors</dc:title><dc:language>en</dc:language></metadata><manifest><item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#,
+            ),
+            (
+                "OPS/Text/one.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>before</p><p id="same">same target</p></body></html>"##,
+            ),
+            (
+                "OPS/Text/two.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>chapter two</p><p><span id="cross target">cross target</span></p></body></html>"##,
+            ),
+        ])
+    }
+
+    #[test]
+    fn epub_locations_resolve_same_and_cross_chapter_fragments_canonically() {
+        let document = EpubDoc::from_bytes(linked_chapter_epub()).expect("fixture should open");
+
+        assert_eq!(document.resolve_location(0, "#same"), Some((0, 7)));
+        assert_eq!(
+            document.resolve_location(0, "two.xhtml#cross%20target"),
+            Some((1, 12))
+        );
+        assert_eq!(document.resolve_location(0, "two.xhtml"), Some((1, 0)));
+        assert_eq!(document.resolve_location(0, "#missing"), None);
+        assert_eq!(
+            document.resolve_location(0, "../../outside.xhtml#same"),
+            None
+        );
     }
 
     fn forge_declared_uncompressed_size(archive: &mut [u8], forged_size: u32) {

@@ -1153,58 +1153,30 @@ fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
         return Task::none();
     }
 
-    // Internal EPUB links: navigate to the target chapter.
-    if let Some(OpenDocument::Epub(doc)) = &state.document {
-        // Split href into path and optional fragment (#anchor).
-        let (target_path, _fragment) = match href.split_once('#') {
-            Some((path, frag)) => (path, Some(frag)),
-            None => (href, None),
-        };
-
-        // If the path is empty, it's a same-chapter fragment link — nothing to navigate.
-        if target_path.is_empty() {
-            return Task::none();
-        }
-
-        // Find the chapter whose path ends with the target.
-        // Links may be relative to the current chapter's directory, so we
-        // resolve against the current chapter's base path.
-        let current_base = doc
-            .chapter(state.current_page)
-            .map(|ch| {
-                ch.path
-                    .rsplit_once('/')
-                    .map(|(dir, _)| dir.to_string())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
-
-        let resolved = if !current_base.is_empty() && !target_path.starts_with('/') {
-            format!("{current_base}/{target_path}")
-        } else {
-            target_path.to_string()
-        };
-
-        // Find the chapter index by matching the resolved path.
-        if let Some(chapter_idx) = doc.content().chapters.iter().position(|ch| {
-            ch.path == resolved || ch.path.ends_with(target_path) || ch.path.ends_with(&resolved)
-        }) {
-            if uses_paginated_epub_layout(state) {
-                state.epub_page = epub_page_for_location(state, chapter_idx, 0);
-                sync_epub_location(state);
-                save_reading_state(state);
-                return Task::none();
-            }
-            state.current_page = chapter_idx;
-            state.epub_page = 0;
-            state.epub_offset = 0;
-            state.page_input = format!("{}", state.current_page + 1);
-            save_reading_state(state);
-            return refresh_content(state);
-        }
+    // Internal EPUB links: navigate to the stable chapter/character location.
+    if let Some(OpenDocument::Epub(doc)) = &state.document
+        && let Some((chapter, offset)) = doc.resolve_location(state.current_page, href)
+    {
+        return navigate_to_epub_location(state, chapter, offset);
     }
 
     Task::none()
+}
+
+fn navigate_to_epub_location(state: &mut State, chapter: usize, offset: usize) -> Task<Message> {
+    if uses_paginated_epub_layout(state) {
+        state.epub_page = epub_page_for_location(state, chapter, offset);
+        sync_epub_location(state);
+        state.epub_offset = offset;
+        save_reading_state(state);
+        return Task::none();
+    }
+    state.current_page = chapter;
+    state.epub_page = 0;
+    state.epub_offset = offset;
+    state.page_input = format!("{}", state.current_page + 1);
+    save_reading_state(state);
+    content_navigation_task(state)
 }
 
 /// Refresh the visible content for the current page/chapter.
@@ -7549,6 +7521,68 @@ mod tests {
         ]);
 
         assert_eq!(epub_page_for_location(&state, 0, 5), 1);
+    }
+
+    #[test]
+    fn epub_fragment_locations_drive_paginated_and_continuous_navigation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let paragraph = |text: &str| {
+            ContentNode::Paragraph(
+                vec![shosai_core::epub::render::TextSpan {
+                    text: text.to_string(),
+                    math: None,
+                    font_family: None,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                Default::default(),
+            )
+        };
+        state.epub_pages = Arc::new(vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("first"),
+                    text_offset: 0,
+                }],
+            },
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("second"),
+                    text_offset: 5,
+                }],
+            },
+            EpubPage {
+                chapter: 1,
+                title: None,
+                nodes: vec![EpubPageNode {
+                    node: paragraph("third"),
+                    text_offset: 0,
+                }],
+            },
+        ]);
+
+        let task = navigate_to_epub_location(&mut state, 0, 5);
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.epub_page, 1);
+        assert_eq!((state.current_page, state.epub_offset), (0, 5));
+
+        state.reading_mode = ReadingMode::Continuous;
+        let task = navigate_to_epub_location(&mut state, 1, 12);
+        assert!(task.units() > 0);
+        assert_eq!((state.current_page, state.epub_offset), (1, 12));
+        assert_eq!(state.page_input, "2");
     }
 
     #[test]
