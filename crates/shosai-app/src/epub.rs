@@ -21,6 +21,7 @@ pub(crate) const EPUB_TABLE_CELL_PADDING: f32 = 6.0;
 pub(crate) const EPUB_TABLE_CELL_SPACING: f32 = 4.0;
 pub(crate) const EPUB_TABLE_ROW_SPACING: f32 = 8.0;
 pub(crate) const INLINE_MATH_WRAP_SPACING: f32 = 0.25;
+pub(crate) const MAX_INLINE_MATH_FLOW_ITEMS: usize = 256;
 const MAX_INLINE_MATH_LINE_HEIGHTS: f32 = 3.0;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
@@ -1932,20 +1933,30 @@ fn pagination_inline_spans(
     direction: shosai_core::epub::style::TextDirection,
     alignment: Option<shosai_core::epub::style::TextAlignment>,
 ) -> Vec<shosai_core::epub::render::TextSpan> {
+    let admit_flow = inline_math_flow_is_admitted(spans);
     spans
         .iter()
         .cloned()
         .map(|mut span| {
-            if layout_inline_math_span_for_context(
-                &span, base_size, width, height, direction, alignment,
-            )
-            .is_none()
+            if !admit_flow
+                || layout_inline_math_span_for_context(
+                    &span, base_size, width, height, direction, alignment,
+                )
+                .is_none()
             {
                 span.math = None;
             }
             span
         })
         .collect()
+}
+
+pub(crate) fn inline_math_flow_is_admitted(spans: &[shosai_core::epub::render::TextSpan]) -> bool {
+    spans
+        .iter()
+        .map(|span| span.text.split_inclusive(char::is_whitespace).count())
+        .sum::<usize>()
+        <= MAX_INLINE_MATH_FLOW_ITEMS
 }
 
 pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {

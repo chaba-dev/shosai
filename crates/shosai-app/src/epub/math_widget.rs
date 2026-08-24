@@ -1,8 +1,6 @@
 //! Iced painting for shared native MathML geometry.
 
-use iced::advanced::{
-    Clipboard, Layout, Shell, Widget, layout, renderer, widget::Tree,
-};
+use iced::advanced::{Clipboard, Layout, Shell, Widget, layout, renderer, widget::Tree};
 use iced::{Element, Event, Font, Length, Rectangle, Size, mouse};
 
 use super::math_layout::{MATH_FONT_FAMILY, MathLayout, MathPrimitiveKind};

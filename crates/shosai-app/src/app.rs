@@ -4469,7 +4469,7 @@ fn render_inline_math_spans<'a>(
     available_width: f32,
     available_height: Option<f32>,
 ) -> Element<'a, Message> {
-    if inline_math_flow_item_count(spans) > MAX_INLINE_MATH_FLOW_ITEMS {
+    if !crate::epub::inline_math_flow_is_admitted(spans) {
         let prefix = spans[..source_prefix_spans]
             .iter()
             .map(|span| span.text.as_str())
@@ -4577,15 +4577,6 @@ fn render_inline_math_spans<'a>(
             _ => iced::alignment::Horizontal::Left,
         })
         .into()
-}
-
-const MAX_INLINE_MATH_FLOW_ITEMS: usize = 256;
-
-fn inline_math_flow_item_count(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
-    spans
-        .iter()
-        .map(|span| span.text.split_inclusive(char::is_whitespace).count())
-        .sum()
 }
 
 fn inline_flow_text_pieces(text: &str) -> Vec<&str> {
