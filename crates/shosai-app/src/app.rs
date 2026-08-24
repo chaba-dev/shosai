@@ -3758,6 +3758,9 @@ fn render_content_node<'a>(
             style,
         } => {
             let mut table = column![].spacing(EPUB_TABLE_ROW_SPACING);
+            let table_width = crate::epub::epub_table_layout_width(row_groups, available_width);
+            let table_content_width =
+                (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let mut table_offset = text_offset;
             if !caption.is_empty() {
                 let caption_style = caption_style.as_ref().unwrap_or(style);
@@ -3794,7 +3797,11 @@ fn render_content_node<'a>(
                             palette,
                             image_handles,
                             fill_images,
-                            available_width,
+                            crate::epub::epub_table_cell_content_width(
+                                table_row,
+                                cell_index,
+                                table_content_width,
+                            ),
                             available_height,
                             table_offset,
                             highlights,
@@ -3827,7 +3834,6 @@ fn render_content_node<'a>(
                 table = table.push(rendered_row);
                 table_offset += 1;
             }
-            let table_width = crate::epub::epub_table_layout_width(row_groups, available_width);
             let mut table = container(table).width(Length::Fixed(table_width));
             if let Some(margin) = style.margin_left_em {
                 table = table.padding(iced::Padding {

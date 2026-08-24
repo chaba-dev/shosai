@@ -798,6 +798,23 @@ pub(crate) fn epub_table_layout_width(row_groups: &[TableRowGroup], available_wi
         .min(MAX_EPUB_TABLE_WIDTH)
 }
 
+pub(crate) fn epub_table_cell_content_width(
+    row: &TableRow,
+    cell_index: usize,
+    table_width: f32,
+) -> f32 {
+    let portions = row
+        .cells
+        .iter()
+        .map(|cell| f32::from(cell.column_span.max(1)))
+        .sum::<f32>()
+        .max(1.0);
+    let available =
+        (table_width - BLOCKQUOTE_SPACING * row.cells.len().saturating_sub(1) as f32).max(1.0);
+    let portion = f32::from(row.cells[cell_index].column_span.max(1));
+    (available * portion / portions - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0)
+}
+
 fn measure_epub_spans(
     fonts: Option<&EpubFontBook>,
     spans: &[shosai_core::epub::render::TextSpan],
@@ -1540,8 +1557,12 @@ fn estimated_epub_compact_node_height(
             caption,
             caption_style,
             row_groups,
-            ..
+            style,
         } => {
+            let outer_width = chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH;
+            let table_width = epub_table_layout_width(row_groups, outer_width);
+            let table_content_width =
+                (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let caption_height = (!caption.is_empty()).then(|| {
                 let scale = caption_style
                     .as_ref()
@@ -1556,7 +1577,7 @@ fn estimated_epub_compact_node_height(
                                 .as_ref()
                                 .and_then(|style| style.font_size_multiplier)
                                 .unwrap_or(1.0),
-                        chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
+                        table_content_width,
                         f32::MAX,
                     )
             });
@@ -1566,13 +1587,20 @@ fn estimated_epub_compact_node_height(
                 .map(|row| {
                     row.cells
                         .iter()
-                        .map(|cell| {
+                        .enumerate()
+                        .map(|(cell_index, cell)| {
+                            let cell_width =
+                                epub_table_cell_content_width(row, cell_index, table_content_width);
+                            let cell_chars_per_line =
+                                (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+                                    .floor()
+                                    .max(1.0) as usize;
                             cell.children
                                 .iter()
                                 .map(|child| {
                                     estimated_epub_compact_node_height(
                                         child,
-                                        chars_per_line,
+                                        cell_chars_per_line,
                                         lines_per_page,
                                         font_size,
                                     )
