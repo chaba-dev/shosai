@@ -3777,7 +3777,7 @@ fn render_content_node<'a>(
                     fonts,
                     scale,
                     caption_style.text_align,
-                    available_width,
+                    table_content_width,
                     available_height,
                 ));
                 table_offset += spans_text_len(caption) + 1;

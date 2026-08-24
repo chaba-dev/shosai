@@ -545,6 +545,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 lines_per_page,
                 font_size,
                 line_spacing,
+                page_size.width,
                 page_size.height,
                 first_page_has_title,
                 &mut pages,
@@ -616,6 +617,7 @@ fn paginate_epub_table(
     lines_per_page: usize,
     font_size: f32,
     line_spacing: f32,
+    page_width: f32,
     page_height: f32,
     first_page_has_title: bool,
     pages: &mut Vec<PageNodes>,
@@ -663,12 +665,14 @@ fn paginate_epub_table(
             if pending.is_some() {
                 append_table_band(&mut candidate, group.kind, rows);
             }
-            let candidate_height = estimated_epub_node_height(
+            let candidate_height = estimated_epub_node_height_bounded(
                 &candidate,
                 chars_per_line,
                 lines_per_page,
                 font_size,
                 line_spacing,
+                page_width,
+                page_height,
             );
 
             if pending.is_some() && candidate_height > fragment_capacity && !page_budget_exhausted {
@@ -689,12 +693,14 @@ fn paginate_epub_table(
                 let _ = push_epub_page(pages, budget);
                 *remaining = page_height;
                 fragment_capacity = *remaining;
-                pending_height = estimated_epub_node_height(
+                pending_height = estimated_epub_node_height_bounded(
                     &band,
                     chars_per_line,
                     lines_per_page,
                     font_size,
                     line_spacing,
+                    page_width,
+                    page_height,
                 );
                 pending = Some(band);
                 continue;
@@ -720,12 +726,14 @@ fn paginate_epub_table(
         });
         *remaining = (fragment_capacity - pending_height).max(0.0);
     } else if !caption.is_empty() {
-        let height = estimated_epub_node_height(
+        let height = estimated_epub_node_height_bounded(
             table,
             chars_per_line,
             lines_per_page,
             font_size,
             line_spacing,
+            page_width,
+            page_height,
         );
         if height > *remaining
             && page_has_content(pages, first_page_has_title)
@@ -1331,6 +1339,26 @@ fn estimated_epub_node_height(
         + font_size * line_spacing
 }
 
+#[allow(clippy::too_many_arguments)]
+fn estimated_epub_node_height_bounded(
+    node: &ContentNode,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    font_size: f32,
+    line_spacing: f32,
+    width: f32,
+    height: f32,
+) -> f32 {
+    estimated_epub_compact_node_height_bounded(
+        node,
+        chars_per_line,
+        lines_per_page,
+        font_size,
+        width,
+        height,
+    ) + font_size * line_spacing
+}
+
 fn estimated_epub_blockquote_height(
     children: &[ContentNode],
     chars_per_line: usize,
@@ -1522,6 +1550,24 @@ fn estimated_epub_compact_node_height(
     lines_per_page: usize,
     font_size: f32,
 ) -> f32 {
+    estimated_epub_compact_node_height_bounded(
+        node,
+        chars_per_line,
+        lines_per_page,
+        font_size,
+        chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
+        lines_per_page as f32 * font_size * TEXT_LINE_HEIGHT,
+    )
+}
+
+fn estimated_epub_compact_node_height_bounded(
+    node: &ContentNode,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    font_size: f32,
+    width: f32,
+    height: f32,
+) -> f32 {
     let wrapped = |characters: usize, scale: f32| {
         characters
             .div_ceil(scaled_characters_per_line(chars_per_line, scale))
@@ -1548,8 +1594,8 @@ fn estimated_epub_compact_node_height(
                 + inline_math_height_reserve(
                     spans,
                     font_size * heading_scale * style_scale,
-                    chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
-                    f32::MAX,
+                    width,
+                    height,
                 )
         }
         ContentNode::BlockQuote { children, .. } => {
@@ -1561,8 +1607,7 @@ fn estimated_epub_compact_node_height(
             row_groups,
             style,
         } => {
-            let outer_width = chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH;
-            let table_width = epub_table_layout_width(row_groups, outer_width);
+            let table_width = epub_table_layout_width(row_groups, width);
             let table_content_width =
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let caption_height = (!caption.is_empty()).then(|| {
@@ -1580,7 +1625,7 @@ fn estimated_epub_compact_node_height(
                                 .and_then(|style| style.font_size_multiplier)
                                 .unwrap_or(1.0),
                         table_content_width,
-                        f32::MAX,
+                        height,
                     )
             });
             let row_heights = row_groups
@@ -1600,11 +1645,13 @@ fn estimated_epub_compact_node_height(
                             cell.children
                                 .iter()
                                 .map(|child| {
-                                    estimated_epub_compact_node_height(
+                                    estimated_epub_compact_node_height_bounded(
                                         child,
                                         cell_chars_per_line,
                                         lines_per_page,
                                         font_size,
+                                        cell_width,
+                                        height,
                                     )
                                 })
                                 .sum::<f32>()
@@ -1622,7 +1669,17 @@ fn estimated_epub_compact_node_height(
         }
         ContentNode::Math { content, style, .. } => {
             let scale = style.font_size_multiplier.unwrap_or(1.0);
-            wrapped(content.fallback.chars().count(), scale) * text_line_height * scale
+            let size = font_size * scale;
+            content
+                .expression
+                .as_ref()
+                .and_then(|expression| {
+                    math_layout::layout_math_for_bounds(expression, size, width, height)
+                })
+                .map_or_else(
+                    || wrapped(content.fallback.chars().count(), scale) * text_line_height * scale,
+                    |layout| layout.height,
+                )
         }
         ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
             items
@@ -1630,12 +1687,7 @@ fn estimated_epub_compact_node_height(
                 .map(|item| {
                     let scale = spans_font_scale(item);
                     wrapped(spans_text_len(item) + 4, scale) * text_line_height * scale
-                        + inline_math_height_reserve(
-                            item,
-                            font_size,
-                            chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
-                            f32::MAX,
-                        )
+                        + inline_math_height_reserve(item, font_size, width, height)
                 })
                 .sum::<f32>()
                 + 4.0 * items.len().saturating_sub(1) as f32
@@ -1656,8 +1708,8 @@ fn estimated_epub_compact_node_height(
                 + inline_math_height_reserve(
                     spans,
                     font_size * style.font_size_multiplier.unwrap_or(1.0),
-                    chars_per_line as f32 * font_size * AVERAGE_CHARACTER_WIDTH,
-                    f32::MAX,
+                    width,
+                    height,
                 )
         }
     }
