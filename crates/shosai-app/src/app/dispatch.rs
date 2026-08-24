@@ -577,25 +577,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::GoToBookmark(page, location_offset) => {
-            if uses_paginated_epub_layout(state) {
-                state.current_page = page;
-                state.epub_offset = location_offset.unwrap_or(0);
-                state.epub_page =
-                    epub_page_for_location(state, state.current_page, state.epub_offset);
-                if !state.epub_pages.is_empty() {
-                    state.page_input = (state.epub_page + 1).to_string();
-                }
-                update_bookmark_status(state);
-                save_reading_state(state);
-                return Task::none();
-            }
-            state.current_page = page;
-            state.epub_page = 0;
-            state.epub_offset = location_offset.unwrap_or(0);
-            state.page_input = format!("{}", page + 1);
-            save_reading_state(state);
-            update_bookmark_status(state);
-            return content_navigation_task(state);
+            return navigate_to_saved_location(state, page, location_offset);
         }
 
         Message::StartEditNote(id, existing) => {

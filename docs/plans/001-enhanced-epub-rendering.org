@@ -53,7 +53,8 @@ boundaries.
   reading-state writes off the UI thread.
   The writer is flushed before shutdown.  Release app-action-to-present
   measurements are recorded in ADR 001; the remaining Iced widget rebuild is
-  included in those measurements.  Internal-link fragments are ignored;
+  included in those measurements.  Internal same-book links resolve canonical
+  chapter paths and bounded element-ID/legacy-name character offsets;
   user-activated HTTP(S) and mail links open in the system handler.
 - A native route may use a text shaper such as ~cosmic-text~, but text shaping is
   not a CSS cascade, block/table layout engine, DOM, MathML renderer, or
@@ -418,19 +419,37 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 ** M5 — Reader Integration and Release
 
-- [ ] Preserve chapter/fragment navigation, TOC, search and highlighting,
+- [X] Preserve chapter/fragment navigation, TOC, search and highlighting,
   bookmarks, progress restoration, themes, font sizing, continuous/paginated
-  modes, multiple documents, and keyboard controls in ~shosai-app/src/app.rs~.
-- [ ] Establish the shared parsed-chapter/layout cache and stable-location model
+  modes, multiple documents, and keyboard controls.  Production chapter
+  presentations now retain bounded decoded fragment anchors for visible body,
+  empty, inline, and table-descendant elements in the shared search-offset
+  coordinate space; canonical same- and cross-chapter links select those
+  offsets in paginated and continuous modes.  The contents panel resolves nav
+  and NCX references relative to their own resources, decodes each target once,
+  preserves nested grouping entries, and uses the document's indexed canonical
+  chapter lookup to map fragment targets to the same stable locations.  Books
+  without a usable TOC retain chapter fallback.
+- [X] Establish the shared parsed-chapter/layout cache and stable-location model
   before backend adapters so chapter switches and preference changes do not
-  repeatedly parse every chapter.
-- [ ] Keep warm page turns free of parsing, repagination, image/font decoding,
+  repeatedly parse every chapter.  ~EpubPresentation~ parses each admitted
+  chapter once; tabs retain reference-counted paginated derivatives keyed by
+  viewport and typography, and character offsets survive relayout and mode
+  changes.
+- [X] Keep warm page turns free of parsing, repagination, image/font decoding,
   and synchronous storage.  Debounce or asynchronously persist reading state,
   resolve bookmark status off the turn path, and precompute/prefetch adjacent
-  native presentation where needed.
+  native presentation where needed.  EPUB turns now select an existing page,
+  update bookmark status from the in-memory list, and enqueue coalesced reading
+  state persistence without producing background layout work; a regression
+  retains the parsed presentation, paginated-page allocation, layout key,
+  decoded image handles, and render generation across the turn.
 - [ ] Move backend-specific rendering into focused modules under
   ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
-  parsing/resource policy in ~shosai-core/src/epub/~.
+  parsing/resource policy in ~shosai-core/src/epub/~.  Stable-location,
+  search-result, TOC, bookmark, and warm page-turn navigation has moved to
+  ~app/epub_navigation.rs~; the remaining EPUB view construction in ~app.rs~
+  still needs extraction.
 - [ ] Add feature/build configuration and packaging changes only for the native
   implementation; document runtime prerequisites and attribution.
 - [ ] Run the full workspace test suite and platform packaging smoke tests.
@@ -466,8 +485,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   subject to its security and license boundaries.
 - [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
   semantic and visual expectations on every supported platform.
-- [ ] No book content triggers network access or script execution by default;
+- [X] No book content triggers network access or script execution by default;
   user-activated external links obey the documented confirmation/allow policy.
+  Native presentation has no script or network loader; explicit link activation
+  allows only same-book targets plus HTTP(S) and mail handlers, while all other
+  schemes remain inert.
 - [ ] Corrupt/oversized resources degrade safely with actionable errors.
 - [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
   reading modes pass regression tests.

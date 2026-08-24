@@ -162,14 +162,25 @@ pub struct EpubReference {
 }
 
 impl EpubReference {
+    /// Serialize this decoded reference as a canonical archive-relative URI.
+    pub fn to_archive_reference(&self) -> String {
+        let mut reference = self
+            .path
+            .0
+            .split('/')
+            .map(encode_component)
+            .collect::<Vec<_>>()
+            .join("/");
+        if let Some(fragment) = &self.fragment {
+            reference.push('#');
+            reference.push_str(&encode_component(fragment));
+        }
+        reference
+    }
+
     /// Serialize this reference as a canonical URI within the isolated book origin.
     pub fn to_protocol_uri(&self) -> String {
-        let mut uri = self.path.to_protocol_uri();
-        if let Some(fragment) = &self.fragment {
-            uri.push('#');
-            uri.push_str(&encode_component(fragment));
-        }
-        uri
+        format!("shosai://book/{}", self.to_archive_reference())
     }
 }
 

@@ -5,9 +5,13 @@
 //! supported computed styles onto block and inline presentation values.
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::EpubLimits;
+
+const MAX_CHAPTER_ANCHORS: usize = 4_096;
+const MAX_ANCHOR_NAME_BYTES: usize = 1_024;
 
 /// A styled span of inline text or bounded MathML replacement geometry.
 #[derive(Debug, Clone, PartialEq)]
@@ -157,8 +161,10 @@ pub(crate) fn parse_chapter_xhtml_with_limits(
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
     parse_chapter_xhtml_with_owner_and_limits(xhtml, base_path, None, styles, None, limits)
+        .map(|parsed| parsed.nodes)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_chapter_xhtml_at_path_with_limits(
     xhtml: &str,
     chapter_path: &str,
@@ -166,6 +172,32 @@ pub(crate) fn parse_chapter_xhtml_at_path_with_limits(
     fonts: &super::font::EpubFontBook,
     limits: &EpubLimits,
 ) -> Result<Vec<ContentNode>> {
+    let base_path = chapter_path
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    parse_chapter_xhtml_with_owner_and_limits(
+        xhtml,
+        base_path,
+        Some(chapter_path),
+        styles,
+        Some(fonts),
+        limits,
+    )
+    .map(|parsed| parsed.nodes)
+}
+
+pub(crate) struct ParsedChapterContent {
+    pub(crate) nodes: Vec<ContentNode>,
+    pub(crate) anchor_offsets: HashMap<String, usize>,
+}
+
+pub(crate) fn parse_chapter_content_at_path_with_limits(
+    xhtml: &str,
+    chapter_path: &str,
+    styles: &super::style::EpubStyles,
+    fonts: &super::font::EpubFontBook,
+    limits: &EpubLimits,
+) -> Result<ParsedChapterContent> {
     let base_path = chapter_path
         .rsplit_once('/')
         .map_or("", |(directory, _)| directory);
@@ -186,10 +218,15 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     styles: &super::style::EpubStyles,
     fonts: Option<&super::font::EpubFontBook>,
     limits: &EpubLimits,
-) -> Result<Vec<ContentNode>> {
+) -> Result<ParsedChapterContent> {
     let doc = match roxmltree::Document::parse(xhtml) {
         Ok(d) => d,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => {
+            return Ok(ParsedChapterContent {
+                nodes: Vec::new(),
+                anchor_offsets: HashMap::new(),
+            });
+        }
     };
 
     let css = styles.document_css_with_owner(&doc, base_path, chapter_path, limits)?;
@@ -206,10 +243,15 @@ fn parse_chapter_xhtml_with_owner_and_limits(
         .get(body)
         .is_some_and(|style| style.display == super::computed_style::DisplayRole::None)
     {
-        return Ok(Vec::new());
+        return Ok(ParsedChapterContent {
+            nodes: Vec::new(),
+            anchor_offsets: HashMap::new(),
+        });
     }
 
-    Ok(parse_block_children(body, base_path, &computed_styles))
+    let mut parsed = parse_block_children(body, base_path, &computed_styles);
+    record_element_anchors(&body, 0, &mut parsed.anchor_offsets);
+    Ok(parsed)
 }
 
 /// Parse block-level children of an element.
@@ -217,15 +259,17 @@ fn parse_block_children(
     parent: roxmltree::Node,
     base_path: &str,
     styles: &super::computed_style::ComputedDocumentStyles,
-) -> Vec<ContentNode> {
+) -> ParsedChapterContent {
     let mut nodes = Vec::new();
+    let mut anchor_offsets = HashMap::new();
+    let mut text_offset = 0;
 
     for child in parent.children() {
         if !child.is_element() {
             if child.is_text() {
                 let text = child.text().unwrap_or("").trim();
                 if !text.is_empty() {
-                    nodes.push(ContentNode::Paragraph(
+                    let node = ContentNode::Paragraph(
                         vec![TextSpan {
                             text: text.to_string(),
                             math: None,
@@ -238,7 +282,12 @@ fn parse_block_children(
                             link: None,
                         }],
                         NodeStyle::default(),
-                    ));
+                    );
+                    text_offset +=
+                        crate::search::extract_text_from_nodes(std::slice::from_ref(&node))
+                            .chars()
+                            .count();
+                    nodes.push(node);
                 }
             }
             continue;
@@ -253,6 +302,11 @@ fn parse_block_children(
             continue;
         }
 
+        let child_text_offset = text_offset;
+        let first_child_node = nodes.len();
+        let mut nested_anchors = HashMap::new();
+        record_element_anchors(&child, child_text_offset, &mut anchor_offsets);
+
         // If the CSS says monospace + preserve-whitespace, treat as code block
         // regardless of the HTML tag (handles Calibre-generated classes).
         if !matches!(child.tag_name().name(), "pre" | "code")
@@ -262,10 +316,15 @@ fn parse_block_children(
         {
             let code = collect_visible_text_content(&child, styles);
             if !code.trim().is_empty() {
-                nodes.push(ContentNode::CodeBlock {
+                let node = ContentNode::CodeBlock {
                     code: code.trim().to_string(),
                     language: None,
-                });
+                };
+                record_element_anchors(&child, child_text_offset, &mut anchor_offsets);
+                text_offset += crate::search::extract_text_from_nodes(std::slice::from_ref(&node))
+                    .chars()
+                    .count();
+                nodes.push(node);
                 continue;
             }
         }
@@ -273,27 +332,41 @@ fn parse_block_children(
         let node_style = css_to_node_style(css_style, child.tag_name().name());
 
         match child.tag_name().name() {
-            "h1" => push_heading(&mut nodes, &child, 1, &node_style, styles),
-            "h2" => push_heading(&mut nodes, &child, 2, &node_style, styles),
-            "h3" => push_heading(&mut nodes, &child, 3, &node_style, styles),
-            "h4" => push_heading(&mut nodes, &child, 4, &node_style, styles),
-            "h5" => push_heading(&mut nodes, &child, 5, &node_style, styles),
-            "h6" => push_heading(&mut nodes, &child, 6, &node_style, styles),
+            "h1" => nested_anchors = push_heading(&mut nodes, &child, 1, &node_style, styles),
+            "h2" => nested_anchors = push_heading(&mut nodes, &child, 2, &node_style, styles),
+            "h3" => nested_anchors = push_heading(&mut nodes, &child, 3, &node_style, styles),
+            "h4" => nested_anchors = push_heading(&mut nodes, &child, 4, &node_style, styles),
+            "h5" => nested_anchors = push_heading(&mut nodes, &child, 5, &node_style, styles),
+            "h6" => nested_anchors = push_heading(&mut nodes, &child, 6, &node_style, styles),
 
             "p" => {
-                let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
+                let inline = collect_inline_content(&child, styles, css_style.font_size_px);
+                nested_anchors = inline.anchors;
+                let spans = inline.spans;
                 let mut paragraph = Vec::new();
+                let mut source_offset = 0;
+                let mut paragraph_source_start = 0;
+                let mut emitted_node = false;
+                let mut separator_boundaries = Vec::new();
                 for span in spans {
+                    let span_len = span.text.chars().count();
                     if span
                         .math
                         .as_ref()
                         .is_some_and(|math| math.display == super::MathDisplay::Block)
                     {
                         if !paragraph.is_empty() {
+                            if emitted_node {
+                                separator_boundaries.push(paragraph_source_start);
+                            }
                             nodes.push(ContentNode::Paragraph(
                                 std::mem::take(&mut paragraph),
                                 node_style.clone(),
                             ));
+                            emitted_node = true;
+                        }
+                        if emitted_node {
+                            separator_boundaries.push(source_offset);
                         }
                         nodes.push(ContentNode::Math {
                             content: span.math.expect("checked block math"),
@@ -303,20 +376,33 @@ fn parse_block_children(
                             },
                             link: span.link,
                         });
+                        emitted_node = true;
+                        paragraph_source_start = source_offset + span_len;
                     } else {
                         paragraph.push(span);
                     }
+                    source_offset += span_len;
                 }
                 if !paragraph.is_empty() {
+                    if emitted_node {
+                        separator_boundaries.push(paragraph_source_start);
+                    }
                     nodes.push(ContentNode::Paragraph(paragraph, node_style));
+                }
+                for offset in nested_anchors.values_mut() {
+                    *offset += separator_boundaries
+                        .iter()
+                        .filter(|boundary| **boundary <= *offset)
+                        .count();
                 }
             }
 
             "blockquote" => {
                 let inner = parse_block_children(child, base_path, styles);
-                if !inner.is_empty() {
+                if !inner.nodes.is_empty() {
+                    nested_anchors = inner.anchor_offsets;
                     nodes.push(ContentNode::BlockQuote {
-                        children: inner,
+                        children: inner.nodes,
                         style: node_style,
                     });
                 }
@@ -324,6 +410,7 @@ fn parse_block_children(
 
             "table" => {
                 if let Some(table) = parse_table(&child, base_path, styles, node_style) {
+                    nested_anchors = table_anchor_offsets(&child, &table, base_path, styles);
                     nodes.push(table);
                 }
             }
@@ -337,15 +424,17 @@ fn parse_block_children(
             }
 
             "ul" => {
-                let items = parse_list_items(&child, styles);
+                let (items, anchors) = parse_list_items(&child, styles);
                 if !items.is_empty() {
+                    nested_anchors = anchors;
                     nodes.push(ContentNode::UnorderedList(items));
                 }
             }
 
             "ol" => {
-                let items = parse_list_items(&child, styles);
+                let (items, anchors) = parse_list_items(&child, styles);
                 if !items.is_empty() {
+                    nested_anchors = anchors;
                     let start = child
                         .attribute("start")
                         .and_then(|value| value.parse().ok())
@@ -396,19 +485,177 @@ fn parse_block_children(
 
             "div" | "section" | "article" | "main" | "aside" | "header" | "footer" | "figure"
             | "figcaption" => {
-                nodes.extend(parse_block_children(child, base_path, styles));
+                let inner = parse_block_children(child, base_path, styles);
+                nested_anchors = inner.anchor_offsets;
+                nodes.extend(inner.nodes);
             }
 
             _ => {
-                let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
-                if !spans.is_empty() {
-                    nodes.push(ContentNode::Paragraph(spans, node_style));
+                let inline = collect_inline_content(&child, styles, css_style.font_size_px);
+                nested_anchors = inline.anchors;
+                if !inline.spans.is_empty() {
+                    nodes.push(ContentNode::Paragraph(inline.spans, node_style));
                 }
             }
         }
+
+        for (name, offset) in nested_anchors {
+            record_anchor_name(&name, child_text_offset + offset, &mut anchor_offsets);
+        }
+        if nodes.len() > first_child_node {
+            text_offset += crate::search::extract_text_from_nodes(&nodes[first_child_node..])
+                .chars()
+                .count();
+        }
     }
 
-    nodes
+    ParsedChapterContent {
+        nodes,
+        anchor_offsets,
+    }
+}
+
+fn record_element_anchors(
+    element: &roxmltree::Node<'_, '_>,
+    offset: usize,
+    anchors: &mut HashMap<String, usize>,
+) {
+    let names = element.attribute("id").into_iter().chain(
+        (element.tag_name().name() == "a")
+            .then(|| element.attribute("name"))
+            .flatten(),
+    );
+    for name in names {
+        record_anchor_name(name, offset, anchors);
+    }
+}
+
+fn record_anchor_name(name: &str, offset: usize, anchors: &mut HashMap<String, usize>) {
+    if anchors.len() >= MAX_CHAPTER_ANCHORS
+        || name.is_empty()
+        || name.len() > MAX_ANCHOR_NAME_BYTES
+        || name.chars().any(|character| character.is_control())
+    {
+        return;
+    }
+    anchors.entry(name.to_owned()).or_insert(offset);
+}
+
+fn table_anchor_offsets(
+    source: &roxmltree::Node<'_, '_>,
+    table: &ContentNode,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> HashMap<String, usize> {
+    let ContentNode::Table {
+        caption,
+        row_groups,
+        ..
+    } = table
+    else {
+        return HashMap::new();
+    };
+    let mut anchors = HashMap::new();
+    if let Some(source_caption) = source.children().find(|child| {
+        child.is_element()
+            && child.tag_name().name() == "caption"
+            && styles
+                .get(*child)
+                .is_none_or(|style| style.display != super::computed_style::DisplayRole::None)
+    }) {
+        record_element_anchors(&source_caption, 0, &mut anchors);
+        let font_size = styles
+            .get(source_caption)
+            .expect("computed style must exist for table caption")
+            .font_size_px;
+        for (name, offset) in collect_inline_content(&source_caption, styles, font_size).anchors {
+            record_anchor_name(&name, offset, &mut anchors);
+        }
+    }
+    let mut offset = caption
+        .iter()
+        .map(|span| span.text.chars().count())
+        .sum::<usize>();
+    offset += usize::from(!caption.is_empty());
+
+    let source_rows = visible_table_rows(source, styles);
+    let rows = row_groups.iter().flat_map(|group| &group.rows);
+    for (source_row, row) in source_rows.into_iter().zip(rows) {
+        record_element_anchors(&source_row, offset, &mut anchors);
+        let source_cells = source_row.children().filter(|cell| {
+            cell.is_element()
+                && matches!(cell.tag_name().name(), "th" | "td")
+                && styles
+                    .get(*cell)
+                    .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+        });
+        for (cell_index, (source_cell, cell)) in source_cells.zip(&row.cells).enumerate() {
+            record_element_anchors(&source_cell, offset, &mut anchors);
+            let has_block_children = source_cell.children().any(|child| {
+                child.is_element()
+                    && styles.get(child).is_some_and(|style| {
+                        style.display != super::computed_style::DisplayRole::None
+                            && style.display != super::computed_style::DisplayRole::Inline
+                    })
+            });
+            let nested = if has_block_children {
+                parse_block_children(source_cell, base_path, styles).anchor_offsets
+            } else {
+                let font_size = styles
+                    .get(source_cell)
+                    .expect("computed style must exist for table cell")
+                    .font_size_px;
+                collect_inline_content(&source_cell, styles, font_size).anchors
+            };
+            for (name, nested_offset) in nested {
+                record_anchor_name(&name, offset + nested_offset, &mut anchors);
+            }
+            for (child_index, child) in cell.children.iter().enumerate() {
+                if cell.block_starts.contains(&child_index) {
+                    offset += 1;
+                }
+                offset += crate::search::extract_text_from_nodes(std::slice::from_ref(child))
+                    .chars()
+                    .count()
+                    .saturating_sub(1);
+            }
+            offset += usize::from(cell_index + 1 < row.cells.len());
+        }
+        offset += 1;
+    }
+    anchors
+}
+
+fn visible_table_rows<'a>(
+    table: &roxmltree::Node<'a, 'a>,
+    styles: &super::computed_style::ComputedDocumentStyles,
+) -> Vec<roxmltree::Node<'a, 'a>> {
+    let visible_row = |row: roxmltree::Node<'a, 'a>| {
+        row.is_element()
+            && row.tag_name().name() == "tr"
+            && styles
+                .get(row)
+                .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+            && row.children().any(|cell| {
+                cell.is_element()
+                    && matches!(cell.tag_name().name(), "th" | "td")
+                    && styles.get(cell).is_some_and(|style| {
+                        style.display != super::computed_style::DisplayRole::None
+                    })
+            })
+    };
+    table
+        .children()
+        .filter(roxmltree::Node::is_element)
+        .flat_map(|child| match child.tag_name().name() {
+            "tr" => visible_row(child).then_some(child).into_iter().collect(),
+            "thead" | "tbody" | "tfoot" => child
+                .children()
+                .filter(|row| visible_row(*row))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect()
 }
 
 fn parse_table(
@@ -847,27 +1094,30 @@ fn push_heading(
     level: u8,
     node_style: &NodeStyle,
     styles: &super::computed_style::ComputedDocumentStyles,
-) {
+) -> HashMap<String, usize> {
     let font_size = styles
         .get(*element)
         .expect("computed style must exist for heading")
         .font_size_px;
-    let spans = collect_inline_spans(element, styles, font_size);
-    if !spans.is_empty() {
+    let inline = collect_inline_content(element, styles, font_size);
+    if !inline.spans.is_empty() {
         nodes.push(ContentNode::Heading {
             level,
-            spans,
+            spans: inline.spans,
             style: node_style.clone(),
         });
     }
+    inline.anchors
 }
 
 /// Parse <li> items from a <ul> or <ol>.
 fn parse_list_items(
     list: &roxmltree::Node,
     styles: &super::computed_style::ComputedDocumentStyles,
-) -> Vec<Vec<TextSpan>> {
+) -> (Vec<Vec<TextSpan>>, HashMap<String, usize>) {
     let mut items = Vec::new();
+    let mut anchors = HashMap::new();
+    let mut text_offset = 0;
     for child in list.children() {
         if child.is_element() && child.tag_name().name() == "li" {
             if styles
@@ -876,13 +1126,23 @@ fn parse_list_items(
             {
                 continue;
             }
-            let spans = collect_inline_spans(&child, styles, 16.0);
-            if !spans.is_empty() {
-                items.push(spans);
+            let inline = collect_inline_content(&child, styles, 16.0);
+            if !inline.spans.is_empty() {
+                record_element_anchors(&child, text_offset, &mut anchors);
+                for (name, offset) in inline.anchors {
+                    record_anchor_name(&name, text_offset + offset, &mut anchors);
+                }
+                text_offset += inline
+                    .spans
+                    .iter()
+                    .map(|span| span.text.chars().count())
+                    .sum::<usize>()
+                    + 1;
+                items.push(inline.spans);
             }
         }
     }
-    items
+    (items, anchors)
 }
 
 /// Collect inline text spans with bold/italic formatting from an element.
@@ -891,21 +1151,58 @@ fn collect_inline_spans(
     styles: &super::computed_style::ComputedDocumentStyles,
     base_font_size: f32,
 ) -> Vec<TextSpan> {
+    collect_inline_content(element, styles, base_font_size).spans
+}
+
+struct InlineContent {
+    spans: Vec<TextSpan>,
+    anchors: HashMap<String, usize>,
+}
+
+fn collect_inline_content(
+    element: &roxmltree::Node,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    base_font_size: f32,
+) -> InlineContent {
     let mut spans = Vec::new();
-    collect_inline_spans_recursive(element, base_font_size, None, styles, &mut spans);
+    let mut anchors = HashMap::new();
+    let mut raw_offset = 0;
+    collect_inline_spans_recursive(
+        element,
+        base_font_size,
+        None,
+        styles,
+        &mut spans,
+        &mut anchors,
+        &mut raw_offset,
+    );
 
     // XHTML follows HTML whitespace rules for normal inline content: source
     // line breaks and indentation collapse to a single space. Preserve raw
     // whitespace only in code blocks, which do not use this collector.
-    collapse_inline_whitespace(&mut spans);
+    collapse_inline_whitespace_with_anchors(&mut spans, &mut anchors);
 
     // Merge adjacent spans with the same formatting.
     merge_spans(&mut spans);
-    spans
+    InlineContent { spans, anchors }
 }
 
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
+    collapse_inline_whitespace_with_anchors(spans, &mut HashMap::new());
+}
+
+fn collapse_inline_whitespace_with_anchors(
+    spans: &mut Vec<TextSpan>,
+    anchors: &mut HashMap<String, usize>,
+) {
     let mut at_start_or_whitespace = true;
+    let raw_len = spans
+        .iter()
+        .map(|span| span.text.chars().count())
+        .sum::<usize>();
+    let mut normalized_boundaries = vec![0; raw_len + 1];
+    let mut raw_offset = 0_usize;
+    let mut normalized_offset = 0_usize;
     for span in spans.iter_mut() {
         if span.math.is_some() {
             at_start_or_whitespace = span
@@ -913,6 +1210,11 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
                 .chars()
                 .last()
                 .is_none_or(|character| character.is_ascii_whitespace());
+            for _ in span.text.chars() {
+                raw_offset += 1;
+                normalized_offset += 1;
+                normalized_boundaries[raw_offset] = normalized_offset;
+            }
             continue;
         }
         if span.preserve_whitespace {
@@ -921,6 +1223,11 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
                 .chars()
                 .last()
                 .is_none_or(|character| character.is_ascii_whitespace());
+            for _ in span.text.chars() {
+                raw_offset += 1;
+                normalized_offset += 1;
+                normalized_boundaries[raw_offset] = normalized_offset;
+            }
             continue;
         }
         let mut normalized = String::with_capacity(span.text.len());
@@ -928,12 +1235,16 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
             if character.is_ascii_whitespace() {
                 if !at_start_or_whitespace {
                     normalized.push(' ');
+                    normalized_offset += 1;
                     at_start_or_whitespace = true;
                 }
             } else {
                 normalized.push(character);
+                normalized_offset += 1;
                 at_start_or_whitespace = false;
             }
+            raw_offset += 1;
+            normalized_boundaries[raw_offset] = normalized_offset;
         }
         span.text = normalized;
     }
@@ -944,8 +1255,16 @@ fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
         && last.text.ends_with(' ')
     {
         last.text.pop();
+        normalized_offset = normalized_offset.saturating_sub(1);
     }
     spans.retain(|span| !span.text.is_empty());
+    for offset in anchors.values_mut() {
+        *offset = normalized_boundaries
+            .get(*offset)
+            .copied()
+            .unwrap_or(normalized_offset)
+            .min(normalized_offset);
+    }
 }
 
 fn collect_inline_spans_recursive(
@@ -954,6 +1273,8 @@ fn collect_inline_spans_recursive(
     link: Option<&str>,
     styles: &super::computed_style::ComputedDocumentStyles,
     spans: &mut Vec<TextSpan>,
+    anchors: &mut HashMap<String, usize>,
+    raw_offset: &mut usize,
 ) {
     let style = styles
         .get(*node)
@@ -962,6 +1283,7 @@ fn collect_inline_spans_recursive(
         if child.is_text() {
             let text = child.text().unwrap_or("");
             if !text.is_empty() {
+                *raw_offset += text.chars().count();
                 spans.push(TextSpan {
                     text: text.to_string(),
                     math: None,
@@ -982,8 +1304,11 @@ fn collect_inline_spans_recursive(
                 continue;
             }
 
+            record_element_anchors(&child, *raw_offset, anchors);
+
             if super::math::is_math(child) {
                 let content = super::math::parse_math(child);
+                *raw_offset += content.fallback.chars().count();
                 spans.push(TextSpan {
                     text: content.fallback.clone(),
                     math: Some(content),
@@ -1001,10 +1326,26 @@ fn collect_inline_spans_recursive(
             match child.tag_name().name() {
                 "a" => {
                     let href = child.attribute("href");
-                    collect_inline_spans_recursive(&child, base_font_size, href, styles, spans);
+                    collect_inline_spans_recursive(
+                        &child,
+                        base_font_size,
+                        href,
+                        styles,
+                        spans,
+                        anchors,
+                        raw_offset,
+                    );
                 }
                 _ => {
-                    collect_inline_spans_recursive(&child, base_font_size, link, styles, spans);
+                    collect_inline_spans_recursive(
+                        &child,
+                        base_font_size,
+                        link,
+                        styles,
+                        spans,
+                        anchors,
+                        raw_offset,
+                    );
                 }
             }
         }
@@ -1098,6 +1439,134 @@ fn resolve_relative(base: &str, href: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chapter_anchors_follow_search_text_character_offsets() {
+        let xhtml = r#"<html><body>
+            <p>before</p>
+            <section id="section"><p id="second">alpha <a name="middle"></a>beta <span id="target">gamma</span></p></section>
+            <p><span id="duplicate">first</span></p>
+            <p id="duplicate">second</p>
+            <p style="display:none" id="hidden">hidden</p>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+        let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
+
+        assert_eq!(search_text, "before\nalpha beta gamma\nfirst\nsecond\n");
+        assert_eq!(parsed.anchor_offsets.get("section"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("second"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("middle"), Some(&13));
+        assert_eq!(parsed.anchor_offsets.get("target"), Some(&18));
+        assert_eq!(parsed.anchor_offsets.get("duplicate"), Some(&24));
+        assert!(!parsed.anchor_offsets.contains_key("hidden"));
+    }
+
+    #[test]
+    fn chapter_anchors_cover_headings_lists_and_table_cells() {
+        let xhtml = r#"<html><body>
+            <h1><span id="heading">title</span></h1>
+            <ul><li id="first-item">one</li><li><span id="second-item">two</span></li></ul>
+            <table><tr><td id="cell">cell</td><td>other</td></tr></table>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "title\none\ntwo\n\ncell\tother\n\n"
+        );
+        assert_eq!(parsed.anchor_offsets.get("heading"), Some(&0));
+        assert_eq!(parsed.anchor_offsets.get("first-item"), Some(&6));
+        assert_eq!(parsed.anchor_offsets.get("second-item"), Some(&10));
+        assert_eq!(parsed.anchor_offsets.get("cell"), Some(&15));
+    }
+
+    #[test]
+    fn paragraph_anchor_offsets_include_promoted_display_separators() {
+        let xhtml = r#"<html xmlns:m="http://www.w3.org/1998/Math/MathML"><body>
+            <p>before <m:math id="formula" display="block"><m:mfrac><m:mi>a</m:mi><m:mi>b</m:mi></m:mfrac></m:math> after <span id="tail">tail</span></p>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "before \n(a)/(b)\n after tail\n"
+        );
+        assert_eq!(parsed.anchor_offsets.get("formula"), Some(&8));
+        assert_eq!(parsed.anchor_offsets.get("tail"), Some(&23));
+    }
+
+    #[test]
+    fn chapter_anchors_include_body_empty_markers_and_table_descendants() {
+        let xhtml = r#"<html><body id="body-top">
+            <a id="empty-marker" name="legacy-marker"></a><p id="empty-paragraph"></p>
+            <p>before</p>
+            <table><caption id="caption"><span id="caption-child">cap</span></caption>
+              <tr id="row"><td><span id="cell-child">cell</span></td></tr>
+            </table>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("chapter should parse");
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "before\ncap\ncell\n\n"
+        );
+        for anchor in [
+            "body-top",
+            "empty-marker",
+            "legacy-marker",
+            "empty-paragraph",
+        ] {
+            assert_eq!(parsed.anchor_offsets.get(anchor), Some(&0), "{anchor}");
+        }
+        assert_eq!(parsed.anchor_offsets.get("caption"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("caption-child"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("row"), Some(&11));
+        assert_eq!(parsed.anchor_offsets.get("cell-child"), Some(&11));
+    }
 
     #[test]
     fn test_parse_paragraph() {

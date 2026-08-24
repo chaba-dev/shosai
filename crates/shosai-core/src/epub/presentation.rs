@@ -1,6 +1,7 @@
 //! Parsed EPUB chapter content shared by search and reader presentation.
 
 use anyhow::Result;
+use std::collections::HashMap;
 
 use super::EpubLimits;
 use super::render::ContentNode;
@@ -12,6 +13,7 @@ use super::types::Chapter;
 pub struct EpubChapterPresentation {
     nodes: Vec<ContentNode>,
     search_text: String,
+    anchor_offsets: HashMap<String, usize>,
 }
 
 impl EpubChapterPresentation {
@@ -23,6 +25,11 @@ impl EpubChapterPresentation {
     /// Searchable text extracted from the same parsed content nodes.
     pub fn search_text(&self) -> &str {
         &self.search_text
+    }
+
+    /// Character offset for a decoded XHTML element ID or legacy anchor name.
+    pub fn anchor_offset(&self, anchor: &str) -> Option<usize> {
+        self.anchor_offsets.get(anchor).copied()
     }
 }
 
@@ -42,15 +49,19 @@ impl EpubPresentation {
         let chapters = chapters
             .iter()
             .map(|chapter| -> Result<_> {
-                let nodes = super::render::parse_chapter_xhtml_at_path_with_limits(
+                let parsed = super::render::parse_chapter_content_at_path_with_limits(
                     &chapter.content,
                     &chapter.path,
                     styles,
                     fonts,
                     limits,
                 )?;
-                let search_text = crate::search::extract_text_from_nodes(&nodes);
-                Ok(EpubChapterPresentation { nodes, search_text })
+                let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
+                Ok(EpubChapterPresentation {
+                    nodes: parsed.nodes,
+                    search_text,
+                    anchor_offsets: parsed.anchor_offsets,
+                })
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self { chapters })

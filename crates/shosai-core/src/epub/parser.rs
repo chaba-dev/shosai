@@ -33,6 +33,7 @@ pub struct EpubDoc {
     content: EpubContent,
     fonts: super::font::EpubFontBook,
     presentation: EpubPresentation,
+    chapter_index: HashMap<CanonicalEpubPath, usize>,
 }
 
 impl EpubDoc {
@@ -107,10 +108,15 @@ impl EpubDoc {
         validate_spine_size(&spine_ids, &limits)?;
 
         // 3. Try to parse the TOC (NCX or nav document).
-        let toc = parse_toc(&mut archive, &manifest, &opf_dir, &limits)?;
+        let toc = parse_toc(&mut archive, &manifest, &limits)?;
 
         // 4. Load chapters (spine items) in reading order.
         let chapters = load_chapters(&mut archive, &spine_ids, &manifest, &toc, &limits)?;
+        let chapter_index = chapters
+            .iter()
+            .enumerate()
+            .map(|(index, chapter)| Ok((CanonicalEpubPath::new(&chapter.path)?, index)))
+            .collect::<Result<HashMap<_, _>>>()?;
 
         // 5. Load resources (images, CSS, fonts).
         let chapter_paths = chapters
@@ -156,6 +162,7 @@ impl EpubDoc {
             },
             fonts,
             presentation,
+            chapter_index,
         })
     }
 
@@ -184,6 +191,42 @@ impl EpubDoc {
     /// Parsed chapter content shared by rendering, pagination, and search.
     pub fn presentation(&self) -> &EpubPresentation {
         &self.presentation
+    }
+
+    /// Resolve a same-book link to a spine chapter and stable character offset.
+    pub fn resolve_location(&self, current_chapter: usize, href: &str) -> Option<(usize, usize)> {
+        let current_path = CanonicalEpubPath::new(&self.chapter(current_chapter)?.path).ok()?;
+        let reference = if let Some(fragment) = href.strip_prefix('#') {
+            current_path.with_fragment(fragment).ok()?
+        } else {
+            let base_path = current_path
+                .as_str()
+                .rsplit_once('/')
+                .map_or("", |(directory, _)| directory);
+            CanonicalEpubPath::resolve(base_path, href).ok()?
+        };
+        self.resolve_reference_location(reference)
+    }
+
+    /// Resolve a canonical same-book table-of-contents target.
+    pub fn resolve_toc_location(&self, href: &str) -> Option<(usize, usize)> {
+        let reference = CanonicalEpubPath::resolve("", href).ok()?;
+        self.resolve_reference_location(reference)
+    }
+
+    fn resolve_reference_location(
+        &self,
+        reference: super::EpubReference,
+    ) -> Option<(usize, usize)> {
+        let chapter = *self.chapter_index.get(&reference.path)?;
+        let offset = match reference.fragment {
+            Some(fragment) => self
+                .presentation
+                .chapter(chapter)?
+                .anchor_offset(&fragment)?,
+            None => 0,
+        };
+        Some((chapter, offset))
     }
 
     /// Book-local embedded fonts admitted from author stylesheets.
@@ -672,7 +715,6 @@ fn validate_spine_size(spine_ids: &[String], limits: &EpubLimits) -> Result<()> 
 fn parse_toc(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     manifest: &HashMap<String, ManifestItem>,
-    opf_dir: &str,
     limits: &EpubLimits,
 ) -> Result<Vec<TocEntry>> {
     // Try NCX first (EPUB 2).
@@ -683,7 +725,11 @@ fn parse_toc(
         let exists = archive.by_name(&ncx_item.href).is_ok();
         if exists {
             let xml = read_archive_entry(archive, &ncx_item.href, limits)?;
-            if let Ok(entries) = parse_ncx_toc(&xml, opf_dir) {
+            let base_dir = ncx_item
+                .href
+                .rsplit_once('/')
+                .map_or("", |(directory, _)| directory);
+            if let Ok(entries) = parse_ncx_toc(&xml, base_dir) {
                 return Ok(entries);
             }
         }
@@ -697,7 +743,11 @@ fn parse_toc(
         let exists = archive.by_name(&nav_item.href).is_ok();
         if exists {
             let xml = read_archive_entry(archive, &nav_item.href, limits)?;
-            if let Ok(entries) = parse_nav_toc(&xml, opf_dir) {
+            let base_dir = nav_item
+                .href
+                .rsplit_once('/')
+                .map_or("", |(directory, _)| directory);
+            if let Ok(entries) = parse_nav_toc(&xml, base_dir) {
                 return Ok(entries);
             }
         }
@@ -770,40 +820,46 @@ fn parse_nav_toc(xml: &str, opf_dir: &str) -> Result<Vec<TocEntry>> {
     parse_nav_ol(ol, opf_dir)
 }
 
-fn parse_nav_ol(ol: roxmltree::Node, opf_dir: &str) -> Result<Vec<TocEntry>> {
+fn parse_nav_ol(ol: roxmltree::Node, base_dir: &str) -> Result<Vec<TocEntry>> {
     let mut entries = Vec::new();
     for li in ol.children() {
         if !li.is_element() || li.tag_name().name() != "li" {
             continue;
         }
 
-        let (title, href) = if let Some(a) = li
+        let link = li
             .children()
-            .find(|n| n.is_element() && n.tag_name().name() == "a")
-        {
-            let title = a.text().unwrap_or("").trim().to_string();
-            let href = a
-                .attribute("href")
-                .map(|source| resolve_path(opf_dir, source))
-                .transpose()?
-                .unwrap_or_default();
-            (title, href)
-        } else {
-            continue;
-        };
+            .find(|node| node.is_element() && node.tag_name().name() == "a");
+        let title = link
+            .and_then(|node| node.text())
+            .or_else(|| {
+                li.children()
+                    .find(|node| node.is_element() && node.tag_name().name() == "span")
+                    .and_then(|node| node.text())
+            })
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let href = link
+            .and_then(|node| node.attribute("href"))
+            .map(|source| resolve_path(base_dir, source))
+            .transpose()?
+            .unwrap_or_default();
 
         let children = li
             .children()
             .find(|n| n.is_element() && n.tag_name().name() == "ol")
-            .map(|ol| parse_nav_ol(ol, opf_dir))
+            .map(|ol| parse_nav_ol(ol, base_dir))
             .transpose()?
             .unwrap_or_default();
 
-        entries.push(TocEntry {
-            title,
-            href,
-            children,
-        });
+        if !title.is_empty() || !href.is_empty() || !children.is_empty() {
+            entries.push(TocEntry {
+                title,
+                href,
+                children,
+            });
+        }
     }
     Ok(entries)
 }
@@ -820,9 +876,9 @@ fn load_chapters(
     let mut toc_titles: HashMap<String, String> = HashMap::new();
     fn collect_titles(entries: &[TocEntry], map: &mut HashMap<String, String>) {
         for entry in entries {
-            let path = entry.href.split('#').next().unwrap_or("").to_string();
-            if !path.is_empty() {
-                map.entry(path).or_insert_with(|| entry.title.clone());
+            if let Ok(reference) = CanonicalEpubPath::resolve("", &entry.href) {
+                map.entry(reference.path.as_str().to_string())
+                    .or_insert_with(|| entry.title.clone());
             }
             collect_titles(&entry.children, map);
         }
@@ -906,12 +962,7 @@ fn load_resources(
 /// Resolve a relative path against the OPF directory.
 fn resolve_path(opf_dir: &str, href: &str) -> Result<String> {
     let reference = CanonicalEpubPath::resolve(opf_dir, href)?;
-    let mut resolved = reference.path.as_str().to_string();
-    if let Some(fragment) = reference.fragment {
-        resolved.push('#');
-        resolved.push_str(&fragment);
-    }
-    Ok(resolved)
+    Ok(reference.to_archive_reference())
 }
 
 fn resolve_manifest_path(opf_dir: &str, href: &str) -> Result<String> {
@@ -955,6 +1006,83 @@ mod tests {
             archive.write_all(bytes).unwrap();
         }
         archive.finish().unwrap().into_inner()
+    }
+
+    fn linked_chapter_epub() -> Vec<u8> {
+        archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">anchors</dc:identifier><dc:title>Anchors</dc:title><dc:language>en</dc:language></metadata><manifest><item id="one" href="Text/one.xhtml" media-type="application/xhtml+xml"/><item id="two" href="Text/two.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="one"/><itemref idref="two"/></spine></package>"#,
+            ),
+            (
+                "OPS/Text/one.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>before</p><p id="same">same target</p></body></html>"##,
+            ),
+            (
+                "OPS/Text/two.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>chapter two</p><p><span id="cross target">cross target</span></p></body></html>"##,
+            ),
+        ])
+    }
+
+    fn nested_navigation_epub() -> Vec<u8> {
+        archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">toc-anchors</dc:identifier><dc:title>TOC Anchors</dc:title><dc:language>en</dc:language></metadata><manifest><item id="nav" href="Nav/toc.xhtml" media-type="application/xhtml+xml"/><item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            (
+                "OPS/Nav/toc.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><nav><ol><li><span>Part</span><ol><li><a href="../Text/chapter.xhtml#literal%2520id">Literal percent</a></li></ol></li></ol></nav></body></html>"##,
+            ),
+            (
+                "OPS/Text/chapter.xhtml",
+                br##"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>before</p><p id="literal%20id">target</p></body></html>"##,
+            ),
+        ])
+    }
+
+    #[test]
+    fn epub_locations_resolve_same_and_cross_chapter_fragments_canonically() {
+        let document = EpubDoc::from_bytes(linked_chapter_epub()).expect("fixture should open");
+
+        assert_eq!(document.resolve_location(0, "#same"), Some((0, 7)));
+        assert_eq!(
+            document.resolve_location(0, "two.xhtml#cross%20target"),
+            Some((1, 12))
+        );
+        assert_eq!(document.resolve_location(0, "two.xhtml"), Some((1, 0)));
+        assert_eq!(
+            document.resolve_toc_location("OPS/Text/two.xhtml#cross%20target"),
+            Some((1, 12))
+        );
+        assert_eq!(document.resolve_location(0, "#missing"), None);
+        assert_eq!(
+            document.resolve_location(0, "../../outside.xhtml#same"),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_toc_keeps_nested_navigation_base_and_literal_percent_fragment() {
+        let document = EpubDoc::from_bytes(nested_navigation_epub()).expect("fixture should open");
+
+        assert_eq!(document.toc().len(), 1);
+        assert_eq!(document.toc()[0].title, "Part");
+        assert_eq!(document.toc()[0].children.len(), 1);
+        let target = &document.toc()[0].children[0];
+        assert_eq!(target.title, "Literal percent");
+        assert_eq!(document.resolve_toc_location(&target.href), Some((0, 7)));
     }
 
     fn forge_declared_uncompressed_size(archive: &mut [u8], forged_size: u32) {
