@@ -685,7 +685,9 @@ matrices. Direct display math remains an atomic block. Inline MathML identity is
 retained independently of native-layout success. An expression becomes an
 atomic wrapping-row item only when the same admission used by painting succeeds
 for its direction, alignment, glyphs, effective container width, and page
-height; otherwise its readable fallback remains splittable text. This admission
+height, with inline geometry additionally capped at three text-line heights;
+otherwise its readable fallback remains splittable text. Unbroken fallback uses
+word-or-glyph wrapping within clipped table cells and page bounds. This admission
 also applies inside headings, captions, lists, indented paragraphs, and padded
 table cells. Explicit display math nested in a paragraph is promoted to a block
 between the surrounding text fragments even when only its fallback is

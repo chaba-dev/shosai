@@ -399,7 +399,8 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   explicit display math without dropping enclosing links, and admits atomic
   inline geometry only when the shared pagination/painting check succeeds for the
   effective container bounds, direction, alignment, and glyph coverage.  RTL,
-  justified, over-bound, and unsupported cases retain splittable fallback.  Local
+  justified, over-bound, over-three-line-height, and unsupported cases retain
+  word-or-glyph-wrapped splittable fallback.  Local
   regressions also cover wrapped-page height, blockquote slicing, bounded mixed
   embedded-font flow, and table search separators.  Native macOS and Linux
   validation is still required before this item is complete.
