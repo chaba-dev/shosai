@@ -3954,42 +3954,49 @@ fn render_content_node<'a>(
             }) {
                 let highlight =
                     math_highlight_state(highlights, text_offset, content.fallback.chars().count());
-                let math: Element<'a, Message> = crate::epub::math_widget::math(
-                    layout,
-                    palette.text,
-                    math_highlight_color(palette, highlight),
-                );
                 let math = if let Some(link) = link {
-                    button(math)
-                        .on_press(Message::LinkClicked(link.clone()))
-                        .padding(0)
-                        .style(button::text)
-                        .into()
+                    crate::epub::math_widget::linked_math(
+                        layout,
+                        palette.text,
+                        math_highlight_color(palette, highlight),
+                        Message::LinkClicked(link.clone()),
+                    )
                 } else {
-                    math
+                    crate::epub::math_widget::math(
+                        layout,
+                        palette.text,
+                        math_highlight_color(palette, highlight),
+                    )
                 };
                 return container(math)
                     .width(Length::Fill)
                     .align_x(node_style_to_alignment(style))
                     .into();
             }
-            let rendered: Element<'a, Message> = render_highlighted_text_with_font(
-                &content.fallback,
-                text_offset,
+            let fallback = shosai_core::epub::render::TextSpan {
+                text: content.fallback.clone(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: link.clone(),
+            };
+            let rendered = render_spans(
+                std::slice::from_ref(&fallback),
+                style.direction,
                 size,
                 palette,
-                Font::DEFAULT,
+                text_offset,
                 highlights,
+                None,
+                scale,
+                style.text_align,
+                available_width,
+                available_height,
             );
-            let rendered = if let Some(link) = link {
-                button(rendered)
-                    .on_press(Message::LinkClicked(link.clone()))
-                    .padding(0)
-                    .style(button::text)
-                    .into()
-            } else {
-                rendered
-            };
             container(rendered)
                 .width(Length::Fill)
                 .align_x(node_style_to_alignment(style))
@@ -4508,21 +4515,21 @@ fn render_inline_math_spans<'a>(
         {
             let highlight =
                 math_highlight_state(highlights, source_offset, content.fallback.chars().count());
-            let math: Element<'a, Message> = container(crate::epub::math_widget::math(
-                layout,
-                palette.text,
-                math_highlight_color(palette, highlight),
-            ))
-            .into();
-            flow = flow.push(if let Some(link) = &source.link {
-                button(math)
-                    .on_press(Message::LinkClicked(link.clone()))
-                    .padding(0)
-                    .style(button::text)
-                    .into()
+            let math = if let Some(link) = &source.link {
+                crate::epub::math_widget::linked_math(
+                    layout,
+                    palette.text,
+                    math_highlight_color(palette, highlight),
+                    Message::LinkClicked(link.clone()),
+                )
             } else {
-                math
-            });
+                crate::epub::math_widget::math(
+                    layout,
+                    palette.text,
+                    math_highlight_color(palette, highlight),
+                )
+            };
+            flow = flow.push(container(math));
             if !is_prefix {
                 source_offset += source.text.chars().count();
             }
