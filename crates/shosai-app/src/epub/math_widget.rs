@@ -1,7 +1,7 @@
 //! Iced painting for shared native MathML geometry.
 
 use iced::advanced::{Layout, Renderer as _, Widget, layout, renderer, widget::Tree};
-use iced::{Element, Font, Length, Rectangle, Size, mouse};
+use iced::{Element, Event, Font, Length, Rectangle, Size, mouse};
 
 use super::math_layout::{MATH_FONT_FAMILY, MathLayout, MathPrimitiveKind};
 
@@ -21,6 +21,15 @@ struct Math {
     layout: MathLayout,
     color: iced::Color,
     highlight: Option<iced::Color>,
+}
+
+fn linked_math_message<Message: Clone>(
+    _event: &Event,
+    _bounds: Rectangle,
+    _cursor: mouse::Cursor,
+    _message: &Message,
+) -> Option<Message> {
+    None
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Math {
@@ -103,5 +112,35 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Math {
                 ),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_math_publishes_on_a_hit_tested_press() {
+        let bounds = Rectangle::new(iced::Point::new(20.0, 30.0), Size::new(80.0, 40.0));
+        let event = Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left));
+
+        assert_eq!(
+            linked_math_message(
+                &event,
+                bounds,
+                mouse::Cursor::Available(iced::Point::new(60.0, 50.0)),
+                &"chapter.xhtml#proof",
+            ),
+            Some("chapter.xhtml#proof")
+        );
+        assert_eq!(
+            linked_math_message(
+                &event,
+                bounds,
+                mouse::Cursor::Available(iced::Point::new(10.0, 10.0)),
+                &"chapter.xhtml#proof",
+            ),
+            None
+        );
     }
 }
