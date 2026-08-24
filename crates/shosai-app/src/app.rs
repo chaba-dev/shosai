@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, grid, image, responsive, rich_text, row, scrollable, sensor,
-    span, text, text_input,
+    button, center, column, container, grid, image, mouse_area, responsive, rich_text, row,
+    scrollable, sensor, span, text, text_input,
 };
 use iced::{Element, Font, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -3686,6 +3686,8 @@ fn render_content_node<'a>(
                 fonts,
                 scale,
                 style.text_align,
+                available_width,
+                available_height,
             );
             container(heading).width(Length::Fill).align_x(align).into()
         }
@@ -3706,6 +3708,8 @@ fn render_content_node<'a>(
                 fonts,
                 scale,
                 style.text_align,
+                available_width,
+                available_height,
             );
             let mut c = container(rendered).width(Length::Fill).align_x(align);
             if let Some(margin) = style.margin_left_em {
@@ -3770,6 +3774,8 @@ fn render_content_node<'a>(
                     fonts,
                     scale,
                     caption_style.text_align,
+                    available_width,
+                    available_height,
                 ));
                 table_offset += spans_text_len(caption) + 1;
             }
@@ -3853,6 +3859,8 @@ fn render_content_node<'a>(
                     fonts,
                     scale,
                     None,
+                    available_width,
+                    available_height,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -3876,6 +3884,8 @@ fn render_content_node<'a>(
                     fonts,
                     scale,
                     None,
+                    available_width,
+                    available_height,
                 ));
                 item_offset += spans_text_len(item_spans) + 1;
             }
@@ -4228,6 +4238,8 @@ fn render_spans<'a>(
     fonts: Option<&'a EpubFontBook>,
     scale: f32,
     alignment: Option<shosai_core::epub::style::TextAlignment>,
+    available_width: f32,
+    available_height: Option<f32>,
 ) -> Element<'a, Message> {
     render_spans_with_prefix(
         "",
@@ -4241,6 +4253,8 @@ fn render_spans<'a>(
         fonts,
         scale,
         alignment,
+        available_width,
+        available_height,
     )
 }
 
@@ -4257,7 +4271,43 @@ fn render_spans_with_prefix<'a>(
     fonts: Option<&'a EpubFontBook>,
     scale: f32,
     alignment: Option<shosai_core::epub::style::TextAlignment>,
+    available_width: f32,
+    available_height: Option<f32>,
 ) -> Element<'a, Message> {
+    if direction == shosai_core::epub::style::TextDirection::Ltr
+        && alignment != Some(shosai_core::epub::style::TextAlignment::Justify)
+        && spans.iter().any(|span| span.math.is_some())
+    {
+        let mut inline_spans = Vec::with_capacity(spans.len() + usize::from(!prefix.is_empty()));
+        if !prefix.is_empty() {
+            inline_spans.push(shosai_core::epub::render::TextSpan {
+                text: prefix.to_owned(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: prefix_font_size / font_size,
+                preserve_whitespace: false,
+                link: None,
+            });
+        }
+        inline_spans.extend_from_slice(spans);
+        return render_inline_math_spans(
+            &inline_spans,
+            usize::from(!prefix.is_empty()),
+            direction,
+            font_size,
+            palette,
+            text_offset,
+            highlights,
+            fonts,
+            scale,
+            alignment,
+            available_width,
+            available_height,
+        );
+    }
     let text_color = palette.text;
     if let Some(fonts) = fonts.filter(|fonts| crate::epub::uses_native_fonts(fonts, spans)) {
         let prefix_scalars = prefix.chars().count();
@@ -4352,6 +4402,99 @@ fn color_rgba(color: iced::Color) -> [u8; 4] {
         (color.b * 255.0).round() as u8,
         (color.a * 255.0).round() as u8,
     ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_inline_math_spans<'a>(
+    spans: &[shosai_core::epub::render::TextSpan],
+    source_prefix_spans: usize,
+    direction: shosai_core::epub::style::TextDirection,
+    font_size: f32,
+    palette: ReaderPalette,
+    text_offset: usize,
+    highlights: &[SearchHighlight],
+    fonts: Option<&'a EpubFontBook>,
+    scale: f32,
+    alignment: Option<shosai_core::epub::style::TextAlignment>,
+    available_width: f32,
+    available_height: Option<f32>,
+) -> Element<'a, Message> {
+    let mut flow = row![]
+        .spacing(0)
+        .align_y(iced::Alignment::End)
+        .width(Length::Fill);
+    let mut source_offset = text_offset;
+
+    for (span_index, source) in spans.iter().enumerate() {
+        let is_prefix = span_index < source_prefix_spans;
+        if let Some(content) = &source.math
+            && let Some(layout) = crate::epub::layout_inline_math_span(
+                source,
+                font_size,
+                available_width,
+                available_height.unwrap_or(f32::MAX),
+            )
+        {
+            let highlight =
+                math_highlight_state(highlights, source_offset, content.fallback.chars().count());
+            let math: Element<'a, Message> = container(crate::epub::math_widget::math(
+                layout,
+                palette.text,
+                math_highlight_color(palette, highlight),
+            ))
+            .into();
+            flow = flow.push(if let Some(link) = &source.link {
+                mouse_area(math)
+                    .on_press(Message::LinkClicked(link.clone()))
+                    .interaction(iced::mouse::Interaction::Pointer)
+                    .into()
+            } else {
+                math
+            });
+            if !is_prefix {
+                source_offset += source.text.chars().count();
+            }
+            continue;
+        }
+
+        for piece in source.text.split_inclusive(char::is_whitespace) {
+            if piece.is_empty() {
+                continue;
+            }
+            let mut text_span = source.clone();
+            text_span.text = piece.to_owned();
+            text_span.math = None;
+            flow = flow.push(render_spans(
+                std::slice::from_ref(&text_span),
+                direction,
+                font_size,
+                palette,
+                source_offset,
+                if is_prefix { &[] } else { highlights },
+                fonts,
+                scale,
+                None,
+                available_width,
+                available_height,
+            ));
+            if !is_prefix {
+                source_offset += piece.chars().count();
+            }
+        }
+    }
+
+    flow.wrap()
+        .vertical_spacing(0)
+        .align_x(match alignment {
+            Some(shosai_core::epub::style::TextAlignment::Center) => {
+                iced::alignment::Horizontal::Center
+            }
+            Some(shosai_core::epub::style::TextAlignment::Right) => {
+                iced::alignment::Horizontal::Right
+            }
+            _ => iced::alignment::Horizontal::Left,
+        })
+        .into()
 }
 
 fn native_epub_run(
@@ -7288,6 +7431,7 @@ mod tests {
             ContentNode::Paragraph(
                 vec![shosai_core::epub::render::TextSpan {
                     text: text.to_string(),
+                    math: None,
                     font_family: None,
                     bold: false,
                     italic: false,
@@ -7680,12 +7824,67 @@ mod tests {
     }
 
     #[test]
+    fn inline_math_flow_keeps_geometry_highlight_and_link_dispatch() {
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let href = "chapter.xhtml#proof";
+        let math = TextSpan {
+            text: "(a)/(b)".into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                )),
+                fallback: "(a)/(b)".into(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: Some(href.into()),
+        };
+        let highlights = [SearchHighlight {
+            start: 8,
+            end: 15,
+            current: true,
+        }];
+        let geometry = crate::epub::layout_inline_math_span(&math, 18.0, 300.0, 200.0)
+            .expect("supported inline math must retain native geometry");
+
+        assert!(geometry.height > 18.0);
+        assert_eq!(math_highlight_state(&highlights, 7, 7), Some(true));
+        assert!(matches!(
+            epub_link_clicked(math.link.clone().unwrap()),
+            Message::LinkClicked(link) if link == href
+        ));
+        drop(render_inline_math_spans(
+            std::slice::from_ref(&math),
+            0,
+            shosai_core::epub::style::TextDirection::Ltr,
+            18.0,
+            ReaderTheme::Sepia.palette(),
+            7,
+            &highlights,
+            None,
+            1.0,
+            None,
+            300.0,
+            Some(200.0),
+        ));
+    }
+
+    #[test]
     fn rich_and_native_epub_links_use_shared_palette_highlights_and_dispatch() {
         use shosai_core::epub::render::TextSpan;
 
         let href = "chapter.xhtml#note";
         let linked = TextSpan {
             text: "note".into(),
+            math: None,
             font_family: None,
             bold: false,
             italic: false,
@@ -7936,6 +8135,7 @@ mod tests {
                     level: 2,
                     spans: vec![shosai_core::epub::render::TextSpan {
                         text: "A heading".to_string(),
+                        math: None,
                         font_family: None,
                         bold: true,
                         italic: false,
@@ -7949,6 +8149,7 @@ mod tests {
                 ContentNode::OrderedList {
                     items: vec![vec![shosai_core::epub::render::TextSpan {
                         text: "list item".to_string(),
+                        math: None,
                         font_family: None,
                         bold: true,
                         italic: false,
