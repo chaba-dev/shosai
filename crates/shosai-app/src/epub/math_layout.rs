@@ -66,13 +66,19 @@ pub(crate) fn layout_math(expression: &MathExpression, font_size: f32) -> Option
     valid_layout(&layout).then_some(layout)
 }
 
-pub(crate) fn layout_math_for_width(
+pub(crate) fn layout_math_for_bounds(
     expression: &MathExpression,
     font_size: f32,
     available_width: f32,
+    available_height: f32,
 ) -> Option<MathLayout> {
     let layout = layout_math(expression, font_size)?;
-    (available_width.is_finite() && available_width > 0.0 && layout.width <= available_width)
+    (available_width.is_finite()
+        && available_height.is_finite()
+        && available_width > 0.0
+        && available_height > 0.0
+        && layout.width <= available_width
+        && layout.height <= available_height)
         .then_some(layout)
 }
 

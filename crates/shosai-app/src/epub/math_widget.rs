@@ -8,13 +8,19 @@ use super::math_layout::{MATH_FONT_FAMILY, MathLayout, MathPrimitiveKind};
 pub(crate) fn math<'a, Message: 'a>(
     layout: MathLayout,
     color: iced::Color,
+    highlight: Option<iced::Color>,
 ) -> Element<'a, Message> {
-    Element::new(Math { layout, color })
+    Element::new(Math {
+        layout,
+        color,
+        highlight,
+    })
 }
 
 struct Math {
     layout: MathLayout,
     color: iced::Color,
+    highlight: Option<iced::Color>,
 }
 
 impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Math {
@@ -54,6 +60,16 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for Math {
         let Some(clip) = bounds.intersection(viewport) else {
             return;
         };
+        if let Some(highlight) = self.highlight {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    snap: true,
+                    ..renderer::Quad::default()
+                },
+                highlight,
+            );
+        }
         for primitive in &self.layout.primitives {
             let position = iced::Point::new(bounds.x + primitive.x, bounds.y + primitive.y);
             let primitive_bounds =

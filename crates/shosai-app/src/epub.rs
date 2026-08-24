@@ -470,18 +470,23 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 budget,
             ),
             _ => {
-                let node_height =
-                    measured_epub_compact_node_height(fonts, node, font_size, page_size.width)
-                        .map(|height| height + font_size * line_spacing)
-                        .unwrap_or_else(|| {
-                            estimated_epub_node_height(
-                                node,
-                                chars_per_line,
-                                lines_per_page,
-                                font_size,
-                                line_spacing,
-                            )
-                        });
+                let node_height = measured_epub_compact_node_height_bounded(
+                    fonts,
+                    node,
+                    font_size,
+                    page_size.width,
+                    page_size.height,
+                )
+                .map(|height| height + font_size * line_spacing)
+                .unwrap_or_else(|| {
+                    estimated_epub_node_height(
+                        node,
+                        chars_per_line,
+                        lines_per_page,
+                        font_size,
+                        line_spacing,
+                    )
+                });
                 if node_height > remaining
                     && page_has_content(&pages, first_page_has_title)
                     && push_epub_page(&mut pages, budget)
@@ -1482,6 +1487,16 @@ fn measured_epub_compact_node_height(
     font_size: f32,
     width: f32,
 ) -> Option<f32> {
+    measured_epub_compact_node_height_bounded(fonts, node, font_size, width, f32::MAX)
+}
+
+fn measured_epub_compact_node_height_bounded(
+    fonts: Option<&EpubFontBook>,
+    node: &ContentNode,
+    font_size: f32,
+    width: f32,
+    height: f32,
+) -> Option<f32> {
     match node {
         ContentNode::Heading {
             spans,
@@ -1526,11 +1541,9 @@ fn measured_epub_compact_node_height(
                 link: None,
             };
             let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
-            if let Some(layout) = content
-                .expression
-                .as_ref()
-                .and_then(|expression| math_layout::layout_math_for_width(expression, size, width))
-            {
+            if let Some(layout) = content.expression.as_ref().and_then(|expression| {
+                math_layout::layout_math_for_bounds(expression, size, width, height)
+            }) {
                 return Some(layout.height);
             }
             measure_epub_spans(
@@ -1813,7 +1826,7 @@ mod tests {
             },
             style: NodeStyle::default(),
         };
-        let native = math_layout::layout_math_for_width(&expression, 20.0, 600.0)
+        let native = math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0)
             .expect("supported standalone math should use native geometry");
 
         assert_eq!(
@@ -1858,8 +1871,13 @@ mod tests {
             unreachable!();
         };
         assert!(
-            math_layout::layout_math_for_width(content.expression.as_ref().unwrap(), 20.0, 1.0)
-                .is_none()
+            math_layout::layout_math_for_bounds(
+                content.expression.as_ref().unwrap(),
+                20.0,
+                1.0,
+                700.0,
+            )
+            .is_none()
         );
         assert!(estimated_epub_compact_node_height(&overwide, 1, 20, 20.0) > 0.0);
     }

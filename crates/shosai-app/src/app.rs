@@ -3355,6 +3355,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                                 state.window_size.width,
                                 state.show_bookmarks_panel,
                             ),
+                            None,
                             text_offset,
                             &highlights,
                             Some(doc.fonts()),
@@ -3579,6 +3580,7 @@ fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &state.epub_image_handles,
                 true,
                 text_width,
+                Some(epub_page_size(state).height),
                 page_node.text_offset,
                 &highlights,
                 fonts,
@@ -3659,6 +3661,7 @@ fn render_content_node<'a>(
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
     available_width: f32,
+    available_height: Option<f32>,
     text_offset: usize,
     highlights: &[SearchHighlight],
     fonts: Option<&'a EpubFontBook>,
@@ -3726,6 +3729,7 @@ fn render_content_node<'a>(
                     image_handles,
                     fill_images,
                     (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
+                    available_height,
                     child_offset,
                     highlights,
                     fonts,
@@ -3785,6 +3789,7 @@ fn render_content_node<'a>(
                             image_handles,
                             fill_images,
                             available_width,
+                            available_height,
                             table_offset,
                             highlights,
                             fonts,
@@ -3916,23 +3921,24 @@ fn render_content_node<'a>(
 
         ContentNode::Math { content, style } => {
             let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
-            let highlighted = highlights.iter().any(|highlight| {
-                highlight.start < text_offset + content.fallback.chars().count()
-                    && highlight.end > text_offset
-            });
-            if !highlighted
-                && let Some(layout) = content.expression.as_ref().and_then(|expression| {
-                    crate::epub::math_layout::layout_math_for_width(
-                        expression,
-                        size,
-                        available_width,
-                    )
-                })
-            {
-                return container(crate::epub::math_widget::math(layout, palette.text))
-                    .width(Length::Fill)
-                    .align_x(node_style_to_alignment(style))
-                    .into();
+            if let Some(layout) = content.expression.as_ref().and_then(|expression| {
+                crate::epub::math_layout::layout_math_for_bounds(
+                    expression,
+                    size,
+                    available_width,
+                    available_height.unwrap_or(f32::MAX),
+                )
+            }) {
+                let highlight =
+                    math_highlight_state(highlights, text_offset, content.fallback.chars().count());
+                return container(crate::epub::math_widget::math(
+                    layout,
+                    palette.text,
+                    math_highlight_color(palette, highlight),
+                ))
+                .width(Length::Fill)
+                .align_x(node_style_to_alignment(style))
+                .into();
             }
             let rendered = render_highlighted_text_with_font(
                 &content.fallback,
@@ -3953,6 +3959,29 @@ fn render_content_node<'a>(
             .color(text_color)
             .into(),
     }
+}
+
+fn math_highlight_state(
+    highlights: &[SearchHighlight],
+    text_offset: usize,
+    text_len: usize,
+) -> Option<bool> {
+    let text_end = text_offset + text_len;
+    highlights
+        .iter()
+        .filter(|highlight| highlight.start < text_end && highlight.end > text_offset)
+        .map(|highlight| highlight.current)
+        .max()
+}
+
+fn math_highlight_color(palette: ReaderPalette, highlight: Option<bool>) -> Option<iced::Color> {
+    highlight.map(|current| {
+        if current {
+            palette.current_search_highlight
+        } else {
+            palette.search_highlight
+        }
+    })
 }
 
 fn epub_heading_font_size(
@@ -7494,6 +7523,7 @@ mod tests {
             &handles,
             false,
             600.0,
+            None,
             0,
             &[],
             None,
@@ -7510,6 +7540,7 @@ mod tests {
             &handles,
             false,
             600.0,
+            None,
             0,
             &[],
             None,
