@@ -299,6 +299,7 @@ mod tests {
                 level: 1,
                 spans: vec![TextSpan {
                     text: "Chapter One".to_string(),
+                    math: None,
                     font_family: None,
                     bold: true,
                     italic: false,
@@ -313,6 +314,7 @@ mod tests {
                 vec![
                     TextSpan {
                         text: "Hello ".to_string(),
+                        math: None,
                         font_family: None,
                         bold: false,
                         italic: false,
@@ -323,6 +325,7 @@ mod tests {
                     },
                     TextSpan {
                         text: "world".to_string(),
+                        math: None,
                         font_family: None,
                         bold: true,
                         italic: false,

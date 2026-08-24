@@ -9,10 +9,12 @@ use std::sync::Arc;
 
 use super::EpubLimits;
 
-/// A styled span of inline text.
+/// A styled span of inline text or bounded MathML replacement geometry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSpan {
     pub text: String,
+    /// Native inline geometry. `text` remains its readable search and fallback contract.
+    pub math: Option<super::MathContent>,
     /// First admitted embedded family from the computed CSS fallback list.
     pub font_family: Option<Arc<str>>,
     pub bold: bool,
@@ -225,6 +227,7 @@ fn parse_block_children(
                     nodes.push(ContentNode::Paragraph(
                         vec![TextSpan {
                             text: text.to_string(),
+                            math: None,
                             font_family: None,
                             bold: false,
                             italic: false,
@@ -278,8 +281,32 @@ fn parse_block_children(
 
             "p" => {
                 let spans = collect_inline_spans(&child, styles, css_style.font_size_px);
-                if !spans.is_empty() {
-                    nodes.push(ContentNode::Paragraph(spans, node_style));
+                let mut paragraph = Vec::new();
+                for span in spans {
+                    if span
+                        .math
+                        .as_ref()
+                        .is_some_and(|math| math.display == super::MathDisplay::Block)
+                    {
+                        if !paragraph.is_empty() {
+                            nodes.push(ContentNode::Paragraph(
+                                std::mem::take(&mut paragraph),
+                                node_style.clone(),
+                            ));
+                        }
+                        nodes.push(ContentNode::Math {
+                            content: span.math.expect("checked block math"),
+                            style: NodeStyle {
+                                font_size_multiplier: Some(span.font_size_multiplier),
+                                ..node_style.clone()
+                            },
+                        });
+                    } else {
+                        paragraph.push(span);
+                    }
+                }
+                if !paragraph.is_empty() {
+                    nodes.push(ContentNode::Paragraph(paragraph, node_style));
                 }
             }
 
@@ -612,6 +639,33 @@ fn collect_table_cell_inline(
     if css.display == super::computed_style::DisplayRole::None {
         return;
     }
+    if super::math::is_math(*node) {
+        let content = super::math::parse_math(*node);
+        if content.display == super::MathDisplay::Block {
+            flush_table_cell_spans(spans, children, block_style);
+            children.push(ContentNode::Math {
+                content,
+                style: NodeStyle {
+                    font_size_multiplier: Some(css.font_size_px / base_font_size),
+                    ..block_style.clone()
+                },
+            });
+        } else {
+            let math = content.expression.is_some().then_some(content.clone());
+            spans.push(TextSpan {
+                text: content.fallback.clone(),
+                math,
+                font_family: css.font_families.first().cloned(),
+                bold: css.bold,
+                italic: css.italic,
+                monospace: false,
+                font_size_multiplier: css.font_size_px / base_font_size,
+                preserve_whitespace: false,
+                link: link.map(str::to_owned),
+            });
+        }
+        return;
+    }
     if node.tag_name().name() == "img" {
         let alt = node.attribute("alt").unwrap_or("");
         let Some(raw_src) = node.attribute("src") else {
@@ -688,6 +742,7 @@ fn text_span_for_node(
         .expect("computed style must exist for text owner");
     TextSpan {
         text,
+        math: None,
         font_family: style.font_families.first().cloned(),
         bold: style.bold,
         italic: style.italic,
@@ -837,6 +892,14 @@ fn collect_inline_spans(
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
     let mut at_start_or_whitespace = true;
     for span in spans.iter_mut() {
+        if span.math.is_some() {
+            at_start_or_whitespace = span
+                .text
+                .chars()
+                .last()
+                .is_none_or(|character| character.is_ascii_whitespace());
+            continue;
+        }
         if span.preserve_whitespace {
             at_start_or_whitespace = span
                 .text
@@ -886,6 +949,7 @@ fn collect_inline_spans_recursive(
             if !text.is_empty() {
                 spans.push(TextSpan {
                     text: text.to_string(),
+                    math: None,
                     font_family: style.font_families.first().cloned(),
                     bold: style.bold,
                     italic: style.italic,
@@ -900,6 +964,23 @@ fn collect_inline_spans_recursive(
                 .get(child)
                 .expect("computed style must exist for every element");
             if child_style.display == super::computed_style::DisplayRole::None {
+                continue;
+            }
+
+            if super::math::is_math(child) {
+                let content = super::math::parse_math(child);
+                let math = content.expression.is_some().then_some(content.clone());
+                spans.push(TextSpan {
+                    text: content.fallback.clone(),
+                    math,
+                    font_family: child_style.font_families.first().cloned(),
+                    bold: child_style.bold,
+                    italic: child_style.italic,
+                    monospace: false,
+                    font_size_multiplier: child_style.font_size_px / base_font_size,
+                    preserve_whitespace: false,
+                    link: link.map(str::to_owned),
+                });
                 continue;
             }
 
@@ -921,6 +1002,8 @@ fn merge_spans(spans: &mut Vec<TextSpan>) {
     let mut i = 0;
     while i + 1 < spans.len() {
         if spans[i].bold == spans[i + 1].bold
+            && spans[i].math.is_none()
+            && spans[i + 1].math.is_none()
             && spans[i].font_family == spans[i + 1].font_family
             && spans[i].italic == spans[i + 1].italic
             && spans[i].monospace == spans[i + 1].monospace
@@ -1620,6 +1703,41 @@ mod tests {
         assert_eq!(
             crate::search::extract_text_from_nodes(&nodes),
             "root(x, 3)\nreadable fallback\n"
+        );
+    }
+
+    #[test]
+    fn paragraphs_retain_inline_math_and_promote_explicit_display_math() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <p>Area is <math xmlns="http://www.w3.org/1998/Math/MathML">
+                <mfrac><mi>a</mi><mi>b</mi></mfrac>
+            </math> today.</p>
+            <p>before <math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+                <msqrt><mi>x</mi></msqrt>
+            </math> after</p>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        assert!(matches!(
+            &nodes[0],
+            ContentNode::Paragraph(spans, _)
+                if spans.len() == 3
+                    && spans[0].text == "Area is "
+                    && spans[1].text == "(a)/(b)"
+                    && spans[1].math.as_ref().is_some_and(|math|
+                        math.display == super::super::MathDisplay::Inline
+                            && math.expression.is_some())
+                    && spans[2].text == " today."
+        ));
+        assert!(matches!(
+            &nodes[2],
+            ContentNode::Math { content, .. }
+                if content.display == super::super::MathDisplay::Block
+                    && content.fallback == "sqrt(x)"
+        ));
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Area is (a)/(b) today.\nbefore \nsqrt(x)\n after\n"
         );
     }
 
