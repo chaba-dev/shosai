@@ -8,7 +8,7 @@ enum EpubLinkTarget {
 }
 
 fn classify_link_target(href: &str) -> EpubLinkTarget {
-    let Some((scheme, _)) = href.split_once(':') else {
+    let Some(scheme) = link_scheme(href) else {
         return EpubLinkTarget::Internal;
     };
     if ["http", "https", "mailto"]
@@ -19,6 +19,22 @@ fn classify_link_target(href: &str) -> EpubLinkTarget {
     } else {
         EpubLinkTarget::Unsupported
     }
+}
+
+fn link_scheme(href: &str) -> Option<&str> {
+    let colon = href.find(':')?;
+    if href[..colon].find(['/', '?', '#']).is_some() {
+        return None;
+    }
+    let scheme = &href[..colon];
+    let mut characters = scheme.chars();
+    (characters
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic())
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+        }))
+    .then_some(scheme)
 }
 
 pub(super) fn handle_link_click(state: &mut State, href: &str) -> Task<Message> {
