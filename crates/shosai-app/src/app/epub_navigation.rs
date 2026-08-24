@@ -76,6 +76,92 @@ pub(super) fn navigate_to_epub_location(
     content_navigation_task(state)
 }
 
+pub(super) fn navigate_to_saved_location(
+    state: &mut State,
+    page: usize,
+    location_offset: Option<usize>,
+) -> Task<Message> {
+    if uses_paginated_epub_layout(state) {
+        state.current_page = page;
+        state.epub_offset = location_offset.unwrap_or(0);
+        state.epub_page = epub_page_for_location(state, state.current_page, state.epub_offset);
+        if !state.epub_pages.is_empty() {
+            state.page_input = (state.epub_page + 1).to_string();
+        }
+        update_bookmark_status(state);
+        save_reading_state(state);
+        return Task::none();
+    }
+    state.current_page = page;
+    state.epub_page = 0;
+    state.epub_offset = location_offset.unwrap_or(0);
+    state.page_input = format!("{}", page + 1);
+    save_reading_state(state);
+    update_bookmark_status(state);
+    content_navigation_task(state)
+}
+
+pub(super) fn navigate_to_current_search_result(
+    state: &mut State,
+    previous_highlights: &[SearchHighlight],
+) -> Task<Message> {
+    let target = if let Some(result) = state.search_results.get(state.search_current) {
+        let target_page = result.page;
+        if matches!(state.document, Some(OpenDocument::Epub(_))) {
+            state.epub_offset = result.offset;
+        }
+        if target_page != state.current_page && target_page < state.total_pages {
+            state.current_page = target_page;
+            state.epub_page = 0;
+            state.page_input = format!("{}", state.current_page + 1);
+            save_reading_state(state);
+        }
+        Some((target_page, result.offset))
+    } else {
+        None
+    };
+    if uses_paginated_epub_layout(state) {
+        if let Some((chapter, offset)) = target {
+            state.epub_page = epub_page_for_location(state, chapter, offset);
+            sync_epub_location(state);
+            state.epub_offset = offset;
+            save_reading_state(state);
+        }
+        return Task::none();
+    }
+    if matches!(state.document, Some(OpenDocument::Pdf(_)))
+        && (state.reading_mode == ReadingMode::Continuous
+            || previous_highlights != current_page_search_highlights(state))
+    {
+        if state.reading_mode == ReadingMode::Continuous {
+            invalidate_continuous_rasters(state);
+        }
+        refresh_content(state)
+    } else {
+        content_navigation_task(state)
+    }
+}
+
+pub(super) fn epub_toc_locations(document: &EpubDoc) -> Vec<(usize, String, usize, usize)> {
+    fn collect(
+        document: &EpubDoc,
+        entries: &[shosai_core::epub::TocEntry],
+        depth: usize,
+        locations: &mut Vec<(usize, String, usize, usize)>,
+    ) {
+        for entry in entries {
+            if let Some((chapter, offset)) = document.resolve_toc_location(&entry.href) {
+                locations.push((depth, entry.title.clone(), chapter, offset));
+            }
+            collect(document, &entry.children, depth + 1, locations);
+        }
+    }
+
+    let mut locations = Vec::new();
+    collect(document, document.toc(), 0, &mut locations);
+    locations
+}
+
 pub(super) fn turn_epub_page(state: &mut State, forward: bool) -> Task<Message> {
     let step = if epub_uses_spread(state) { 2 } else { 1 };
     let page = if forward {

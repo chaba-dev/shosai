@@ -2315,47 +2315,6 @@ fn perform_search(state: &mut State) -> Task<Message> {
     )
 }
 
-fn navigate_to_current_search_result(
-    state: &mut State,
-    previous_highlights: &[SearchHighlight],
-) -> Task<Message> {
-    let target = if let Some(result) = state.search_results.get(state.search_current) {
-        let target_page = result.page;
-        if matches!(state.document, Some(OpenDocument::Epub(_))) {
-            state.epub_offset = result.offset;
-        }
-        if target_page != state.current_page && target_page < state.total_pages {
-            state.current_page = target_page;
-            state.epub_page = 0;
-            state.page_input = format!("{}", state.current_page + 1);
-            save_reading_state(state);
-        }
-        Some((target_page, result.offset))
-    } else {
-        None
-    };
-    if uses_paginated_epub_layout(state) {
-        if let Some((chapter, offset)) = target {
-            state.epub_page = epub_page_for_location(state, chapter, offset);
-            sync_epub_location(state);
-            state.epub_offset = offset;
-            save_reading_state(state);
-        }
-        return Task::none();
-    }
-    if matches!(state.document, Some(OpenDocument::Pdf(_)))
-        && (state.reading_mode == ReadingMode::Continuous
-            || previous_highlights != current_page_search_highlights(state))
-    {
-        if state.reading_mode == ReadingMode::Continuous {
-            invalidate_continuous_rasters(state);
-        }
-        refresh_content(state)
-    } else {
-        content_navigation_task(state)
-    }
-}
-
 fn current_epub_offset(state: &State) -> Option<usize> {
     matches!(state.document, Some(OpenDocument::Epub(_))).then_some(state.epub_offset)
 }
@@ -2868,26 +2827,6 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
         .height(reader_more_height(compact))
         .style(app_theme::reader_controls)
         .into()
-}
-
-fn epub_toc_locations(document: &EpubDoc) -> Vec<(usize, String, usize, usize)> {
-    fn collect(
-        document: &EpubDoc,
-        entries: &[shosai_core::epub::TocEntry],
-        depth: usize,
-        locations: &mut Vec<(usize, String, usize, usize)>,
-    ) {
-        for entry in entries {
-            if let Some((chapter, offset)) = document.resolve_toc_location(&entry.href) {
-                locations.push((depth, entry.title.clone(), chapter, offset));
-            }
-            collect(document, &entry.children, depth + 1, locations);
-        }
-    }
-
-    let mut locations = Vec::new();
-    collect(document, document.toc(), 0, &mut locations);
-    locations
 }
 
 fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
