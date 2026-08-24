@@ -2446,6 +2446,60 @@ mod tests {
     }
 
     #[test]
+    fn deeply_nested_inline_fraction_uses_readable_fallback() {
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let token = |text: &str| MathExpression::Token(text.into());
+        let fraction = |top, bottom| MathExpression::Fraction(Box::new(top), Box::new(bottom));
+        let expression = fraction(
+            fraction(
+                fraction(token("a"), token("b")),
+                fraction(token("c"), token("d")),
+            ),
+            fraction(
+                fraction(token("e"), token("f")),
+                fraction(token("g"), token("h")),
+            ),
+        );
+        let fallback = "(((a)/(b))/((c)/(d)))/(((e)/(f))/((g)/(h)))";
+        let span = TextSpan {
+            text: fallback.into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(expression),
+                fallback: fallback.into(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        };
+
+        assert!(
+            layout_inline_math_span(&span, 20.0, 388.0, 500.0).is_none(),
+            "inline geometry spanning several text lines must use readable fallback even when it fits the page"
+        );
+        let pages = paginate_epub_chapter(
+            &[ContentNode::Paragraph(vec![span], Default::default())],
+            None,
+            20.0,
+            1.6,
+            Size::new(388.0, 500.0),
+        );
+        assert!(pages.iter().flatten().all(|page| {
+            matches!(
+                &page.node,
+                ContentNode::Paragraph(spans, _)
+                    if spans.iter().all(|span| span.math.is_none())
+            )
+        }));
+    }
+
+    #[test]
     fn paragraph_pagination_accounts_for_inline_geometry_at_page_boundaries() {
         use shosai_core::epub::render::{NodeStyle, TextSpan};
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
