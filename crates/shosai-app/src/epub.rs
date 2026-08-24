@@ -2195,6 +2195,118 @@ mod tests {
     }
 
     #[test]
+    fn table_display_math_height_uses_native_geometry() {
+        use shosai_core::epub::render::{
+            NodeStyle, TableCell, TableRow, TableRowGroup, TableRowGroupKind,
+        };
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let expression = MathExpression::Fraction(
+            Box::new(MathExpression::Token("a".into())),
+            Box::new(MathExpression::SquareRoot(vec![MathExpression::Token(
+                "b".into(),
+            )])),
+        );
+        let table = ContentNode::Table {
+            caption: Vec::new(),
+            caption_style: None,
+            row_groups: vec![TableRowGroup {
+                kind: TableRowGroupKind::Body,
+                rows: vec![TableRow {
+                    cells: vec![TableCell {
+                        id: None,
+                        header: false,
+                        scope: None,
+                        headers: Vec::new(),
+                        row_span: 1,
+                        column_span: 1,
+                        children: vec![ContentNode::Math {
+                            content: MathContent {
+                                display: MathDisplay::Block,
+                                expression: Some(expression.clone()),
+                                fallback: "(a)/(sqrt(b))".into(),
+                            },
+                            style: NodeStyle::default(),
+                            link: None,
+                        }],
+                        block_starts: Vec::new(),
+                        style: NodeStyle::default(),
+                    }],
+                }],
+            }],
+            style: NodeStyle::default(),
+        };
+        let font_size = 16.0;
+        let outer_width = 360.0;
+        let cell_width = outer_width - 2.0 * EPUB_TABLE_CELL_PADDING;
+        let native_height =
+            math_layout::layout_math_for_bounds(&expression, font_size, cell_width, 240.0)
+                .expect("fixture math should fit the table cell")
+                .height;
+        let chars_per_line = (outer_width / (font_size * AVERAGE_CHARACTER_WIDTH)).floor() as usize;
+
+        assert!(
+            estimated_epub_compact_node_height(&table, chars_per_line, 20, font_size)
+                >= native_height + 2.0 * EPUB_TABLE_CELL_PADDING,
+            "table pagination must reserve the native display-math height painted in the cell"
+        );
+    }
+
+    #[test]
+    fn oversized_inline_math_flow_falls_back_before_pagination_layout() {
+        use shosai_core::epub::render::TextSpan;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let mut spans = (0..256)
+            .map(|_| TextSpan {
+                text: "word ".into(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            })
+            .collect::<Vec<_>>();
+        spans.push(TextSpan {
+            text: "(a)/(b)".into(),
+            math: Some(MathContent {
+                display: MathDisplay::Inline,
+                expression: Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Token("a".into())),
+                    Box::new(MathExpression::Token("b".into())),
+                )),
+                fallback: "(a)/(b)".into(),
+            }),
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: Some("chapter.xhtml#proof".into()),
+        });
+        let pagination = pagination_inline_spans(
+            &spans,
+            16.0,
+            360.0,
+            500.0,
+            shosai_core::epub::style::TextDirection::Ltr,
+            None,
+        );
+
+        assert!(pagination.iter().all(|span| span.math.is_none()));
+        assert_eq!(
+            pagination.last().and_then(|span| span.link.as_deref()),
+            Some("chapter.xhtml#proof"),
+            "aggregate fallback must retain source links"
+        );
+        assert_eq!(spans_text_len(&pagination), spans_text_len(&spans));
+    }
+
+    #[test]
     fn standalone_math_pagination_uses_the_native_painted_height() {
         use shosai_core::epub::render::NodeStyle;
         use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
