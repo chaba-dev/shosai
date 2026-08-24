@@ -425,16 +425,25 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   Production chapter presentations now retain bounded decoded fragment anchors
   in the shared search-offset coordinate space; canonical same- and
   cross-chapter links select those offsets in paginated and continuous modes.
-- [ ] Establish the shared parsed-chapter/layout cache and stable-location model
+- [X] Establish the shared parsed-chapter/layout cache and stable-location model
   before backend adapters so chapter switches and preference changes do not
-  repeatedly parse every chapter.
-- [ ] Keep warm page turns free of parsing, repagination, image/font decoding,
+  repeatedly parse every chapter.  ~EpubPresentation~ parses each admitted
+  chapter once; tabs retain reference-counted paginated derivatives keyed by
+  viewport and typography, and character offsets survive relayout and mode
+  changes.
+- [X] Keep warm page turns free of parsing, repagination, image/font decoding,
   and synchronous storage.  Debounce or asynchronously persist reading state,
   resolve bookmark status off the turn path, and precompute/prefetch adjacent
-  native presentation where needed.
+  native presentation where needed.  EPUB turns now select an existing page,
+  update bookmark status from the in-memory list, and enqueue coalesced reading
+  state persistence without producing background layout work; a regression
+  retains the parsed presentation, paginated-page allocation, layout key,
+  decoded image handles, and render generation across the turn.
 - [ ] Move backend-specific rendering into focused modules under
   ~crates/shosai-app/src/~ rather than expanding ~app.rs~ further; keep EPUB
-  parsing/resource policy in ~shosai-core/src/epub/~.
+  parsing/resource policy in ~shosai-core/src/epub/~.  Stable-location and warm
+  page-turn integration has moved to ~app/epub_navigation.rs~; the remaining
+  EPUB view construction in ~app.rs~ still needs extraction.
 - [ ] Add feature/build configuration and packaging changes only for the native
   implementation; document runtime prerequisites and attribution.
 - [ ] Run the full workspace test suite and platform packaging smoke tests.
