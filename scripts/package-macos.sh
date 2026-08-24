@@ -19,6 +19,7 @@ install -m 755 "$binary" "$app/Contents/MacOS/Shosai"
 install -m 755 "$pdfium_dir/lib/libpdfium.dylib" "$app/Contents/Frameworks/libpdfium.dylib"
 install -m 644 "$pdfium_dir/LICENSE" "$app/Contents/Resources/PDFIUM-LICENSE"
 install -m 644 LICENSE "$app/Contents/Resources/LICENSE"
+install -m 644 assets/fonts/LICENSE-Inter "$app/Contents/Resources/INTER-LICENSE"
 
 iconset="$output_dir/Shosai.iconset"
 rm -rf "$iconset"

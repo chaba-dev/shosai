@@ -25,6 +25,7 @@ install -m 644 assets/shosai-icon.png \
 install -m 755 packaging/linux/install.sh "$output_dir/$package/install.sh"
 install -m 644 packaging/linux/shosai.desktop "$output_dir/$package/shosai.desktop"
 install -m 644 LICENSE "$output_dir/$package/LICENSE"
+install -m 644 assets/fonts/LICENSE-Inter "$output_dir/$package/INTER-LICENSE"
 install -m 644 "$pdfium_dir/LICENSE" "$output_dir/$package/PDFIUM-LICENSE"
 
 tar -C "$output_dir" -czf "$output_dir/$package.tar.gz" "$package"

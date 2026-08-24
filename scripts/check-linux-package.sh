@@ -46,6 +46,7 @@ if [[ -n "$invalid_entries" ]]; then
 fi
 
 expected_files=$(cat <<EOF
+INTER-LICENSE
 LICENSE
 PDFIUM-LICENSE
 bin/shosai
@@ -71,6 +72,7 @@ test -x "$package_dir/bin/shosai"
 test -x "$package_dir/install.sh"
 test -s "$package_dir/lib/libpdfium.so"
 test -s "$package_dir/LICENSE"
+test -s "$package_dir/INTER-LICENSE"
 test -s "$package_dir/PDFIUM-LICENSE"
 
 file "$package_dir/bin/shosai" | grep -Fq "$architecture"
@@ -87,6 +89,7 @@ SHOSAI_INSTALL_PREFIX="$install_prefix" "$package_dir/install.sh"
 test -x "$install_prefix/opt/shosai/bin/shosai"
 test -s "$install_prefix/opt/shosai/lib/libpdfium.so"
 test -s "$install_prefix/opt/shosai/LICENSE"
+test -s "$install_prefix/opt/shosai/INTER-LICENSE"
 test -s "$install_prefix/opt/shosai/PDFIUM-LICENSE"
 test -L "$install_prefix/bin/shosai"
 test "$(readlink "$install_prefix/bin/shosai")" = "$install_prefix/opt/shosai/bin/shosai"

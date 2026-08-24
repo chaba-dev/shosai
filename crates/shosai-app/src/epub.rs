@@ -6,6 +6,8 @@ use shosai_core::epub::{
     EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest, EpubTextRun,
 };
 
+pub(crate) mod math_layout;
+pub(crate) mod math_widget;
 pub(crate) mod native_text;
 
 pub(crate) const BLOCKQUOTE_SPACING: f32 = 8.0;
@@ -178,7 +180,50 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 remaining = page_size.height;
             }
         }
-
+        if page_has_content(&pages, first_page_has_title)
+            && matches!(node, ContentNode::Paragraph(..))
+            && let Some(ContentNode::Math { content, style }) = nodes.get(node_index + 1)
+            && content.expression.is_some()
+        {
+            let label_height =
+                measured_epub_compact_node_height(fonts, node, font_size, page_size.width)
+                    .map(|height| height + block_spacing)
+                    .unwrap_or_else(|| {
+                        estimated_epub_node_height(
+                            node,
+                            chars_per_line,
+                            lines_per_page,
+                            font_size,
+                            line_spacing,
+                        )
+                    });
+            let math_height = measured_epub_compact_node_height_bounded(
+                fonts,
+                &nodes[node_index + 1],
+                font_size,
+                page_size.width,
+                page_size.height,
+            )
+            .map(|height| height + block_spacing)
+            .unwrap_or_else(|| {
+                estimated_epub_node_height(
+                    &nodes[node_index + 1],
+                    chars_per_line,
+                    lines_per_page,
+                    font_size,
+                    line_spacing,
+                )
+            });
+            // Default-font paragraph heights are estimated. Keep one scaled math line in reserve so
+            // measurement drift cannot clip an atomic native widget at the bottom of the page.
+            let fit_reserve =
+                font_size * TEXT_LINE_HEIGHT * style.font_size_multiplier.unwrap_or(1.0);
+            if label_height + math_height + fit_reserve > remaining
+                && push_epub_page(&mut pages, budget)
+            {
+                remaining = page_size.height;
+            }
+        }
         let text_len = content_node_text_len(node);
         match node {
             ContentNode::Paragraph(spans, style) => {
@@ -468,18 +513,23 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 budget,
             ),
             _ => {
-                let node_height =
-                    measured_epub_compact_node_height(fonts, node, font_size, page_size.width)
-                        .map(|height| height + font_size * line_spacing)
-                        .unwrap_or_else(|| {
-                            estimated_epub_node_height(
-                                node,
-                                chars_per_line,
-                                lines_per_page,
-                                font_size,
-                                line_spacing,
-                            )
-                        });
+                let node_height = measured_epub_compact_node_height_bounded(
+                    fonts,
+                    node,
+                    font_size,
+                    page_size.width,
+                    page_size.height,
+                )
+                .map(|height| height + font_size * line_spacing)
+                .unwrap_or_else(|| {
+                    estimated_epub_node_height(
+                        node,
+                        chars_per_line,
+                        lines_per_page,
+                        font_size,
+                        line_spacing,
+                    )
+                });
                 if node_height > remaining
                     && page_has_content(&pages, first_page_has_title)
                     && push_epub_page(&mut pages, budget)
@@ -1480,6 +1530,16 @@ fn measured_epub_compact_node_height(
     font_size: f32,
     width: f32,
 ) -> Option<f32> {
+    measured_epub_compact_node_height_bounded(fonts, node, font_size, width, f32::MAX)
+}
+
+fn measured_epub_compact_node_height_bounded(
+    fonts: Option<&EpubFontBook>,
+    node: &ContentNode,
+    font_size: f32,
+    width: f32,
+    height: f32,
+) -> Option<f32> {
     match node {
         ContentNode::Heading {
             spans,
@@ -1523,10 +1583,16 @@ fn measured_epub_compact_node_height(
                 preserve_whitespace: false,
                 link: None,
             };
+            let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            if let Some(layout) = content.expression.as_ref().and_then(|expression| {
+                math_layout::layout_math_for_bounds(expression, size, width, height)
+            }) {
+                return Some(layout.height);
+            }
             measure_epub_spans(
                 fonts,
                 std::slice::from_ref(&span),
-                font_size * style.font_size_multiplier.unwrap_or(1.0),
+                size,
                 width,
                 style.direction,
                 style.text_align,
@@ -1669,9 +1735,6 @@ pub(crate) mod text_shaping;
 mod table_layout;
 
 #[cfg(test)]
-mod math_layout;
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1784,6 +1847,253 @@ mod tests {
                 .filter(|node| matches!(node, ContentNode::Table { .. }))
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn standalone_math_pagination_uses_the_native_painted_height() {
+        use shosai_core::epub::render::NodeStyle;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let expression = MathExpression::Fraction(
+            Box::new(MathExpression::Token("a".into())),
+            Box::new(MathExpression::SquareRoot(vec![MathExpression::Token(
+                "b".into(),
+            )])),
+        );
+        let node = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: Some(expression.clone()),
+                fallback: "(a)/(sqrt(b))".into(),
+            },
+            style: NodeStyle::default(),
+        };
+        let native = math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0)
+            .expect("supported standalone math should use native geometry");
+
+        assert_eq!(
+            measured_epub_compact_node_height(None, &node, 20.0, 600.0),
+            Some(native.height),
+            "pagination and painting must consume the same geometry"
+        );
+        assert_eq!(
+            content_node_text_len(&node),
+            "(a)/(sqrt(b))".chars().count(),
+            "native presentation must not change shared source offsets"
+        );
+    }
+
+    #[test]
+    fn unsupported_or_overwide_math_keeps_the_readable_text_path() {
+        use shosai_core::epub::render::NodeStyle;
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let unsupported = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: None,
+                fallback: "readable fallback".into(),
+            },
+            style: NodeStyle::default(),
+        };
+        let overwide = ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression: Some(MathExpression::Token("wide expression".into())),
+                fallback: "wide expression".into(),
+            },
+            style: NodeStyle::default(),
+        };
+
+        assert!(
+            estimated_epub_compact_node_height(&unsupported, 40, 20, 20.0) > 0.0,
+            "unsupported math must remain measurable through its fallback"
+        );
+        let ContentNode::Math { content, .. } = &overwide else {
+            unreachable!();
+        };
+        assert!(
+            math_layout::layout_math_for_bounds(
+                content.expression.as_ref().unwrap(),
+                20.0,
+                1.0,
+                700.0,
+            )
+            .is_none()
+        );
+        assert!(estimated_epub_compact_node_height(&overwide, 1, 20, 20.0) > 0.0);
+    }
+
+    #[test]
+    fn dense_math_sequence_moves_complete_matrix_and_fallback_between_pages() {
+        use shosai_core::epub::render::{NodeStyle, TextSpan};
+        use shosai_core::epub::{MathContent, MathDisplay, MathExpression};
+
+        let label = |text: &str| {
+            ContentNode::Paragraph(
+                vec![TextSpan {
+                    text: text.into(),
+                    font_family: None,
+                    bold: false,
+                    italic: false,
+                    monospace: false,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: false,
+                    link: None,
+                }],
+                NodeStyle::default(),
+            )
+        };
+        let math = |expression: Option<MathExpression>, fallback: &str| ContentNode::Math {
+            content: MathContent {
+                display: MathDisplay::Block,
+                expression,
+                fallback: fallback.into(),
+            },
+            style: NodeStyle {
+                font_size_multiplier: Some(1.5),
+                ..NodeStyle::default()
+            },
+        };
+        let token = |text: &str| MathExpression::Token(text.into());
+        let matrix = MathExpression::Fenced {
+            open: "(".into(),
+            close: ")".into(),
+            content: vec![MathExpression::Table(vec![
+                vec![token("1"), token("0")],
+                vec![token("0"), token("1")],
+            ])],
+        };
+        let nodes = vec![
+            label("Native MathML geometry — fraction:"),
+            math(
+                Some(MathExpression::Fraction(
+                    Box::new(MathExpression::Row(vec![
+                        token("a"),
+                        token("+"),
+                        token("b"),
+                    ])),
+                    Box::new(MathExpression::Row(vec![
+                        token("c"),
+                        token("+"),
+                        token("d"),
+                    ])),
+                )),
+                "(a+b)/(c+d)",
+            ),
+            label("Indexed root and sub/superscript:"),
+            math(
+                Some(MathExpression::Row(vec![
+                    MathExpression::Root(Box::new(token("x")), Box::new(token("3"))),
+                    token("+"),
+                    MathExpression::SubSuperscript {
+                        base: Box::new(token("y")),
+                        subscript: Box::new(token("i")),
+                        superscript: Box::new(token("2")),
+                    },
+                ])),
+                "root(x, 3) + y_i^2",
+            ),
+            label("Fence:"),
+            math(
+                Some(MathExpression::Fenced {
+                    open: "[".into(),
+                    close: "]".into(),
+                    content: vec![MathExpression::Row(vec![
+                        token("p"),
+                        token("+"),
+                        token("q"),
+                    ])],
+                }),
+                "[p + q]",
+            ),
+            label("Fenced 2 x 2 matrix:"),
+            math(Some(matrix.clone()), "(1 0; 0 1)"),
+            label("Unsupported case remains readable:"),
+            math(None, "Readable unsupported fallback"),
+        ];
+        let page_size = Size::new(420.0, 500.0);
+        let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, page_size);
+
+        assert!(
+            pages.len() > 1,
+            "dense fixture must exercise a page boundary"
+        );
+        assert_eq!(
+            pages.iter().map(Vec::len).sum::<usize>(),
+            nodes.len(),
+            "pagination must retain every label, expression, and fallback"
+        );
+        let mut expected_offset = 0;
+        for (page_node, source_node) in pages.iter().flatten().zip(&nodes) {
+            assert_eq!(page_node.text_offset, expected_offset);
+            assert_eq!(&page_node.node, source_node);
+            expected_offset += content_node_text_len(source_node) + 1;
+        }
+        let matrix_page = pages
+            .iter()
+            .position(|page| {
+                page.iter().any(|node| {
+                    matches!(
+                        &node.node,
+                        ContentNode::Math { content, .. }
+                            if content.expression.as_ref() == Some(&matrix)
+                    )
+                })
+            })
+            .expect("matrix must remain on one page");
+        assert!(matches!(
+            pages[matrix_page].as_slice(),
+            [
+                PageNode {
+                    node: ContentNode::Paragraph(spans, _),
+                    ..
+                },
+                PageNode {
+                    node: ContentNode::Math { content, .. },
+                    ..
+                },
+                ..
+            ] if spans.iter().any(|span| span.text == "Fenced 2 x 2 matrix:")
+                && content.expression.as_ref() == Some(&matrix)
+        ));
+        let matrix_layout = math_layout::layout_math_for_bounds(&matrix, 24.0, 420.0, 500.0)
+            .expect("matrix must retain native geometry");
+        assert!(matrix_layout.primitives.iter().all(|primitive| {
+            primitive.x >= 0.0
+                && primitive.y >= 0.0
+                && primitive.x + primitive.width <= matrix_layout.width
+                && primitive.y + primitive.height <= matrix_layout.height
+        }));
+        for value in ["1", "0"] {
+            assert!(matrix_layout.primitives.iter().any(|primitive| {
+                matches!(&primitive.kind, math_layout::MathPrimitiveKind::Text(text) if text == value)
+            }));
+        }
+        let zero_rows = matrix_layout
+            .primitives
+            .iter()
+            .filter(|primitive| {
+                matches!(&primitive.kind, math_layout::MathPrimitiveKind::Text(text) if text == "0")
+            })
+            .map(|primitive| primitive.y)
+            .collect::<Vec<_>>();
+        assert_eq!(zero_rows.len(), 2);
+        assert_ne!(
+            zero_rows[0], zero_rows[1],
+            "both matrix rows must be positioned"
+        );
+        assert!(
+            pages[matrix_page..]
+                .iter()
+                .any(|page| page.iter().any(|node| {
+                    matches!(
+                        &node.node,
+                        ContentNode::Math { content, .. }
+                            if content.fallback == "Readable unsupported fallback"
+                    )
+                }))
         );
     }
 

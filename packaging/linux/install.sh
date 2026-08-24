@@ -16,6 +16,7 @@ install -m 644 "$package_dir/lib/libpdfium.so" "$install_dir/lib/libpdfium.so"
 install -m 644 "$package_dir/share/icons/hicolor/1024x1024/apps/shosai.png" \
   "$prefix/share/icons/hicolor/1024x1024/apps/shosai.png"
 install -m 644 "$package_dir/PDFIUM-LICENSE" "$install_dir/PDFIUM-LICENSE"
+install -m 644 "$package_dir/INTER-LICENSE" "$install_dir/INTER-LICENSE"
 install -m 644 "$package_dir/LICENSE" "$install_dir/LICENSE"
 ln -sfn "$install_dir/bin/shosai" "$prefix/bin/shosai"
 sed "s|@SHOSAI_EXEC@|$install_dir/bin/shosai|" \

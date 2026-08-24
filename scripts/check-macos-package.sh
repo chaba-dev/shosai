@@ -51,6 +51,7 @@ info_plist="$contents/Info.plist"
 test -x "$binary"
 test -x "$pdfium"
 test -s "$contents/Resources/LICENSE"
+test -s "$contents/Resources/INTER-LICENSE"
 test -s "$contents/Resources/PDFIUM-LICENSE"
 test -s "$contents/Resources/Shosai.icns"
 
