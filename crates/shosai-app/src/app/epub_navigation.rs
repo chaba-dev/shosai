@@ -125,7 +125,14 @@ mod tests {
 
     #[test]
     fn epub_links_allow_only_internal_http_https_and_mail_targets() {
-        for href in ["#note", "chapter.xhtml#note", "../chapter.xhtml"] {
+        for href in [
+            "#note",
+            "#part:two",
+            "chapter.xhtml#note",
+            "Text/foo:bar.xhtml#target",
+            "Text/section/chapter:one.xhtml",
+            "../chapter.xhtml",
+        ] {
             assert_eq!(classify_link_target(href), EpubLinkTarget::Internal);
         }
         for href in [
