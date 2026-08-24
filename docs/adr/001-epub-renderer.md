@@ -684,11 +684,13 @@ native geometry for standalone rows, tokens, fractions, roots, scripts, fences,
 and matrices. One shared layout owns both pagination height and Iced painting,
 uses reader font scaling, and paints text and rules with the active reader
 theme's contrast-safe text color. The bundled OFL-licensed Inter font makes
-measurement and painting deterministic. Expressions that exceed the available
-width, contain an uncovered glyph, have no supported expression model, or need
-an active search highlight retain the readable text path. Search and source
-offsets always remain based on the original bounded fallback. Inline MathML
-embedded inside an XHTML text block remains open.
+measurement and painting deterministic; release archives, installers, and Nix
+packages carry its required license notice. Expressions that exceed the
+available page width or height, contain an uncovered glyph, or have no supported
+expression model retain the readable text path. Search highlights paint the
+native box with the active theme highlight instead of changing its paginated
+geometry. Search and source offsets always remain based on the original bounded
+fallback. Inline MathML embedded inside an XHTML text block remains open.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
