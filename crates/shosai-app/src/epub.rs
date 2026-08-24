@@ -21,6 +21,7 @@ pub(crate) const EPUB_TABLE_CELL_PADDING: f32 = 6.0;
 pub(crate) const EPUB_TABLE_CELL_SPACING: f32 = 4.0;
 pub(crate) const EPUB_TABLE_ROW_SPACING: f32 = 8.0;
 pub(crate) const INLINE_MATH_WRAP_SPACING: f32 = 0.25;
+const MAX_INLINE_MATH_LINE_HEIGHTS: f32 = 3.0;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
@@ -1898,11 +1899,12 @@ pub(crate) fn layout_inline_math_span(
         return None;
     }
     let expression = math.expression.as_ref()?;
+    let size = base_size * span.font_size_multiplier;
     math_layout::layout_math_for_bounds(
         expression,
-        base_size * span.font_size_multiplier,
+        size,
         width,
-        height,
+        height.min(size * TEXT_LINE_HEIGHT * MAX_INLINE_MATH_LINE_HEIGHTS),
     )
 }
 
