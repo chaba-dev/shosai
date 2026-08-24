@@ -3708,7 +3708,7 @@ fn render_content_node<'a>(
                 fonts,
                 scale,
                 style.text_align,
-                available_width,
+                crate::epub::paragraph_width(available_width, font_size, style),
                 available_height,
             );
             let mut c = container(rendered).width(Length::Fill).align_x(align);
@@ -4451,11 +4451,13 @@ fn render_inline_math_spans<'a>(
     for (span_index, source) in spans.iter().enumerate() {
         let is_prefix = span_index < source_prefix_spans;
         if let Some(content) = &source.math
-            && let Some(layout) = crate::epub::layout_inline_math_span(
+            && let Some(layout) = crate::epub::layout_inline_math_span_for_context(
                 source,
                 font_size,
                 available_width,
                 available_height.unwrap_or(f32::MAX),
+                direction,
+                alignment,
             )
         {
             let highlight =
