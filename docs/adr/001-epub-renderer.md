@@ -705,8 +705,8 @@ fallback. Admitted inline expressions remain indivisible during pagination;
 their native height and wrapped-line clearance are reserved in addition to
 fallback text flow. Right-to-left and justified paragraphs deliberately retain
 readable linear fallback until the native flow can preserve full paragraph-level
-bidi and justification semantics. Unit tests cover retained link dispatch but do
-not synthesize a platform pointer event; repeatable activation in packaged native
+bidi and justification semantics. Unit tests synthesize hit-tested widget pointer
+events and cover retained link dispatch; repeatable activation in packaged native
 apps remains release-validation evidence.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
