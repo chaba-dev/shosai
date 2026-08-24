@@ -394,19 +394,22 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   preserve the readable text path; highlighted native expressions retain their
   geometry and use the active theme highlight.  Search and source offsets remain
   fallback-based.
-- [X] Support inline versus display math.  Supported inline expressions now
-  remain in paragraph source order as atomic wrapping-row items, share native
-  geometry with pagination and painting, preserve fallback-based search offsets,
-  highlights, links, font scaling, and theme contrast, and promote explicit
-  display math nested in a paragraph to a standalone block.  RTL and justified
-  paragraphs retain readable fallback until native mixed-flow bidi and
-  justification can be preserved without reordering source offsets.
+- [ ] Support inline versus display math.  The current candidate retains MathML
+  semantics independently of native admission, promotes supported and unsupported
+  explicit display math without dropping enclosing links, and admits atomic
+  inline geometry only when the shared pagination/painting check succeeds for the
+  effective container bounds, direction, alignment, and glyph coverage.  RTL,
+  justified, over-bound, and unsupported cases retain splittable fallback.  Local
+  regressions also cover wrapped-page height, blockquote slicing, bounded mixed
+  embedded-font flow, and table search separators.  Native macOS and Linux
+  validation is still required before this item is complete.
 - [X] Test common operators, fractions, roots, scripts, matrices, annotations,
   malformed MathML, and books that declare MathML manifest properties.  The
   generated MathML fixture now verifies retained inline fractions alongside the
   existing display, operator, script, matrix, annotation, malformed, and manifest
-  evidence; app regressions cover atomic pagination, shared geometry, highlights,
-  links, and source offsets.
+  evidence; app regressions cover admitted atomic pagination, shared geometry,
+  highlights, link-message construction, and source offsets.  Pointer-event
+  activation remains an end-to-end native validation boundary.
 
 ** M5 — Reader Integration and Release
 

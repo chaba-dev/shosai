@@ -681,23 +681,31 @@ app fallback consume that same bounded fallback.
 
 The application now lowers the retained model—not the source XML—into bounded
 native geometry for rows, tokens, fractions, roots, scripts, fences, and
-matrices. Direct display math remains an atomic block. Supported inline math is
-retained in paragraph source order, participates as an atomic wrapping-row item,
-and uses the same geometry inside headings, captions, lists, and table-cell text.
-Explicit display math nested in a paragraph is promoted to a block between the
-surrounding text fragments. One shared layout owns both pagination height and Iced painting,
-uses reader font scaling, and paints text and rules with the active reader
-theme's contrast-safe text color. The bundled OFL-licensed Inter font makes
+matrices. Direct display math remains an atomic block. Inline MathML identity is
+retained independently of native-layout success. An expression becomes an
+atomic wrapping-row item only when the same admission used by painting succeeds
+for its direction, alignment, glyphs, effective container width, and page
+height; otherwise its readable fallback remains splittable text. This admission
+also applies inside headings, captions, lists, indented paragraphs, and padded
+table cells. Explicit display math nested in a paragraph is promoted to a block
+between the surrounding text fragments even when only its fallback is
+supported, and an enclosing link remains attached to the promoted block. One
+shared layout owns both pagination height and Iced painting, uses reader font
+scaling, and paints text and rules with the active reader theme's contrast-safe
+text color. The bundled OFL-licensed Inter font makes
 measurement and painting deterministic; release archives, installers, and Nix
 packages carry its required license notice. Expressions that exceed the
 available page width or height, contain an uncovered glyph, or have no supported
 expression model retain the readable text path. Search highlights paint the
 native box with the active theme highlight instead of changing its paginated
 geometry. Search and source offsets always remain based on the original bounded
-fallback. Inline expressions remain indivisible during pagination; their native
-height is reserved in addition to fallback text flow. Right-to-left and justified
-paragraphs deliberately retain readable linear fallback until the native flow can
-preserve full paragraph-level bidi and justification semantics.
+fallback. Admitted inline expressions remain indivisible during pagination;
+their native height and wrapped-line clearance are reserved in addition to
+fallback text flow. Right-to-left and justified paragraphs deliberately retain
+readable linear fallback until the native flow can preserve full paragraph-level
+bidi and justification semantics. Unit tests cover retained link dispatch but do
+not synthesize a platform pointer event; repeatable activation in packaged native
+apps remains release-validation evidence.
 
 A redistribution-safe XHTML fixture extends the earlier structural fraction and
 mixed Latin/Arabic/Japanese evidence with inline and display math, fractions,
