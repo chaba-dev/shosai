@@ -183,7 +183,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
         }
         if page_has_content(&pages, first_page_has_title)
             && matches!(node, ContentNode::Paragraph(..))
-            && let Some(ContentNode::Math { content, style }) = nodes.get(node_index + 1)
+            && let Some(ContentNode::Math { content, style, .. }) = nodes.get(node_index + 1)
             && content.expression.is_some()
         {
             let label_height =
@@ -1521,7 +1521,7 @@ fn estimated_epub_compact_node_height(
                 + row_heights.into_iter().sum::<f32>()
                 + EPUB_TABLE_ROW_SPACING * table_children.saturating_sub(1) as f32
         }
-        ContentNode::Math { content, style } => {
+        ContentNode::Math { content, style, .. } => {
             let scale = style.font_size_multiplier.unwrap_or(1.0);
             wrapped(content.fallback.chars().count(), scale) * text_line_height * scale
         }
@@ -1620,7 +1620,7 @@ fn measured_epub_compact_node_height_bounded(
                 layout.height + inline_math_height_reserve(spans, base_size, width, height)
             })
         }
-        ContentNode::Math { content, style } => {
+        ContentNode::Math { content, style, .. } => {
             let span = shosai_core::epub::render::TextSpan {
                 text: content.fallback.clone(),
                 math: None,
@@ -1965,6 +1965,7 @@ mod tests {
                 fallback: "(a)/(sqrt(b))".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
         let native = math_layout::layout_math_for_bounds(&expression, 20.0, 600.0, 700.0)
             .expect("supported standalone math should use native geometry");
@@ -2093,6 +2094,7 @@ mod tests {
                 fallback: "readable fallback".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
         let overwide = ContentNode::Math {
             content: MathContent {
@@ -2101,6 +2103,7 @@ mod tests {
                 fallback: "wide expression".into(),
             },
             style: NodeStyle::default(),
+            link: None,
         };
 
         assert!(
@@ -2153,6 +2156,7 @@ mod tests {
                 font_size_multiplier: Some(1.5),
                 ..NodeStyle::default()
             },
+            link: None,
         };
         let token = |text: &str| MathExpression::Token(text.into());
         let matrix = MathExpression::Fenced {

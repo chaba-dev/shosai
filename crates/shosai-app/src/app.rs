@@ -3929,7 +3929,11 @@ fn render_content_node<'a>(
             highlights,
         ),
 
-        ContentNode::Math { content, style } => {
+        ContentNode::Math {
+            content,
+            style,
+            link,
+        } => {
             let size = font_size * style.font_size_multiplier.unwrap_or(1.0);
             if let Some(layout) = content.expression.as_ref().and_then(|expression| {
                 crate::epub::math_layout::layout_math_for_bounds(
@@ -3941,16 +3945,26 @@ fn render_content_node<'a>(
             }) {
                 let highlight =
                     math_highlight_state(highlights, text_offset, content.fallback.chars().count());
-                return container(crate::epub::math_widget::math(
+                let math: Element<'a, Message> = crate::epub::math_widget::math(
                     layout,
                     palette.text,
                     math_highlight_color(palette, highlight),
-                ))
-                .width(Length::Fill)
-                .align_x(node_style_to_alignment(style))
-                .into();
+                );
+                let math = if let Some(link) = link {
+                    button(math)
+                        .on_press(Message::LinkClicked(link.clone()))
+                        .padding(0)
+                        .style(button::text)
+                        .into()
+                } else {
+                    math
+                };
+                return container(math)
+                    .width(Length::Fill)
+                    .align_x(node_style_to_alignment(style))
+                    .into();
             }
-            let rendered = render_highlighted_text_with_font(
+            let rendered: Element<'a, Message> = render_highlighted_text_with_font(
                 &content.fallback,
                 text_offset,
                 size,
@@ -3958,6 +3972,15 @@ fn render_content_node<'a>(
                 Font::DEFAULT,
                 highlights,
             );
+            let rendered = if let Some(link) = link {
+                button(rendered)
+                    .on_press(Message::LinkClicked(link.clone()))
+                    .padding(0)
+                    .style(button::text)
+                    .into()
+            } else {
+                rendered
+            };
             container(rendered)
                 .width(Length::Fill)
                 .align_x(node_style_to_alignment(style))

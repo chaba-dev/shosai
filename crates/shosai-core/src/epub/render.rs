@@ -108,6 +108,7 @@ pub enum ContentNode {
     Math {
         content: super::MathContent,
         style: NodeStyle,
+        link: Option<String>,
     },
     /// An unordered list.
     UnorderedList(Vec<Vec<TextSpan>>),
@@ -300,6 +301,7 @@ fn parse_block_children(
                                 font_size_multiplier: Some(span.font_size_multiplier),
                                 ..node_style.clone()
                             },
+                            link: span.link,
                         });
                     } else {
                         paragraph.push(span);
@@ -330,6 +332,7 @@ fn parse_block_children(
                 nodes.push(ContentNode::Math {
                     content: super::math::parse_math(child),
                     style: node_style,
+                    link: None,
                 });
             }
 
@@ -523,8 +526,20 @@ fn parse_table_cell(
         if !children.is_empty() {
             block_starts.push(children.len());
         }
-        children.extend(block);
+        for child in block {
+            if matches!(child, ContentNode::Math { .. }) && !children.is_empty() {
+                block_starts.push(children.len());
+            }
+            let was_math = matches!(child, ContentNode::Math { .. });
+            children.push(child);
+            if was_math {
+                block_starts.push(children.len());
+            }
+        }
     }
+    block_starts.sort_unstable();
+    block_starts.dedup();
+    block_starts.retain(|start| *start < children.len());
     Some(TableCell {
         id: cell.attribute("id").map(str::to_owned),
         header: cell.tag_name().name() == "th",
@@ -649,12 +664,12 @@ fn collect_table_cell_inline(
                     font_size_multiplier: Some(css.font_size_px / base_font_size),
                     ..block_style.clone()
                 },
+                link: link.map(str::to_owned),
             });
         } else {
-            let math = content.expression.is_some().then_some(content.clone());
             spans.push(TextSpan {
                 text: content.fallback.clone(),
-                math,
+                math: Some(content),
                 font_family: css.font_families.first().cloned(),
                 bold: css.bold,
                 italic: css.italic,
@@ -969,10 +984,9 @@ fn collect_inline_spans_recursive(
 
             if super::math::is_math(child) {
                 let content = super::math::parse_math(child);
-                let math = content.expression.is_some().then_some(content.clone());
                 spans.push(TextSpan {
                     text: content.fallback.clone(),
-                    math,
+                    math: Some(content),
                     font_family: child_style.font_families.first().cloned(),
                     bold: child_style.bold,
                     italic: child_style.italic,
