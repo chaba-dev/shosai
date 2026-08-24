@@ -161,13 +161,8 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             *cache.raster.get_mut() = None;
         }
         let height = layout_height(cache.layout.as_ref(), cache.fallback_height);
-        let intrinsic_width = cache.layout.as_ref().map_or(width, |layout| {
-            layout
-                .lines
-                .iter()
-                .map(|line| line.pixel_width as f32 / self.request.scale)
-                .fold(0.0, f32::max)
-        });
+        let intrinsic_width =
+            native_text_intrinsic_width(cache.layout.as_ref(), width, self.request.scale);
         layout::Node::new(limits.resolve(
             self.width,
             Length::Fixed(height),
@@ -298,6 +293,20 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for NativeText<'_, Me
             mouse::Interaction::None
         }
     }
+}
+
+fn native_text_intrinsic_width(
+    layout: Option<&EpubTextLayout>,
+    fallback_width: f32,
+    scale: f32,
+) -> f32 {
+    layout.map_or(fallback_width, |layout| {
+        layout
+            .lines
+            .iter()
+            .map(|line| line.pixel_width as f32 / scale)
+            .fold(0.0, f32::max)
+    })
 }
 
 fn layout_height(native: Option<&EpubTextLayout>, fallback: f32) -> f32 {
@@ -480,6 +489,30 @@ mod tests {
         assert_eq!(hit(&layout, 10.0, 2.0), Some("chapter.xhtml#note"));
         assert_eq!(hit(&layout, 39.9, 13.9), Some("chapter.xhtml#note"));
         assert_eq!(hit(&layout, 40.0, 14.0), None);
+    }
+
+    #[test]
+    fn shrink_width_uses_logical_text_extent_not_raster_buffer_width() {
+        let layout = EpubTextLayout {
+            width: 42.0,
+            height: 20.0,
+            lines: vec![shosai_core::epub::EpubTextLine {
+                top: 0.0,
+                width: 42.0,
+                rtl: false,
+                scalars: 0..4,
+                pixel_width: 360,
+                pixel_height: 20,
+                rgba: Vec::new(),
+            }],
+            links: Vec::new(),
+        };
+
+        assert_eq!(
+            native_text_intrinsic_width(Some(&layout), 360.0, 1.0),
+            42.0,
+            "wrapping rows must size embedded-font words by glyph extent, not the full raster surface"
+        );
     }
 
     #[test]
