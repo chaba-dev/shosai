@@ -1742,6 +1742,66 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_linked_display_math_retains_block_semantics_and_link() {
+        let xhtml = r##"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <p>before <a href="#proof"><math display="block"
+                xmlns="http://www.w3.org/1998/Math/MathML">
+                <menclose><mtext>readable display fallback</mtext></menclose>
+            </math></a> after</p>
+        </body></html>"##;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        assert_eq!(
+            nodes.len(),
+            3,
+            "display semantics must not depend on native support"
+        );
+        assert!(matches!(
+            &nodes[0],
+            ContentNode::Paragraph(spans, _)
+                if spans.iter().map(|span| span.text.as_str()).collect::<String>() == "before "
+        ));
+        assert!(matches!(
+            &nodes[1],
+            ContentNode::Math { content, .. }
+                if content.display == super::super::MathDisplay::Block
+                    && content.expression.is_none()
+                    && content.fallback == "readable display fallback"
+        ));
+        assert!(
+            format!("{:?}", nodes[1]).contains("#proof"),
+            "promoting linked display math must retain its navigation target"
+        );
+        assert!(matches!(
+            &nodes[2],
+            ContentNode::Paragraph(spans, _)
+                if spans.iter().map(|span| span.text.as_str()).collect::<String>() == " after"
+        ));
+    }
+
+    #[test]
+    fn table_display_math_preserves_block_search_separators() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
+            <table><tr><td>before<math display="block"
+                xmlns="http://www.w3.org/1998/Math/MathML">
+                <menclose><mtext>display fallback</mtext></menclose>
+            </math>after</td></tr></table>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "before\ndisplay fallback\nafter\n\n",
+            "table display blocks must retain the same separators as chapter flow"
+        );
+        let ContentNode::Table { row_groups, .. } = &nodes[0] else {
+            panic!("expected table");
+        };
+        let cell = &row_groups[0].rows[0].cells[0];
+        assert_eq!(cell.block_starts, vec![1, 2]);
+    }
+
+    #[test]
     fn preformatted_monospace_css_cannot_bypass_mathml_admission() {
         let xhtml = format!(
             r#"<html xmlns="http://www.w3.org/1999/xhtml"><body>
