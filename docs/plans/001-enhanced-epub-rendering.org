@@ -457,7 +457,7 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   use the host Apple compiler and SDK with a macOS 13 deployment target, and
   package validation rejects newer or non-portable Mach-O load commands.
 - [X] Run the full workspace test suite and platform packaging smoke tests.
-  The final M5 stack passes 424 Rust tests and 16 script tests on native
+  The final M5 stack passes 426 Rust tests and 16 script tests on native
   x86_64 Linux, plus release build, package validation, and extracted-app
   runtime smoke tests on Linux and Apple Silicon macOS.  macOS inspection
   confirms the app and bundled PDFium both target macOS 13 and contain no
@@ -492,12 +492,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 - [X] The renderer ADR selects native before M1; production dependencies remain
   subject to its security and license boundaries.
-- [X] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
+- [-] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
   semantic and visual expectations on every supported platform.  The final M4c
   packaged-app protocol passed on native Apple Silicon macOS and Framework 16
-  x86_64 Linux: table cells retained independent flow, embedded Inter text used
-  page width across table boundaries, native bounded MathML remained clear, and
-  pathological expressions used readable in-bounds fallback.
+  Linux x86_64/X11: production table fallback retained independent cell flow,
+  embedded Inter text used page width across table boundaries, bounded native
+  MathML remained clear, and pathological expressions used readable in-bounds
+  fallback.  Backend-independent semantic tests pass across the CI targets;
+  native Linux arm64 and Wayland packaged-app visual/runtime evidence remains
+  open before claiming every released architecture and supported Linux session.
 - [X] No book content triggers network access or script execution by default;
   user-activated external links obey the documented confirmation/allow policy.
   Native presentation has no script or network loader; explicit link activation
@@ -522,9 +525,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   p95 at 1.62–3.47 ms, and relayout p95 at 0.60–25.59 ms, below the respective
   16.7, 33.3, and 100 ms budgets.  Warm turns retain the parsed presentation,
   paginated allocation, layout key, image handles, and render generation while
-  queuing persistence off the UI thread.  A repeated 64-turn chapter regression
-  additionally proves page storage, font/native-text identity, image handles,
-  search generations, and presentation ownership remain stable.
+  queuing persistence off the UI thread.  A repeated 64-turn navigation
+  regression proves state-owned page storage, font/native-text identity, image
+  handles, search generations, and presentation ownership remain stable.  A
+  separate 32-turn production chapter-view layout/draw regression uses the
+  combined embedded-font/image fixture to prove retained raster pixels stay
+  within the per-book budget and are released with replaced widget trees.
 
 * Risks and Mitigations
 
