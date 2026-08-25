@@ -2058,6 +2058,20 @@ pub(crate) fn content_node_text_len(node: &ContentNode) -> usize {
     }
 }
 
+pub(crate) fn content_starts_with_heading(nodes: &[ContentNode], title: &str) -> bool {
+    nodes.first().is_some_and(|node| match node {
+        ContentNode::Heading { spans, .. } => {
+            spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>()
+                .trim()
+                == title.trim()
+        }
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod text_layout;
 

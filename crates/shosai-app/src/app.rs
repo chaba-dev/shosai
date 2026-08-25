@@ -28,7 +28,8 @@ use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
     EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
     PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, PageNode as EpubPageNode,
-    content_node_text_len, paginate_epub_chapter_with_budget, spans_font_scale, spans_text_len,
+    content_node_text_len, content_starts_with_heading, paginate_epub_chapter_with_budget,
+    spans_font_scale, spans_text_len,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;

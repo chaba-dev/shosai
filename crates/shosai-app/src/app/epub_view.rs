@@ -249,20 +249,6 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
         .into()
 }
 
-pub(super) fn content_starts_with_heading(nodes: &[ContentNode], title: &str) -> bool {
-    nodes.first().is_some_and(|node| match node {
-        ContentNode::Heading { spans, .. } => {
-            spans
-                .iter()
-                .map(|span| span.text.as_str())
-                .collect::<String>()
-                .trim()
-                == title.trim()
-        }
-        _ => false,
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_content_node<'a>(
     node: &ContentNode,
