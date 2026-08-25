@@ -941,7 +941,34 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
 }
 
 fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
-    if let Some(index) = state.tabs.iter().position(|tab| tab.file_path == path) {
+    if let Some(index) = state
+        .tabs
+        .iter()
+        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
+    {
+        if state.tabs[index].file_path != path {
+            let document = match load_document(&path) {
+                Ok(document) => document,
+                Err(error) => {
+                    let performance_task = perf::fail(state, &error.diagnostic());
+                    state.open_error = Some(error);
+                    return performance_task;
+                }
+            };
+            save_active_tab(state);
+            state.active_tab_id = Some(state.tabs[index].id);
+            state.continuous_activation = state.continuous_activation.wrapping_add(1);
+            state.open_error = None;
+            state.missing_book_id = None;
+            install_document(state, path, book_id, document);
+            let task = refresh_content(state);
+            if let Some(tab) = capture_reader_tab(state) {
+                state.tabs[index] = tab;
+                state.active_tab = Some(index);
+                state.screen = Screen::Reader;
+            }
+            return task;
+        }
         if let Some(book_id) = book_id {
             state.tabs[index].book_id = Some(book_id);
             if state.active_tab == Some(index) {
@@ -5580,6 +5607,37 @@ mod tests {
         assert_eq!(task.units(), 0);
         assert_eq!(state.open_error, Some(AppError::MissingBook));
         assert_eq!(state.missing_book_id, Some(42));
+    }
+
+    #[test]
+    fn reopening_a_relocated_book_replaces_its_existing_identity_tab() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.epub");
+        let replacement = directory.path().join("replacement.epub");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/sample.epub");
+        std::fs::copy(&fixture, &original).unwrap();
+        std::fs::copy(&fixture, &replacement).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+
+        let _ = open_document(&mut state, original, Some(42));
+        let old_document = match state.document.as_ref().unwrap() {
+            OpenDocument::Epub(document) => Arc::clone(document),
+            _ => panic!("expected EPUB document"),
+        };
+        let _ = open_document(&mut state, replacement.clone(), Some(42));
+
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.active_tab, Some(0));
+        assert_eq!(state.book_id, Some(42));
+        assert_eq!(state.file_path.as_ref(), Some(&replacement));
+        assert_eq!(state.tabs[0].file_path, replacement);
+        let Some(OpenDocument::Epub(document)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        assert!(!Arc::ptr_eq(document, &old_document));
     }
 
     #[test]
