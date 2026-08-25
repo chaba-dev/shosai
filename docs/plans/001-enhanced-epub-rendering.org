@@ -492,8 +492,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
 
 - [X] The renderer ADR selects native before M1; production dependencies remain
   subject to its security and license boundaries.
-- [ ] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
-  semantic and visual expectations on every supported platform.
+- [X] Fixture tables, embedded fonts, ~@font-face~, and MathML satisfy documented
+  semantic and visual expectations on every supported platform.  The final M4c
+  packaged-app protocol passed on native Apple Silicon macOS and Framework 16
+  x86_64 Linux: table cells retained independent flow, embedded Inter text used
+  page width across table boundaries, native bounded MathML remained clear, and
+  pathological expressions used readable in-bounds fallback.
 - [X] No book content triggers network access or script execution by default;
   user-activated external links obey the documented confirmation/allow policy.
   Native presentation has no script or network loader; explicit link activation
@@ -505,8 +509,13 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   corrupt archives and rejected resources retain the affected path and limit
   in the localized reader alert while preserving the active document and its
   render generation.
-- [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
-  reading modes pass regression tests.
+- [X] Existing EPUB navigation, search, bookmarks, themes, progress, and both
+  reading modes pass regression tests.  The final workspace suite covers stable
+  same- and cross-chapter locations, linked native and fallback math, TOC and
+  bookmark navigation, Unicode search highlights, theme rendering, persisted
+  chapter/character progress, relayout, and paginated/continuous transitions;
+  packaged-app pointer, keyboard, search, theme, and page-turn smoke tests pass
+  on macOS and Linux.
 - [ ] Gate 0 page-turn, chapter-transition, and relayout p50/p95 budgets are met
   on reference hardware or an accepted variance is documented.  Warm page turns
   perform no synchronous storage or avoidable resource/layout recomputation;
