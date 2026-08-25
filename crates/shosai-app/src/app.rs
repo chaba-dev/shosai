@@ -6475,6 +6475,66 @@ mod tests {
         assert_eq!(current_native_text_id, native_text_id);
     }
 
+    #[test]
+    fn repeated_chapter_view_replacement_keeps_rasters_bounded_and_releases_them() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/conformance.epub")
+                .to_vec(),
+        )
+        .expect("conformance fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size = Size::new(500.0, 700.0);
+        complete_epub_pagination(&mut state);
+        let document = match &state.document {
+            Some(OpenDocument::Epub(document)) => Arc::clone(document),
+            _ => panic!("expected EPUB document"),
+        };
+        let native_text_id = document.fonts().native_text_id();
+        let chapters = [0, 3];
+        assert!(
+            chapters
+                .iter()
+                .all(|chapter| { state.epub_pages.iter().any(|page| page.chapter == *chapter) })
+        );
+        let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+            iced::Font::DEFAULT,
+            iced::Pixels(16.0),
+        ));
+        let mut cache = iced_runtime::user_interface::Cache::new();
+        let theme = iced::Theme::Light;
+        let style = iced::advanced::renderer::Style::default();
+
+        for turn in 0..32 {
+            let chapter = chapters[turn % chapters.len()];
+            assert_eq!(navigate_to_epub_location(&mut state, chapter, 0).units(), 0);
+            let element = epub_chapter_view(&state);
+            let mut interface = iced_runtime::UserInterface::build(
+                element,
+                state.window_size,
+                cache,
+                &mut renderer,
+            );
+            interface.draw(
+                &mut renderer,
+                &theme,
+                &style,
+                iced::mouse::Cursor::Unavailable,
+            );
+            cache = interface.into_cache();
+            assert!(
+                crate::epub::native_text::retained_book_raster_pixels(native_text_id)
+                    <= crate::epub::native_text::book_raster_pixel_budget()
+            );
+        }
+
+        drop(cache);
+        assert_eq!(
+            crate::epub::native_text::retained_book_raster_pixels(native_text_id),
+            0,
+            "replaced chapter trees must release their raster permits"
+        );
+    }
+
     #[tokio::test]
     async fn reading_state_writer_coalesces_queued_positions() {
         let directory = tempfile::tempdir().unwrap();
