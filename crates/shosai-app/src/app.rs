@@ -982,7 +982,7 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
             .map(|document| OpenDocument::Epub(Arc::new(document)))
             .map_err(|error| AppError::Open {
                 format: "EPUB",
-                detail: error.to_string(),
+                detail: format!("{error:#}"),
             }),
         "cbz" => CbzDoc::open(path)
             .map(|document| OpenDocument::Cbz(Arc::new(document)))
