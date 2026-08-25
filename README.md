@@ -33,6 +33,7 @@ Alternatively, install Rust 1.94 or newer and the native dependencies required b
 nix develop
 make lint
 make test
+make check-rfds
 ```
 
 The project is a Cargo workspace:
@@ -40,6 +41,10 @@ The project is a Cargo workspace:
 - `crates/shosai-core` contains document formats, library storage, and reader logic.
 - `crates/shosai-app` contains the native Iced application.
 - `website` contains the Hugo source for the project website.
+
+Architecture and product proposals follow the
+[Requests for Discussion process](rfd/README.md). The
+[project roadmap](docs/roadmap.org) links to the corresponding RFDs.
 
 ## Website
 

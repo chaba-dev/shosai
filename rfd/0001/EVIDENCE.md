@@ -3,7 +3,8 @@
 - Status: Accepted — native renderer selected
 - Date: 2026-08-17
 - Decision date: 2026-08-21
-- Plan: [001 Enhanced EPUB Rendering](../plans/001-enhanced-epub-rendering.org)
+- RFD: [RFD 1: Enhanced EPUB rendering](README.adoc)
+- Implementation: [RFD 1 implementation checklist](IMPLEMENTATION.org)
 
 ## Context
 

@@ -1,0 +1,32 @@
+:authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
+:state: ideation
+:discussion:
+:labels: sync, storage, privacy, networking
+
+= RFD 3 Cloud synchronization
+
+== Goal
+
+Synchronize reading progress and bookmarks across installations while preserving
+offline-first local reading and keeping credentials out of SQLite, logs,
+diagnostics, and payloads.
+
+== Proposal
+
+Introduce portable book and record identities before transport, migrate existing
+path-keyed SQLite data in place, and define deterministic revisions, conflicts,
+deletions, and tombstone retention with test vectors. Synchronization remains
+outside the open/read critical path and applies remote changes transactionally.
+
+A narrow transport interface provides conditional reads and writes, capability
+validation, bounded payloads, cancellation, and typed failures. WebDAV is the
+first candidate, not a permanent choice absent evidence. Credentials use the OS
+credential store; book files and cover blobs are initially out of scope.
+
+Identity, protocol, conflict, transport, and privacy decisions must converge
+before implementation commits to a wire format or provider.
+
+== Implementation
+
+The decision gates, migrations, transport milestones, and acceptance tests are
+tracked in link:IMPLEMENTATION.org[RFD 3 implementation checklist].

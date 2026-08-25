@@ -1,0 +1,31 @@
+:authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
+:state: ideation
+:discussion:
+:labels: mobile, architecture, accessibility, packaging
+
+= RFD 4 Mobile support
+
+== Goal
+
+Determine whether Shōsai should ship a mobile companion or a full mobile reader,
+then build the smallest validated product without coupling shared reading data
+to the desktop UI or local filesystem layout.
+
+== Proposal
+
+Gate implementation on physical-device evidence and an explicit companion versus
+reader decision. Select one first platform; do not promise Android and iOS
+simultaneously. Reuse a platform-neutral core only after portable identity,
+storage, and synchronization boundaries exist.
+
+Mobile integration owns lifecycle, touch navigation, accessibility, secure
+storage, file-provider grants, background work, signing, and store packaging.
+Desktop dialogs, paths, window behavior, keyboard shortcuts, and PDFium loading
+are not treated as portable abstractions. A full reader additionally requires
+each native format dependency to pass device performance and packaging gates.
+
+== Implementation
+
+The feasibility gate, architecture decisions, alternative product milestones,
+and platform acceptance criteria are tracked in
+link:IMPLEMENTATION.org[RFD 4 implementation checklist].

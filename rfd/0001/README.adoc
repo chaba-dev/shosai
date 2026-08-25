@@ -1,0 +1,40 @@
+:authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
+:state: published
+:discussion: https://github.com/chaba-dev/shosai/pull/22
+:labels: epub, rendering, security, performance
+
+= RFD 1 Enhanced EPUB rendering
+
+== Goal
+
+Improve EPUB CSS, table, embedded-font, MathML, navigation, and fidelity without
+weakening Shōsai's native reading experience or growing an unbounded browser
+implementation.
+
+== Decision
+
+Shōsai expands its native parser, computed-style, layout, shaping, and Iced
+presentation rather than embedding an operating-system webview. The Wry spike
+showed useful rendering fidelity, but cannot support native Wayland child
+embedding in the current host and adds platform runtime, packaging, lifecycle,
+input, accessibility, and security variance.
+
+The native route uses bounded archive/resource admission, a book-local resource
+model, shared parsed chapter presentation, stable logical locations, native font
+shaping and rasterization, semantic table lowering, and a bounded MathML subset
+with readable fallback. Network loading and script execution remain disabled.
+
+== Boundaries
+
+The implementation supports a documented EPUB subset rather than attempting a
+general browser engine. Unsupported CSS and MathML degrade predictably. Resource
+limits apply before backend allocation, and warm navigation must avoid parsing,
+repagination, decoding, and synchronous storage.
+
+The complete spike, trade-off, benchmark, and platform evidence is retained in
+link:EVIDENCE.md[the EPUB renderer decision evidence].
+
+== Implementation
+
+Progress and remaining cross-platform acceptance evidence are tracked in
+link:IMPLEMENTATION.org[RFD 1 implementation checklist].
