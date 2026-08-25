@@ -5912,6 +5912,80 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_and_oversized_epubs_report_actionable_open_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let corrupt = directory.path().join("corrupt.epub");
+        std::fs::write(&corrupt, b"not a ZIP archive").unwrap();
+
+        let corrupt_error = load_document(&corrupt).unwrap_err();
+        let AppError::Open {
+            format,
+            detail: corrupt_detail,
+        } = &corrupt_error
+        else {
+            panic!("corrupt EPUB returned an unexpected error: {corrupt_error:?}");
+        };
+        assert_eq!(*format, "EPUB");
+        assert!(
+            corrupt_detail.contains("EPUB archive is corrupt")
+                && corrupt_detail.contains("end-of-central-directory record is missing"),
+            "corrupt EPUB error was not actionable: {corrupt_detail}"
+        );
+
+        let oversized = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
+        let oversized_error = load_document(&oversized).unwrap_err();
+        let AppError::Open {
+            format,
+            detail: oversized_detail,
+        } = &oversized_error
+        else {
+            panic!("oversized EPUB returned an unexpected error: {oversized_error:?}");
+        };
+        assert_eq!(*format, "EPUB");
+        assert!(
+            oversized_detail.contains("OEBPS/Images/huge.svg")
+                && oversized_detail.contains("dimension limit"),
+            "oversized EPUB error was not actionable: {oversized_detail}"
+        );
+
+        let localized = oversized_error
+            .localized(&I18n::new(LanguagePreference::English))
+            .replace(['\u{2068}', '\u{2069}'], "");
+        assert!(localized.starts_with("Failed to open EPUB:"));
+        assert!(localized.contains("OEBPS/Images/huge.svg"));
+        assert!(localized.contains("dimension limit"));
+    }
+
+    #[test]
+    fn rejected_epub_preserves_the_active_document() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let old_generation = state.render_generation;
+        let old_document = state.document.clone();
+        let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
+
+        let task = open_document(&mut state, rejected);
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.render_generation, old_generation);
+        assert!(matches!(
+            (&state.document, old_document),
+            (Some(OpenDocument::Cbz(_)), Some(OpenDocument::Cbz(_)))
+        ));
+        assert!(matches!(
+            &state.open_error,
+            Some(AppError::Open { format: "EPUB", detail })
+                if detail.contains("OEBPS/Images/huge.svg")
+                    && detail.contains("dimension limit")
+        ));
+    }
+
+    #[test]
     fn epub_refresh_paginates_off_the_ui_thread() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
