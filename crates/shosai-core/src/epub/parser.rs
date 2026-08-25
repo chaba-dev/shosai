@@ -505,7 +505,7 @@ fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<us
                     .and_then(|length| offset.checked_add(22 + usize::from(length)))
                     .is_some_and(|end| end == data.len())
         })
-        .context("EPUB ZIP end-of-central-directory record is missing")?;
+        .context("EPUB archive is corrupt: ZIP end-of-central-directory record is missing")?;
     let entries_offset = eocd_offset
         .checked_add(10)
         .context("invalid EPUB ZIP footer")?;
