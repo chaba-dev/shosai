@@ -250,6 +250,17 @@
           // (pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
             # macOS: DYLD_LIBRARY_PATH for dynamic libraries
             DYLD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.pdfium-binaries ];
+
+            # Release artifacts must use the host Apple SDK and system libraries,
+            # rather than embedding dependencies from the Nix SDK or store.
+            CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = "/usr/bin/clang";
+            CC_aarch64_apple_darwin = "/usr/bin/clang";
+            CXX_aarch64_apple_darwin = "/usr/bin/clang++";
+            shellHook = ''
+              export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+              export SDKROOT="$DEVELOPER_DIR/SDKs/MacOSX.sdk"
+              export MACOSX_DEPLOYMENT_TARGET=12.0
+            '';
           })
         );
       }
