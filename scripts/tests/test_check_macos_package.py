@@ -57,12 +57,23 @@ if [[ $1 == -l ]]; then
 Load command 1
       cmd LC_BUILD_VERSION
   cmdsize 32
- platform 1
+ platform ${FAKE_PLATFORM:-1}
     minos $minimum
       sdk 14.4
    ntools 1
 EOF
+  if [[ -n ${FAKE_RPATH:-} ]]; then
+    cat <<EOF
+Load command 2
+          cmd LC_RPATH
+      cmdsize 48
+         path $FAKE_RPATH (offset 12)
+EOF
+  fi
 else
+  if [[ ${FAKE_OTOOL_L_FAILURE:-0} == 1 ]]; then
+    exit 1
+  fi
   printf '%s:\\n' "$2"
   case "$2" in
     */libpdfium.dylib)
@@ -102,6 +113,50 @@ fi
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("non-portable Mach-O dependency", result.stderr)
         self.assertIn("/nix/store/example-libiconv", result.stderr)
+
+    def test_rejects_nix_store_pdfium_dependency(self):
+        result = self._check(
+            FAKE_PDFIUM_DEPENDENCY="/nix/store/example/lib/libdependency.dylib"
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("non-portable Mach-O dependency in PDFium library", result.stderr)
+
+    def test_rejects_nonportable_rpath(self):
+        result = self._check(
+            FAKE_BINARY_DEPENDENCY="@rpath/libdependency.dylib",
+            FAKE_RPATH="/nix/store/example/lib",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("non-portable LC_RPATH", result.stderr)
+
+    def test_rejects_dependency_path_traversal(self):
+        result = self._check(
+            FAKE_BINARY_DEPENDENCY="/usr/lib/../../nix/store/example/libbad.dylib"
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("path traversal", result.stderr)
+
+    def test_rejects_otool_dependency_inspection_failure(self):
+        result = self._check(FAKE_OTOOL_L_FAILURE="1")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot inspect Mach-O dependencies", result.stderr)
+
+    def test_rejects_non_macos_binary(self):
+        result = self._check(FAKE_PLATFORM="2")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not a macOS Mach-O", result.stderr)
+
+    def test_preserves_spaces_in_dependency_paths(self):
+        dependency = "/Applications/Unsafe Library/libbad.dylib"
+        result = self._check(FAKE_BINARY_DEPENDENCY=dependency)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(dependency, result.stderr)
 
     def test_accepts_declared_target_and_portable_dependencies(self):
         result = self._check(
