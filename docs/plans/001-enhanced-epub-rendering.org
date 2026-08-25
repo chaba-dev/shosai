@@ -456,7 +456,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   packages bundle PDFium and Inter with their licenses.  macOS release builds
   use the host Apple compiler and SDK with a macOS 13 deployment target, and
   package validation rejects newer or non-portable Mach-O load commands.
-- [ ] Run the full workspace test suite and platform packaging smoke tests.
+- [X] Run the full workspace test suite and platform packaging smoke tests.
+  The final M5 stack passes 421 Rust tests and 10 script tests on native
+  x86_64 Linux, plus release build, package validation, and extracted-app
+  runtime smoke tests on Linux and Apple Silicon macOS.  macOS inspection
+  confirms the app and bundled PDFium both target macOS 13 and contain no
+  non-system absolute load dependencies.
 
 * Tests and Fixtures
 
