@@ -451,8 +451,11 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   ~app/epub_navigation.rs~.  Image presentation caching plus paginated and
   continuous EPUB widget construction now live in ~app/epub_view.rs~; generic
   reader chrome and state/update ownership remain in ~app.rs~.
-- [ ] Add feature/build configuration and packaging changes only for the native
-  implementation; document runtime prerequisites and attribution.
+- [X] Add feature/build configuration and packaging changes only for the native
+  implementation; document runtime prerequisites and attribution.  Release
+  packages bundle PDFium and Inter with their licenses.  macOS release builds
+  use the host Apple compiler and SDK with a macOS 13 deployment target, and
+  package validation rejects newer or non-portable Mach-O load commands.
 - [ ] Run the full workspace test suite and platform packaging smoke tests.
 
 * Tests and Fixtures
