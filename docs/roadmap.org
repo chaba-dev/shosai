@@ -277,8 +277,9 @@ RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 ** TODO Mobile support
 RFD: [[file:../rfd/0004/README.adoc][RFD 4: Mobile support]]
 
-- [ ] Evaluate Iced's future mobile story
-- [ ] Consider companion app approach
+- [ ] Prove the Flutter mobile and Rust-core boundary on physical Android and iOS
+  devices
+- [ ] Select companion versus full reader and the first release platform
 - [ ] Sync reading progress across desktop and mobile
 
 ** TODO Distribution & packaging

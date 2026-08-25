@@ -78,27 +78,28 @@ No production mobile frontend starts until this gate records a decision.
   import/open, sync errors, and compact/rotated screens.
 - [ ] Select one candidate and one first platform with measurable rationale.
 
-** Iced and platform viability spike
+** Flutter and platform viability spike
 
-- [ ] Verify the repository's pinned Iced version and renderer on physical target
-  devices: startup, touch/gesture events, text input, accessibility, suspend/
-  resume, orientation, safe areas, high-DPI scaling, and GPU loss.
-- [ ] Build a thin spike that opens a screen, reads/writes SQLite in the app
-  sandbox, resumes after process death, and calls one shared-core API.
+- [ ] Build the Flutter vertical slice proposed by RFD 4 on physical Android and
+  iOS devices.  Verify startup, touch/gesture events, text input, accessibility,
+  suspend/resume, orientation, safe areas, high-DPI scaling, memory pressure,
+  and renderer recovery.
+- [ ] Have the spike read/write SQLite in the app sandbox, resume after process
+  death, and call one shared-core API through the packaged Dart/Rust bridge.
 - [ ] For a full reader, separately prove PDFium binary build/loading and page
   render, EPUB text/image rendering, and CBZ image decoding under memory pressure.
 - [ ] Verify platform document pickers and persisted access grants; do not use
   ~rfd~ as the mobile design.
 - [ ] Verify TLS/networking, secure credential storage, background execution
   limits, cross-compilation, signing, and install packaging.
-- [ ] Compare keeping Iced with a mobile-native frontend calling Rust core.  Record
-  an ADR covering accessibility, lifecycle, maintenance, binary size, testability,
-  and shared UI expectations.
+- [ ] Confirm or revise RFD 4 from measured accessibility, lifecycle,
+  maintenance, binary-size, rendering, and testability evidence.
 
-*Gate acceptance*: a reproducible physical-device spike and ADR choose companion
-or full reader, first platform, frontend technology, and supported formats.  If
-Iced fails required criteria, retain the shared Rust core and choose a native
-frontend or stop; do not patch around the gate by asserting desktop readiness.
+*Gate acceptance*: a reproducible physical-device spike and published RFD choose
+companion or full reader, first platform, frontend technology, and supported
+formats.  If Flutter fails required criteria, retain the shared Rust core and
+choose native mobile frontends or stop; do not patch around the gate by asserting
+desktop readiness.
 
 * Architecture Decisions Required
 
@@ -107,12 +108,14 @@ frontend or stop; do not patch around the gate by asserting desktop readiness.
 Record companion versus full reader, Android versus iOS first, minimum OS,
 tablet/phone scope, offline contract, and explicit deferred features.
 
-** Frontend ADR
+** Frontend boundary
 
-Choose Iced or a native platform UI based on Gate 0 evidence.  Define the core
-boundary as commands/data/errors rather than Iced messages or widgets.  Decide
-whether Rust is called directly, through UniFFI/C ABI, or from a separate mobile
-Rust binary, including async and cancellation semantics.
+Confirm the Iced desktop and Flutter mobile split in RFD 4 from Gate 0 evidence.
+Define the core boundary as commands/data/errors rather than Iced messages,
+Flutter widgets, or platform locators.  Select a Dart FFI-compatible bridge and
+specify ownership, thread affinity, error mapping, async progress, cancellation,
+and buffer release.  No Rust panic or borrowed reference crosses FFI, and the
+bridge must not require per-widget, per-glyph, or per-frame calls.
 
 ** Portable identity and locator ADR
 
@@ -132,6 +135,10 @@ synced record.
 Decide supported formats per platform based on measured binary size, native
 dependencies, memory, rendering latency, licensing, and store policy.  Define
 cache limits and cancellation; PDFium desktop success is not mobile evidence.
+For EPUB, choose between a shared renderer-neutral Rust layout/scene and Flutter
+layout of the shared semantic model.  Preserve search offsets, links, bookmarks,
+pagination, themes, resource limits, and readable fallback behavior without a
+second parser or resource-security policy.
 
 * Staged Milestones
 
@@ -153,6 +160,8 @@ production-code fork.
   and window/config-directory lookup.
 - [ ] Introduce injected storage location, clock/device identity, credential
   access, and transport interfaces only where the selected product needs them.
+- [ ] Add the selected Dart/Rust bridge with typed ownership, cancellation,
+  buffer-lifetime, panic-containment, and error-contract tests.
 - [ ] Represent mobile locators and permission failures without serializing them
   as sync identity.
 - [ ] Compile and test the selected subset of ~shosai-core~ for the target triple;
@@ -227,8 +236,8 @@ product acceptance criteria pass.
 
 ** Mobile frontend/platform responsibilities
 
-- Application lifecycle, navigation, gestures, accessibility, safe areas, and
-  platform error presentation.
+- Flutter application lifecycle, navigation, adaptive phone/tablet layouts,
+  gestures, accessibility, safe areas, and platform error presentation.
 - Document picker/security-scoped access/content URI grants and local locators.
 - Secure credential APIs, networking/background scheduling adapters, and OS
   privacy controls.
@@ -248,8 +257,8 @@ well-defined domain operations into core, not by importing ~app.rs~ into mobile.
   under target-specific builds and tests.
 - Update ~crates/shosai-app/src/app.rs~ only to consume shared abstractions and
   preserve desktop behavior; keep ~rfd~ in the desktop integration.
-- Add a mobile crate/platform project only after Gate 0 determines technology;
-  its name and layout are outputs of the frontend ADR, not assumptions here.
+- Add a Flutter mobile project and Rust bridge only after Gate 0 passes; its name,
+  generator, and layout remain outputs of the measured frontend boundary.
 - Add target build/package definitions in workspace and CI files only in M4.
 
 * Migration and Compatibility Strategy
@@ -321,8 +330,12 @@ well-defined domain operations into core, not by importing ~app.rs~ into mobile.
   the feasibility gate?
 - Which first platform and minimum OS have available signing hardware/accounts
   and sufficient user demand?
-- Does current Iced meet touch, accessibility, lifecycle, and packaging needs, or
-  is a native frontend over a Rust core lower risk?
+- Does the Flutter vertical slice meet touch, accessibility, lifecycle,
+  rendering, and packaging requirements on both mobile operating systems?
+- Does EPUB mobile presentation consume a shared Rust scene or a shared semantic
+  model laid out by Flutter?
+- Which Dart/Rust binding approach passes both platform build and maintenance
+  criteria?
 - Which formats pass physical-device performance and binary-size budgets?
 - Must the first mobile release transfer book files, or will users import them
   independently and associate by content ID?
