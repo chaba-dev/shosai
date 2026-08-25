@@ -14,6 +14,7 @@ use sqlx::sqlite::SqlitePool;
 pub struct Bookmark {
     pub id: i64,
     pub file_path: String,
+    pub book_id: Option<i64>,
     pub page: usize,
     pub location_offset: Option<usize>,
     pub title: Option<String>,
@@ -128,12 +129,61 @@ impl BookmarkStore {
         }
     }
 
+    /// Toggle a bookmark using a stable library book identity.
+    pub async fn toggle_for_book_at_async(
+        &self,
+        book_id: i64,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+        title: Option<&str>,
+    ) -> Result<Option<Bookmark>> {
+        let existing = sqlx::query(
+            "SELECT id FROM bookmarks
+             WHERE book_id = ? AND page = ?
+               AND location_offset IS ? AND note IS NULL",
+        )
+        .bind(book_id)
+        .bind(page as i64)
+        .bind(location_offset.map(|offset| offset as i64))
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to check existing bookmark for book")?;
+
+        if let Some(row) = existing {
+            self.remove_async(row.get("id")).await?;
+            Ok(None)
+        } else {
+            let key = canonical_key(file_path);
+            let id = sqlx::query(
+                "INSERT INTO bookmarks
+                    (file_path, book_id, page, location_offset, title, note, color)
+                 VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
+                 RETURNING id",
+            )
+            .bind(key)
+            .bind(book_id)
+            .bind(page as i64)
+            .bind(location_offset.map(|offset| offset as i64))
+            .bind(title)
+            .fetch_one(&self.pool)
+            .await
+            .context("failed to add bookmark for book")?
+            .get("id");
+            Ok(Some(
+                self.get_by_id_async(id)
+                    .await?
+                    .context("bookmark not found after insert")?,
+            ))
+        }
+    }
+
     /// List all bookmarks for a file, ordered by page.
     pub async fn list_for_file_async(&self, file_path: &Path) -> Result<Vec<Bookmark>> {
         let key = canonical_key(file_path);
 
         let rows = sqlx::query(
-            "SELECT id, file_path, page, location_offset, title, note, color, created_at
+            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
              FROM bookmarks
              WHERE file_path = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC",
@@ -143,6 +193,21 @@ impl BookmarkStore {
         .await
         .context("failed to list bookmarks")?;
 
+        Ok(rows.iter().filter_map(row_to_bookmark).collect())
+    }
+
+    /// List bookmarks using a stable library book identity.
+    pub async fn list_for_book_async(&self, book_id: i64) -> Result<Vec<Bookmark>> {
+        let rows = sqlx::query(
+            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
+             FROM bookmarks
+             WHERE book_id = ?
+             ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC",
+        )
+        .bind(book_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list bookmarks for book")?;
         Ok(rows.iter().filter_map(row_to_bookmark).collect())
     }
 
@@ -222,7 +287,7 @@ impl BookmarkStore {
     /// Get a single bookmark by ID.
     async fn get_by_id_async(&self, id: i64) -> Result<Option<Bookmark>> {
         let row = sqlx::query(
-            "SELECT id, file_path, page, location_offset, title, note, color, created_at
+            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
              FROM bookmarks WHERE id = ?",
         )
         .bind(id)
@@ -295,9 +360,26 @@ impl BookmarkStore {
         rt.block_on(self.toggle_at_async(file_path, page, location_offset, title))
     }
 
+    pub fn toggle_for_book_at(
+        &self,
+        book_id: i64,
+        file_path: &Path,
+        page: usize,
+        location_offset: Option<usize>,
+        title: Option<&str>,
+    ) -> Result<Option<Bookmark>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.toggle_for_book_at_async(book_id, file_path, page, location_offset, title))
+    }
+
     pub fn list_for_file(&self, file_path: &Path) -> Result<Vec<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.list_for_file_async(file_path))
+    }
+
+    pub fn list_for_book(&self, book_id: i64) -> Result<Vec<Bookmark>> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.list_for_book_async(book_id))
     }
 
     pub fn is_bookmarked(&self, file_path: &Path, page: usize) -> bool {
@@ -332,6 +414,7 @@ fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Option<Bookmark> {
     Some(Bookmark {
         id: row.try_get("id").ok()?,
         file_path: row.try_get("file_path").ok()?,
+        book_id: row.try_get("book_id").ok()?,
         page: row.try_get::<i64, _>("page").ok()? as usize,
         location_offset: row
             .try_get::<Option<i64>, _>("location_offset")

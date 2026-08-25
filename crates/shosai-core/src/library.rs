@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use sha2::{Digest, Sha256};
 use sqlx::QueryBuilder;
 use sqlx::Row;
 use sqlx::sqlite::SqlitePool;
@@ -21,6 +22,30 @@ pub enum BookFormat {
     Pdf,
     Epub,
     Cbz,
+}
+
+/// Where Shosai expects a book's bytes to live.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageKind {
+    Referenced,
+    Managed,
+}
+
+impl StorageKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Referenced => "referenced",
+            Self::Managed => "managed",
+        }
+    }
+
+    fn from_db(value: &str) -> Option<Self> {
+        match value {
+            "referenced" => Some(Self::Referenced),
+            "managed" => Some(Self::Managed),
+            _ => None,
+        }
+    }
 }
 
 impl BookFormat {
@@ -59,6 +84,10 @@ pub struct Book {
     pub author: Option<String>,
     pub format: BookFormat,
     pub file_path: String,
+    pub storage_kind: StorageKind,
+    pub original_path: Option<String>,
+    pub content_hash: Option<String>,
+    pub file_size: Option<u64>,
     pub cover: Option<Vec<u8>>,
     pub progress: f64,
     pub date_added: String,
@@ -72,16 +101,29 @@ pub struct BookPage {
     pub has_more: bool,
 }
 
+struct FileFingerprint {
+    hash: String,
+    size: u64,
+}
+
+struct BookInspection {
+    title: String,
+    author: Option<String>,
+    cover: Option<Vec<u8>>,
+    fingerprint: FileFingerprint,
+}
+
 /// Library backed by SQLite.
 #[derive(Debug, Clone)]
 pub struct Library {
     pool: SqlitePool,
+    managed_dir: PathBuf,
 }
 
 impl Library {
     /// Create a library handle from an existing connection pool.
-    pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+    pub fn new(pool: SqlitePool, managed_dir: PathBuf) -> Self {
+        Self { pool, managed_dir }
     }
 
     /// Import a single book file into the library.
@@ -109,27 +151,148 @@ impl Library {
         // Parsing documents, decoding images, and rendering PDF covers are CPU-heavy. Keep that
         // work away from the async executor so imports do not stall the application UI.
         let metadata_path = path.clone();
-        let (title, author, cover) =
-            tokio::task::spawn_blocking(move || extract_metadata_and_cover(&metadata_path, format))
-                .await
-                .context("metadata extraction task failed")??;
+        let inspection = tokio::task::spawn_blocking(move || inspect_book(&metadata_path, format))
+            .await
+            .context("metadata extraction task failed")??;
 
         sqlx::query(
-            "INSERT INTO books (title, author, format, file_path, cover_blob)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO books
+                (title, author, format, file_path, cover_blob, storage_kind,
+                 original_path, content_hash, file_size)
+             VALUES (?, ?, ?, ?, ?, 'referenced', ?, ?, ?)",
         )
-        .bind(&title)
-        .bind(&author)
+        .bind(&inspection.title)
+        .bind(&inspection.author)
         .bind(format.as_str())
         .bind(&path_str)
-        .bind(&cover)
+        .bind(&inspection.cover)
+        .bind(&path_str)
+        .bind(&inspection.fingerprint.hash)
+        .bind(inspection.fingerprint.size as i64)
         .execute(&self.pool)
         .await
         .context("failed to insert book")?;
 
-        self.get_by_path(&path_str)
+        let book = self
+            .get_by_path(&path_str)
             .await?
-            .context("book not found after insert")
+            .context("book not found after insert")?;
+        self.attach_identity(book.id, &path_str, &path_str).await?;
+        Ok(book)
+    }
+
+    /// Copy a book into Shosai's private data directory and add it to the library.
+    pub async fn import_managed_file(&self, source: &Path) -> Result<Book> {
+        let source = canonical_path(source);
+        let source_str = source.to_string_lossy().to_string();
+        let ext = source
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let format = BookFormat::from_extension(&ext)
+            .with_context(|| format!("unsupported format: .{ext}"))?;
+        let inspection_path = source.clone();
+        let inspection =
+            tokio::task::spawn_blocking(move || inspect_book(&inspection_path, format))
+                .await
+                .context("book inspection task failed")??;
+
+        let existing_hash = self.get_by_hash(&inspection.fingerprint.hash).await?;
+        if let Some(existing) = &existing_hash
+            && existing.storage_kind == StorageKind::Managed
+        {
+            return Ok(existing.clone());
+        }
+
+        let destination = self
+            .managed_dir
+            .join(format!("{}.{ext}", inspection.fingerprint.hash));
+        let copy_source = source.clone();
+        let copy_destination = destination.clone();
+        tokio::task::spawn_blocking(move || copy_managed_file(&copy_source, &copy_destination))
+            .await
+            .context("managed book copy task failed")??;
+        let destination = canonical_path(&destination);
+        let destination_str = destination.to_string_lossy().to_string();
+
+        if let Some(existing) = self.get_by_path(&source_str).await?.or(existing_hash) {
+            self.update_location(
+                existing.id,
+                &existing.file_path,
+                &destination_str,
+                StorageKind::Managed,
+                Some(&source_str),
+                &inspection.fingerprint,
+            )
+            .await?;
+            return self
+                .get(existing.id)
+                .await?
+                .context("managed book not found after update");
+        }
+
+        sqlx::query(
+            "INSERT INTO books
+                (title, author, format, file_path, cover_blob, storage_kind,
+                 original_path, content_hash, file_size)
+             VALUES (?, ?, ?, ?, ?, 'managed', ?, ?, ?)",
+        )
+        .bind(inspection.title)
+        .bind(inspection.author)
+        .bind(format.as_str())
+        .bind(&destination_str)
+        .bind(inspection.cover)
+        .bind(&source_str)
+        .bind(&inspection.fingerprint.hash)
+        .bind(inspection.fingerprint.size as i64)
+        .execute(&self.pool)
+        .await
+        .context("failed to insert managed book")?;
+        let book = self
+            .get_by_path(&destination_str)
+            .await?
+            .context("managed book not found after insert")?;
+        self.attach_identity(book.id, &source_str, &destination_str)
+            .await?;
+        Ok(book)
+    }
+
+    /// Relink a missing referenced book while preserving its stable identity and reader data.
+    pub async fn relink(&self, book_id: i64, replacement: &Path) -> Result<Book> {
+        let book = self
+            .get(book_id)
+            .await?
+            .with_context(|| format!("book {book_id} not found"))?;
+        let replacement = canonical_path(replacement);
+        let ext = replacement
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if BookFormat::from_extension(&ext) != Some(book.format) {
+            bail!("selected file has a different book format");
+        }
+        let fingerprint_path = replacement.clone();
+        let fingerprint = tokio::task::spawn_blocking(move || file_fingerprint(&fingerprint_path))
+            .await
+            .context("book fingerprint task failed")??;
+        if let Some(expected) = &book.content_hash
+            && expected != &fingerprint.hash
+        {
+            bail!("selected file does not match this book");
+        }
+        let replacement_str = replacement.to_string_lossy().to_string();
+        self.update_location(
+            book.id,
+            &book.file_path,
+            &replacement_str,
+            StorageKind::Referenced,
+            Some(&replacement_str),
+            &fingerprint,
+        )
+        .await?;
+        self.get(book.id)
+            .await?
+            .context("book not found after relink")
     }
 
     /// Import all supported files from a directory (recursively).
@@ -156,7 +319,7 @@ impl Library {
                     .unwrap_or_default();
 
                 if BookFormat::from_extension(&ext).is_some() {
-                    match self.import_file(&path).await {
+                    match self.import_managed_file(&path).await {
                         Ok(book) => books.push(book),
                         Err(e) => {
                             eprintln!("warning: failed to import {}: {e}", path.display());
@@ -172,7 +335,8 @@ impl Library {
     /// List all books, ordered by most recently read first, then by date added.
     pub async fn list_all(&self) -> Result<Vec<Book>> {
         let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, cover_blob, progress,
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress,
                     date_added, last_read
              FROM books
              ORDER BY last_read DESC NULLS LAST, date_added DESC",
@@ -188,7 +352,8 @@ impl Library {
     pub async fn search(&self, query: &str) -> Result<Vec<Book>> {
         let pattern = format!("%{query}%");
         let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, cover_blob, progress,
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress,
                     date_added, last_read
              FROM books
              WHERE title LIKE ? OR author LIKE ?
@@ -206,7 +371,8 @@ impl Library {
     /// Filter books by format.
     pub async fn filter_by_format(&self, format: BookFormat) -> Result<Vec<Book>> {
         let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, cover_blob, progress,
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress,
                     date_added, last_read
              FROM books
              WHERE format = ?
@@ -233,7 +399,8 @@ impl Library {
     ) -> Result<BookPage> {
         let limit = limit.max(1);
         let mut builder = QueryBuilder::new(
-            "SELECT id, title, author, format, file_path, cover_blob, progress, \
+            "SELECT id, title, author, format, file_path, storage_kind, original_path, \
+             content_hash, file_size, cover_blob, progress, \
              date_added, last_read FROM books",
         );
 
@@ -301,7 +468,8 @@ impl Library {
         }
 
         let mut builder = QueryBuilder::new(
-            "SELECT id, title, author, format, file_path, cover_blob, progress, \
+            "SELECT id, title, author, format, file_path, storage_kind, original_path, \
+             content_hash, file_size, cover_blob, progress, \
              date_added, last_read FROM books WHERE id IN (",
         );
         let mut separated = builder.separated(", ");
@@ -355,19 +523,45 @@ impl Library {
 
     /// Remove a book from the library (does not delete the file).
     pub async fn remove(&self, book_id: i64) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE bookmarks SET book_id = NULL WHERE book_id = ?")
+            .bind(book_id)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to detach book bookmarks")?;
+        sqlx::query("UPDATE reading_state SET book_id = NULL WHERE book_id = ?")
+            .bind(book_id)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to detach book reading state")?;
         sqlx::query("DELETE FROM books WHERE id = ?")
             .bind(book_id)
-            .execute(&self.pool)
+            .execute(&mut *transaction)
             .await
             .context("failed to remove book")?;
+        transaction.commit().await?;
         Ok(())
+    }
+
+    /// Get a book by stable ID.
+    pub async fn get(&self, book_id: i64) -> Result<Option<Book>> {
+        let row = sqlx::query(
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress, date_added, last_read
+             FROM books WHERE id = ?",
+        )
+        .bind(book_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query book by id")?;
+        Ok(row.as_ref().and_then(row_to_book))
     }
 
     /// Get a book by file path.
     async fn get_by_path(&self, path: &str) -> Result<Option<Book>> {
         let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, cover_blob, progress,
-                    date_added, last_read
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress, date_added, last_read
              FROM books WHERE file_path = ?",
         )
         .bind(path)
@@ -376,6 +570,94 @@ impl Library {
         .context("failed to query book by path")?;
 
         Ok(row.as_ref().and_then(row_to_book))
+    }
+
+    async fn get_by_hash(&self, content_hash: &str) -> Result<Option<Book>> {
+        let row = sqlx::query(
+            "SELECT id, title, author, format, file_path, storage_kind, original_path,
+                    content_hash, file_size, cover_blob, progress, date_added, last_read
+             FROM books WHERE content_hash = ? ORDER BY storage_kind = 'managed' DESC LIMIT 1",
+        )
+        .bind(content_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to query book by fingerprint")?;
+        Ok(row.as_ref().and_then(row_to_book))
+    }
+
+    async fn update_location(
+        &self,
+        book_id: i64,
+        old_path: &str,
+        new_path: &str,
+        storage_kind: StorageKind,
+        original_path: Option<&str>,
+        fingerprint: &FileFingerprint,
+    ) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE books SET file_path = ?, storage_kind = ?, original_path = ?,
+                              content_hash = ?, file_size = ? WHERE id = ?",
+        )
+        .bind(new_path)
+        .bind(storage_kind.as_str())
+        .bind(original_path)
+        .bind(&fingerprint.hash)
+        .bind(fingerprint.size as i64)
+        .bind(book_id)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to update book location")?;
+        sqlx::query(
+            "UPDATE reading_state SET file_path = ?, book_id = ?
+             WHERE book_id = ? OR file_path = ?",
+        )
+        .bind(new_path)
+        .bind(book_id)
+        .bind(book_id)
+        .bind(old_path)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to relink reading state")?;
+        sqlx::query(
+            "UPDATE bookmarks SET file_path = ?, book_id = ?
+             WHERE book_id = ? OR file_path = ?",
+        )
+        .bind(new_path)
+        .bind(book_id)
+        .bind(book_id)
+        .bind(old_path)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to relink bookmarks")?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    async fn attach_identity(&self, book_id: i64, old_path: &str, new_path: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE reading_state SET file_path = ?, book_id = ?
+             WHERE book_id = ? OR file_path = ?",
+        )
+        .bind(new_path)
+        .bind(book_id)
+        .bind(book_id)
+        .bind(old_path)
+        .execute(&self.pool)
+        .await
+        .context("failed to attach reading state to book")?;
+        sqlx::query(
+            "UPDATE bookmarks SET file_path = ?, book_id = ?
+             WHERE book_id = ? OR file_path = ?",
+        )
+        .bind(new_path)
+        .bind(book_id)
+        .bind(book_id)
+        .bind(old_path)
+        .execute(&self.pool)
+        .await
+        .context("failed to attach bookmarks to book")?;
+        Ok(())
     }
 }
 
@@ -408,6 +690,7 @@ fn push_library_filters<'a>(
 fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Option<Book> {
     let format_str: String = row.try_get("format").ok()?;
     let format = BookFormat::from_db(&format_str)?;
+    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind").ok()?)?;
 
     Some(Book {
         id: row.try_get("id").ok()?,
@@ -415,6 +698,13 @@ fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Option<Book> {
         author: row.try_get("author").ok()?,
         format,
         file_path: row.try_get("file_path").ok()?,
+        storage_kind,
+        original_path: row.try_get("original_path").ok()?,
+        content_hash: row.try_get("content_hash").ok()?,
+        file_size: row
+            .try_get::<Option<i64>, _>("file_size")
+            .ok()?
+            .map(|size| size as u64),
         cover: row.try_get("cover_blob").ok()?,
         progress: row.try_get("progress").ok()?,
         date_added: row.try_get("date_added").ok()?,
@@ -442,6 +732,73 @@ fn extract_metadata_and_cover(
         BookFormat::Pdf => extract_pdf_metadata(path),
         BookFormat::Epub => extract_epub_metadata(path),
         BookFormat::Cbz => extract_cbz_metadata(path),
+    }
+}
+
+fn inspect_book(path: &Path, format: BookFormat) -> Result<BookInspection> {
+    let (title, author, cover) = extract_metadata_and_cover(path, format)?;
+    Ok(BookInspection {
+        title,
+        author,
+        cover,
+        fingerprint: file_fingerprint(path)?,
+    })
+}
+
+fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
+    use std::io::Read;
+
+    let mut file =
+        std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let file_size = file.metadata()?.len();
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(FileFingerprint {
+        hash: format!("{:x}", hasher.finalize()),
+        size: file_size,
+    })
+}
+
+fn copy_managed_file(source: &Path, destination: &Path) -> Result<()> {
+    if destination.exists() {
+        return Ok(());
+    }
+    let parent = destination
+        .parent()
+        .context("managed book destination has no parent")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+    let temporary = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        destination
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy(),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::copy(source, &temporary)
+        .with_context(|| format!("failed to copy {} to managed library", source.display()))?;
+    match std::fs::rename(&temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(_) if destination.exists() => {
+            let _ = std::fs::remove_file(temporary);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(temporary);
+            Err(error).context("failed to finalize managed book copy")
+        }
     }
 }
 
