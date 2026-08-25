@@ -249,6 +249,17 @@ async fn managed_import_survives_the_source_being_removed() {
 }
 
 #[tokio::test]
+async fn managed_import_uses_the_source_filename_for_fallback_metadata() {
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("My Comic.cbz");
+    std::fs::copy(fixture_path("sample.cbz"), &source).unwrap();
+
+    let book = lib.import_managed_file(&source).await.unwrap();
+
+    assert_eq!(book.title, "My Comic");
+}
+
+#[tokio::test]
 async fn relink_preserves_stable_identity_reading_state_and_bookmarks() {
     let (lib, store, dir) = temp_library().await;
     let original = dir.path().join("original.epub");
@@ -304,4 +315,174 @@ async fn relink_rejects_a_different_book() {
         lib.get(book.id).await.unwrap().unwrap().file_path,
         book.file_path
     );
+}
+
+#[tokio::test]
+async fn relink_refuses_to_guess_the_identity_of_an_unfingerprinted_book() {
+    let (lib, store, dir) = temp_library().await;
+    let original = dir.path().join("legacy.epub");
+    std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
+    let book = lib.import_file(&original).await.unwrap();
+    sqlx::query("UPDATE books SET content_hash = NULL, file_size = NULL WHERE id = ?")
+        .bind(book.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    std::fs::remove_file(original).unwrap();
+
+    let result = lib
+        .relink(book.id, &fixture_path("epub-conformance/table.epub"))
+        .await;
+
+    assert!(result.is_err());
+    assert!(format!("{:#}", result.unwrap_err()).contains("cannot verify"));
+}
+
+#[tokio::test]
+async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
+    let (lib, store, dir) = temp_library().await;
+    let original = dir.path().join("original.epub");
+    let replacement = dir.path().join("replacement.epub");
+    std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &replacement).unwrap();
+    let book = lib.import_file(&original).await.unwrap();
+    store
+        .set_for_book_async(
+            book.id,
+            &original,
+            &FileReadingState {
+                page: 2,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE reading_state SET updated_at = '2026-01-01' WHERE book_id = ?")
+        .bind(book.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    store
+        .set_async(
+            &replacement,
+            &FileReadingState {
+                page: 8,
+                location_offset: Some(12),
+                zoom: 1.25,
+            },
+        )
+        .await
+        .unwrap();
+    sqlx::query("UPDATE reading_state SET updated_at = '2026-02-01' WHERE file_path = ?")
+        .bind(
+            replacement
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref(),
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_for_book_at_async(book.id, &original, 3, Some(7), None)
+        .await
+        .unwrap();
+    bookmarks
+        .add_at_async(&replacement, 3, Some(7), None, None, "yellow")
+        .await
+        .unwrap();
+    bookmarks
+        .add_at_async(&replacement, 6, None, Some("Other"), Some("note"), "blue")
+        .await
+        .unwrap();
+
+    lib.relink(book.id, &replacement).await.unwrap();
+
+    let state = store.get_for_book_async(book.id).await.unwrap();
+    assert_eq!((state.page, state.location_offset), (8, Some(12)));
+    let merged = bookmarks.list_for_book_async(book.id).await.unwrap();
+    assert_eq!(merged.len(), 2);
+    let replacement = replacement.canonicalize().unwrap();
+    let replacement_str = replacement.to_string_lossy();
+    assert!(
+        merged
+            .iter()
+            .all(|bookmark| bookmark.file_path == replacement_str)
+    );
+    store
+        .set_for_book_async(
+            book.id,
+            &replacement,
+            &FileReadingState {
+                page: 9,
+                location_offset: Some(13),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn managed_import_repairs_a_corrupt_existing_destination() {
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    std::fs::write(&book.file_path, b"corrupt").unwrap();
+
+    let imported = lib.import_managed_file(&source).await.unwrap();
+
+    assert_eq!(imported.id, book.id);
+    assert_eq!(
+        std::fs::read(imported.file_path).unwrap(),
+        std::fs::read(source).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn concurrent_identical_managed_imports_return_the_same_book() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.epub");
+    let second = dir.path().join("second.epub");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+
+    let (first_result, second_result) = tokio::join!(
+        lib.import_managed_file(&first),
+        lib.import_managed_file(&second)
+    );
+
+    assert_eq!(first_result.unwrap().id, second_result.unwrap().id);
+    assert_eq!(lib.list_all().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn removing_a_managed_book_deletes_its_private_copy() {
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&book.file_path);
+
+    lib.remove(book.id).await.unwrap();
+
+    assert!(!managed_path.exists());
+    assert!(source.exists());
+}
+
+#[tokio::test]
+async fn removing_a_referenced_book_never_deletes_the_original() {
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_file(&source).await.unwrap();
+
+    lib.remove(book.id).await.unwrap();
+
+    assert!(source.exists());
 }

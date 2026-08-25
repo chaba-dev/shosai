@@ -95,6 +95,7 @@ impl ReadingStateStore {
             db_path: db_path.to_path_buf(),
         };
         store.migrate().await?;
+        crate::library::backfill_missing_fingerprints(&store.pool).await?;
         Ok(store)
     }
 
@@ -193,25 +194,27 @@ impl ReadingStateStore {
         state: &FileReadingState,
     ) -> Result<()> {
         let key = canonical_key(file_path);
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
+            .bind(book_id)
+            .bind(&key)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to reconcile reading state aliases")?;
         sqlx::query(
             "INSERT INTO reading_state
                 (file_path, book_id, page, location_offset, zoom, updated_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))
-             ON CONFLICT(book_id) WHERE book_id IS NOT NULL DO UPDATE SET
-                file_path = excluded.file_path,
-                page = excluded.page,
-                location_offset = excluded.location_offset,
-                zoom = excluded.zoom,
-                updated_at = excluded.updated_at",
+             VALUES (?, ?, ?, ?, ?, datetime('now'))",
         )
-        .bind(key)
+        .bind(&key)
         .bind(book_id)
         .bind(state.page as i64)
         .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .context("failed to save reading state for book")?;
+        transaction.commit().await?;
         Ok(())
     }
 
