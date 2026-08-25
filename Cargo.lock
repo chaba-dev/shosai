@@ -5107,6 +5107,7 @@ dependencies = [
  "winit",
  "wry",
  "x11-dl",
+ "zip",
 ]
 
 [[package]]

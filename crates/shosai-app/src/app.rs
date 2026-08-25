@@ -3766,9 +3766,35 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Cursor, Write};
+
     use super::*;
     use iced::advanced::widget::Operation;
     use shosai_core::epub::render::ContentNode;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    fn epub_with_chapter(chapter: &[u8]) -> Vec<u8> {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (path, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Limits</dc:title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            ("OPS/chapter.xhtml", chapter),
+        ] {
+            archive.start_file(path, options).unwrap();
+            archive.write_all(bytes).unwrap();
+        }
+        archive.finish().unwrap().into_inner()
+    }
 
     #[test]
     fn boot_defers_storage_initialization() {
@@ -5958,6 +5984,46 @@ mod tests {
     }
 
     #[test]
+    fn wrapped_epub_limits_and_structural_zip_errors_keep_their_causes() {
+        let directory = tempfile::tempdir().unwrap();
+        let oversized_xml = directory.path().join("oversized-xml.epub");
+        let mut chapter =
+            br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>"#
+                .to_vec();
+        chapter.extend(std::iter::repeat_n(b'x', 4 * 1024 * 1024 + 1));
+        chapter.extend_from_slice(b"</p></body></html>");
+        std::fs::write(&oversized_xml, epub_with_chapter(&chapter)).unwrap();
+
+        let error = load_document(&oversized_xml).unwrap_err();
+        let AppError::Open { detail, .. } = error else {
+            panic!("oversized chapter returned an unexpected error: {error:?}");
+        };
+        assert!(
+            detail.contains("OPS/chapter.xhtml"),
+            "missing path: {detail}"
+        );
+        assert!(detail.contains("text limit"), "missing limit: {detail}");
+
+        let malformed_zip = directory.path().join("malformed-directory.epub");
+        let mut archive = epub_with_chapter(
+            br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>ok</p></body></html>"#,
+        );
+        let central = archive
+            .windows(4)
+            .position(|bytes| bytes == b"PK\x01\x02")
+            .expect("fixture ZIP must have a central directory");
+        archive[central..central + 4].copy_from_slice(b"BAD!");
+        std::fs::write(&malformed_zip, archive).unwrap();
+
+        let error = load_document(&malformed_zip).unwrap_err();
+        let AppError::Open { detail, .. } = error else {
+            panic!("malformed ZIP returned an unexpected error: {error:?}");
+        };
+        assert!(detail.contains("EPUB archive is corrupt"), "{detail}");
+        assert!(detail.contains("ZIP archive"), "{detail}");
+    }
+
+    #[test]
     fn rejected_epub_preserves_the_active_document() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -5966,6 +6032,27 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         let old_generation = state.render_generation;
         let old_document = state.document.clone();
+        let old_document = match old_document {
+            Some(OpenDocument::Cbz(document)) => document,
+            _ => panic!("expected CBZ document"),
+        };
+        state.rendered_page = Some(RenderedPage {
+            width: 7,
+            height: 11,
+            pixels: bytes::Bytes::from(vec![0; 7 * 11 * 4]),
+        });
+        state.page_cache.push_back((
+            PageCacheKey {
+                page: 0,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+            RenderedPage {
+                width: 13,
+                height: 17,
+                pixels: bytes::Bytes::from(vec![0; 13 * 17 * 4]),
+            },
+        ));
         let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
 
@@ -5973,10 +6060,13 @@ mod tests {
 
         assert_eq!(task.units(), 0);
         assert_eq!(state.render_generation, old_generation);
-        assert!(matches!(
-            (&state.document, old_document),
-            (Some(OpenDocument::Cbz(_)), Some(OpenDocument::Cbz(_)))
-        ));
+        let Some(OpenDocument::Cbz(current_document)) = &state.document else {
+            panic!("rejected EPUB replaced the active CBZ");
+        };
+        assert!(Arc::ptr_eq(current_document, &old_document));
+        assert_eq!(state.rendered_page.as_ref().map(|page| page.width), Some(7));
+        assert_eq!(state.page_cache.len(), 1);
+        assert_eq!(state.page_cache[0].1.width, 13);
         assert!(matches!(
             &state.open_error,
             Some(AppError::Open { format: "EPUB", detail })
