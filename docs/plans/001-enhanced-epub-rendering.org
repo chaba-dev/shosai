@@ -457,7 +457,7 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   use the host Apple compiler and SDK with a macOS 13 deployment target, and
   package validation rejects newer or non-portable Mach-O load commands.
 - [X] Run the full workspace test suite and platform packaging smoke tests.
-  The final M5 stack passes 421 Rust tests and 10 script tests on native
+  The final M5 stack passes 424 Rust tests and 16 script tests on native
   x86_64 Linux, plus release build, package validation, and extracted-app
   runtime smoke tests on Linux and Apple Silicon macOS.  macOS inspection
   confirms the app and bundled PDFium both target macOS 13 and contain no
@@ -516,10 +516,15 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   chapter/character progress, relayout, and paginated/continuous transitions;
   packaged-app pointer, keyboard, search, theme, and page-turn smoke tests pass
   on macOS and Linux.
-- [ ] Gate 0 page-turn, chapter-transition, and relayout p50/p95 budgets are met
-  on reference hardware or an accepted variance is documented.  Warm page turns
-  perform no synchronous storage or avoidable resource/layout recomputation;
-  repeated chapter changes do not leak per-book resources.
+- [X] Gate 0 page-turn, chapter-transition, and relayout p50/p95 budgets are met
+  on reference hardware or an accepted variance is documented.  The dated
+  release benchmark records warm-turn p95 at 1.20–6.31 ms, chapter-transition
+  p95 at 1.62–3.47 ms, and relayout p95 at 0.60–25.59 ms, below the respective
+  16.7, 33.3, and 100 ms budgets.  Warm turns retain the parsed presentation,
+  paginated allocation, layout key, image handles, and render generation while
+  queuing persistence off the UI thread.  A repeated 64-turn chapter regression
+  additionally proves page storage, font/native-text identity, image handles,
+  search generations, and presentation ownership remain stable.
 
 * Risks and Mitigations
 
