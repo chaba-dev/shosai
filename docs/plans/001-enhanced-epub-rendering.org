@@ -499,7 +499,12 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   Native presentation has no script or network loader; explicit link activation
   allows only same-book targets plus HTTP(S) and mail handlers, while all other
   schemes remain inert.
-- [ ] Corrupt/oversized resources degrade safely with actionable errors.
+- [X] Corrupt/oversized resources degrade safely with actionable errors.  Core
+  admission rejects malformed archives and bounded XML, CSS, font, image, and
+  aggregate ZIP resources before renderer allocation.  App regressions prove
+  corrupt archives and rejected resources retain the affected path and limit
+  in the localized reader alert while preserving the active document and its
+  render generation.
 - [ ] Existing EPUB navigation, search, bookmarks, themes, progress, and both
   reading modes pass regression tests.
 - [ ] Gate 0 page-turn, chapter-transition, and relayout p50/p95 budgets are met
