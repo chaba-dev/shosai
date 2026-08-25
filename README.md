@@ -43,8 +43,8 @@ The project is a Cargo workspace:
 - `website` contains the Hugo source for the project website.
 
 Architecture and product proposals follow the
-[Requests for Discussion process](rfd/README.md). The existing roadmap remains
-under `docs/plans/` and links to the corresponding RFDs.
+[Requests for Discussion process](rfd/README.md). The
+[project roadmap](docs/roadmap.org) links to the corresponding RFDs.
 
 ## Website
 

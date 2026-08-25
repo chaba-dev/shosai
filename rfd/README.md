@@ -69,8 +69,8 @@ documents a replacement.
 
 ## Roadmaps and historical evidence
 
-The project roadmap remains under `docs/plans/000-roadmap.org` and links to RFDs
-for detailed proposals and implementation status. Historical decision evidence
+The project roadmap remains at `docs/roadmap.org` and links to RFDs for detailed
+proposals and implementation status. Historical decision evidence
 may live beside its RFD when retaining the complete experiment and trade-off
 record is useful. A material change to a published or committed decision uses a
 new pull request and, when it supersedes the decision, a new RFD.

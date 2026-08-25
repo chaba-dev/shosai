@@ -246,7 +246,7 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 *Goal*: Extended format support, mobile, and distribution.
 
 ** TODO Enhanced EPUB rendering
-RFD: [[file:../../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
+RFD: [[file:../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
 
 - [ ] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
 - [ ] Or build custom text layout engine using ~cosmic-text~
@@ -254,7 +254,7 @@ RFD: [[file:../../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
 - [ ] CSS ~@font-face~ support with embedded fonts
 
 ** TODO Additional ebook formats
-RFD: [[file:../../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
+RFD: [[file:../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
 
 - [ ] Package CBZ/CBR comic support for the first post-launch release
 - [ ] MOBI / AZW3 (Amazon Kindle) — evaluate legal feasibility
@@ -264,7 +264,7 @@ RFD: [[file:../../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
 - [ ] CBR (RAR-based comic archives) — note: ~unrar~ has restrictive license
 
 ** TODO Cloud sync (optional)
-RFD: [[file:../../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
+RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 
 - [ ] Design sync protocol for reading progress + bookmarks
 - [ ] Evaluate backends (self-hosted, WebDAV, etc.)
@@ -272,14 +272,14 @@ RFD: [[file:../../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 - [ ] Start with local storage, architecture should support sync later
 
 ** TODO Mobile support
-RFD: [[file:../../rfd/0004/README.adoc][RFD 4: Mobile support]]
+RFD: [[file:../rfd/0004/README.adoc][RFD 4: Mobile support]]
 
 - [ ] Evaluate Iced's future mobile story
 - [ ] Consider companion app approach
 - [ ] Sync reading progress across desktop and mobile
 
 ** TODO Distribution & packaging
-RFD: [[file:../../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
+RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
 
 - [X] CI/CD pipeline for automated builds and releases
 - [X] Portable Linux archives (x86_64 and aarch64)
