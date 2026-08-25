@@ -21,6 +21,8 @@ test:
 test-scripts:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s benchmarks/epub-page-turn/2026-08-17/tests
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+		-s scripts/tests
 
 ## Regenerate CHANGELOG.md from conventional commits
 changelog:
