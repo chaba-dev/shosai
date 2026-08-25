@@ -68,7 +68,7 @@ test "$("$plist_buddy" -c 'Print :CFBundleShortVersionString' "$info_plist")" = 
   "$version"
 test "$("$plist_buddy" -c 'Print :CFBundleVersion' "$info_plist")" = "$version"
 minimum_system_version=$("$plist_buddy" -c 'Print :LSMinimumSystemVersion' "$info_plist")
-test "$minimum_system_version" = "12.0"
+test "$minimum_system_version" = "13.0"
 
 macho_minimum_version() {
   otool -l "$1" | awk '
@@ -104,6 +104,10 @@ check_macho_portability() {
   fi
 
   while IFS= read -r dependency; do
+    # otool reports a dylib's install name before its actual dependencies.
+    if [[ "$label" == "PDFium library" && "$dependency" == "./libpdfium.dylib" ]]; then
+      continue
+    fi
     case "$dependency" in
       ""|/usr/lib/*|/System/Library/*|@rpath/*|@loader_path/*|@executable_path/*) ;;
       *)

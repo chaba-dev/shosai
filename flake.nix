@@ -259,7 +259,7 @@
             shellHook = ''
               export DEVELOPER_DIR=/Library/Developer/CommandLineTools
               export SDKROOT="$DEVELOPER_DIR/SDKs/MacOSX.sdk"
-              export MACOSX_DEPLOYMENT_TARGET=12.0
+              export MACOSX_DEPLOYMENT_TARGET=13.0
             '';
           })
         );

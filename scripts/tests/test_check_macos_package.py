@@ -29,7 +29,7 @@ case "$2" in
   *CFBundleIdentifier*) printf 'io.github.chaba2.shosai\\n' ;;
   *CFBundleExecutable*|*CFBundleIconFile*) printf 'Shosai\\n' ;;
   *CFBundleShortVersionString*|*CFBundleVersion*) printf '1.0.0\\n' ;;
-  *LSMinimumSystemVersion*) printf '%s\\n' "${FAKE_DECLARED_MINIMUM:-12.0}" ;;
+  *LSMinimumSystemVersion*) printf '%s\\n' "${FAKE_DECLARED_MINIMUM:-13.0}" ;;
   *) exit 1 ;;
 esac
 """,
@@ -50,8 +50,8 @@ esac
             """
 if [[ $1 == -l ]]; then
   case "$2" in
-    */libpdfium.dylib) minimum=${FAKE_PDFIUM_MINOS:-12.0} ;;
-    *) minimum=${FAKE_BINARY_MINOS:-12.0} ;;
+    */libpdfium.dylib) minimum=${FAKE_PDFIUM_MINOS:-13.0} ;;
+    *) minimum=${FAKE_BINARY_MINOS:-13.0} ;;
   esac
   cat <<EOF
 Load command 1
@@ -83,14 +83,14 @@ fi
         result = self._check(FAKE_BINARY_MINOS="14.0")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("requires macOS 14.0 but package declares 12.0", result.stderr)
+        self.assertIn("requires macOS 14.0 but package declares 13.0", result.stderr)
 
     def test_rejects_pdfium_newer_than_declared_minimum(self):
-        result = self._check(FAKE_PDFIUM_MINOS="13.0")
+        result = self._check(FAKE_PDFIUM_MINOS="14.0")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "PDFium library requires macOS 13.0 but package declares 12.0",
+            "PDFium library requires macOS 14.0 but package declares 13.0",
             result.stderr,
         )
 

@@ -76,7 +76,7 @@ jobs:
 
       - name: Build release binary
         env:
-          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '12.0' || '' }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '13.0' || '' }}
         run: cargo build --release --locked --target "${{ matrix.target }}" --bin shosai
 
       - name: Download pinned PDFium
