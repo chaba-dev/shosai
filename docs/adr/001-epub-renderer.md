@@ -312,7 +312,7 @@ Those behaviors need explicit tests rather than visual inference.
 
 | Target        | Child-view path                            | Current finding                                                                                                                 |
 |---------------|--------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| macOS 12+     | Iced raw AppKit handle → child `WKWebView` | Builds and renders with the system WebKit; no extra runtime packaged                                                            |
+| macOS 13+     | Iced raw AppKit handle → child `WKWebView` | Builds and renders with the system WebKit; no extra runtime packaged                                                            |
 | Windows CI    | Iced raw Win32 handle → child WebView2     | API path exists; runtime, accessibility, focus, and CI spike not yet tested                                                     |
 | Linux X11     | Iced raw Xlib handle → WebKitGTK child     | Builds on x86_64; automated resize/teardown and zero-network proofs pass under Xvfb; interactive and arm64 evidence remain open |
 | Linux Wayland | GTK container via Wry Unix extension       | Raw child embedding is unsupported; standard Iced runner exposes no GTK container, making this the main Wry portability blocker |

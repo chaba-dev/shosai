@@ -322,7 +322,7 @@ Verify all downloaded installer tools and PDFium inputs by digest.
 - Apple Developer Program membership, a Developer ID Application certificate,
   and an App Store Connect issuer/key ID/API key (or approved notarytool profile).
 - Confirm hardened-runtime entitlements by testing both architectures, PDFium,
-  file dialogs, and GPU rendering.  Keep ~LSMinimumSystemVersion=12.0~ unless
+  file dialogs, and GPU rendering.  Keep ~LSMinimumSystemVersion=13.0~ unless
   compatibility testing changes it.
 
 ** Actionable changes and likely files

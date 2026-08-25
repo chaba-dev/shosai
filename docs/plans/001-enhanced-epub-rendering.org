@@ -451,9 +451,17 @@ Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
   ~app/epub_navigation.rs~.  Image presentation caching plus paginated and
   continuous EPUB widget construction now live in ~app/epub_view.rs~; generic
   reader chrome and state/update ownership remain in ~app.rs~.
-- [ ] Add feature/build configuration and packaging changes only for the native
-  implementation; document runtime prerequisites and attribution.
-- [ ] Run the full workspace test suite and platform packaging smoke tests.
+- [X] Add feature/build configuration and packaging changes only for the native
+  implementation; document runtime prerequisites and attribution.  Release
+  packages bundle PDFium and Inter with their licenses.  macOS release builds
+  use the host Apple compiler and SDK with a macOS 13 deployment target, and
+  package validation rejects newer or non-portable Mach-O load commands.
+- [X] Run the full workspace test suite and platform packaging smoke tests.
+  The final M5 stack passes 421 Rust tests and 10 script tests on native
+  x86_64 Linux, plus release build, package validation, and extracted-app
+  runtime smoke tests on Linux and Apple Silicon macOS.  macOS inspection
+  confirms the app and bundled PDFium both target macOS 13 and contain no
+  non-system absolute load dependencies.
 
 * Tests and Fixtures
 

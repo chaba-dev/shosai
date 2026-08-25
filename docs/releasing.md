@@ -35,7 +35,9 @@ Linux packages contain an optimized binary, PDFium, licenses, a desktop entry, a
 
 The macOS zip contains `Shosai.app`. Extract it and move the application into `/Applications` or `~/Applications`. The bundle is ad-hoc signed but is not yet Developer ID signed or notarized, so macOS may show a Gatekeeper warning for downloaded releases.
 
-PDFium is pinned to the checksummed `chromium/7999` binaries from `bblanchon/pdfium-binaries`. Shosai resolves the bundled library relative to its executable and falls back to the system library for development builds.
+macOS release builds require the Apple Command Line Tools and target macOS 13, matching the bundled PDFium binary. The Nix development shell selects the host Apple compiler and SDK for Cargo release builds so packaged binaries link only to system or bundle-relative libraries. Package validation rejects Mach-O files whose deployment target exceeds the bundle's declared minimum or whose load commands contain non-portable absolute dependencies.
+
+PDFium is pinned to the checksummed `chromium/7999` binaries from `bblanchon/pdfium-binaries`. Shosai resolves the bundled library relative to its executable and falls back to the system library for development builds. Release packages include the project, PDFium, and Inter font licenses alongside the corresponding runtime assets.
 
 ## Required repository settings
 
