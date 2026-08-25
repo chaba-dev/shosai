@@ -245,13 +245,16 @@ The separation of ~shosai-core~ and ~shosai-app~ ensures:
 
 *Goal*: Extended format support, mobile, and distribution.
 
-** TODO Enhanced EPUB rendering
+** DONE Enhanced EPUB rendering
 RFD: [[file:../rfd/0001/README.adoc][RFD 1: Enhanced EPUB rendering]]
 
-- [ ] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
-- [ ] Or build custom text layout engine using ~cosmic-text~
-- [ ] Support complex EPUB layouts (tables, embedded fonts, MathML)
-- [ ] CSS ~@font-face~ support with embedded fonts
+- [X] Evaluate embedding ~wry~ webview for full HTML/CSS fidelity
+- [X] Build the selected native text/layout route using ~cosmic-text~
+- [X] Support complex EPUB layouts (tables, embedded fonts, MathML)
+- [X] CSS ~@font-face~ support with embedded fonts
+
+Implementation is complete.  Native Linux arm64 and Wayland packaged-app
+acceptance evidence remains tracked separately in RFD 1.
 
 ** TODO Additional ebook formats
 RFD: [[file:../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
