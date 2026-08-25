@@ -6310,6 +6310,81 @@ mod tests {
         assert!(queued_saves.try_recv().is_err());
     }
 
+    #[test]
+    fn repeated_epub_chapter_turns_retain_per_book_resources() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let (saves, mut queued_saves) = mpsc::unbounded_channel();
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.reading_state_saves = Some(saves);
+        state.window_size.width = 500.0;
+        state.epub_pages = Arc::new(vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: Vec::new(),
+            },
+            EpubPage {
+                chapter: 1,
+                title: None,
+                nodes: Vec::new(),
+            },
+        ]);
+        state.epub_layout_key = Some(epub_layout_key(&state));
+        state.epub_image_handles.insert(
+            "cached.png".to_string(),
+            EpubImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
+        );
+
+        let pages = Arc::clone(&state.epub_pages);
+        let layout_key = state.epub_layout_key;
+        let render_generation = state.render_generation;
+        let search_document_generation = state.search_document_generation;
+        let search_query_generation = state.search_query_generation;
+        let cached_image = state.epub_image_handles["cached.png"].0.id();
+        let (presentation, fonts, native_text_id) = match &state.document {
+            Some(OpenDocument::Epub(document)) => (
+                document.presentation() as *const _,
+                document.fonts() as *const _,
+                document.fonts().native_text_id(),
+            ),
+            _ => panic!("expected EPUB document"),
+        };
+
+        for turn in 0..64 {
+            let forward = turn % 2 == 0;
+            assert_eq!(turn_epub_page(&mut state, forward).units(), 0);
+            assert_eq!(state.current_page, usize::from(forward));
+            assert!(matches!(
+                queued_saves.try_recv(),
+                Ok(ReadingStateWriterMessage::Save(_))
+            ));
+        }
+
+        assert!(queued_saves.try_recv().is_err());
+        assert!(Arc::ptr_eq(&state.epub_pages, &pages));
+        assert_eq!(state.epub_layout_key, layout_key);
+        assert_eq!(state.render_generation, render_generation);
+        assert_eq!(state.search_document_generation, search_document_generation);
+        assert_eq!(state.search_query_generation, search_query_generation);
+        assert_eq!(state.epub_image_handles.len(), 1);
+        assert_eq!(state.epub_image_handles["cached.png"].0.id(), cached_image);
+        let (current_presentation, current_fonts, current_native_text_id) = match &state.document {
+            Some(OpenDocument::Epub(document)) => (
+                document.presentation() as *const _,
+                document.fonts() as *const _,
+                document.fonts().native_text_id(),
+            ),
+            _ => panic!("expected EPUB document"),
+        };
+        assert_eq!(current_presentation, presentation);
+        assert_eq!(current_fonts, fonts);
+        assert_eq!(current_native_text_id, native_text_id);
+    }
+
     #[tokio::test]
     async fn reading_state_writer_coalesces_queued_positions() {
         let directory = tempfile::tempdir().unwrap();
