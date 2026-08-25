@@ -982,7 +982,7 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
             .map(|document| OpenDocument::Epub(Arc::new(document)))
             .map_err(|error| AppError::Open {
                 format: "EPUB",
-                detail: error.to_string(),
+                detail: format!("{error:#}"),
             }),
         "cbz" => CbzDoc::open(path)
             .map(|document| OpenDocument::Cbz(Arc::new(document)))
@@ -3766,9 +3766,35 @@ pub fn subscription(state: &State) -> Subscription<Message> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Cursor, Write};
+
     use super::*;
     use iced::advanced::widget::Operation;
     use shosai_core::epub::render::ContentNode;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    fn epub_with_chapter(chapter: &[u8]) -> Vec<u8> {
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (path, bytes) in [
+            ("mimetype", b"application/epub+zip".as_slice()),
+            (
+                "META-INF/container.xml",
+                br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
+            ),
+            (
+                "OPS/content.opf",
+                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Limits</dc:title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            ("OPS/chapter.xhtml", chapter),
+        ] {
+            archive.start_file(path, options).unwrap();
+            archive.write_all(bytes).unwrap();
+        }
+        archive.finish().unwrap().into_inner()
+    }
 
     #[test]
     fn boot_defers_storage_initialization() {
@@ -5912,6 +5938,144 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_and_oversized_epubs_report_actionable_open_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let corrupt = directory.path().join("corrupt.epub");
+        std::fs::write(&corrupt, b"not a ZIP archive").unwrap();
+
+        let corrupt_error = load_document(&corrupt).unwrap_err();
+        let AppError::Open {
+            format,
+            detail: corrupt_detail,
+        } = &corrupt_error
+        else {
+            panic!("corrupt EPUB returned an unexpected error: {corrupt_error:?}");
+        };
+        assert_eq!(*format, "EPUB");
+        assert!(
+            corrupt_detail.contains("EPUB archive is corrupt")
+                && corrupt_detail.contains("end-of-central-directory record is missing"),
+            "corrupt EPUB error was not actionable: {corrupt_detail}"
+        );
+
+        let oversized = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
+        let oversized_error = load_document(&oversized).unwrap_err();
+        let AppError::Open {
+            format,
+            detail: oversized_detail,
+        } = &oversized_error
+        else {
+            panic!("oversized EPUB returned an unexpected error: {oversized_error:?}");
+        };
+        assert_eq!(*format, "EPUB");
+        assert!(
+            oversized_detail.contains("OEBPS/Images/huge.svg")
+                && oversized_detail.contains("dimension limit"),
+            "oversized EPUB error was not actionable: {oversized_detail}"
+        );
+
+        let localized = oversized_error
+            .localized(&I18n::new(LanguagePreference::English))
+            .replace(['\u{2068}', '\u{2069}'], "");
+        assert!(localized.starts_with("Failed to open EPUB:"));
+        assert!(localized.contains("OEBPS/Images/huge.svg"));
+        assert!(localized.contains("dimension limit"));
+    }
+
+    #[test]
+    fn wrapped_epub_limits_and_structural_zip_errors_keep_their_causes() {
+        let directory = tempfile::tempdir().unwrap();
+        let oversized_xml = directory.path().join("oversized-xml.epub");
+        let mut chapter =
+            br#"<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>"#
+                .to_vec();
+        chapter.extend(std::iter::repeat_n(b'x', 4 * 1024 * 1024 + 1));
+        chapter.extend_from_slice(b"</p></body></html>");
+        std::fs::write(&oversized_xml, epub_with_chapter(&chapter)).unwrap();
+
+        let error = load_document(&oversized_xml).unwrap_err();
+        let AppError::Open { detail, .. } = error else {
+            panic!("oversized chapter returned an unexpected error: {error:?}");
+        };
+        assert!(
+            detail.contains("OPS/chapter.xhtml"),
+            "missing path: {detail}"
+        );
+        assert!(detail.contains("text limit"), "missing limit: {detail}");
+
+        let malformed_zip = directory.path().join("malformed-directory.epub");
+        let mut archive = epub_with_chapter(
+            br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>ok</p></body></html>"#,
+        );
+        let central = archive
+            .windows(4)
+            .position(|bytes| bytes == b"PK\x01\x02")
+            .expect("fixture ZIP must have a central directory");
+        archive[central..central + 4].copy_from_slice(b"BAD!");
+        std::fs::write(&malformed_zip, archive).unwrap();
+
+        let error = load_document(&malformed_zip).unwrap_err();
+        let AppError::Open { detail, .. } = error else {
+            panic!("malformed ZIP returned an unexpected error: {error:?}");
+        };
+        assert!(detail.contains("EPUB archive is corrupt"), "{detail}");
+        assert!(detail.contains("ZIP archive"), "{detail}");
+    }
+
+    #[test]
+    fn rejected_epub_preserves_the_active_document() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let old_generation = state.render_generation;
+        let old_document = state.document.clone();
+        let old_document = match old_document {
+            Some(OpenDocument::Cbz(document)) => document,
+            _ => panic!("expected CBZ document"),
+        };
+        state.rendered_page = Some(RenderedPage {
+            width: 7,
+            height: 11,
+            pixels: bytes::Bytes::from(vec![0; 7 * 11 * 4]),
+        });
+        state.page_cache.push_back((
+            PageCacheKey {
+                page: 0,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+            RenderedPage {
+                width: 13,
+                height: 17,
+                pixels: bytes::Bytes::from(vec![0; 13 * 17 * 4]),
+            },
+        ));
+        let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
+
+        let task = open_document(&mut state, rejected);
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.render_generation, old_generation);
+        let Some(OpenDocument::Cbz(current_document)) = &state.document else {
+            panic!("rejected EPUB replaced the active CBZ");
+        };
+        assert!(Arc::ptr_eq(current_document, &old_document));
+        assert_eq!(state.rendered_page.as_ref().map(|page| page.width), Some(7));
+        assert_eq!(state.page_cache.len(), 1);
+        assert_eq!(state.page_cache[0].1.width, 13);
+        assert!(matches!(
+            &state.open_error,
+            Some(AppError::Open { format: "EPUB", detail })
+                if detail.contains("OEBPS/Images/huge.svg")
+                    && detail.contains("dimension limit")
+        ));
+    }
+
+    #[test]
     fn epub_refresh_paginates_off_the_ui_thread() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -6234,6 +6398,141 @@ mod tests {
         assert_eq!(save.reading.page, 2);
         assert_eq!(save.reading.location_offset, Some(0));
         assert!(queued_saves.try_recv().is_err());
+    }
+
+    #[test]
+    fn repeated_epub_chapter_turns_retain_per_book_resources() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let (saves, mut queued_saves) = mpsc::unbounded_channel();
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.reading_state_saves = Some(saves);
+        state.window_size.width = 500.0;
+        state.epub_pages = Arc::new(vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: Vec::new(),
+            },
+            EpubPage {
+                chapter: 1,
+                title: None,
+                nodes: Vec::new(),
+            },
+        ]);
+        state.epub_layout_key = Some(epub_layout_key(&state));
+        state.epub_image_handles.insert(
+            "cached.png".to_string(),
+            EpubImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
+        );
+
+        let pages = Arc::clone(&state.epub_pages);
+        let layout_key = state.epub_layout_key;
+        let render_generation = state.render_generation;
+        let search_document_generation = state.search_document_generation;
+        let search_query_generation = state.search_query_generation;
+        let cached_image = state.epub_image_handles["cached.png"].0.id();
+        let (presentation, fonts, native_text_id) = match &state.document {
+            Some(OpenDocument::Epub(document)) => (
+                document.presentation() as *const _,
+                document.fonts() as *const _,
+                document.fonts().native_text_id(),
+            ),
+            _ => panic!("expected EPUB document"),
+        };
+
+        for turn in 0..64 {
+            let forward = turn % 2 == 0;
+            assert_eq!(turn_epub_page(&mut state, forward).units(), 0);
+            assert_eq!(state.current_page, usize::from(forward));
+            assert!(matches!(
+                queued_saves.try_recv(),
+                Ok(ReadingStateWriterMessage::Save(_))
+            ));
+        }
+
+        assert!(queued_saves.try_recv().is_err());
+        assert!(Arc::ptr_eq(&state.epub_pages, &pages));
+        assert_eq!(state.epub_layout_key, layout_key);
+        assert_eq!(state.render_generation, render_generation);
+        assert_eq!(state.search_document_generation, search_document_generation);
+        assert_eq!(state.search_query_generation, search_query_generation);
+        assert_eq!(state.epub_image_handles.len(), 1);
+        assert_eq!(state.epub_image_handles["cached.png"].0.id(), cached_image);
+        let (current_presentation, current_fonts, current_native_text_id) = match &state.document {
+            Some(OpenDocument::Epub(document)) => (
+                document.presentation() as *const _,
+                document.fonts() as *const _,
+                document.fonts().native_text_id(),
+            ),
+            _ => panic!("expected EPUB document"),
+        };
+        assert_eq!(current_presentation, presentation);
+        assert_eq!(current_fonts, fonts);
+        assert_eq!(current_native_text_id, native_text_id);
+    }
+
+    #[test]
+    fn repeated_chapter_view_replacement_keeps_rasters_bounded_and_releases_them() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/conformance.epub")
+                .to_vec(),
+        )
+        .expect("conformance fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.window_size = Size::new(500.0, 700.0);
+        complete_epub_pagination(&mut state);
+        let document = match &state.document {
+            Some(OpenDocument::Epub(document)) => Arc::clone(document),
+            _ => panic!("expected EPUB document"),
+        };
+        let native_text_id = document.fonts().native_text_id();
+        let chapters = [0, 3];
+        assert!(
+            chapters
+                .iter()
+                .all(|chapter| { state.epub_pages.iter().any(|page| page.chapter == *chapter) })
+        );
+        let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+            iced::Font::DEFAULT,
+            iced::Pixels(16.0),
+        ));
+        let mut cache = iced_runtime::user_interface::Cache::new();
+        let theme = iced::Theme::Light;
+        let style = iced::advanced::renderer::Style::default();
+
+        for turn in 0..32 {
+            let chapter = chapters[turn % chapters.len()];
+            assert_eq!(navigate_to_epub_location(&mut state, chapter, 0).units(), 0);
+            let element = epub_chapter_view(&state);
+            let mut interface = iced_runtime::UserInterface::build(
+                element,
+                state.window_size,
+                cache,
+                &mut renderer,
+            );
+            interface.draw(
+                &mut renderer,
+                &theme,
+                &style,
+                iced::mouse::Cursor::Unavailable,
+            );
+            cache = interface.into_cache();
+            assert!(
+                crate::epub::native_text::retained_book_raster_pixels(native_text_id)
+                    <= crate::epub::native_text::book_raster_pixel_budget()
+            );
+        }
+
+        drop(cache);
+        assert_eq!(
+            crate::epub::native_text::retained_book_raster_pixels(native_text_id),
+            0,
+            "replaced chapter trees must release their raster permits"
+        );
     }
 
     #[tokio::test]

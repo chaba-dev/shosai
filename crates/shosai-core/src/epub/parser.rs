@@ -87,11 +87,12 @@ impl EpubDoc {
         validate_input_size(data.len() as u64, &limits)?;
         let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
         let mut validation_archive = ZipArchive::new(Cursor::new(data.as_slice()))
-            .context("failed to open EPUB as ZIP archive")?;
+            .context("EPUB archive is corrupt: failed to open ZIP archive")?;
         validate_archive_entries(&mut validation_archive, declared_entries, &limits, &data)?;
         drop(validation_archive);
         let cursor = Cursor::new(data);
-        let mut archive = ZipArchive::new(cursor).context("failed to open EPUB as ZIP archive")?;
+        let mut archive = ZipArchive::new(cursor)
+            .context("EPUB archive is corrupt: failed to reopen ZIP archive")?;
 
         // 1. Parse container.xml to find the OPF path.
         let opf_path = parse_container(&mut archive, &limits)?;
@@ -348,7 +349,7 @@ fn validate_archive_entries<R: Read + Seek>(
     for index in 0..archive.len() {
         let file = archive
             .by_index(index)
-            .context("failed to inspect EPUB archive structure")?;
+            .context("EPUB archive is corrupt: failed to inspect ZIP structure")?;
         local_header_starts.push(file.header_start());
         central_directory_start = central_directory_start.min(file.central_header_start());
     }
@@ -366,7 +367,7 @@ fn validate_archive_entries<R: Read + Seek>(
     for index in 0..archive.len() {
         let mut file = archive
             .by_index(index)
-            .context("failed to inspect EPUB archive entry")?;
+            .context("EPUB archive is corrupt: failed to inspect ZIP entry")?;
         let is_directory = file.is_dir();
         let canonical_name = file.name().trim_end_matches('/');
         let path = CanonicalEpubPath::new(canonical_name)
@@ -505,7 +506,7 @@ fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<us
                     .and_then(|length| offset.checked_add(22 + usize::from(length)))
                     .is_some_and(|end| end == data.len())
         })
-        .context("EPUB ZIP end-of-central-directory record is missing")?;
+        .context("EPUB archive is corrupt: ZIP end-of-central-directory record is missing")?;
     let entries_offset = eocd_offset
         .checked_add(10)
         .context("invalid EPUB ZIP footer")?;

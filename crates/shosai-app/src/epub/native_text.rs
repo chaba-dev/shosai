@@ -77,6 +77,25 @@ fn reserve_raster(budget: &Arc<BookRasterBudget>, pixels: usize) -> Option<Raste
     })
 }
 
+#[cfg(test)]
+pub(crate) fn retained_book_raster_pixels(id: u64) -> usize {
+    BOOK_RASTER_BUDGETS
+        .get()
+        .and_then(|budgets| {
+            budgets
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&id)
+                .and_then(Weak::upgrade)
+        })
+        .map_or(0, |budget| budget.pixels.load(Ordering::Relaxed))
+}
+
+#[cfg(test)]
+pub(crate) const fn book_raster_pixel_budget() -> usize {
+    BOOK_RASTER_PIXEL_BUDGET
+}
+
 pub(crate) struct NativeText<'a, Message> {
     fonts: &'a EpubFontBook,
     request: EpubTextRequest,
