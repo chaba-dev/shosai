@@ -1,0 +1,76 @@
+# Shōsai Requests for Discussion
+
+Requests for Discussion (RFDs) capture ideas early enough to shape them through
+written discussion and preserve the reasoning behind decisions. An RFD is not
+authoritative merely because it exists; its `state` says how it should be read.
+
+| RFD | Topic |
+|---|---|
+| [1: Enhanced EPUB rendering](0001/README.adoc) | Native rendering decision, EPUB fidelity, resource policy, and reader integration |
+| [2: Additional ebook formats](0002/README.adoc) | Format extensibility, plain text/Markdown, DjVu, FB2, MOBI/AZW3, and CBR |
+| [3: Cloud synchronization](0003/README.adoc) | Portable identity, offline-first records, conflict handling, transport, and privacy |
+| [4: Mobile support](0004/README.adoc) | Product feasibility, shared-core boundaries, mobile lifecycle, and packaging |
+| [5: Distribution and packaging](0005/README.adoc) | AppImage, Flatpak, Windows, macOS signing, and shared release assets |
+
+## Source format
+
+Each RFD lives at `rfd/NNNN/README.adoc`, where `NNNN` is a four-digit number.
+The document starts with canonical AsciiDoc attributes and an unpadded title:
+
+```asciidoc
+:authors: Name <email@example.com>
+:state: prediscussion
+:discussion:
+:labels: software, process
+
+= RFD 7 Example title
+```
+
+`authors` contains semicolon-separated owners. `discussion` contains the RFD's
+pull-request URL once discussion starts. `labels` is a comma-separated set of
+searchable topics. The document is the single source of truth for this metadata;
+the index intentionally does not duplicate it.
+
+Implementation progress lives separately in `rfd/NNNN/IMPLEMENTATION.org` or
+`rfd/NNNN/IMPLEMENTATION.md`; an RFD must have exactly one format. The RFD and
+checklist link to each other, keeping the design and decision record stable
+while implementation tasks are checked off.
+
+Run `make check-rfds` to validate source layout, metadata, state, title, and the
+checker regression fixtures.
+
+## States
+
+- `prediscussion`: actively being written and not ready for broad review.
+- `ideation`: a narrowly scoped topic or scratchpad without active revision.
+- `discussion`: under active review in the linked pull request.
+- `published`: discussion has converged and the RFD expresses project direction.
+- `committed`: the proposal is fully implemented and describes current behavior.
+- `abandoned`: deliberately not proceeding or otherwise retained only for history.
+
+The usual path is `prediscussion` or `ideation` to `discussion`, then
+`published`, and eventually `committed`. `abandoned` is an off-ramp at any stage.
+Implementation checklist progress does not determine the RFD's state.
+
+## Lifecycle
+
+Reserve the next unused four-digit number and create `rfd/NNNN/README.adoc` and
+one implementation checklist (`IMPLEMENTATION.org` or `IMPLEMENTATION.md`) on a
+branch. Cross-link the two documents. Use `prediscussion` while writing or
+`ideation` for a topic placeholder. When the document is ready for review, open
+a pull request, set the state to `discussion`, and add that pull request as the
+discussion URL.
+
+Before merging a proposal that represents project direction, move it to
+`published`. Once the described work is entirely implemented, update it to
+`committed`. Material changes to a published or committed RFD go through a new
+pull request and retain the original discussion link unless the RFD explicitly
+documents a replacement.
+
+## Roadmaps and historical evidence
+
+The project roadmap remains under `docs/plans/000-roadmap.org` and links to RFDs
+for detailed proposals and implementation status. Historical decision evidence
+may live beside its RFD when retaining the complete experiment and trade-off
+record is useful. A material change to a published or committed decision uses a
+new pull request and, when it supersedes the decision, a new RFD.

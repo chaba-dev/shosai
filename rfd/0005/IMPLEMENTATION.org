@@ -1,8 +1,7 @@
-#+TITLE: Shōsai Distribution and Packaging Plan
-#+STATUS: Active
-#+AUTHOR: darwin
-#+DATE: 2026-08-14
+#+TITLE: RFD 0005 implementation checklist
 #+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 5: Distribution and packaging]].
 
 * Purpose
 

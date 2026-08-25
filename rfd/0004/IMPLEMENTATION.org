@@ -1,7 +1,7 @@
-#+TITLE: Shōsai Mobile Support Plan
-#+STATUS: Draft
-#+DATE: 2026-08-14
+#+TITLE: RFD 0004 implementation checklist
 #+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 4: Mobile support]].
 
 * Purpose
 
@@ -51,7 +51,8 @@ the current desktop application already runs on mobile.
 
 - A companion app requires the stable content/book IDs, sync-ready records,
   tombstones, deterministic merge, transport, and credential model described in
-  ~docs/plans/003-cloud-sync.org~ through its usable end-to-end sync milestone.
+  [[file:../0003/README.adoc][RFD 3: Cloud synchronization]] through its usable
+  end-to-end sync milestone.
 - A full reader may prototype local opening before remote sync is complete, but
   release still requires portable IDs so imported mobile content can associate
   with desktop records.
@@ -147,7 +148,7 @@ production-code fork.
 ** TODO M1 — Portable shared-core boundaries
 
 - [ ] Complete stable book/content identity and ID-based reading/bookmark APIs
-  required from ~003-cloud-sync.org~.
+  required from RFD 3.
 - [ ] Separate domain operations from desktop path discovery, ~rfd~, Iced state,
   and window/config-directory lookup.
 - [ ] Introduce injected storage location, clock/device identity, credential
@@ -242,7 +243,7 @@ well-defined domain operations into core, not by importing ~app.rs~ into mobile.
 - Extend ~crates/shosai-core/src/library.rs~, ~reading_state.rs~,
   ~bookmarks.rs~, and ~lib.rs~ for portable APIs.
 - Reuse/add the identity and ~sync/~ modules and migrations planned by
-  ~docs/plans/003-cloud-sync.org~.
+  [[file:../0003/README.adoc][RFD 3]].
 - Audit ~crates/shosai-core/src/pdf.rs~, ~cbz.rs~, ~epub/~, and their dependencies
   under target-specific builds and tests.
 - Update ~crates/shosai-app/src/app.rs~ only to consume shared abstractions and

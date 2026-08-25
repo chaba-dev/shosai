@@ -1,7 +1,7 @@
-#+TITLE: Shōsai Cloud Sync Plan
-#+STATUS: Draft
-#+DATE: 2026-08-14
+#+TITLE: RFD 0003 implementation checklist
 #+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 3: Cloud synchronization]].
 
 * Purpose
 

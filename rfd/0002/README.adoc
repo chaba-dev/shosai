@@ -1,0 +1,30 @@
+:authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
+:state: ideation
+:discussion:
+:labels: formats, parsing, extensibility
+
+= RFD 2 Additional ebook formats
+
+== Goal
+
+Add plain text and Markdown, DjVu, FB2, unencrypted MOBI/AZW3, and CBR through a
+small format-extensibility seam. Each format remains independently shippable and
+must pass dependency, license, bounded-parsing, fixture, reader, library, and
+packaging gates.
+
+== Proposal
+
+Centralize stable format identity, extensions, capabilities, detection, import,
+and open dispatch without forcing unlike raster, reflowable, and archive-image
+formats behind one rendering abstraction. Add only the seam required to remove
+existing duplicated dispatch; do not define a plugin ABI.
+
+Every format requires legally redistributable fixtures, explicit corrupt and
+unsupported errors, resource bounds, background parsing or decoding where
+needed, and supported-platform package validation. DRM circumvention, remote
+resources, active content, and restrictive decoder licensing are out of scope.
+
+== Implementation
+
+The format-specific gates and work packages are tracked in
+link:IMPLEMENTATION.org[RFD 2 implementation checklist].

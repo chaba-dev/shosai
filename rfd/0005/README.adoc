@@ -1,0 +1,30 @@
+:authors: Darwin D Wu <darwin67@users.noreply.github.com>
+:state: ideation
+:discussion:
+:labels: distribution, packaging, release, supply-chain
+
+= RFD 5 Distribution and packaging
+
+== Goal
+
+Deliver installable formats beyond the existing Linux archives, macOS app, and
+Nix package without turning independent distribution targets into an
+all-or-nothing rollout.
+
+== Proposal
+
+Treat AppImage, Flatpak, Windows installers, macOS Developer ID
+signing/notarization, and shared icons/metadata as independent work packages.
+Each package owns dependency closure, PDFium placement and pinning, architecture
+validation, installation and launch smoke tests, licenses, update expectations,
+and platform-specific security boundaries.
+
+Release builds remain reproducible and must not fetch mutable assets. Signing
+credentials stay in protected CI environments, unsigned pull-request builds
+exercise the same layout and validation where possible, and package metadata
+must not claim unsupported formats or platform behavior.
+
+== Implementation
+
+Completed baseline work and the independent package acceptance criteria are
+tracked in link:IMPLEMENTATION.org[RFD 5 implementation checklist].

@@ -1,4 +1,4 @@
-.PHONY: dev lint fmt test test-scripts changelog next-version
+.PHONY: dev lint fmt test test-scripts check-rfds changelog next-version
 
 ## Run the application in debug mode
 dev:
@@ -23,6 +23,11 @@ test-scripts:
 		-s benchmarks/epub-page-turn/2026-08-17/tests
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s scripts/tests
+
+## Validate RFD sources and the checker regression fixtures
+check-rfds:
+	@./scripts/check-rfd-status.sh
+	@./scripts/check-rfd-status-test.sh
 
 ## Regenerate CHANGELOG.md from conventional commits
 changelog:

@@ -1,8 +1,7 @@
-#+TITLE: Enhanced EPUB Rendering Plan
-#+STATUS: Active
-#+AUTHOR: Shōsai contributors
-#+DATE: 2026-08-14
+#+TITLE: RFD 0001 implementation checklist
 #+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 1: Enhanced EPUB rendering]].
 
 * Objective
 
@@ -108,7 +107,7 @@ external links follow an explicit confirmation/allow policy.
 
 ** Spike A — ~wry~
 
-Working evidence: [[file:../adr/001-epub-renderer.md][ADR 001: EPUB renderer]].
+Working evidence: [[file:EVIDENCE.md][EPUB renderer decision evidence]].
 
 - [X] Render one chapter from bytes through a custom, non-network resource
   protocol; resolve XHTML/CSS/images/fonts relative to the OPF/chapter path.

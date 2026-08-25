@@ -1,8 +1,7 @@
-#+TITLE: Additional Ebook Formats Plan
-#+STATUS: Draft
-#+AUTHOR: Shōsai contributors
-#+DATE: 2026-08-14
+#+TITLE: RFD 0002 implementation checklist
 #+STARTUP: showall
+
+Implements [[file:README.adoc][RFD 2: Additional ebook formats]].
 
 * Objective
 
