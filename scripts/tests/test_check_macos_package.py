@@ -29,7 +29,7 @@ case "$2" in
   *CFBundleIdentifier*) printf 'io.github.chaba2.shosai\\n' ;;
   *CFBundleExecutable*|*CFBundleIconFile*) printf 'Shosai\\n' ;;
   *CFBundleShortVersionString*|*CFBundleVersion*) printf '1.0.0\\n' ;;
-  *LSMinimumSystemVersion*) printf '12.0\\n' ;;
+  *LSMinimumSystemVersion*) printf '%s\\n' "${FAKE_DECLARED_MINIMUM:-12.0}" ;;
   *) exit 1 ;;
 esac
 """,
@@ -49,20 +49,29 @@ esac
             "otool",
             """
 if [[ $1 == -l ]]; then
+  case "$2" in
+    */libpdfium.dylib) minimum=${FAKE_PDFIUM_MINOS:-12.0} ;;
+    *) minimum=${FAKE_BINARY_MINOS:-12.0} ;;
+  esac
   cat <<EOF
 Load command 1
       cmd LC_BUILD_VERSION
   cmdsize 32
  platform 1
-    minos ${FAKE_MINOS:-12.0}
+    minos $minimum
       sdk 14.4
    ntools 1
 EOF
 else
   printf '%s:\\n' "$2"
-  if [[ -n ${FAKE_DEPENDENCY:-} ]]; then
-    printf '\\t%s (compatibility version 1.0.0, current version 1.0.0)\\n' "$FAKE_DEPENDENCY"
-  fi
+  case "$2" in
+    */libpdfium.dylib)
+      printf '\\t./libpdfium.dylib (compatibility version 0.0.0, current version 0.0.0)\\n'
+      dependency=${FAKE_PDFIUM_DEPENDENCY:-}
+      ;;
+    *) dependency=${FAKE_BINARY_DEPENDENCY:-} ;;
+  esac
+  [[ -z $dependency ]] || printf '\\t%s (compatibility version 1.0.0, current version 1.0.0)\\n' "$dependency"
 fi
 """,
         )
@@ -71,14 +80,23 @@ fi
         self.temporary.cleanup()
 
     def test_rejects_binary_newer_than_declared_minimum(self):
-        result = self._check(FAKE_MINOS="14.0")
+        result = self._check(FAKE_BINARY_MINOS="14.0")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires macOS 14.0 but package declares 12.0", result.stderr)
 
+    def test_rejects_pdfium_newer_than_declared_minimum(self):
+        result = self._check(FAKE_PDFIUM_MINOS="13.0")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "PDFium library requires macOS 13.0 but package declares 12.0",
+            result.stderr,
+        )
+
     def test_rejects_nix_store_dependency(self):
         result = self._check(
-            FAKE_DEPENDENCY="/nix/store/example-libiconv/lib/libiconv.2.dylib"
+            FAKE_BINARY_DEPENDENCY="/nix/store/example-libiconv/lib/libiconv.2.dylib"
         )
 
         self.assertNotEqual(result.returncode, 0)
@@ -87,11 +105,18 @@ fi
 
     def test_accepts_declared_target_and_portable_dependencies(self):
         result = self._check(
-            FAKE_DEPENDENCY="/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"
+            FAKE_DECLARED_MINIMUM="13.0",
+            FAKE_PDFIUM_MINOS="13.0",
+            FAKE_BINARY_DEPENDENCY="/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Validated", result.stdout)
+
+    def test_accepts_relative_dylib_install_name(self):
+        result = self._check()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def _check(self, **environment):
         path = f"{self.bin}{os.pathsep}{os.environ['PATH']}"
