@@ -26,9 +26,9 @@ Create a Pages project connected to this GitHub repository with these settings:
 | --- | --- |
 | Production branch | `main` |
 | Framework preset | `Hugo` |
-| Build command | `hugo --minify` |
-| Build output directory | `public` |
-| Root directory | `website` |
+| Build command | `hugo --source website --minify` |
+| Build output directory | `website/public` |
+| Root directory | *(repository root)* |
 | Node.js version | Not required |
 
 Cloudflare Pages provides Hugo when using the Hugo framework preset. Once the custom domain is known, update `baseURL` in `hugo.toml` to its canonical `https://` URL.
@@ -39,7 +39,7 @@ To avoid deploying the site for application-only changes, go to **Settings** > *
 
 | Setting | Value |
 | --- | --- |
-| Include paths | `website/*` |
+| Include paths | `website/*`, `assets/fonts/*` |
 | Exclude paths | *(empty)* |
 
-Cloudflare Pages then creates a deployment only when a changed path is in `website/`. Root-level files are intentionally excluded; include them here if the website later depends on one.
+The website mounts the shared font assets from `assets/fonts`, so changes to either the Hugo source or bundled fonts must trigger a deployment.
