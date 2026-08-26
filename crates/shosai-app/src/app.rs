@@ -65,6 +65,8 @@ enum AppError {
     UnsupportedFormat(String),
     Render(String),
     EpubEmpty,
+    MissingBook,
+    Library(String),
 }
 
 impl AppError {
@@ -88,6 +90,10 @@ impl AppError {
                 i18n.text_with_args("failed-render", [("error", detail.clone().into())])
             }
             Self::EpubEmpty => i18n.text("epub-empty"),
+            Self::MissingBook => i18n.text("missing-book"),
+            Self::Library(detail) => {
+                i18n.text_with_args("library-error", [("error", detail.clone().into())])
+            }
         }
     }
 
@@ -100,6 +106,8 @@ impl AppError {
             }
             Self::Render(detail) => format!("failed to render page: {detail}"),
             Self::EpubEmpty => "EPUB contains no readable content".to_string(),
+            Self::MissingBook => "book file is missing".to_string(),
+            Self::Library(detail) => format!("library operation failed: {detail}"),
         }
     }
 }
@@ -136,21 +144,6 @@ impl std::fmt::Debug for EpubImageHandle {
 enum Screen {
     Library,
     Reader,
-}
-
-#[derive(Debug)]
-enum PendingOpen {
-    FileSelected(PathBuf),
-    LibraryBook(PathBuf),
-}
-
-impl PendingOpen {
-    fn into_message(self) -> Message {
-        match self {
-            Self::FileSelected(path) => Message::FileSelected(Some(path)),
-            Self::LibraryBook(path) => Message::OpenBook(path.to_string_lossy().into_owned()),
-        }
-    }
 }
 
 const LIBRARY_PAGE_SIZE: u32 = 40;
@@ -373,6 +366,7 @@ impl EpubLayoutKey {
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
+    book_id: Option<i64>,
     file_path: PathBuf,
     document: OpenDocument,
     current_page: usize,
@@ -429,6 +423,7 @@ pub struct InitializedState {
 
 #[derive(Debug)]
 struct ReadingStateSave {
+    book_id: Option<i64>,
     path: PathBuf,
     reading: FileReadingState,
 }
@@ -457,6 +452,7 @@ pub struct State {
     i18n: I18n,
 
     // -- Reader state --
+    book_id: Option<i64>,
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
     current_page: usize,
@@ -491,6 +487,7 @@ pub struct State {
     active_tab_id: Option<u64>,
     next_tab_id: u64,
     open_error: Option<AppError>,
+    missing_book_id: Option<i64>,
     show_reader_settings: bool,
     show_reader_more: bool,
 
@@ -529,7 +526,7 @@ pub struct State {
     library_offset: usize,
     storage_initializing: bool,
     storage_error: Option<AppError>,
-    pending_open: Option<PendingOpen>,
+    pending_open: Option<PathBuf>,
     window_id: Option<window::Id>,
     window_size: Size,
     window_scale_factor: f32,
@@ -553,6 +550,7 @@ pub fn boot() -> (State, Task<Message>) {
         screen: Screen::Library,
         i18n: I18n::new(LanguagePreference::System),
 
+        book_id: None,
         file_path: None,
         document: None,
         current_page: 0,
@@ -587,6 +585,7 @@ pub fn boot() -> (State, Task<Message>) {
         active_tab_id: None,
         next_tab_id: 1,
         open_error: None,
+        missing_book_id: None,
         show_reader_settings: false,
         show_reader_more: false,
 
@@ -622,7 +621,7 @@ pub fn boot() -> (State, Task<Message>) {
         library_offset: 0,
         storage_initializing: true,
         storage_error: None,
-        pending_open: performance_file.map(PendingOpen::FileSelected),
+        pending_open: performance_file,
         window_id: None,
         window_size: Size::new(900.0, 700.0),
         window_scale_factor: 1.0,
@@ -755,6 +754,7 @@ fn library_activity_active(state: &State) -> bool {
 fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
     Some(ReaderTab {
         id: state.active_tab_id?,
+        book_id: state.book_id,
         file_path: state.file_path.clone()?,
         document: state.document.clone()?,
         current_page: state.current_page,
@@ -799,6 +799,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
 
 fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.active_tab_id = Some(tab.id);
+    state.book_id = tab.book_id;
     state.file_path = Some(tab.file_path);
     state.document = Some(tab.document);
     state.current_page = tab.current_page;
@@ -911,6 +912,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
     if state.tabs.is_empty() {
         state.active_tab = None;
         state.active_tab_id = None;
+        state.book_id = None;
         state.file_path = None;
         state.document = None;
         state.rendered_page = None;
@@ -938,8 +940,41 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
     select_tab(state, next)
 }
 
-fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
-    if let Some(index) = state.tabs.iter().position(|tab| tab.file_path == path) {
+fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
+    if let Some(index) = state
+        .tabs
+        .iter()
+        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
+    {
+        if state.tabs[index].file_path != path {
+            let document = match load_document(&path) {
+                Ok(document) => document,
+                Err(error) => {
+                    let performance_task = perf::fail(state, &error.diagnostic());
+                    state.open_error = Some(error);
+                    return performance_task;
+                }
+            };
+            save_active_tab(state);
+            state.active_tab_id = Some(state.tabs[index].id);
+            state.continuous_activation = state.continuous_activation.wrapping_add(1);
+            state.open_error = None;
+            state.missing_book_id = None;
+            install_document(state, path, book_id, document);
+            let task = refresh_content(state);
+            if let Some(tab) = capture_reader_tab(state) {
+                state.tabs[index] = tab;
+                state.active_tab = Some(index);
+                state.screen = Screen::Reader;
+            }
+            return task;
+        }
+        if let Some(book_id) = book_id {
+            state.tabs[index].book_id = Some(book_id);
+            if state.active_tab == Some(index) {
+                state.book_id = Some(book_id);
+            }
+        }
         return select_tab(state, index);
     }
     let document = match load_document(&path) {
@@ -956,7 +991,8 @@ fn open_document(state: &mut State, path: PathBuf) -> Task<Message> {
     state.active_tab_id = Some(tab_id);
     state.continuous_activation = state.continuous_activation.wrapping_add(1);
     state.open_error = None;
-    install_document(state, path, document);
+    state.missing_book_id = None;
+    install_document(state, path, book_id, document);
     let task = refresh_content(state);
     if let Some(tab) = capture_reader_tab(state) {
         state.tabs.push(tab);
@@ -994,7 +1030,12 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
     }
 }
 
-fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
+fn install_document(
+    state: &mut State,
+    path: PathBuf,
+    book_id: Option<i64>,
+    document: OpenDocument,
+) {
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.render_generation = state.render_generation.wrapping_add(1);
@@ -1030,10 +1071,11 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     };
     state.document = Some(document);
 
-    let saved = state
-        .reading_state
-        .as_ref()
-        .and_then(|store| store.get(&path));
+    let saved = state.reading_state.as_ref().and_then(|store| {
+        book_id
+            .and_then(|id| store.get_for_book(id))
+            .or_else(|| store.get(&path))
+    });
     if let Some(saved) = saved {
         state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
         state.epub_offset = saved.location_offset.unwrap_or(0);
@@ -1044,9 +1086,13 @@ fn install_document(state: &mut State, path: PathBuf, document: OpenDocument) {
     state.zoom = ZoomMode::FitPage;
 
     state.page_input = format!("{}", state.current_page + 1);
+    state.book_id = book_id;
     state.file_path = Some(path);
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-        state.bookmarks = store.list_for_file(path).unwrap_or_default();
+        state.bookmarks = book_id
+            .map(|id| store.list_for_book(id))
+            .unwrap_or_else(|| store.list_for_file(path))
+            .unwrap_or_default();
     }
     update_bookmark_status(state);
 }
@@ -2034,9 +2080,16 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
     {
         let store = store.clone();
         let path = path.clone();
+        let book_id = state.book_id;
         let result_path = path.clone();
         Task::perform(
-            async move { store.list_for_file_async(&path).await.unwrap_or_default() },
+            async move {
+                if let Some(book_id) = book_id {
+                    store.list_for_book_async(book_id).await.unwrap_or_default()
+                } else {
+                    store.list_for_file_async(&path).await.unwrap_or_default()
+                }
+            },
             move |bookmarks| Message::BookmarksLoaded {
                 tab_id,
                 file_path: result_path.clone(),
@@ -2060,6 +2113,7 @@ fn update_bookmark_status(state: &mut State) {
 fn save_reading_state(state: &State) {
     if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
         let save = ReadingStateSave {
+            book_id: state.book_id,
             path: path.clone(),
             reading: FileReadingState {
                 page: state.current_page,
@@ -2074,13 +2128,13 @@ fn save_reading_state(state: &State) {
 
     // Also update library progress so the library sort/order stays current.
     // Use a background task to avoid blocking the UI thread on DB writes.
-    if let (Some(lib), Some(path)) = (state.library.clone(), state.file_path.clone())
+    if let (Some(lib), Some(book_id)) = (state.library.clone(), state.book_id)
         && state.total_pages > 0
     {
         let progress = (state.current_page + 1) as f64 / state.total_pages as f64;
         let progress = progress.clamp(0.0, 1.0);
         tokio::task::spawn(async move {
-            let _ = lib.update_progress_by_path(&path, progress).await;
+            let _ = lib.update_progress(book_id, progress).await;
         });
     }
 }
@@ -2096,7 +2150,7 @@ fn start_reading_state_writer(
             let mut flushes = Vec::new();
             match first {
                 ReadingStateWriterMessage::Save(save) => {
-                    pending.insert(save.path, save.reading);
+                    pending.insert((save.book_id, save.path), save.reading);
                 }
                 ReadingStateWriterMessage::Language(preference) => language = Some(preference),
                 ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
@@ -2104,7 +2158,7 @@ fn start_reading_state_writer(
             while let Ok(message) = receiver.try_recv() {
                 match message {
                     ReadingStateWriterMessage::Save(save) => {
-                        pending.insert(save.path, save.reading);
+                        pending.insert((save.book_id, save.path), save.reading);
                     }
                     ReadingStateWriterMessage::Language(preference) => {
                         language = Some(preference);
@@ -2113,8 +2167,13 @@ fn start_reading_state_writer(
                 }
             }
 
-            for (path, reading) in pending {
-                if let Err(error) = store.set_async(&path, &reading).await {
+            for ((book_id, path), reading) in pending {
+                let result = if let Some(book_id) = book_id {
+                    store.set_for_book_async(book_id, &path, &reading).await
+                } else {
+                    store.set_async(&path, &reading).await
+                };
+                if let Err(error) = result {
                     eprintln!("warning: failed to save reading state: {error}");
                 }
             }
@@ -2352,15 +2411,30 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
     }
 
     if let Some(error) = &state.open_error {
+        let mut alert = row![
+            text(error.localized(&state.i18n))
+                .size(13)
+                .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
+            iced::widget::Space::new().width(Length::Fill),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        if let Some(book_id) = state.missing_book_id {
+            alert = alert
+                .push(widgets::primary_button(
+                    state.i18n.text("locate-file"),
+                    Some(Message::LocateBook(book_id)),
+                ))
+                .push(widgets::secondary_button(
+                    state.i18n.text("remove-from-library"),
+                    Some(Message::RemoveBook(book_id)),
+                ));
+        }
         layout = layout.push(
-            container(
-                text(error.localized(&state.i18n))
-                    .size(13)
-                    .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
-            )
-            .padding([7, 14])
-            .width(Length::Fill)
-            .style(app_theme::reader_alert),
+            container(alert)
+                .padding([7, 14])
+                .width(Length::Fill)
+                .style(app_theme::reader_alert),
         );
     }
 
@@ -3289,20 +3363,12 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
     .width(Length::Fill);
     let search = container(search_input).width(Length::Fill).max_width(380);
     let import_message = state.library.is_some().then_some(Message::ImportFile);
+    let link_message = state.library.is_some().then_some(Message::LinkFile);
     let folder_message = state.library.is_some().then_some(Message::ImportDirectory);
-    let actions = row![
-        widgets::secondary_button(
-            state.i18n.selector_label(),
-            state
-                .reading_state_saves
-                .as_ref()
-                .map(|_| Message::CycleLanguage),
-        ),
-        widgets::secondary_button(state.i18n.text("scan-folder"), folder_message),
-        widgets::primary_button(state.i18n.text("add-book"), import_message),
-    ]
-    .spacing(8)
-    .align_y(iced::Alignment::Center);
+    let language_message = state
+        .reading_state_saves
+        .as_ref()
+        .map(|_| Message::CycleLanguage);
 
     let content: Element<'_, Message> = if compact {
         column![
@@ -3315,10 +3381,16 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
                 ]
                 .spacing(2),
                 iced::widget::Space::new().width(Length::Fill),
-                actions,
+                widgets::secondary_button(state.i18n.selector_label(), language_message),
             ]
             .align_y(iced::Alignment::Center),
             search,
+            row![
+                widgets::primary_button(state.i18n.text("add-book"), import_message),
+                widgets::secondary_button(state.i18n.text("link-book"), link_message),
+                widgets::secondary_button(state.i18n.text("scan-folder"), folder_message),
+            ]
+            .spacing(8),
         ]
         .spacing(12)
         .into()
@@ -3333,7 +3405,14 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
             .spacing(2),
             iced::widget::Space::new().width(Length::Fill),
             search,
-            actions,
+            row![
+                widgets::secondary_button(state.i18n.selector_label(), language_message),
+                widgets::secondary_button(state.i18n.text("scan-folder"), folder_message),
+                widgets::secondary_button(state.i18n.text("link-book"), link_message),
+                widgets::primary_button(state.i18n.text("add-book"), import_message),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
         ]
         .spacing(16)
         .align_y(iced::Alignment::Center)
@@ -3458,6 +3537,10 @@ fn library_collection(state: &State) -> Element<'_, Message> {
                     widgets::primary_button(
                         state.i18n.text("add-first-book"),
                         state.library.is_some().then_some(Message::ImportFile),
+                    ),
+                    widgets::secondary_button(
+                        state.i18n.text("link-book"),
+                        state.library.is_some().then_some(Message::LinkFile),
                     ),
                     widgets::secondary_button(
                         state.i18n.text("scan-folder-long"),
@@ -3591,6 +3674,7 @@ fn library_search_input_id() -> iced::widget::Id {
 
 fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
+    let book_id = book.id;
     let cover = render_book_cover(book, Length::Fill, 210.0);
     let title_text = text(book.title.clone())
         .size(13)
@@ -3632,13 +3716,14 @@ fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message
     .height(Length::Fill)
     .width(Length::Fill);
 
-    widgets::book_button(card, Message::OpenBook(file_path))
+    widgets::book_button(card, Message::OpenLibraryBook(book_id, file_path))
         .height(330)
         .into()
 }
 
 fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
+    let book_id = book.id;
     let percentage = (book.progress.clamp(0.0, 1.0) * 100.0).round() as u32;
     let details = column![
         text(book.title.clone()).size(16),
@@ -3672,11 +3757,14 @@ fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Mes
     .spacing(14)
     .align_y(iced::Alignment::Center);
 
-    container(widgets::book_button(content, Message::OpenBook(file_path)))
-        .width(Length::Fill)
-        .max_width(620)
-        .style(app_theme::surface)
-        .into()
+    container(widgets::book_button(
+        content,
+        Message::OpenLibraryBook(book_id, file_path),
+    ))
+    .width(Length::Fill)
+    .max_width(620)
+    .style(app_theme::surface)
+    .into()
 }
 
 fn render_book_cover(book: &Book, width: Length, height: f32) -> Element<'_, Message> {
@@ -4668,7 +4756,7 @@ mod tests {
         state.reading_state = Some(store);
 
         let _runtime = runtime.enter();
-        install_document(&mut state, path, OpenDocument::Cbz(Arc::new(cbz)));
+        install_document(&mut state, path, None, OpenDocument::Cbz(Arc::new(cbz)));
 
         assert_eq!(state.current_page, 1);
         assert_eq!(state.zoom, ZoomMode::FitPage);
@@ -4681,6 +4769,10 @@ mod tests {
             author: None,
             format: shosai_core::library::BookFormat::Epub,
             file_path: format!("/book-{id}.epub"),
+            storage_kind: shosai_core::library::StorageKind::Referenced,
+            original_path: None,
+            content_hash: None,
+            file_size: None,
             cover: None,
             progress: 0.0,
             date_added: "2026-01-01".to_string(),
@@ -5195,6 +5287,7 @@ mod tests {
                 bookmarks: vec![Bookmark {
                     id: 1,
                     file_path: "first.epub".to_string(),
+                    book_id: None,
                     page: 0,
                     location_offset: None,
                     title: None,
@@ -5339,7 +5432,10 @@ mod tests {
             .await
             .unwrap();
         let (mut state, _) = boot();
-        state.library = Some(Library::new(store.pool().clone()));
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
         state.library_books.push(test_book(1));
         state.library_loading = false;
 
@@ -5358,7 +5454,10 @@ mod tests {
             .await
             .unwrap();
         let (mut state, _) = boot();
-        state.library = Some(Library::new(store.pool().clone()));
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
         state.library_books.push(test_book(1));
         state.library_loading = false;
         let generation = state.library_generation;
@@ -5492,22 +5591,53 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_book_while_storage_initializes_is_queued() {
+    fn missing_library_book_offers_recovery_instead_of_a_parser_error() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        state.storage_initializing = true;
+        let missing = tempfile::tempdir().unwrap().path().join("moved.epub");
 
-        let task = update(&mut state, Message::OpenBook("queued.epub".to_string()));
+        let task = update(
+            &mut state,
+            Message::OpenLibraryBook(42, missing.to_string_lossy().into_owned()),
+        );
 
         assert_eq!(task.units(), 0);
-        assert!(matches!(
-            state.pending_open,
-            Some(PendingOpen::LibraryBook(ref path)) if path == &PathBuf::from("queued.epub")
-        ));
-        assert!(state.file_path.is_none());
+        assert_eq!(state.open_error, Some(AppError::MissingBook));
+        assert_eq!(state.missing_book_id, Some(42));
+    }
+
+    #[test]
+    fn reopening_a_relocated_book_replaces_its_existing_identity_tab() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.epub");
+        let replacement = directory.path().join("replacement.epub");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/sample.epub");
+        std::fs::copy(&fixture, &original).unwrap();
+        std::fs::copy(&fixture, &replacement).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+
+        let _ = open_document(&mut state, original, Some(42));
+        let old_document = match state.document.as_ref().unwrap() {
+            OpenDocument::Epub(document) => Arc::clone(document),
+            _ => panic!("expected EPUB document"),
+        };
+        let _ = open_document(&mut state, replacement.clone(), Some(42));
+
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.active_tab, Some(0));
+        assert_eq!(state.book_id, Some(42));
+        assert_eq!(state.file_path.as_ref(), Some(&replacement));
+        assert_eq!(state.tabs[0].file_path, replacement);
+        let Some(OpenDocument::Epub(document)) = &state.document else {
+            panic!("expected EPUB document");
+        };
+        assert!(!Arc::ptr_eq(document, &old_document));
     }
 
     #[test]
@@ -5526,7 +5656,7 @@ mod tests {
 
         assert!(matches!(
             state.pending_open,
-            Some(PendingOpen::FileSelected(ref path)) if path == &PathBuf::from("selected.epub")
+            Some(ref path) if path == &PathBuf::from("selected.epub")
         ));
     }
 
@@ -5899,7 +6029,7 @@ mod tests {
         let render_task = refresh_content(&mut state);
         let old_generation = state.render_generation;
         let old_document = state.document.clone();
-        let open_task = open_document(&mut state, PathBuf::from("unsupported.txt"));
+        let open_task = open_document(&mut state, PathBuf::from("unsupported.txt"), None);
 
         assert!(render_task.units() > 0);
         assert_eq!(open_task.units(), 0);
@@ -6056,7 +6186,7 @@ mod tests {
         let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
 
-        let task = open_document(&mut state, rejected);
+        let task = open_document(&mut state, rejected, None);
 
         assert_eq!(task.units(), 0);
         assert_eq!(state.render_generation, old_generation);
@@ -6353,6 +6483,7 @@ mod tests {
         state.bookmarks.push(Bookmark {
             id: 1,
             file_path: "book.epub".to_string(),
+            book_id: None,
             page: 2,
             location_offset: Some(0),
             title: None,
@@ -6547,6 +6678,7 @@ mod tests {
         for page in 1..=3 {
             saves
                 .send(ReadingStateWriterMessage::Save(ReadingStateSave {
+                    book_id: None,
                     path: path.clone(),
                     reading: FileReadingState {
                         page,

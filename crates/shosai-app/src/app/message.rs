@@ -4,7 +4,7 @@ use std::sync::Arc;
 use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
-use shosai_core::library::BookPage;
+use shosai_core::library::{Book, BookPage};
 use shosai_core::search::SearchMatch;
 
 use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
@@ -85,9 +85,13 @@ pub enum Message {
         page: BookPage,
     },
     ImportFile,
+    LinkFile,
     ImportDirectory,
-    OpenBook(String), // file_path
-    #[allow(dead_code)]
+    OpenLibraryBook(i64, String),
+    ManagedBookImported(Result<Book, String>),
+    LocateBook(i64),
+    RelinkBookSelected(i64, Option<PathBuf>),
+    BookRelinked(Result<Book, String>),
     RemoveBook(i64),
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),

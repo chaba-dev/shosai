@@ -10,7 +10,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } = initialized;
             state.i18n.set_preference(language_preference);
             let pool = store.pool().clone();
-            state.library = Some(Library::new(pool.clone()));
+            state.library = Some(Library::new(pool.clone(), store.managed_books_dir()));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
             state.reading_state = Some(store);
@@ -28,7 +28,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     Task::none()
                 };
             if let Some(pending) = state.pending_open.take() {
-                return Task::batch([geometry_task, Task::done(pending.into_message())]);
+                return Task::batch([
+                    geometry_task,
+                    Task::done(Message::FileSelected(Some(pending))),
+                ]);
             }
             return Task::batch([geometry_task, reset_library(state)]);
         }
@@ -39,7 +42,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.library_loading = false;
             state.storage_error = Some(AppError::Storage(error));
             if let Some(pending) = state.pending_open.take() {
-                return Task::done(pending.into_message());
+                return Task::done(Message::FileSelected(Some(pending)));
             }
         }
 
@@ -65,10 +68,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::FileSelected(Some(path)) => {
             if state.storage_initializing {
-                state.pending_open = Some(PendingOpen::FileSelected(path));
+                state.pending_open = Some(path);
                 return Task::none();
             }
-            return open_document(state, path);
+            return open_document(state, path, None);
         }
 
         Message::FileSelected(None) => {}
@@ -427,9 +430,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ImportFile => {
-            if state.library.is_none() {
+            let Some(lib) = state.library.clone() else {
                 return Task::none();
-            }
+            };
             let ebooks = state.i18n.text("ebooks");
             let import_library = state.i18n.text("import-library");
             return Task::perform(
@@ -439,14 +442,49 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .set_title(&import_library)
                         .pick_file()
                         .await;
-                    file.map(|f| f.path().to_path_buf())
-                },
-                |path| {
-                    if let Some(p) = path {
-                        Message::OpenBook(p.to_string_lossy().to_string())
-                    } else {
-                        Message::RefreshLibrary // no-op refresh
+                    match file {
+                        Some(file) => lib
+                            .import_managed_file(file.path())
+                            .await
+                            .map_err(|error| format!("{error:#}")),
+                        None => return Ok(None),
                     }
+                    .map(Some)
+                },
+                |result| match result {
+                    Ok(Some(book)) => Message::ManagedBookImported(Ok(book)),
+                    Ok(None) => Message::RefreshLibrary,
+                    Err(error) => Message::ManagedBookImported(Err(error)),
+                },
+            );
+        }
+
+        Message::LinkFile => {
+            let Some(lib) = state.library.clone() else {
+                return Task::none();
+            };
+            let ebooks = state.i18n.text("ebooks");
+            let import_library = state.i18n.text("link-library");
+            return Task::perform(
+                async move {
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
+                        .set_title(&import_library)
+                        .pick_file()
+                        .await;
+                    match file {
+                        Some(file) => lib
+                            .import_file(file.path())
+                            .await
+                            .map(Some)
+                            .map_err(|error| format!("{error:#}")),
+                        None => Ok(None),
+                    }
+                },
+                |result| match result {
+                    Ok(Some(book)) => Message::ManagedBookImported(Ok(book)),
+                    Ok(None) => Message::RefreshLibrary,
+                    Err(error) => Message::ManagedBookImported(Err(error)),
                 },
             );
         }
@@ -469,26 +507,82 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::OpenBook(file_path) => {
-            let path = PathBuf::from(&file_path);
-            if state.storage_initializing {
-                state.pending_open = Some(PendingOpen::LibraryBook(path));
+        Message::OpenLibraryBook(book_id, file_path) => {
+            let path = PathBuf::from(file_path);
+            state.screen = Screen::Reader;
+            if !path.exists() {
+                state.open_error = Some(AppError::MissingBook);
+                state.missing_book_id = Some(book_id);
                 return Task::none();
             }
-            // Import to library if not already there.
-            if let Some(lib) = state.library.clone() {
-                let p = path.clone();
-                // Fire-and-forget import.
-                tokio::task::spawn(async move {
-                    let _ = lib.import_file(&p).await;
-                });
-            }
-            state.screen = Screen::Reader;
-            return open_document(state, path);
+            return open_document(state, path, Some(book_id));
         }
+
+        Message::ManagedBookImported(result) => match result {
+            Ok(book) => {
+                let task = Task::done(Message::OpenLibraryBook(book.id, book.file_path));
+                return Task::batch([reset_library(state), task]);
+            }
+            Err(error) => {
+                state.open_error = Some(AppError::Library(error));
+                state.screen = Screen::Reader;
+            }
+        },
+
+        Message::LocateBook(book_id) => {
+            if state.library.is_none() {
+                return Task::none();
+            }
+            let ebooks = state.i18n.text("ebooks");
+            let locate_book = state.i18n.text("locate-book-dialog");
+            return Task::perform(
+                async move {
+                    let file = rfd::AsyncFileDialog::new()
+                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
+                        .set_title(&locate_book)
+                        .pick_file()
+                        .await;
+                    file.map(|file| file.path().to_path_buf())
+                },
+                move |path| Message::RelinkBookSelected(book_id, path),
+            );
+        }
+
+        Message::RelinkBookSelected(book_id, Some(path)) => {
+            let Some(lib) = state.library.clone() else {
+                return Task::none();
+            };
+            return Task::perform(
+                async move {
+                    lib.relink(book_id, &path)
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                },
+                Message::BookRelinked,
+            );
+        }
+
+        Message::RelinkBookSelected(_, None) => {}
+
+        Message::BookRelinked(result) => match result {
+            Ok(book) => {
+                state.open_error = None;
+                state.missing_book_id = None;
+                return Task::batch([
+                    reset_library(state),
+                    Task::done(Message::OpenLibraryBook(book.id, book.file_path)),
+                ]);
+            }
+            Err(error) => state.open_error = Some(AppError::Library(error)),
+        },
 
         Message::RemoveBook(id) => {
             if let Some(lib) = state.library.clone() {
+                if state.missing_book_id == Some(id) {
+                    state.missing_book_id = None;
+                    state.open_error = None;
+                    state.screen = Screen::Library;
+                }
                 return Task::perform(
                     async move {
                         let _ = lib.remove(id).await;
@@ -534,7 +628,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
-                match store.toggle_at(path, page, location_offset, None) {
+                let result = if let Some(book_id) = state.book_id {
+                    store.toggle_for_book_at(book_id, path, page, location_offset, None)
+                } else {
+                    store.toggle_at(path, page, location_offset, None)
+                };
+                match result {
                     Ok(Some(bookmark)) => {
                         state.bookmarks.push(bookmark);
                         state.current_page_bookmarked = true;

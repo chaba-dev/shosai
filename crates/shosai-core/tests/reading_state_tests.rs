@@ -1,6 +1,10 @@
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use std::borrow::Cow;
 use std::path::PathBuf;
 use tempfile::TempDir;
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 /// Each test gets its own temporary directory (and therefore its own database).
 /// The directory is cleaned up automatically when `TempDir` is dropped.
@@ -299,6 +303,99 @@ async fn test_migrations_are_idempotent() {
         .expect("data should survive re-migration");
     assert_eq!(state.page, 7);
     assert!((state.zoom - 1.25).abs() < f32::EPSILON);
+}
+
+#[tokio::test]
+async fn migrating_a_v5_database_fingerprints_reachable_legacy_books() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shosai.db");
+    let reachable = dir.path().join("reachable.epub");
+    let missing = dir.path().join("missing.epub");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"),
+        &reachable,
+    )
+    .unwrap();
+
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true);
+    let pool = SqlitePool::connect_with(options).await.unwrap();
+    let v5_migrator = sqlx::migrate::Migrator {
+        migrations: Cow::Owned(MIGRATOR.migrations[..5].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    v5_migrator.run(&pool).await.unwrap();
+    for path in [&reachable, &missing] {
+        sqlx::query("INSERT INTO books (title, format, file_path) VALUES ('Legacy', 'epub', ?)")
+            .bind(path.to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+
+    let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+    let rows: Vec<(String, Option<String>, Option<i64>)> =
+        sqlx::query_as("SELECT file_path, content_hash, file_size FROM books ORDER BY id")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].1.is_some());
+    assert_eq!(
+        rows[0].2,
+        Some(std::fs::metadata(reachable).unwrap().len() as i64)
+    );
+    assert_eq!(rows[1].1, None);
+    assert_eq!(rows[1].2, None);
+}
+
+#[tokio::test]
+async fn stable_save_replaces_a_path_only_alias() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/relinked.epub");
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', '/old.epub')
+         RETURNING id",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    store
+        .set_async(
+            &path,
+            &FileReadingState {
+                page: 1,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+    store
+        .set_for_book_async(
+            book_id,
+            &path,
+            &FileReadingState {
+                page: 9,
+                location_offset: Some(3),
+                zoom: 1.5,
+            },
+        )
+        .await
+        .unwrap();
+
+    let state = store.get_for_book_async(book_id).await.unwrap();
+    assert_eq!(state.page, 9);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reading_state WHERE file_path = ?")
+        .bind(path.to_string_lossy().as_ref())
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
 }
 
 // ---------------------------------------------------------------------------

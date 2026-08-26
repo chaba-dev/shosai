@@ -26,8 +26,8 @@ wuff = { version = "=0.2.8", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["default-formats"] }
 natord = "1.0.9"
 unicode-casefold = "0.2.0"
+sha2 = "0.10.9"
 
 [dev-dependencies]
-sha2 = "0.10.9"
 tempfile = "3.27.0"
 tokio = { version = "1", features = ["rt", "macros"] }

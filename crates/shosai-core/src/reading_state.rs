@@ -35,6 +35,7 @@ pub struct FileReadingState {
 #[derive(Debug, Clone)]
 pub struct ReadingStateStore {
     pool: SqlitePool,
+    db_path: PathBuf,
 }
 
 impl ReadingStateStore {
@@ -44,6 +45,14 @@ impl ReadingStateStore {
     /// that use the same database.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    /// Directory used for book files copied into Shosai's managed library.
+    pub fn managed_books_dir(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("books")
     }
 
     /// Open (or create) the store at the default platform path.
@@ -81,8 +90,12 @@ impl ReadingStateStore {
             .await
             .with_context(|| format!("failed to open database at {}", db_path.display()))?;
 
-        let store = Self { pool };
+        let store = Self {
+            pool,
+            db_path: db_path.to_path_buf(),
+        };
         store.migrate().await?;
+        crate::library::backfill_missing_fingerprints(&store.pool).await?;
         Ok(store)
     }
 
@@ -148,6 +161,60 @@ impl ReadingStateStore {
         .await
         .context("failed to save reading state")?;
 
+        Ok(())
+    }
+
+    /// Get reading state using a stable library book identity.
+    pub async fn get_for_book_async(&self, book_id: i64) -> Option<FileReadingState> {
+        sqlx::query("SELECT page, location_offset, zoom FROM reading_state WHERE book_id = ?")
+            .bind(book_id)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|row| FileReadingState {
+                page: row.get::<i64, _>("page") as usize,
+                location_offset: row
+                    .get::<Option<i64>, _>("location_offset")
+                    .map(|offset| offset as usize),
+                zoom: row.get::<f64, _>("zoom") as f32,
+            })
+    }
+
+    pub fn get_for_book(&self, book_id: i64) -> Option<FileReadingState> {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.get_for_book_async(book_id))
+    }
+
+    /// Save reading state using a stable library book identity.
+    pub async fn set_for_book_async(
+        &self,
+        book_id: i64,
+        file_path: &Path,
+        state: &FileReadingState,
+    ) -> Result<()> {
+        let key = canonical_key(file_path);
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
+            .bind(book_id)
+            .bind(&key)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to reconcile reading state aliases")?;
+        sqlx::query(
+            "INSERT INTO reading_state
+                (file_path, book_id, page, location_offset, zoom, updated_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        )
+        .bind(&key)
+        .bind(book_id)
+        .bind(state.page as i64)
+        .bind(state.location_offset.map(|offset| offset as i64))
+        .bind(state.zoom as f64)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to save reading state for book")?;
+        transaction.commit().await?;
         Ok(())
     }
 
