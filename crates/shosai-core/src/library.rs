@@ -1187,7 +1187,9 @@ impl Library {
     }
 
     async fn attach_identity(&self, book_id: i64, old_path: &str, new_path: &str) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+        // Reconciliation reads before writing, so reserve SQLite's writer slot up front rather
+        // than failing a deferred transaction's lock upgrade during concurrent imports.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         reconcile_identity(&mut transaction, book_id, old_path, new_path).await?;
         transaction.commit().await?;
         Ok(())
@@ -1582,13 +1584,16 @@ impl Drop for ManagedStage {
 }
 
 fn unique_managed_path(parent: &Path, label: &str) -> PathBuf {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
     parent.join(format!(
-        ".{label}.{}.{}.tmp",
+        ".{label}.{}.{}.{}.tmp",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed)
     ))
 }
 

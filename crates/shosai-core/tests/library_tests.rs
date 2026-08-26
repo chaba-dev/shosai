@@ -788,15 +788,22 @@ async fn concurrent_identical_managed_imports_return_the_same_book() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("first.epub");
     let second = dir.path().join("second.epub");
+    let third = dir.path().join("third.epub");
+    let fourth = dir.path().join("fourth.epub");
     std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
     std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &third).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &fourth).unwrap();
 
-    let (first_result, second_result) = tokio::join!(
+    let results = tokio::join!(
         lib.import_managed_file(&first),
-        lib.import_managed_file(&second)
+        lib.import_managed_file(&second),
+        lib.import_managed_file(&third),
+        lib.import_managed_file(&fourth),
     );
 
-    assert_eq!(first_result.unwrap().id, second_result.unwrap().id);
+    let ids = [results.0, results.1, results.2, results.3].map(|result| result.unwrap().id);
+    assert!(ids.iter().all(|id| *id == ids[0]));
     assert_eq!(lib.list_all().await.unwrap().len(), 1);
 }
 
