@@ -5,6 +5,8 @@ use fluent_templates::fluent_bundle::FluentValue;
 use fluent_templates::{Loader, static_loader};
 use unic_langid::{LanguageIdentifier, langid};
 
+use crate::typography;
+
 const ENGLISH: LanguageIdentifier = langid!("en-US");
 const JAPANESE: LanguageIdentifier = langid!("ja");
 
@@ -68,6 +70,14 @@ impl I18n {
         *self = Self::new(preference);
     }
 
+    pub fn ui_font(&self) -> iced::Font {
+        if self.language == JAPANESE {
+            typography::NOTO_SANS_JP
+        } else {
+            typography::INTER
+        }
+    }
+
     pub fn text(&self, key: &str) -> String {
         LOCALES.lookup(&self.language, key)
     }
@@ -122,6 +132,18 @@ mod tests {
                 preference
             );
         }
+    }
+
+    #[test]
+    fn interface_font_tracks_the_resolved_language() {
+        assert_eq!(
+            I18n::new(LanguagePreference::English).ui_font(),
+            typography::INTER
+        );
+        assert_eq!(
+            I18n::new(LanguagePreference::Japanese).ui_font(),
+            typography::NOTO_SANS_JP
+        );
     }
 
     #[test]

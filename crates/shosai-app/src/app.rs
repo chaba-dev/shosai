@@ -6,7 +6,7 @@ use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
     button, center, column, container, grid, image, mouse_area, opaque, pick_list, responsive, row,
-    scrollable, sensor, text, text_input,
+    scrollable, sensor, text_input,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -29,7 +29,7 @@ use crate::epub::{
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
 use crate::theme::ReaderTheme;
-use crate::{theme as app_theme, widgets};
+use crate::{theme as app_theme, typography, widgets};
 
 mod dispatch;
 mod epub_navigation;
@@ -41,6 +41,12 @@ pub use dispatch::update;
 use epub_navigation::*;
 use epub_view::{cache_epub_image_handles, continuous_epub_content_view, epub_chapter_view};
 pub use message::Message;
+
+fn text<'a>(value: impl iced::widget::text::IntoFragment<'a>) -> iced::widget::Text<'a> {
+    let fragment = value.into_fragment();
+    let font = typography::font_for_text(fragment.as_ref());
+    iced::widget::text(fragment).font(font)
+}
 
 const LANGUAGE_PREFERENCE_KEY: &str = "language";
 const ADD_BOOK_BEHAVIOR_KEY: &str = "library.add_behavior";
@@ -2664,6 +2670,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
             alert = alert.push(widgets::primary_button(
                 state.i18n.text("locate-file"),
                 (!removing).then_some(Message::LocateBook(book_id)),
+                state.i18n.ui_font(),
             ));
             alert = alert.push(widgets::secondary_button(
                 state.i18n.text(if removing {
@@ -2672,6 +2679,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
                     "remove-from-library"
                 }),
                 (!removing).then_some(Message::RemoveBook(book_id)),
+                state.i18n.ui_font(),
             ));
         }
         layout = layout.push(
@@ -2898,7 +2906,11 @@ fn reader_header(state: &State, compact: bool) -> Element<'_, Message> {
 
     container(
         row![
-            widgets::secondary_button(state.i18n.text("back-library"), Some(Message::ShowLibrary),),
+            widgets::secondary_button(
+                state.i18n.text("back-library"),
+                Some(Message::ShowLibrary),
+                state.i18n.ui_font(),
+            ),
             container(text(title).size(if compact { 15 } else { 17 }))
                 .width(Length::Fill)
                 .center_x(Length::Fill),
@@ -3038,6 +3050,7 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     };
     let location = row![
         text_input(&state.i18n.text("page"), &state.page_input)
+            .font(state.i18n.ui_font())
             .on_input(Message::PageInputChanged)
             .on_submit(Message::GoToPage)
             .padding([7, 8])
@@ -3217,6 +3230,7 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                     &state.i18n.text("add-note-placeholder"),
                     &state.editing_note_text,
                 )
+                .font(state.i18n.ui_font())
                 .on_input(Message::EditNoteChanged)
                 .on_submit(Message::SaveNote)
                 .size(12)
@@ -3270,6 +3284,7 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
         panel = panel.push(widgets::secondary_button(
             state.i18n.text("export-markdown"),
             Some(Message::ExportBookmarks),
+            state.i18n.ui_font(),
         ));
     }
 
@@ -3285,6 +3300,7 @@ fn search_bar(state: &State, compact: bool) -> Element<'_, Message> {
         &state.i18n.text("search-document-placeholder"),
         &state.search_query,
     )
+    .font(state.i18n.ui_font())
     .id(search_input_id())
     .on_input(Message::SearchQueryChanged)
     .on_submit(Message::SearchNext)
@@ -3613,6 +3629,7 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         &state.i18n.text("search-library-placeholder"),
         &state.library_search,
     )
+    .font(state.i18n.ui_font())
     .id(library_search_input_id())
     .on_input(Message::LibrarySearchChanged)
     .padding([10, 12])
@@ -3636,7 +3653,7 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
             ]
             .spacing(2),
             search,
-            widgets::primary_button(add_label, add_message),
+            widgets::primary_button(add_label, add_message, state.i18n.ui_font()),
         ]
         .spacing(12)
         .into()
@@ -3651,7 +3668,7 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
             .spacing(2),
             iced::widget::Space::new().width(Length::Fill),
             search,
-            widgets::primary_button(add_label, add_message),
+            widgets::primary_button(add_label, add_message, state.i18n.ui_font()),
         ]
         .spacing(16)
         .align_y(iced::Alignment::Center)
@@ -3706,6 +3723,7 @@ fn language_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectLanguage(option.value)
     })
+    .font(state.i18n.ui_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -3814,10 +3832,12 @@ fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
                 widgets::secondary_button(
                     state.i18n.text("open-folder"),
                     library_available.then_some(Message::OpenManagedLibraryFolder),
+                    state.i18n.ui_font(),
                 ),
                 widgets::secondary_button(
                     state.i18n.text("change-location"),
                     library_available.then_some(Message::ChooseManagedLibraryParent),
+                    state.i18n.ui_font(),
                 ),
             ]
             .spacing(8),
@@ -3848,13 +3868,21 @@ fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(5);
     let font_size = row![
-        widgets::secondary_button("−", Some(Message::DefaultEpubFontSizeDown)),
+        widgets::secondary_button(
+            "−",
+            Some(Message::DefaultEpubFontSizeDown),
+            state.i18n.ui_font(),
+        ),
         container(text(format!(
             "{} px",
             state.reader_defaults.epub_font_size as u32
         )))
         .padding([9, 12]),
-        widgets::secondary_button("+", Some(Message::DefaultEpubFontSizeUp)),
+        widgets::secondary_button(
+            "+",
+            Some(Message::DefaultEpubFontSizeUp),
+            state.i18n.ui_font(),
+        ),
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
@@ -3964,6 +3992,7 @@ fn add_book_behavior_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectAddBookBehavior(option.value)
     })
+    .font(state.i18n.ui_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -3991,6 +4020,7 @@ fn reader_theme_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectDefaultReaderTheme(option.value)
     })
+    .font(state.i18n.ui_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -4014,6 +4044,7 @@ fn line_spacing_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectDefaultEpubLineSpacing(option.value)
     })
+    .font(state.i18n.ui_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -4038,6 +4069,7 @@ fn pdf_zoom_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectDefaultPdfFitWidth(option.value)
     })
+    .font(state.i18n.ui_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -4053,18 +4085,21 @@ fn library_sidebar(state: &State) -> Element<'_, Message> {
                 state.i18n.text("all-books"),
                 state.screen == Screen::Library && state.library_filter.is_none(),
                 Message::LibraryFilterChanged(None),
+                state.i18n.ui_font(),
             ),
             widgets::navigation_button(
                 "EPUB",
                 state.screen == Screen::Library
                     && state.library_filter == Some(shosai_core::library::BookFormat::Epub),
                 Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Epub)),
+                state.i18n.ui_font(),
             ),
             widgets::navigation_button(
                 "PDF",
                 state.screen == Screen::Library
                     && state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
                 Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
+                state.i18n.ui_font(),
             ),
         ]
         .spacing(6),
@@ -4073,6 +4108,7 @@ fn library_sidebar(state: &State) -> Element<'_, Message> {
             state.i18n.text("settings"),
             state.screen == Screen::Settings,
             Message::ShowSettings,
+            state.i18n.ui_font(),
         ),
     ]
     .spacing(12)
@@ -4093,23 +4129,27 @@ fn mobile_library_filters(state: &State) -> Element<'_, Message> {
                 state.i18n.text("all"),
                 state.screen == Screen::Library && state.library_filter.is_none(),
                 Message::LibraryFilterChanged(None),
+                state.i18n.ui_font(),
             ),
             widgets::navigation_button(
                 "EPUB",
                 state.screen == Screen::Library
                     && state.library_filter == Some(shosai_core::library::BookFormat::Epub),
                 Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Epub)),
+                state.i18n.ui_font(),
             ),
             widgets::navigation_button(
                 "PDF",
                 state.screen == Screen::Library
                     && state.library_filter == Some(shosai_core::library::BookFormat::Pdf),
                 Message::LibraryFilterChanged(Some(shosai_core::library::BookFormat::Pdf)),
+                state.i18n.ui_font(),
             ),
             widgets::navigation_button(
                 state.i18n.text("settings"),
                 state.screen == Screen::Settings,
                 Message::ShowSettings,
+                state.i18n.ui_font(),
             ),
         ]
         .spacing(4),
@@ -4161,7 +4201,11 @@ fn library_collection(state: &State) -> Element<'_, Message> {
             } else {
                 state.i18n.text("add-first-books")
             };
-            empty = empty.push(widgets::primary_button(label, message));
+            empty = empty.push(widgets::primary_button(
+                label,
+                message,
+                state.i18n.ui_font(),
+            ));
         }
 
         return center(empty)
@@ -4275,10 +4319,12 @@ fn managed_library_move_modal(state: &State) -> Element<'_, Message> {
         widgets::secondary_button(
             state.i18n.text("cancel"),
             (!state.moving_library).then_some(Message::CancelManagedLibraryMove),
+            state.i18n.ui_font(),
         ),
         widgets::primary_button(
             move_label,
             (!state.moving_library).then_some(Message::ConfirmManagedLibraryMove),
+            state.i18n.ui_font(),
         ),
     ]
     .spacing(8);
@@ -4365,6 +4411,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 widgets::primary_button(
                     state.i18n.text("copy-into-shosai"),
                     Some(Message::AddSelectedBooks { copy: true }),
+                    state.i18n.ui_font(),
                 )
                 .width(Length::Fill),
                 text(state.i18n.text("copy-into-shosai-description"))
@@ -4373,6 +4420,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 widgets::secondary_button(
                     state.i18n.text("use-current-location"),
                     Some(Message::AddSelectedBooks { copy: false }),
+                    state.i18n.ui_font(),
                 )
                 .width(Length::Fill),
                 text(state.i18n.text("use-current-location-description"))
@@ -4414,6 +4462,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 widgets::primary_button(
                     state.i18n.text("add-selected-books"),
                     Some(Message::AddSelectedBooks { copy }),
+                    state.i18n.ui_font(),
                 )
                 .width(Length::Fill),
                 row![
@@ -4437,11 +4486,13 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             widgets::primary_button(
                 state.i18n.text("choose-book-files"),
                 Some(Message::ChooseBookFiles),
+                state.i18n.ui_font(),
             )
             .width(Length::Fill),
             widgets::secondary_button(
                 state.i18n.text("choose-book-folder"),
                 Some(Message::ChooseBookFolder),
+                state.i18n.ui_font(),
             )
             .width(Length::Fill),
             row![iced::widget::Space::new().width(Length::Fill), cancel],
