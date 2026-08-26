@@ -4533,7 +4533,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             )
         } else {
             state.i18n.text_with_args(
-                "checking-books-progress",
+                "checking-copies-progress",
                 [
                     ("completed", (progress.completed_files as i64).into()),
                     ("total", (progress.total_files as i64).into()),
