@@ -50,6 +50,14 @@ fn text<'a>(value: impl iced::widget::text::IntoFragment<'a>) -> iced::widget::T
     iced::widget::text(fragment).font(font)
 }
 
+fn editable_text_font(value: &str, placeholder: &str) -> iced::Font {
+    typography::font_for_text(if value.is_empty() { placeholder } else { value })
+}
+
+fn language_menu_font() -> iced::Font {
+    typography::NOTO_SANS_JP
+}
+
 const LANGUAGE_PREFERENCE_KEY: &str = "language";
 const ADD_BOOK_BEHAVIOR_KEY: &str = "library.add_behavior";
 const DEFAULT_READING_MODE_KEY: &str = "reader.default_mode";
@@ -3258,7 +3266,10 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
                     &state.i18n.text("add-note-placeholder"),
                     &state.editing_note_text,
                 )
-                .font(state.i18n.ui_font())
+                .font(editable_text_font(
+                    &state.editing_note_text,
+                    &state.i18n.text("add-note-placeholder"),
+                ))
                 .on_input(Message::EditNoteChanged)
                 .on_submit(Message::SaveNote)
                 .size(12)
@@ -3324,16 +3335,14 @@ fn bookmarks_panel(state: &State, width: Length) -> Element<'_, Message> {
 }
 
 fn search_bar(state: &State, compact: bool) -> Element<'_, Message> {
-    let input = text_input(
-        &state.i18n.text("search-document-placeholder"),
-        &state.search_query,
-    )
-    .font(state.i18n.ui_font())
-    .id(search_input_id())
-    .on_input(Message::SearchQueryChanged)
-    .on_submit(Message::SearchNext)
-    .padding([8, 10])
-    .width(Length::Fill);
+    let placeholder = state.i18n.text("search-document-placeholder");
+    let input = text_input(&placeholder, &state.search_query)
+        .font(editable_text_font(&state.search_query, &placeholder))
+        .id(search_input_id())
+        .on_input(Message::SearchQueryChanged)
+        .on_submit(Message::SearchNext)
+        .padding([8, 10])
+        .width(Length::Fill);
 
     let result_info = if state.search_results.is_empty() {
         if state.search_query.is_empty() {
@@ -3653,15 +3662,13 @@ fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
 }
 
 fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
-    let search_input = text_input(
-        &state.i18n.text("search-library-placeholder"),
-        &state.library_search,
-    )
-    .font(state.i18n.ui_font())
-    .id(library_search_input_id())
-    .on_input(Message::LibrarySearchChanged)
-    .padding([10, 12])
-    .width(Length::Fill);
+    let placeholder = state.i18n.text("search-library-placeholder");
+    let search_input = text_input(&placeholder, &state.library_search)
+        .font(editable_text_font(&state.library_search, &placeholder))
+        .id(library_search_input_id())
+        .on_input(Message::LibrarySearchChanged)
+        .padding([10, 12])
+        .width(Length::Fill);
     let search = container(search_input).width(Length::Fill).max_width(380);
     let add_message = (state.library.is_some() && !state.adding_books && !state.moving_library)
         .then_some(Message::OpenAddBooks);
@@ -3751,7 +3758,7 @@ fn language_selector(state: &State) -> Element<'static, Message> {
     pick_list(options, selected, |option| {
         Message::SelectLanguage(option.value)
     })
-    .font(state.i18n.ui_font())
+    .font(language_menu_font())
     .text_size(14)
     .padding([9, 12])
     .into()
@@ -6567,6 +6574,16 @@ mod tests {
         let _ = update(&mut state, Message::LibraryFilterChanged(None));
 
         assert_eq!(state.screen, Screen::Library);
+    }
+
+    #[test]
+    fn editable_and_cross_script_controls_use_bundled_glyph_coverage() {
+        assert_eq!(
+            editable_text_font("日本語", "Search"),
+            typography::NOTO_SANS_JP
+        );
+        assert_eq!(editable_text_font("", "検索"), typography::NOTO_SANS_JP);
+        assert_eq!(language_menu_font(), typography::NOTO_SANS_JP);
     }
 
     #[test]
