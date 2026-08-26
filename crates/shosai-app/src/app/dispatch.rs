@@ -568,6 +568,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.add_books_source = Some(AddBooksSource::Files(paths.clone()));
             state.add_books_discovering = true;
+            state.library_activity_progress = 0.0;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
@@ -595,6 +596,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.add_books_source = Some(AddBooksSource::Folder(path.clone()));
             state.add_books_discovering = true;
+            state.library_activity_progress = 0.0;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
@@ -946,7 +948,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     let progress = progress.snapshot();
                     if progress.enumerating {
                         state.library_activity_progress =
-                            (state.library_activity_progress + LIBRARY_ACTIVITY_STEP).min(1.0);
+                            (state.library_activity_progress + LIBRARY_ACTIVITY_STEP) % 1.0;
                     } else {
                         state.library_activity_progress =
                             progress.completed_files as f32 / progress.total_files.max(1) as f32;

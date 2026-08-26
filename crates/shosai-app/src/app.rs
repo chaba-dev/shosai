@@ -7485,6 +7485,19 @@ mod tests {
     }
 
     #[test]
+    fn discovery_activity_wraps_instead_of_freezing_at_the_right_edge() {
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.add_books_discovering = true;
+        state.add_books_progress = Some(ImportDiscoveryProgress::default());
+        state.library_activity_progress = 0.99;
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+
+        assert!(state.library_activity_progress < 0.1);
+    }
+
+    #[test]
     fn later_library_pages_do_not_introduce_continue_reading() {
         let (mut state, _) = boot();
         state.library_books = (0..LIBRARY_PAGE_SIZE)
