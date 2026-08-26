@@ -508,6 +508,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::OpenLibraryBook(book_id, file_path) => {
+            state.book_menu = None;
+            state.pending_remove_book = None;
             let path = PathBuf::from(file_path);
             state.screen = Screen::Reader;
             if !path.exists() {
@@ -530,7 +532,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         },
 
         Message::LocateBook(book_id) => {
-            if state.library.is_none() {
+            if state.library.is_none() || state.removing_book == Some(book_id) {
                 return Task::none();
             }
             let ebooks = state.i18n.text("ebooks");
@@ -576,19 +578,120 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) => state.open_error = Some(AppError::Library(error)),
         },
 
+        Message::ToggleBookMenu(id) => {
+            if state.removing_book.is_none() && state.pending_remove_book.is_none() {
+                state.book_menu = (state.book_menu != Some(id)).then_some(id);
+            }
+        }
+
+        Message::CloseBookMenu => {
+            state.book_menu = None;
+        }
+
+        Message::RequestRemoveBook(id) => {
+            if state.removing_book.is_none() {
+                state.book_menu = None;
+                state.pending_remove_book = Some(id);
+                state.library_error = None;
+            }
+        }
+
+        Message::CancelRemoveBook => {
+            state.pending_remove_book = None;
+        }
+
         Message::RemoveBook(id) => {
-            if let Some(lib) = state.library.clone() {
-                if state.missing_book_id == Some(id) {
-                    state.missing_book_id = None;
-                    state.open_error = None;
-                    state.screen = Screen::Library;
+            if state.removing_book.is_some()
+                || (state.pending_remove_book != Some(id) && state.missing_book_id != Some(id))
+            {
+                return Task::none();
+            }
+            let Some(lib) = state.library.clone() else {
+                return Task::none();
+            };
+            state.book_menu = None;
+            state.pending_remove_book = None;
+            state.removing_book = Some(id);
+            state.library_error = None;
+            return Task::perform(
+                async move { lib.remove(id).await.map_err(|error| format!("{error:#}")) },
+                move |result| Message::BookRemoved { id, result },
+            );
+        }
+
+        Message::BookRemoved { id, result } => {
+            if state.removing_book == Some(id) {
+                state.removing_book = None;
+            }
+            match result {
+                Ok(()) => {
+                    state.library_books.retain(|book| book.id != id);
+                    let mut detached_paths = BTreeSet::new();
+                    let mut detached_saves = Vec::new();
+                    if state.book_id == Some(id) {
+                        if let Some(path) = &state.file_path {
+                            detached_paths.insert(path.clone());
+                            detached_saves.push(ReadingStateSave {
+                                book_id: None,
+                                path: path.clone(),
+                                reading: FileReadingState {
+                                    page: state.current_page,
+                                    location_offset: current_epub_offset(state),
+                                    zoom: state.zoom.scale(),
+                                },
+                            });
+                        }
+                        state.book_id = None;
+                        for bookmark in &mut state.bookmarks {
+                            bookmark.book_id = None;
+                        }
+                    }
+                    for tab in &mut state.tabs {
+                        if tab.book_id == Some(id) {
+                            if detached_paths.insert(tab.file_path.clone()) {
+                                detached_saves.push(ReadingStateSave {
+                                    book_id: None,
+                                    path: tab.file_path.clone(),
+                                    reading: FileReadingState {
+                                        page: tab.current_page,
+                                        location_offset: matches!(
+                                            &tab.document,
+                                            OpenDocument::Epub(_)
+                                        )
+                                        .then_some(tab.epub_offset),
+                                        zoom: tab.zoom.scale(),
+                                    },
+                                });
+                            }
+                            tab.book_id = None;
+                            for bookmark in &mut tab.bookmarks {
+                                bookmark.book_id = None;
+                            }
+                        }
+                    }
+                    if let Some(saves) = &state.reading_state_saves {
+                        for save in detached_saves {
+                            if saves.send(ReadingStateWriterMessage::Save(save)).is_err() {
+                                eprintln!("warning: reading state writer stopped unexpectedly");
+                                break;
+                            }
+                        }
+                    }
+                    if state.missing_book_id == Some(id) {
+                        state.missing_book_id = None;
+                        state.open_error = None;
+                        state.screen = Screen::Library;
+                    }
+                    return reset_library(state);
                 }
-                return Task::perform(
-                    async move {
-                        let _ = lib.remove(id).await;
-                    },
-                    |_| Message::RefreshLibrary,
-                );
+                Err(error)
+                    if state.screen == Screen::Reader && state.missing_book_id == Some(id) =>
+                {
+                    state.open_error = Some(AppError::Library(error));
+                }
+                Err(error) => {
+                    state.library_error = Some(AppError::Library(error));
+                }
             }
         }
 
@@ -666,9 +769,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::BookmarksLoaded {
             tab_id,
             file_path,
+            book_id,
             bookmarks,
         } => {
-            if state.active_tab_id != Some(tab_id) || state.file_path.as_ref() != Some(&file_path) {
+            if state.active_tab_id != Some(tab_id)
+                || state.file_path.as_ref() != Some(&file_path)
+                || state.book_id != book_id
+            {
                 return Task::none();
             }
             state.bookmarks = bookmarks;

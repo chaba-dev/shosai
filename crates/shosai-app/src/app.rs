@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, grid, image, responsive, row, scrollable, sensor, text,
-    text_input,
+    button, center, column, container, grid, image, mouse_area, opaque, responsive, row,
+    scrollable, sensor, text, text_input,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -524,6 +524,10 @@ pub struct State {
     library_generation: u64,
     library_book_ids: Arc<Vec<i64>>,
     library_offset: usize,
+    book_menu: Option<i64>,
+    pending_remove_book: Option<i64>,
+    removing_book: Option<i64>,
+    library_error: Option<AppError>,
     storage_initializing: bool,
     storage_error: Option<AppError>,
     pending_open: Option<PathBuf>,
@@ -619,6 +623,10 @@ pub fn boot() -> (State, Task<Message>) {
         library_generation: 0,
         library_book_ids: Arc::new(Vec::new()),
         library_offset: 0,
+        book_menu: None,
+        pending_remove_book: None,
+        removing_book: None,
+        library_error: None,
         storage_initializing: true,
         storage_error: None,
         pending_open: performance_file,
@@ -715,6 +723,9 @@ fn reset_library(state: &mut State) -> Task<Message> {
     state.library_book_ids = Arc::new(Vec::new());
     state.library_offset = 0;
     state.library_has_more = false;
+    state.book_menu = None;
+    state.pending_remove_book = None;
+    state.library_error = None;
     let Some(library) = state.library.clone() else {
         state.library_loading = false;
         return Task::none();
@@ -2093,6 +2104,7 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
             move |bookmarks| Message::BookmarksLoaded {
                 tab_id,
                 file_path: result_path.clone(),
+                book_id,
                 bookmarks,
             },
         )
@@ -2420,15 +2432,19 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         if let Some(book_id) = state.missing_book_id {
-            alert = alert
-                .push(widgets::primary_button(
-                    state.i18n.text("locate-file"),
-                    Some(Message::LocateBook(book_id)),
-                ))
-                .push(widgets::secondary_button(
-                    state.i18n.text("remove-from-library"),
-                    Some(Message::RemoveBook(book_id)),
-                ));
+            let removing = state.removing_book == Some(book_id);
+            alert = alert.push(widgets::primary_button(
+                state.i18n.text("locate-file"),
+                (!removing).then_some(Message::LocateBook(book_id)),
+            ));
+            alert = alert.push(widgets::secondary_button(
+                state.i18n.text(if removing {
+                    "removing"
+                } else {
+                    "remove-from-library"
+                }),
+                (!removing).then_some(Message::RemoveBook(book_id)),
+            ));
         }
         layout = layout.push(
             container(alert)
@@ -3334,7 +3350,7 @@ fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
     let header = library_header(state, compact);
     let collection = library_collection(state);
 
-    if compact {
+    let content: Element<'_, Message> = if compact {
         column![header, mobile_library_filters(state), collection]
             .width(Length::Fill)
             .height(Length::Fill)
@@ -3349,7 +3365,35 @@ fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
-    }
+    };
+    let content = if state.book_menu.is_some() {
+        mouse_area(content).on_press(Message::CloseBookMenu).into()
+    } else {
+        content
+    };
+
+    let Some(book) = state
+        .pending_remove_book
+        .and_then(|book_id| state.library_books.iter().find(|book| book.id == book_id))
+    else {
+        return content;
+    };
+
+    let backdrop = mouse_area(
+        container(iced::widget::Space::new())
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(app_theme::modal_backdrop),
+    )
+    .on_press(Message::CancelRemoveBook);
+
+    iced::widget::Stack::new()
+        .push(content)
+        .push(backdrop)
+        .push(center(opaque(remove_book_modal(state, book))).padding(20))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
@@ -3510,7 +3554,11 @@ fn library_collection(state: &State) -> Element<'_, Message> {
         let constrained = !state.library_search.is_empty() || state.library_filter.is_some();
         let empty_msg = if state.library_loading {
             state.i18n.text("loading-library")
-        } else if let Some(error) = &state.storage_error {
+        } else if let Some(error) = state
+            .library_error
+            .as_ref()
+            .or(state.storage_error.as_ref())
+        {
             error.localized(&state.i18n)
         } else if state.library_search.is_empty() && state.library_filter.is_none() {
             state.i18n.text("empty-library")
@@ -3565,6 +3613,19 @@ fn library_collection(state: &State) -> Element<'_, Message> {
     let book_grid = grid(cards).fluid(220).height(Length::Shrink).spacing(18);
     let mut sections = column![].spacing(16).width(Length::Fill);
 
+    if let Some(error) = &state.library_error {
+        sections = sections.push(
+            container(
+                text(error.localized(&state.i18n))
+                    .size(13)
+                    .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
+            )
+            .padding([7, 14])
+            .width(Length::Fill)
+            .style(app_theme::reader_alert),
+        );
+    }
+
     if let Some(book) = continue_reading_book(state) {
         sections = sections
             .push(text(state.i18n.text("continue-reading")).size(18))
@@ -3598,6 +3659,43 @@ fn library_collection(state: &State) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+fn remove_book_modal<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
+    let description_key = if book.storage_kind == shosai_core::library::StorageKind::Managed {
+        "remove-managed-book-description"
+    } else {
+        "remove-referenced-book-description"
+    };
+    let actions = row![
+        iced::widget::Space::new().width(Length::Fill),
+        button(text(state.i18n.text("cancel")))
+            .on_press(Message::CancelRemoveBook)
+            .padding([8, 14])
+            .style(app_theme::book_card_action),
+        button(text(state.i18n.text("remove")))
+            .on_press(Message::RemoveBook(book.id))
+            .padding([8, 14])
+            .style(app_theme::danger_button),
+    ]
+    .spacing(8);
+
+    container(
+        column![
+            text(state.i18n.text("remove-book-heading")).size(20),
+            text(book.title.clone()).size(14),
+            text(state.i18n.text(description_key))
+                .size(12)
+                .color(app_theme::TEXT_MUTED),
+            actions,
+        ]
+        .spacing(14),
+    )
+    .padding(24)
+    .width(Length::Fill)
+    .max_width(440)
+    .style(app_theme::modal)
+    .into()
 }
 
 fn continue_reading_book(state: &State) -> Option<&Book> {
@@ -3700,25 +3798,88 @@ fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message
     .size(10)
     .color(app_theme::TEXT_MUTED);
 
+    let is_removing = state.removing_book == Some(book_id);
+    let menu_open = state.book_menu == Some(book_id);
+    let mut cover_layers = iced::widget::Stack::new()
+        .push(container(cover).style(app_theme::book_cover))
+        .width(Length::Fill)
+        .height(210);
+
+    if !is_removing {
+        if menu_open {
+            let menu = column![
+                iced::widget::Space::new().height(38),
+                container(
+                    button(text(state.i18n.text("remove-from-library-menu")).size(11))
+                        .on_press(Message::RequestRemoveBook(book_id))
+                        .padding([7, 10])
+                        .width(Length::Fixed(164.0))
+                        .style(app_theme::book_menu_action),
+                )
+                .padding(4)
+                .style(app_theme::book_action_menu),
+            ]
+            .align_x(iced::Alignment::End);
+            cover_layers = cover_layers.push(opaque(
+                container(menu)
+                    .padding([0, 8])
+                    .align_right(Length::Fill)
+                    .align_top(210),
+            ));
+        }
+        let menu_trigger = button(text("•••").size(13))
+            .on_press_maybe(
+                state
+                    .removing_book
+                    .is_none()
+                    .then_some(Message::ToggleBookMenu(book_id)),
+            )
+            .padding([5, 8])
+            .style(app_theme::book_card_action);
+        cover_layers = cover_layers.push(
+            container(menu_trigger)
+                .padding(8)
+                .align_right(Length::Fill)
+                .align_top(210),
+        );
+    }
+
+    let mut metadata = row![format_label]
+        .spacing(6)
+        .align_y(iced::Alignment::Center);
+    if is_removing {
+        metadata = metadata
+            .push(iced::widget::Space::new().width(Length::Fill))
+            .push(
+                button(text(state.i18n.text("removing")).size(10))
+                    .padding([3, 6])
+                    .style(app_theme::book_card_action),
+            );
+    } else {
+        metadata = metadata
+            .push(iced::widget::Space::new().width(Length::Fill))
+            .push(progress_label);
+    }
+
     let card = column![
-        container(cover).style(app_theme::book_cover),
+        cover_layers,
         container(title_text).height(32),
         container(author).height(28),
         iced::widget::Space::new().height(Length::Fill),
-        row![
-            format_label,
-            iced::widget::Space::new().width(Length::Fill),
-            progress_label,
-        ],
+        metadata,
         widgets::reading_progress(book.progress),
     ]
     .spacing(4)
     .height(Length::Fill)
     .width(Length::Fill);
 
-    widgets::book_button(card, Message::OpenLibraryBook(book_id, file_path))
-        .height(330)
-        .into()
+    widgets::book_button(
+        card,
+        (!is_removing && state.pending_remove_book.is_none() && !menu_open)
+            .then_some(Message::OpenLibraryBook(book_id, file_path)),
+    )
+    .height(330)
+    .into()
 }
 
 fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
@@ -3759,7 +3920,8 @@ fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Mes
 
     container(widgets::book_button(
         content,
-        Message::OpenLibraryBook(book_id, file_path),
+        (state.removing_book != Some(book_id))
+            .then_some(Message::OpenLibraryBook(book_id, file_path)),
     ))
     .width(Length::Fill)
     .max_width(620)
@@ -5284,10 +5446,44 @@ mod tests {
             Message::BookmarksLoaded {
                 tab_id: 1,
                 file_path: PathBuf::from("first.epub"),
+                book_id: None,
                 bookmarks: vec![Bookmark {
                     id: 1,
                     file_path: "first.epub".to_string(),
                     book_id: None,
+                    page: 0,
+                    location_offset: None,
+                    title: None,
+                    note: None,
+                    color: "yellow".to_string(),
+                    created_at: "now".to_string(),
+                }],
+            },
+        );
+
+        assert!(state.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn bookmark_completion_with_a_removed_identity_is_rejected() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("removed.epub"));
+        state.book_id = None;
+
+        let _ = update(
+            &mut state,
+            Message::BookmarksLoaded {
+                tab_id: 1,
+                file_path: PathBuf::from("removed.epub"),
+                book_id: Some(42),
+                bookmarks: vec![Bookmark {
+                    id: 1,
+                    file_path: "removed.epub".to_string(),
+                    book_id: Some(42),
                     page: 0,
                     location_offset: None,
                     title: None,
@@ -5423,6 +5619,222 @@ mod tests {
 
         assert!(state.library_books.is_empty());
         assert!(state.library_loading);
+    }
+
+    #[test]
+    fn removing_a_library_book_requires_confirmation() {
+        let (mut state, _) = boot();
+        let book = test_book(42);
+
+        let menu = update(&mut state, Message::ToggleBookMenu(42));
+
+        assert_eq!(menu.units(), 0);
+        assert_eq!(state.book_menu, Some(42));
+        drop(render_book_card(&state, &book));
+
+        let request = update(&mut state, Message::RequestRemoveBook(42));
+
+        assert_eq!(request.units(), 0);
+        assert_eq!(state.book_menu, None);
+        assert_eq!(state.pending_remove_book, Some(42));
+        state.library_books.push(book.clone());
+        drop(library_layout(&state, 900.0));
+
+        let cancel = update(&mut state, Message::CancelRemoveBook);
+
+        assert_eq!(cancel.units(), 0);
+        assert_eq!(state.pending_remove_book, None);
+        drop(render_book_card(&state, &book));
+    }
+
+    #[test]
+    fn clicking_outside_a_book_menu_closes_it() {
+        let (mut state, _) = boot();
+        state.library_books.push(test_book(42));
+        let _ = update(&mut state, Message::ToggleBookMenu(42));
+
+        drop(library_layout(&state, 900.0));
+        let close = update(&mut state, Message::CloseBookMenu);
+
+        assert_eq!(close.units(), 0);
+        assert_eq!(state.book_menu, None);
+    }
+
+    #[test]
+    fn removal_confirmation_describes_managed_and_referenced_storage() {
+        let (mut state, _) = boot();
+        state.pending_remove_book = Some(42);
+        let referenced = test_book(42);
+        let mut managed = test_book(42);
+        managed.storage_kind = shosai_core::library::StorageKind::Managed;
+
+        state.library_books = vec![referenced];
+        drop(library_layout(&state, 900.0));
+        state.library_books = vec![managed];
+        drop(library_layout(&state, 600.0));
+
+        for preference in [LanguagePreference::English, LanguagePreference::Japanese] {
+            let i18n = I18n::new(preference);
+            assert!(!i18n.text("remove-managed-book-description").is_empty());
+            assert!(!i18n.text("remove-referenced-book-description").is_empty());
+        }
+    }
+
+    #[test]
+    fn successful_book_removal_detaches_matching_reader_tabs() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.book_id = Some(42);
+        state.file_path = Some(PathBuf::from("removed.epub"));
+        state.library_books = vec![test_book(42), test_book(7)];
+        state.current_page = 3;
+        state.epub_offset = 17;
+        let (saves, mut queued_saves) = mpsc::unbounded_channel();
+        state.reading_state_saves = Some(saves);
+        let matching = capture_reader_tab(&state).unwrap();
+        let mut unrelated = matching.clone();
+        unrelated.id = 2;
+        unrelated.book_id = Some(7);
+        unrelated.file_path = PathBuf::from("other.epub");
+        state.tabs = vec![matching, unrelated];
+        state.removing_book = Some(42);
+
+        let _ = update(
+            &mut state,
+            Message::BookRemoved {
+                id: 42,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(state.book_id, None);
+        assert_eq!(state.tabs[0].book_id, None);
+        assert_eq!(state.tabs[1].book_id, Some(7));
+        assert_eq!(state.removing_book, None);
+        assert_eq!(
+            state
+                .library_books
+                .iter()
+                .map(|book| book.id)
+                .collect::<Vec<_>>(),
+            vec![7]
+        );
+        let ReadingStateWriterMessage::Save(save) = queued_saves
+            .try_recv()
+            .expect("removal should queue path-backed reading state")
+        else {
+            panic!("removal queued a non-save message");
+        };
+        assert_eq!(save.book_id, None);
+        assert_eq!(save.path, PathBuf::from("removed.epub"));
+        assert_eq!(save.reading.page, 3);
+        assert_eq!(save.reading.location_offset, Some(17));
+        assert!(queued_saves.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_book_removal_keeps_the_book_and_surfaces_the_error() {
+        let (mut state, _) = boot();
+        state.library_books.push(test_book(42));
+        state.removing_book = Some(42);
+
+        let task = update(
+            &mut state,
+            Message::BookRemoved {
+                id: 42,
+                result: Err("database unavailable".to_string()),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.removing_book, None);
+        assert_eq!(state.library_books.len(), 1);
+        assert_eq!(
+            state.library_error,
+            Some(AppError::Library("database unavailable".to_string()))
+        );
+        drop(library_collection(&state));
+    }
+
+    #[tokio::test]
+    async fn book_removal_stays_disabled_while_the_operation_is_in_flight() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.pending_remove_book = Some(42);
+        let book = test_book(42);
+
+        let removal = update(&mut state, Message::RemoveBook(42));
+
+        assert!(removal.units() > 0);
+        assert_eq!(state.pending_remove_book, None);
+        assert_eq!(state.removing_book, Some(42));
+        drop(render_book_card(&state, &book));
+        drop(render_continue_card(&state, &book));
+
+        let duplicate = update(&mut state, Message::RemoveBook(42));
+        let other_request = update(&mut state, Message::RequestRemoveBook(7));
+        let locate = update(&mut state, Message::LocateBook(42));
+
+        assert_eq!(duplicate.units(), 0);
+        assert_eq!(other_request.units(), 0);
+        assert_eq!(locate.units(), 0);
+        assert_eq!(state.pending_remove_book, None);
+        assert_eq!(state.removing_book, Some(42));
+    }
+
+    #[test]
+    fn missing_book_removal_failure_is_shown_on_the_current_screen() {
+        let (mut reader_state, _) = boot();
+        reader_state.screen = Screen::Reader;
+        reader_state.missing_book_id = Some(42);
+        reader_state.open_error = Some(AppError::MissingBook);
+        reader_state.removing_book = Some(42);
+        drop(reader_view(&reader_state));
+
+        let _ = update(
+            &mut reader_state,
+            Message::BookRemoved {
+                id: 42,
+                result: Err("reader failure".to_string()),
+            },
+        );
+
+        assert_eq!(reader_state.removing_book, None);
+        assert_eq!(
+            reader_state.open_error,
+            Some(AppError::Library("reader failure".to_string()))
+        );
+
+        let (mut library_state, _) = boot();
+        library_state.screen = Screen::Reader;
+        library_state.missing_book_id = Some(42);
+        library_state.open_error = Some(AppError::MissingBook);
+        let _ = update(&mut library_state, Message::ShowLibrary);
+        library_state.removing_book = Some(42);
+
+        let _ = update(
+            &mut library_state,
+            Message::BookRemoved {
+                id: 42,
+                result: Err("library failure".to_string()),
+            },
+        );
+
+        assert_eq!(library_state.screen, Screen::Library);
+        assert_eq!(
+            library_state.library_error,
+            Some(AppError::Library("library failure".to_string()))
+        );
     }
 
     #[tokio::test]
