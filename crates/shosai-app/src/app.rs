@@ -15,7 +15,9 @@ use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
-use shosai_core::library::{Book, BookPage, Library, ManagedPathChange, ManagedStorageSummary};
+use shosai_core::library::{
+    Book, BookPage, ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
+};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
@@ -91,6 +93,7 @@ enum AppError {
     EpubEmpty,
     MissingBook,
     Library(String),
+    Import(String),
 }
 
 impl AppError {
@@ -118,6 +121,7 @@ impl AppError {
             Self::Library(detail) => {
                 i18n.text_with_args("library-error", [("error", detail.clone().into())])
             }
+            Self::Import(detail) => detail.clone(),
         }
     }
 
@@ -132,8 +136,32 @@ impl AppError {
             Self::EpubEmpty => "EPUB contains no readable content".to_string(),
             Self::MissingBook => "book file is missing".to_string(),
             Self::Library(detail) => format!("library operation failed: {detail}"),
+            Self::Import(detail) => format!("book import incomplete: {detail}"),
         }
     }
+}
+
+fn import_report_error(report: &ImportReport, i18n: &I18n) -> Option<AppError> {
+    let first = report.failures.first()?;
+    let file = first
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| first.path.display().to_string());
+    let key = if report.books.is_empty() {
+        "books-import-failed"
+    } else {
+        "books-import-partial"
+    };
+    Some(AppError::Import(i18n.text_with_args(
+        key,
+        [
+            ("added", (report.books.len() as i64).into()),
+            ("failed", (report.failures.len() as i64).into()),
+            ("file", file.into()),
+            ("error", first.error.clone().into()),
+        ],
+    )))
 }
 
 #[derive(Clone)]
@@ -6539,6 +6567,31 @@ mod tests {
         let _ = update(&mut state, Message::LibraryFilterChanged(None));
 
         assert_eq!(state.screen, Screen::Library);
+    }
+
+    #[test]
+    fn partial_import_completion_keeps_successes_visible_and_surfaces_failures() {
+        let (mut state, _) = boot();
+        state.adding_books = true;
+        let report = ImportReport {
+            books: vec![test_book(42)],
+            failures: vec![shosai_core::library::ImportFailure {
+                path: PathBuf::from("corrupt.epub"),
+                error: "invalid archive".to_string(),
+            }],
+        };
+
+        let task = update(&mut state, Message::BooksAdded(report));
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.adding_books);
+        let Some(AppError::Import(error)) = state.library_error else {
+            panic!("partial import should surface its failures");
+        };
+        assert_eq!(
+            error.replace(['\u{2068}', '\u{2069}'], ""),
+            "Books added or already present: 1. Files not imported: 1. corrupt.epub: invalid archive"
+        );
     }
 
     #[tokio::test]

@@ -543,13 +543,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 async move {
                     match source {
                         AddBooksSource::Files(paths) => {
-                            for path in paths {
-                                if copy {
-                                    lib.import_managed_file(&path).await
-                                } else {
-                                    lib.import_file(&path).await
-                                }
-                                .map_err(|error| format!("{error:#}"))?;
+                            if copy {
+                                lib.import_files(&paths).await
+                            } else {
+                                lib.link_files(&paths).await
                             }
                         }
                         AddBooksSource::Folder(path) => {
@@ -558,25 +555,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             } else {
                                 lib.link_directory(&path).await
                             }
-                            .map_err(|error| format!("{error:#}"))?;
                         }
                     }
-                    Ok(())
                 },
                 Message::BooksAdded,
             );
         }
 
-        Message::BooksAdded(result) => {
+        Message::BooksAdded(report) => {
             state.adding_books = false;
-            match result {
-                Ok(()) => return reset_library(state),
-                Err(error) => {
-                    let refresh = reset_library(state);
-                    state.library_error = Some(AppError::Library(error));
-                    return refresh;
-                }
+            let error = import_report_error(&report, &state.i18n);
+            let refresh = reset_library(state);
+            if let Some(error) = error {
+                state.library_error = Some(error);
             }
+            return refresh;
         }
 
         Message::OpenLibraryBook(book_id, file_path) => {
