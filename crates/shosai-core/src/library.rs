@@ -4,6 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -11,6 +13,8 @@ use sqlx::QueryBuilder;
 use sqlx::Row;
 use sqlx::Transaction;
 use sqlx::sqlite::{Sqlite, SqlitePool};
+use unicode_casefold::UnicodeCaseFold;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::cbz::CbzDoc;
 use crate::document::Document;
@@ -123,6 +127,7 @@ pub struct ImportCandidate {
     pub group_key: String,
     pub format: BookFormat,
     pub file_size: u64,
+    pub content_hash: String,
     pub duplicate: Option<ImportDuplicate>,
 }
 
@@ -130,6 +135,19 @@ pub struct ImportCandidate {
 pub struct ImportDiscovery {
     pub candidates: Vec<ImportCandidate>,
     pub failures: Vec<ImportFailure>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ImportCancellation(Arc<AtomicBool>);
+
+impl ImportCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -344,6 +362,14 @@ impl Library {
     /// Extracts metadata and cover image from the file. If the file
     /// already exists in the library, returns its existing book entry.
     pub async fn import_file(&self, path: &Path) -> Result<Book> {
+        self.import_file_with_hash(path, None).await
+    }
+
+    async fn import_file_with_hash(
+        &self,
+        path: &Path,
+        expected_hash: Option<&str>,
+    ) -> Result<Book> {
         // Normalize paths so lookups and progress updates stay consistent.
         let path = canonical_path(path);
         let path_str = path.to_string_lossy().to_string();
@@ -364,8 +390,14 @@ impl Library {
         // Parsing documents, decoding images, and rendering PDF covers are CPU-heavy. Keep that
         // work away from the async executor so imports do not stall the application UI.
         let metadata_path = path.clone();
+        let expected_hash = expected_hash.map(str::to_owned);
         let inspection = tokio::task::spawn_blocking(move || {
-            inspect_book(&metadata_path, &metadata_path, format)
+            inspect_book(
+                &metadata_path,
+                &metadata_path,
+                format,
+                expected_hash.as_deref(),
+            )
         })
         .await
         .context("metadata extraction task failed")??;
@@ -398,6 +430,14 @@ impl Library {
 
     /// Copy a book into Shosai's private data directory and add it to the library.
     pub async fn import_managed_file(&self, source: &Path) -> Result<Book> {
+        self.import_managed_file_with_hash(source, None).await
+    }
+
+    async fn import_managed_file_with_hash(
+        &self,
+        source: &Path,
+        expected_hash: Option<&str>,
+    ) -> Result<Book> {
         let source = canonical_path(source);
         let source_str = source.to_string_lossy().to_string();
         let ext = source
@@ -414,8 +454,14 @@ impl Library {
                 .context("managed book staging task failed")??;
         let inspection_path = staged.path.clone();
         let title_path = source.clone();
+        let expected_hash = expected_hash.map(str::to_owned);
         let inspection = tokio::task::spawn_blocking(move || {
-            inspect_book(&inspection_path, &title_path, format)
+            inspect_book(
+                &inspection_path,
+                &title_path,
+                format,
+                expected_hash.as_deref(),
+            )
         })
         .await
         .context("book inspection task failed")??;
@@ -537,27 +583,81 @@ impl Library {
         self.add_files(paths, false).await
     }
 
+    /// Copy candidates after verifying that they still match their discovery fingerprints.
+    pub async fn import_discovered_files(&self, candidates: &[ImportCandidate]) -> ImportReport {
+        self.add_discovered_files(candidates, true).await
+    }
+
+    /// Link candidates after verifying that they still match their discovery fingerprints.
+    pub async fn link_discovered_files(&self, candidates: &[ImportCandidate]) -> ImportReport {
+        self.add_discovered_files(candidates, false).await
+    }
+
+    async fn add_discovered_files(
+        &self,
+        candidates: &[ImportCandidate],
+        managed: bool,
+    ) -> ImportReport {
+        let mut report = ImportReport::default();
+        for candidate in candidates {
+            let result = if managed {
+                self.import_managed_file_with_hash(&candidate.path, Some(&candidate.content_hash))
+                    .await
+            } else {
+                self.import_file_with_hash(&candidate.path, Some(&candidate.content_hash))
+                    .await
+            };
+            report.record(candidate.path.clone(), result);
+        }
+        report
+    }
+
     /// Inspect selected files before importing anything.
     pub async fn discover_files(&self, paths: &[PathBuf]) -> ImportDiscovery {
-        self.discover(paths.to_vec(), false).await
+        self.discover(paths.to_vec(), false, ImportCancellation::default())
+            .await
     }
 
     /// Recursively inspect a directory before importing anything.
     pub async fn discover_directory(&self, dir: &Path) -> ImportDiscovery {
-        self.discover(vec![dir.to_path_buf()], true).await
+        self.discover(vec![dir.to_path_buf()], true, ImportCancellation::default())
+            .await
     }
 
-    async fn discover(&self, roots: Vec<PathBuf>, recursive: bool) -> ImportDiscovery {
-        let mut scanned =
-            tokio::task::spawn_blocking(move || scan_import_candidates(roots, recursive))
-                .await
-                .unwrap_or_else(|error| ImportDiscoveryScan {
-                    candidates: Vec::new(),
-                    failures: vec![ImportFailure {
-                        path: PathBuf::new(),
-                        error: format!("book discovery task failed: {error}"),
-                    }],
-                });
+    pub async fn discover_files_cancellable(
+        &self,
+        paths: Vec<PathBuf>,
+        cancellation: ImportCancellation,
+    ) -> ImportDiscovery {
+        self.discover(paths, false, cancellation).await
+    }
+
+    pub async fn discover_directory_cancellable(
+        &self,
+        dir: PathBuf,
+        cancellation: ImportCancellation,
+    ) -> ImportDiscovery {
+        self.discover(vec![dir], true, cancellation).await
+    }
+
+    async fn discover(
+        &self,
+        roots: Vec<PathBuf>,
+        recursive: bool,
+        cancellation: ImportCancellation,
+    ) -> ImportDiscovery {
+        let scan_cancellation = cancellation.clone();
+        let mut scanned = tokio::task::spawn_blocking(move || {
+            scan_import_candidates(roots, recursive, &scan_cancellation)
+        })
+        .await
+        .unwrap_or_else(|error| ImportDiscoveryScan {
+            candidates: Vec::new(),
+            failures: vec![ImportFailure {
+                path: PathBuf::new(),
+                error: format!("book discovery task failed: {error}"),
+            }],
+        });
         scanned
             .candidates
             .sort_by(|left, right| left.path.cmp(&right.path));
@@ -568,6 +668,9 @@ impl Library {
         let mut selected_hashes = HashMap::<String, PathBuf>::new();
 
         for candidate in scanned.candidates {
+            if cancellation.is_cancelled() {
+                break;
+            }
             let path_str = candidate.path.to_string_lossy();
             let existing = match self.get_by_path(path_str.as_ref()).await {
                 Ok(Some(book)) => Ok(Some(book)),
@@ -599,7 +702,7 @@ impl Library {
                 },
             );
             selected_hashes
-                .entry(candidate.hash)
+                .entry(candidate.hash.clone())
                 .or_insert_with(|| candidate.path.clone());
             discovery.candidates.push(ImportCandidate {
                 title: filename_title(&candidate.path),
@@ -607,6 +710,7 @@ impl Library {
                 path: candidate.path,
                 format: candidate.format,
                 file_size: candidate.file_size,
+                content_hash: candidate.hash,
                 duplicate,
             });
         }
@@ -614,6 +718,11 @@ impl Library {
             left.group_key
                 .cmp(&right.group_key)
                 .then_with(|| left.path.cmp(&right.path))
+        });
+        discovery.failures.sort_by(|left, right| {
+            left.path
+                .cmp(&right.path)
+                .then_with(|| left.error.cmp(&right.error))
         });
         discovery
     }
@@ -1168,26 +1277,59 @@ fn extract_metadata_and_cover(
     }
 }
 
-fn inspect_book(path: &Path, title_path: &Path, format: BookFormat) -> Result<BookInspection> {
+fn inspect_book(
+    path: &Path,
+    title_path: &Path,
+    format: BookFormat,
+    expected_hash: Option<&str>,
+) -> Result<BookInspection> {
+    if let Some(expected_hash) = expected_hash
+        && file_fingerprint(path)?.hash != expected_hash
+    {
+        bail!("file changed after review: {}", title_path.display());
+    }
     let (title, author, cover) = extract_metadata_and_cover(path, title_path, format)?;
+    let fingerprint = file_fingerprint(path)?;
+    if expected_hash.is_some_and(|expected| expected != fingerprint.hash) {
+        bail!("file changed after review: {}", title_path.display());
+    }
     Ok(BookInspection {
         title,
         author,
         cover,
-        fingerprint: file_fingerprint(path)?,
+        fingerprint,
     })
 }
 
 fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
-    use std::io::Read;
+    file_fingerprint_cancellable(path, None)
+}
 
-    let mut file =
+fn file_fingerprint_cancellable(
+    path: &Path,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<FileFingerprint> {
+    if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+        bail!("discovery cancelled");
+    }
+    let file =
         std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let file_size = file.metadata()?.len();
+    fingerprint_reader(file, file_size, cancellation)
+}
+
+fn fingerprint_reader(
+    mut reader: impl std::io::Read,
+    file_size: u64,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<FileFingerprint> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        let read = file.read(&mut buffer)?;
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            bail!("discovery cancelled");
+        }
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
@@ -1206,20 +1348,46 @@ struct ScannedImportCandidate {
     file_size: u64,
 }
 
-fn scan_import_candidates(roots: Vec<PathBuf>, recursive: bool) -> ImportDiscoveryScan {
+fn scan_import_candidates(
+    roots: Vec<PathBuf>,
+    recursive: bool,
+    cancellation: &ImportCancellation,
+) -> ImportDiscoveryScan {
     let mut scan = ImportDiscoveryScan::default();
     let mut pending = roots;
     let mut visited_dirs = HashSet::new();
 
-    while let Some(path) = pending.pop() {
-        if recursive && path.is_dir() {
-            let canonical = canonical_path(&path);
-            if !visited_dirs.insert(canonical) {
+    while let Some(original_path) = pending.pop() {
+        if cancellation.is_cancelled() {
+            break;
+        }
+        let path = canonical_path(&original_path);
+        let metadata = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                let extension = path
+                    .extension()
+                    .map(|extension| extension.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if !recursive || BookFormat::from_extension(&extension).is_some() {
+                    scan.failures.push(ImportFailure {
+                        path,
+                        error: format!("failed to inspect {}: {error}", original_path.display()),
+                    });
+                }
+                continue;
+            }
+        };
+        if recursive && metadata.is_dir() {
+            if !visited_dirs.insert(path.clone()) {
                 continue;
             }
             match std::fs::read_dir(&path) {
                 Ok(entries) => {
                     for entry in entries {
+                        if cancellation.is_cancelled() {
+                            break;
+                        }
                         match entry {
                             Ok(entry) => pending.push(entry.path()),
                             Err(error) => scan.failures.push(ImportFailure {
@@ -1239,6 +1407,9 @@ fn scan_import_candidates(roots: Vec<PathBuf>, recursive: bool) -> ImportDiscove
             }
             continue;
         }
+        if !metadata.is_file() {
+            continue;
+        }
 
         let extension = path
             .extension()
@@ -1253,18 +1424,20 @@ fn scan_import_candidates(roots: Vec<PathBuf>, recursive: bool) -> ImportDiscove
             }
             continue;
         };
-        let path = canonical_path(&path);
-        match file_fingerprint(&path) {
+        match file_fingerprint_cancellable(&path, Some(cancellation)) {
             Ok(fingerprint) => scan.candidates.push(ScannedImportCandidate {
                 path,
                 format,
                 hash: fingerprint.hash,
                 file_size: fingerprint.size,
             }),
-            Err(error) => scan.failures.push(ImportFailure {
-                path,
-                error: format!("{error:#}"),
-            }),
+            Err(_error) if cancellation.is_cancelled() => break,
+            Err(error) => {
+                scan.failures.push(ImportFailure {
+                    path,
+                    error: format!("{error:#}"),
+                });
+            }
         }
     }
     scan
@@ -1278,10 +1451,13 @@ struct ImportDiscoveryScan {
 
 fn import_group_key(path: &Path) -> String {
     filename_title(path)
+        .nfc()
+        .case_fold()
+        .nfc()
+        .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase()
 }
 
 struct ManagedStage {
@@ -1524,6 +1700,35 @@ fn encode_cover_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct CancellingReader {
+        cancellation: ImportCancellation,
+        reads: usize,
+    }
+
+    impl std::io::Read for CancellingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            buffer[0] = 1;
+            self.cancellation.cancel();
+            Ok(1)
+        }
+    }
+
+    #[test]
+    fn fingerprinting_checks_for_cancellation_between_chunks() {
+        let cancellation = ImportCancellation::default();
+        let reader = CancellingReader {
+            cancellation: cancellation.clone(),
+            reads: 0,
+        };
+
+        let Err(error) = fingerprint_reader(reader, 2, Some(&cancellation)) else {
+            panic!("fingerprinting should stop after cancellation");
+        };
+
+        assert!(error.to_string().contains("discovery cancelled"));
+    }
 
     #[test]
     fn publishing_rejects_a_stage_that_does_not_match_its_expected_hash() {

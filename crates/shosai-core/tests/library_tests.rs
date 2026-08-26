@@ -1,6 +1,7 @@
 use shosai_core::bookmarks::BookmarkStore;
 use shosai_core::library::{
-    BookFormat, ImportDuplicate, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
+    BookFormat, ImportCancellation, ImportDuplicate, Library, MANAGED_LIBRARY_DIR_PREFERENCE,
+    StorageKind,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
@@ -298,6 +299,129 @@ async fn discovery_marks_repeated_content_in_the_selection() {
             path: first.canonicalize().unwrap(),
         })
     );
+}
+
+#[tokio::test]
+async fn discovery_failure_order_is_stable() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("a.pdf");
+    let second = dir.path().join("z.epub");
+
+    let forward = lib.discover_files(&[first.clone(), second.clone()]).await;
+    let reverse = lib.discover_files(&[second.clone(), first.clone()]).await;
+
+    let forward_paths: Vec<_> = forward
+        .failures
+        .iter()
+        .map(|failure| &failure.path)
+        .collect();
+    let reverse_paths: Vec<_> = reverse
+        .failures
+        .iter()
+        .map(|failure| &failure.path)
+        .collect();
+    assert_eq!(forward_paths, vec![&first, &second]);
+    assert_eq!(reverse_paths, forward_paths);
+}
+
+#[tokio::test]
+async fn discovery_groups_unicode_equivalent_stems() {
+    let (lib, _, dir) = temp_library().await;
+    let paths = [
+        ("Straße.pdf", "sample.pdf"),
+        ("STRASSE.epub", "sample.epub"),
+        ("か\u{3099}.pdf", "sample.pdf"),
+        ("が.epub", "sample.epub"),
+    ]
+    .map(|(name, fixture)| {
+        let path = dir.path().join(name);
+        std::fs::copy(fixture_path(fixture), &path).unwrap();
+        path
+    });
+
+    let discovery = lib.discover_files(&paths).await;
+
+    let mut keys: Vec<_> = discovery
+        .candidates
+        .iter()
+        .map(|candidate| candidate.group_key.as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["strasse", "strasse", "が", "が"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_skips_non_regular_files() {
+    use std::os::unix::net::UnixListener;
+
+    let (lib, _, dir) = temp_library().await;
+    let socket_path = dir.path().join("not-a-book.pdf");
+    let _listener = UnixListener::bind(&socket_path).unwrap();
+
+    let discovery = lib.discover_directory(dir.path()).await;
+
+    assert!(discovery.candidates.is_empty());
+    assert!(discovery.failures.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_uses_a_symlink_targets_format_and_path() {
+    use std::os::unix::fs::symlink;
+
+    let (lib, _, dir) = temp_library().await;
+    let target = dir.path().join("actual.epub");
+    let alias = dir.path().join("misleading.pdf");
+    std::fs::copy(fixture_path("sample.epub"), &target).unwrap();
+    symlink(&target, &alias).unwrap();
+
+    let discovery = lib.discover_files(&[alias]).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(discovery.candidates[0].format, BookFormat::Epub);
+    assert_eq!(discovery.candidates[0].path, target.canonicalize().unwrap());
+    assert_eq!(discovery.candidates[0].title, "actual");
+}
+
+#[tokio::test]
+async fn discovered_import_rejects_a_file_changed_after_review() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("changing.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let discovery = lib.discover_files(std::slice::from_ref(&source)).await;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&source)
+        .unwrap();
+    file.write_all(b"changed after review").unwrap();
+
+    let linked = lib.link_discovered_files(&discovery.candidates).await;
+    let copied = lib.import_discovered_files(&discovery.candidates).await;
+
+    assert!(linked.books.is_empty());
+    assert_eq!(linked.failures.len(), 1);
+    assert!(linked.failures[0].error.contains("changed after review"));
+    assert!(copied.books.is_empty());
+    assert_eq!(copied.failures.len(), 1);
+    assert!(copied.failures[0].error.contains("changed after review"));
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_discovery_stops_before_scanning_candidates() {
+    let (lib, _, _dir) = temp_library().await;
+    let cancellation = ImportCancellation::default();
+    cancellation.cancel();
+
+    let discovery = lib
+        .discover_files_cancellable(vec![fixture_path("sample.epub")], cancellation)
+        .await;
+
+    assert!(discovery.candidates.is_empty());
+    assert!(discovery.failures.is_empty());
 }
 
 #[tokio::test]

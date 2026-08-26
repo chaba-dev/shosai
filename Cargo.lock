@@ -5135,6 +5135,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "unicode-casefold",
+ "unicode-normalization",
  "wuff",
  "zip",
 ]
