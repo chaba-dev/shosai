@@ -1,5 +1,5 @@
 use shosai_core::bookmarks::BookmarkStore;
-use shosai_core::library::{BookFormat, Library, StorageKind};
+use shosai_core::library::{BookFormat, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -226,8 +226,76 @@ async fn test_import_directory() {
     // Also a non-book file that should be skipped.
     std::fs::write(import_dir.join("notes.txt"), "some notes").unwrap();
 
-    let books = lib.import_directory(&import_dir).await.unwrap();
-    assert_eq!(books.len(), 2);
+    let report = lib.import_directory(&import_dir).await;
+    assert_eq!(report.books.len(), 2);
+    assert!(report.failures.is_empty());
+}
+
+#[tokio::test]
+async fn directory_import_reports_when_every_supported_file_fails() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::write(import_dir.join("corrupt.epub"), b"not an epub").unwrap();
+
+    let report = lib.import_directory(&import_dir).await;
+
+    assert!(report.books.is_empty());
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, import_dir.join("corrupt.epub"));
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn directory_import_keeps_successes_and_reports_other_failures() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), import_dir.join("valid.epub")).unwrap();
+    std::fs::write(import_dir.join("corrupt.epub"), b"not an epub").unwrap();
+
+    let report = lib.import_directory(&import_dir).await;
+
+    assert_eq!(report.books.len(), 1);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(lib.list_all().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn file_batch_continues_after_a_failure_and_reports_it() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.pdf");
+    let corrupt = dir.path().join("corrupt.epub");
+    let last = dir.path().join("last.cbz");
+    std::fs::copy(fixture_path("sample.pdf"), &first).unwrap();
+    std::fs::write(&corrupt, b"not an epub").unwrap();
+    std::fs::copy(fixture_path("sample.cbz"), &last).unwrap();
+
+    let report = lib.import_files(&[first, corrupt.clone(), last]).await;
+
+    assert_eq!(report.books.len(), 2);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, corrupt);
+    assert_eq!(lib.list_all().await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn linked_directory_keeps_books_in_their_original_locations() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    let source = import_dir.join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+
+    let report = lib.link_directory(&import_dir).await;
+
+    assert_eq!(report.books.len(), 1);
+    assert!(report.failures.is_empty());
+    assert_eq!(report.books[0].storage_kind, StorageKind::Referenced);
+    assert_eq!(
+        PathBuf::from(&report.books[0].file_path),
+        source.canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]
@@ -246,6 +314,59 @@ async fn managed_import_survives_the_source_being_removed() {
             .starts_with(dir.path().join("books").canonicalize().unwrap())
     );
     assert!(book.content_hash.is_some());
+}
+
+#[tokio::test]
+async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    let old_path = PathBuf::from(&book.file_path);
+    store
+        .set_for_book_async(
+            book.id,
+            &old_path,
+            &FileReadingState {
+                page: 3,
+                location_offset: Some(42),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_for_book_at_async(book.id, &old_path, 2, Some(7), None)
+        .await
+        .unwrap();
+    let destination = dir.path().join("external").join("Shosai");
+
+    let changes = lib.relocate_managed_books(&destination).await.unwrap();
+
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].book_id, book.id);
+    assert!(!old_path.exists());
+    assert!(changes[0].new_path.exists());
+    let relocated = lib.get(book.id).await.unwrap().unwrap();
+    assert_eq!(PathBuf::from(relocated.file_path), changes[0].new_path);
+    assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 3);
+    let bookmark = bookmarks
+        .list_for_book_async(book.id)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
+    assert_eq!(
+        store.get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE).await,
+        Some(
+            destination
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
 }
 
 #[tokio::test]

@@ -5,3 +5,11 @@ disableKinds = ["taxonomy", "term"]
 
 [params]
   description = "A focused, native desktop reader for PDF, EPUB, and CBZ files."
+
+[module]
+  [[module.mounts]]
+    source = "static"
+    target = "static"
+  [[module.mounts]]
+    source = "../assets/fonts"
+    target = "static/fonts"

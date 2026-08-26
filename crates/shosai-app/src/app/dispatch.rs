@@ -7,13 +7,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 store,
                 window_geometry: geometry,
                 language_preference,
+                managed_books_dir,
+                add_book_behavior,
+                reader_defaults,
             } = initialized;
             state.i18n.set_preference(language_preference);
             let pool = store.pool().clone();
-            state.library = Some(Library::new(pool.clone(), store.managed_books_dir()));
+            state.library = Some(Library::new(pool.clone(), managed_books_dir));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
             state.reading_state = Some(store);
+            state.add_book_behavior = add_book_behavior;
+            state.reader_defaults = reader_defaults;
             state.storage_initializing = false;
             let geometry = (!state.performance.is_automated())
                 .then_some(geometry)
@@ -379,11 +384,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Library
         Message::ShowLibrary => {
+            if state.moving_library {
+                return Task::none();
+            }
             invalidate_continuous_layout(state);
             state.screen = Screen::Library;
             state.show_reader_settings = false;
             state.show_reader_more = false;
             return Task::done(Message::RefreshLibrary);
+        }
+
+        Message::ShowSettings => {
+            state.screen = Screen::Settings;
+            state.book_menu = None;
+            state.pending_remove_book = None;
+            state.add_books_open = false;
+            state.add_books_source = None;
         }
 
         Message::RefreshLibrary => {
@@ -429,85 +445,137 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.library_loading = false;
         }
 
-        Message::ImportFile => {
-            let Some(lib) = state.library.clone() else {
-                return Task::none();
-            };
-            let ebooks = state.i18n.text("ebooks");
-            let import_library = state.i18n.text("import-library");
-            return Task::perform(
-                async move {
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
-                        .set_title(&import_library)
-                        .pick_file()
-                        .await;
-                    match file {
-                        Some(file) => lib
-                            .import_managed_file(file.path())
-                            .await
-                            .map_err(|error| format!("{error:#}")),
-                        None => return Ok(None),
-                    }
-                    .map(Some)
-                },
-                |result| match result {
-                    Ok(Some(book)) => Message::ManagedBookImported(Ok(book)),
-                    Ok(None) => Message::RefreshLibrary,
-                    Err(error) => Message::ManagedBookImported(Err(error)),
-                },
-            );
-        }
-
-        Message::LinkFile => {
-            let Some(lib) = state.library.clone() else {
-                return Task::none();
-            };
-            let ebooks = state.i18n.text("ebooks");
-            let import_library = state.i18n.text("link-library");
-            return Task::perform(
-                async move {
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
-                        .set_title(&import_library)
-                        .pick_file()
-                        .await;
-                    match file {
-                        Some(file) => lib
-                            .import_file(file.path())
-                            .await
-                            .map(Some)
-                            .map_err(|error| format!("{error:#}")),
-                        None => Ok(None),
-                    }
-                },
-                |result| match result {
-                    Ok(Some(book)) => Message::ManagedBookImported(Ok(book)),
-                    Ok(None) => Message::RefreshLibrary,
-                    Err(error) => Message::ManagedBookImported(Err(error)),
-                },
-            );
-        }
-
-        Message::ImportDirectory => {
-            if let Some(lib) = state.library.clone() {
-                let import_directory = state.i18n.text("import-directory");
-                return Task::perform(
-                    async move {
-                        let dir = rfd::AsyncFileDialog::new()
-                            .set_title(&import_directory)
-                            .pick_folder()
-                            .await;
-                        if let Some(d) = dir {
-                            let _ = lib.import_directory(d.path()).await;
-                        }
-                    },
-                    |_| Message::RefreshLibrary,
-                );
+        Message::OpenAddBooks => {
+            if state.library.is_some() && !state.adding_books && !state.moving_library {
+                state.book_menu = None;
+                state.pending_remove_book = None;
+                state.add_books_source = None;
+                state.add_books_override = false;
+                state.add_books_open = true;
             }
         }
 
+        Message::CancelAddBooks => {
+            state.add_books_open = false;
+            state.add_books_source = None;
+            state.add_books_override = false;
+        }
+
+        Message::ChooseBookFiles => {
+            if !state.add_books_open || state.library.is_none() {
+                return Task::none();
+            }
+            let ebooks = state.i18n.text("ebooks");
+            let choose_files = state.i18n.text("choose-book-files");
+            return Task::perform(
+                async move {
+                    rfd::AsyncFileDialog::new()
+                        .add_filter(&ebooks, &["pdf", "epub", "cbz"])
+                        .set_title(&choose_files)
+                        .pick_files()
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|file| file.path().to_path_buf())
+                        .collect()
+                },
+                Message::AddBookFilesSelected,
+            );
+        }
+
+        Message::ChooseBookFolder => {
+            if !state.add_books_open || state.library.is_none() {
+                return Task::none();
+            }
+            let choose_folder = state.i18n.text("choose-book-folder");
+            return Task::perform(
+                async move {
+                    rfd::AsyncFileDialog::new()
+                        .set_title(&choose_folder)
+                        .pick_folder()
+                        .await
+                        .map(|folder| folder.path().to_path_buf())
+                },
+                Message::AddBookFolderSelected,
+            );
+        }
+
+        Message::AddBookFilesSelected(paths) => {
+            if state.add_books_open && !paths.is_empty() {
+                state.add_books_source = Some(AddBooksSource::Files(paths));
+            }
+        }
+
+        Message::AddBookFolderSelected(path) => {
+            if state.add_books_open
+                && let Some(path) = path
+            {
+                state.add_books_source = Some(AddBooksSource::Folder(path));
+            }
+        }
+
+        Message::ClearAddBooksSelection => {
+            if state.add_books_open {
+                state.add_books_source = None;
+                state.add_books_override = false;
+            }
+        }
+
+        Message::ChangeAddBooksStorage => {
+            if state.add_books_open && state.add_books_source.is_some() {
+                state.add_books_override = true;
+            }
+        }
+
+        Message::AddSelectedBooks { copy } => {
+            if state.adding_books {
+                return Task::none();
+            }
+            let (Some(lib), Some(source)) = (state.library.clone(), state.add_books_source.take())
+            else {
+                return Task::none();
+            };
+            state.add_books_open = false;
+            state.adding_books = true;
+            state.library_activity_progress = 0.0;
+            state.library_error = None;
+            return Task::perform(
+                async move {
+                    match source {
+                        AddBooksSource::Files(paths) => {
+                            if copy {
+                                lib.import_files(&paths).await
+                            } else {
+                                lib.link_files(&paths).await
+                            }
+                        }
+                        AddBooksSource::Folder(path) => {
+                            if copy {
+                                lib.import_directory(&path).await
+                            } else {
+                                lib.link_directory(&path).await
+                            }
+                        }
+                    }
+                },
+                Message::BooksAdded,
+            );
+        }
+
+        Message::BooksAdded(report) => {
+            state.adding_books = false;
+            let error = import_report_error(&report, &state.i18n);
+            let refresh = reset_library(state);
+            if let Some(error) = error {
+                state.library_error = Some(error);
+            }
+            return refresh;
+        }
+
         Message::OpenLibraryBook(book_id, file_path) => {
+            if state.moving_library {
+                return Task::none();
+            }
             state.book_menu = None;
             state.pending_remove_book = None;
             let path = PathBuf::from(file_path);
@@ -519,17 +587,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             return open_document(state, path, Some(book_id));
         }
-
-        Message::ManagedBookImported(result) => match result {
-            Ok(book) => {
-                let task = Task::done(Message::OpenLibraryBook(book.id, book.file_path));
-                return Task::batch([reset_library(state), task]);
-            }
-            Err(error) => {
-                state.open_error = Some(AppError::Library(error));
-                state.screen = Screen::Reader;
-            }
-        },
 
         Message::LocateBook(book_id) => {
             if state.library.is_none() || state.removing_book == Some(book_id) {
@@ -589,7 +646,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::RequestRemoveBook(id) => {
-            if state.removing_book.is_none() {
+            if state.removing_book.is_none() && !state.moving_library {
                 state.book_menu = None;
                 state.pending_remove_book = Some(id);
                 state.library_error = None;
@@ -601,7 +658,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::RemoveBook(id) => {
-            if state.removing_book.is_some()
+            if state.moving_library
+                || state.removing_book.is_some()
                 || (state.pending_remove_book != Some(id) && state.missing_book_id != Some(id))
             {
                 return Task::none();
@@ -701,6 +759,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibraryFilterChanged(filter) => {
+            state.screen = Screen::Library;
             state.library_filter = filter;
             return reset_library(state);
         }
@@ -712,17 +771,204 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::CycleLanguage => {
+        Message::SelectLanguage(preference) => {
             let Some(saves) = &state.reading_state_saves else {
                 return Task::none();
             };
-            let preference = state.i18n.preference().next();
             state.i18n.set_preference(preference);
             if saves
                 .send(ReadingStateWriterMessage::Language(preference))
                 .is_err()
             {
                 eprintln!("warning: state writer stopped unexpectedly");
+            }
+        }
+
+        Message::SelectAddBookBehavior(behavior) => {
+            state.add_book_behavior = behavior;
+            save_preference(state, ADD_BOOK_BEHAVIOR_KEY, behavior.stored());
+        }
+
+        Message::SelectDefaultReadingMode(mode) => {
+            state.reader_defaults.reading_mode = mode;
+            save_preference(state, DEFAULT_READING_MODE_KEY, mode.stored());
+        }
+
+        Message::SelectDefaultReaderTheme(theme) => {
+            state.reader_defaults.theme = theme;
+            save_preference(state, DEFAULT_READER_THEME_KEY, theme.stored());
+        }
+
+        Message::DefaultEpubFontSizeUp => {
+            state.reader_defaults.epub_font_size =
+                (state.reader_defaults.epub_font_size + 2.0).min(48.0);
+            save_preference(
+                state,
+                DEFAULT_EPUB_FONT_SIZE_KEY,
+                state.reader_defaults.epub_font_size.to_string(),
+            );
+        }
+
+        Message::DefaultEpubFontSizeDown => {
+            state.reader_defaults.epub_font_size =
+                (state.reader_defaults.epub_font_size - 2.0).max(8.0);
+            save_preference(
+                state,
+                DEFAULT_EPUB_FONT_SIZE_KEY,
+                state.reader_defaults.epub_font_size.to_string(),
+            );
+        }
+
+        Message::SelectDefaultEpubLineSpacing(line_spacing) => {
+            state.reader_defaults.epub_line_spacing = line_spacing.clamp(1.0, 2.4);
+            save_preference(
+                state,
+                DEFAULT_EPUB_LINE_SPACING_KEY,
+                state.reader_defaults.epub_line_spacing.to_string(),
+            );
+        }
+
+        Message::SelectDefaultPdfFitWidth(fit_width) => {
+            state.reader_defaults.pdf_zoom = if fit_width {
+                ZoomMode::FitWidth
+            } else {
+                ZoomMode::FitPage
+            };
+            save_preference(
+                state,
+                DEFAULT_PDF_ZOOM_KEY,
+                if fit_width { "fit-width" } else { "fit-page" },
+            );
+        }
+
+        Message::OpenManagedLibraryFolder => {
+            let Some(library) = &state.library else {
+                return Task::none();
+            };
+            let path = library.managed_dir().to_path_buf();
+            if let Err(error) = std::fs::create_dir_all(&path)
+                .and_then(|_| open::that(&path).map_err(std::io::Error::other))
+            {
+                state.settings_error = Some(error.to_string());
+            }
+        }
+
+        Message::ChooseManagedLibraryParent => {
+            if state.library.is_none()
+                || state.moving_library
+                || state.adding_books
+                || state.removing_book.is_some()
+            {
+                return Task::none();
+            }
+            let title = state.i18n.text("choose-managed-library-parent");
+            return Task::perform(
+                async move {
+                    rfd::AsyncFileDialog::new()
+                        .set_title(&title)
+                        .pick_folder()
+                        .await
+                        .map(|folder| folder.path().to_path_buf())
+                },
+                Message::ManagedLibraryParentSelected,
+            );
+        }
+
+        Message::ManagedLibraryParentSelected(parent) => {
+            let (Some(parent), Some(library)) = (parent, state.library.clone()) else {
+                return Task::none();
+            };
+            let destination = parent.join("Shosai");
+            if library.managed_dir() == destination {
+                return Task::none();
+            }
+            state.settings_error = None;
+            return Task::perform(
+                async move {
+                    library
+                        .managed_storage_summary()
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                },
+                move |result| Message::ManagedLibraryMovePlanned {
+                    destination: destination.clone(),
+                    result,
+                },
+            );
+        }
+
+        Message::ManagedLibraryMovePlanned {
+            destination,
+            result,
+        } => match result {
+            Ok(summary) => {
+                state.pending_library_move = Some(LibraryMovePlan {
+                    destination,
+                    summary,
+                });
+            }
+            Err(error) => state.settings_error = Some(error),
+        },
+
+        Message::CancelManagedLibraryMove => {
+            if !state.moving_library {
+                state.pending_library_move = None;
+            }
+        }
+
+        Message::ConfirmManagedLibraryMove => {
+            if state.moving_library || state.adding_books || state.removing_book.is_some() {
+                return Task::none();
+            }
+            let (Some(plan), Some(library)) =
+                (state.pending_library_move.as_ref(), state.library.clone())
+            else {
+                return Task::none();
+            };
+            let destination = plan.destination.clone();
+            let relocation_destination = destination.clone();
+            let saves = state.reading_state_saves.clone();
+            state.moving_library = true;
+            state.settings_error = None;
+            return Task::perform(
+                async move {
+                    if let Some(saves) = saves {
+                        let (flushed, wait) = oneshot::channel();
+                        if saves
+                            .send(ReadingStateWriterMessage::Flush(flushed))
+                            .is_ok()
+                        {
+                            let _ = wait.await;
+                        }
+                    }
+                    library
+                        .relocate_managed_books(&relocation_destination)
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                },
+                move |result| Message::ManagedLibraryMoved {
+                    destination: destination.clone(),
+                    result,
+                },
+            );
+        }
+
+        Message::ManagedLibraryMoved {
+            destination,
+            result,
+        } => {
+            state.moving_library = false;
+            match result {
+                Ok(changes) => {
+                    apply_managed_path_changes(state, &changes);
+                    let destination = destination.canonicalize().unwrap_or(destination);
+                    if let Some(library) = &state.library {
+                        state.library = Some(library.with_managed_dir(destination));
+                    }
+                    state.pending_library_move = None;
+                    return reset_library(state);
+                }
+                Err(error) => state.settings_error = Some(error),
             }
         }
 

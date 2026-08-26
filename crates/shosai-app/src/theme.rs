@@ -35,6 +35,22 @@ pub struct ReaderPalette {
 }
 
 impl ReaderTheme {
+    pub fn from_stored(value: Option<&str>) -> Self {
+        match value {
+            Some("dark") => Self::Dark,
+            Some("sepia") => Self::Sepia,
+            _ => Self::Light,
+        }
+    }
+
+    pub fn stored(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::Sepia => "sepia",
+        }
+    }
+
     pub fn palette(self) -> ReaderPalette {
         ReaderPalette {
             background: self.background(),

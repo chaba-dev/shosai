@@ -4,7 +4,7 @@ use std::sync::Arc;
 use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
-use shosai_core::library::{Book, BookPage};
+use shosai_core::library::{Book, BookPage, ImportReport};
 use shosai_core::search::SearchMatch;
 
 use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
@@ -72,6 +72,7 @@ pub enum Message {
 
     // Library
     ShowLibrary,
+    ShowSettings,
     RefreshLibrary,
     LoadMoreLibrary,
     LibraryIndexLoaded {
@@ -84,11 +85,19 @@ pub enum Message {
         next_offset: usize,
         page: BookPage,
     },
-    ImportFile,
-    LinkFile,
-    ImportDirectory,
+    OpenAddBooks,
+    CancelAddBooks,
+    ChooseBookFiles,
+    ChooseBookFolder,
+    AddBookFilesSelected(Vec<PathBuf>),
+    AddBookFolderSelected(Option<PathBuf>),
+    ClearAddBooksSelection,
+    ChangeAddBooksStorage,
+    AddSelectedBooks {
+        copy: bool,
+    },
+    BooksAdded(ImportReport),
     OpenLibraryBook(i64, String),
-    ManagedBookImported(Result<Book, String>),
     LocateBook(i64),
     RelinkBookSelected(i64, Option<PathBuf>),
     BookRelinked(Result<Book, String>),
@@ -104,7 +113,29 @@ pub enum Message {
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
-    CycleLanguage,
+    SelectLanguage(crate::i18n::LanguagePreference),
+
+    // Settings
+    SelectAddBookBehavior(super::AddBookBehavior),
+    SelectDefaultReadingMode(super::ReadingMode),
+    SelectDefaultReaderTheme(crate::theme::ReaderTheme),
+    DefaultEpubFontSizeUp,
+    DefaultEpubFontSizeDown,
+    SelectDefaultEpubLineSpacing(f32),
+    SelectDefaultPdfFitWidth(bool),
+    OpenManagedLibraryFolder,
+    ChooseManagedLibraryParent,
+    ManagedLibraryParentSelected(Option<PathBuf>),
+    ManagedLibraryMovePlanned {
+        destination: PathBuf,
+        result: Result<shosai_core::library::ManagedStorageSummary, String>,
+    },
+    CancelManagedLibraryMove,
+    ConfirmManagedLibraryMove,
+    ManagedLibraryMoved {
+        destination: PathBuf,
+        result: Result<Vec<shosai_core::library::ManagedPathChange>, String>,
+    },
 
     // Bookmarks
     ToggleBookmark,

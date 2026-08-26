@@ -5,6 +5,8 @@ use fluent_templates::fluent_bundle::FluentValue;
 use fluent_templates::{Loader, static_loader};
 use unic_langid::{LanguageIdentifier, langid};
 
+use crate::typography;
+
 const ENGLISH: LanguageIdentifier = langid!("en-US");
 const JAPANESE: LanguageIdentifier = langid!("ja");
 
@@ -39,14 +41,6 @@ impl LanguagePreference {
             Self::Japanese => "ja",
         }
     }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::System => Self::English,
-            Self::English => Self::Japanese,
-            Self::Japanese => Self::System,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -76,6 +70,14 @@ impl I18n {
         *self = Self::new(preference);
     }
 
+    pub fn ui_font(&self) -> iced::Font {
+        if self.language == JAPANESE {
+            typography::NOTO_SANS_JP
+        } else {
+            typography::INTER
+        }
+    }
+
     pub fn text(&self, key: &str) -> String {
         LOCALES.lookup(&self.language, key)
     }
@@ -90,15 +92,6 @@ impl I18n {
             .map(|(name, value)| (Cow::Borrowed(name), value))
             .collect::<HashMap<_, _>>();
         LOCALES.lookup_with_args(&self.language, key, &args)
-    }
-
-    pub fn selector_label(&self) -> String {
-        let key = match self.preference {
-            LanguagePreference::System => "language-system",
-            LanguagePreference::English => "language-english",
-            LanguagePreference::Japanese => "language-japanese",
-        };
-        self.text(key)
     }
 }
 
@@ -139,6 +132,18 @@ mod tests {
                 preference
             );
         }
+    }
+
+    #[test]
+    fn interface_font_tracks_the_resolved_language() {
+        assert_eq!(
+            I18n::new(LanguagePreference::English).ui_font(),
+            typography::INTER
+        );
+        assert_eq!(
+            I18n::new(LanguagePreference::Japanese).ui_font(),
+            typography::NOTO_SANS_JP
+        );
     }
 
     #[test]

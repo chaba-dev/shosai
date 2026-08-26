@@ -3,6 +3,7 @@ mod epub;
 mod i18n;
 mod pdf;
 mod theme;
+mod typography;
 mod widgets;
 
 const APPLICATION_ICON: &[u8] = if option_env!("SHOSAI_DEV_BUILD").is_some() {
@@ -63,7 +64,10 @@ fn main() -> iced::Result {
         .title(app::title)
         .theme(theme::application())
         .subscription(app::subscription)
+        .font(typography::INTER_BYTES)
+        .font(typography::NOTO_SANS_JP_BYTES)
         .font(epub::math_layout::MATH_FONT_BYTES)
+        .default_font(typography::INTER)
         .window(iced::window::Settings {
             icon: window_icon(),
             size: window_size,
