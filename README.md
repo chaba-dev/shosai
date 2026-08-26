@@ -36,6 +36,9 @@ make test
 make check-rfds
 ```
 
+With Shosai closed, `make reset` deletes its local database, preferences, and
+managed book copies. Books used from their current location are preserved.
+
 The project is a Cargo workspace:
 
 - `crates/shosai-core` contains document formats, library storage, and reader logic.

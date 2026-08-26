@@ -1,8 +1,12 @@
-.PHONY: dev lint fmt test test-scripts check-rfds changelog next-version
+.PHONY: dev reset lint fmt test test-scripts check-rfds changelog next-version
 
 ## Run the application in debug mode
 dev:
 	SHOSAI_DEV_BUILD=1 cargo run -p shosai-app
+
+## Delete local Shosai data, preferences, and managed book copies
+reset:
+	@python3 scripts/reset-local-data.py
 
 ## Run clippy lints on the workspace
 lint:
