@@ -3898,6 +3898,7 @@ fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
                 reader_theme_selector(state),
                 compact,
             ),
+            settings_format_divider("EPUB"),
             setting_control(
                 state.i18n.text("default-epub-font-size"),
                 font_size.into(),
@@ -3908,6 +3909,7 @@ fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
                 line_spacing_selector(state),
                 compact,
             ),
+            settings_format_divider("PDF"),
             setting_control(
                 state.i18n.text("default-pdf-zoom"),
                 pdf_zoom_selector(state),
@@ -3949,6 +3951,22 @@ fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
     )
     .width(Length::Fill)
     .height(Length::Fill)
+    .into()
+}
+
+fn settings_format_divider(label: &'static str) -> Element<'static, Message> {
+    row![
+        text(label).size(12).color(app_theme::TEXT_MUTED),
+        container(iced::widget::Space::new())
+            .height(1)
+            .width(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(app_theme::BORDER)),
+                ..container::Style::default()
+            }),
+    ]
+    .spacing(10)
+    .align_y(iced::Alignment::Center)
     .into()
 }
 
