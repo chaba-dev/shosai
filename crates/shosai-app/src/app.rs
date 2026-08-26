@@ -15,7 +15,7 @@ use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
-use shosai_core::library::{Book, BookPage, Library};
+use shosai_core::library::{Book, BookPage, Library, ManagedPathChange, ManagedStorageSummary};
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
@@ -43,14 +43,20 @@ use epub_view::{cache_epub_image_handles, continuous_epub_content_view, epub_cha
 pub use message::Message;
 
 const LANGUAGE_PREFERENCE_KEY: &str = "language";
+const ADD_BOOK_BEHAVIOR_KEY: &str = "library.add_behavior";
+const DEFAULT_READING_MODE_KEY: &str = "reader.default_mode";
+const DEFAULT_READER_THEME_KEY: &str = "reader.default_theme";
+const DEFAULT_EPUB_FONT_SIZE_KEY: &str = "reader.default_epub_font_size";
+const DEFAULT_EPUB_LINE_SPACING_KEY: &str = "reader.default_epub_line_spacing";
+const DEFAULT_PDF_ZOOM_KEY: &str = "reader.default_pdf_zoom";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct LanguageOption {
-    preference: LanguagePreference,
+struct SelectOption<T> {
+    value: T,
     label: String,
 }
 
-impl std::fmt::Display for LanguageOption {
+impl<T> std::fmt::Display for SelectOption<T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.label)
     }
@@ -163,6 +169,59 @@ enum Screen {
 enum AddBooksSource {
     Files(Vec<PathBuf>),
     Folder(PathBuf),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum AddBookBehavior {
+    #[default]
+    Ask,
+    Copy,
+    CurrentLocation,
+}
+
+impl AddBookBehavior {
+    fn from_stored(value: Option<&str>) -> Self {
+        match value {
+            Some("copy") => Self::Copy,
+            Some("current-location") => Self::CurrentLocation,
+            _ => Self::Ask,
+        }
+    }
+
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Copy => "copy",
+            Self::CurrentLocation => "current-location",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ReaderDefaults {
+    reading_mode: ReadingMode,
+    theme: ReaderTheme,
+    epub_font_size: f32,
+    epub_line_spacing: f32,
+    pdf_zoom: ZoomMode,
+}
+
+impl Default for ReaderDefaults {
+    fn default() -> Self {
+        Self {
+            reading_mode: ReadingMode::Paginated,
+            theme: ReaderTheme::Light,
+            epub_font_size: 16.0,
+            epub_line_spacing: 1.6,
+            pdf_zoom: ZoomMode::FitPage,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LibraryMovePlan {
+    destination: PathBuf,
+    summary: ManagedStorageSummary,
 }
 
 const LIBRARY_PAGE_SIZE: u32 = 40;
@@ -357,7 +416,7 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum ReadingMode {
+pub(crate) enum ReadingMode {
     #[default]
     Paginated,
     Continuous,
@@ -378,6 +437,22 @@ impl EpubLayoutKey {
             height: page_size.height.to_bits(),
             font_size: font_size.to_bits(),
             line_spacing: line_spacing.to_bits(),
+        }
+    }
+}
+
+impl ReadingMode {
+    fn from_stored(value: Option<&str>) -> Self {
+        match value {
+            Some("continuous") => Self::Continuous,
+            _ => Self::Paginated,
+        }
+    }
+
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Paginated => "paginated",
+            Self::Continuous => "continuous",
         }
     }
 }
@@ -438,6 +513,9 @@ pub struct InitializedState {
     store: ReadingStateStore,
     window_geometry: Option<(Size, Point)>,
     language_preference: LanguagePreference,
+    managed_books_dir: PathBuf,
+    add_book_behavior: AddBookBehavior,
+    reader_defaults: ReaderDefaults,
 }
 
 #[derive(Debug)]
@@ -451,6 +529,7 @@ struct ReadingStateSave {
 enum ReadingStateWriterMessage {
     Save(ReadingStateSave),
     Language(LanguagePreference),
+    Preference(&'static str, String),
     Flush(oneshot::Sender<()>),
 }
 
@@ -548,8 +627,16 @@ pub struct State {
     removing_book: Option<i64>,
     add_books_open: bool,
     add_books_source: Option<AddBooksSource>,
+    add_books_override: bool,
     adding_books: bool,
     library_error: Option<AppError>,
+
+    // -- Settings state --
+    add_book_behavior: AddBookBehavior,
+    reader_defaults: ReaderDefaults,
+    pending_library_move: Option<LibraryMovePlan>,
+    moving_library: bool,
+    settings_error: Option<String>,
     storage_initializing: bool,
     storage_error: Option<AppError>,
     pending_open: Option<PathBuf>,
@@ -650,8 +737,14 @@ pub fn boot() -> (State, Task<Message>) {
         removing_book: None,
         add_books_open: false,
         add_books_source: None,
+        add_books_override: false,
         adding_books: false,
         library_error: None,
+        add_book_behavior: AddBookBehavior::default(),
+        reader_defaults: ReaderDefaults::default(),
+        pending_library_move: None,
+        moving_library: false,
+        settings_error: None,
         storage_initializing: true,
         storage_error: None,
         pending_open: performance_file,
@@ -693,6 +786,42 @@ pub fn boot() -> (State, Task<Message>) {
                     .await
                     .as_deref(),
             );
+            let managed_books_dir = store
+                .get_pref_async(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
+                .await
+                .map(PathBuf::from)
+                .unwrap_or_else(|| store.managed_books_dir());
+            let add_book_behavior = AddBookBehavior::from_stored(
+                store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
+            );
+            let reader_defaults = ReaderDefaults {
+                reading_mode: ReadingMode::from_stored(
+                    store
+                        .get_pref_async(DEFAULT_READING_MODE_KEY)
+                        .await
+                        .as_deref(),
+                ),
+                theme: ReaderTheme::from_stored(
+                    store
+                        .get_pref_async(DEFAULT_READER_THEME_KEY)
+                        .await
+                        .as_deref(),
+                ),
+                epub_font_size: stored_f32(
+                    store.get_pref_async(DEFAULT_EPUB_FONT_SIZE_KEY).await,
+                    16.0,
+                    8.0..=48.0,
+                ),
+                epub_line_spacing: stored_f32(
+                    store.get_pref_async(DEFAULT_EPUB_LINE_SPACING_KEY).await,
+                    1.6,
+                    1.0..=2.4,
+                ),
+                pdf_zoom: match store.get_pref_async(DEFAULT_PDF_ZOOM_KEY).await.as_deref() {
+                    Some("fit-width") => ZoomMode::FitWidth,
+                    _ => ZoomMode::FitPage,
+                },
+            };
             eprintln!(
                 "startup: database and preferences initialized in {} ms",
                 started.elapsed().as_millis()
@@ -701,11 +830,21 @@ pub fn boot() -> (State, Task<Message>) {
                 store,
                 window_geometry: geometry,
                 language_preference,
+                managed_books_dir,
+                add_book_behavior,
+                reader_defaults,
             })
         },
         Message::Initialized,
     );
     (state, initialize)
+}
+
+fn stored_f32(value: Option<String>, fallback: f32, range: std::ops::RangeInclusive<f32>) -> f32 {
+    value
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| range.contains(value))
+        .unwrap_or(fallback)
 }
 
 // ---------------------------------------------------------------------------
@@ -889,6 +1028,32 @@ fn save_active_tab(state: &mut State) {
     }
 }
 
+fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) {
+    for change in changes {
+        if state.book_id == Some(change.book_id) {
+            state.file_path = Some(change.new_path.clone());
+            for bookmark in &mut state.bookmarks {
+                bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+            }
+        }
+        for tab in &mut state.tabs {
+            if tab.book_id == Some(change.book_id) {
+                tab.file_path = change.new_path.clone();
+                for bookmark in &mut tab.bookmarks {
+                    bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+                }
+            }
+        }
+        if let Some(book) = state
+            .library_books
+            .iter_mut()
+            .find(|book| book.id == change.book_id)
+        {
+            book.file_path = change.new_path.to_string_lossy().into_owned();
+        }
+    }
+}
+
 fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     if index >= state.tabs.len() {
         return Task::none();
@@ -1030,6 +1195,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.open_error = None;
     state.missing_book_id = None;
     install_document(state, path, book_id, document);
+    apply_reader_defaults(state);
     let task = refresh_content(state);
     if let Some(tab) = capture_reader_tab(state) {
         state.tabs.push(tab);
@@ -1037,6 +1203,16 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         state.screen = Screen::Reader;
     }
     task
+}
+
+fn apply_reader_defaults(state: &mut State) {
+    state.reading_mode = state.reader_defaults.reading_mode;
+    state.theme = state.reader_defaults.theme;
+    state.font_size = state.reader_defaults.epub_font_size;
+    state.line_spacing = state.reader_defaults.epub_line_spacing;
+    if matches!(state.document, Some(OpenDocument::Pdf(_))) {
+        state.zoom = state.reader_defaults.pdf_zoom;
+    }
 }
 
 fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
@@ -1135,6 +1311,9 @@ fn install_document(
 }
 
 fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
+    if state.moving_library {
+        return Task::none();
+    }
     if let keyboard::Event::KeyPressed { key, modifiers, .. } = event {
         if let keyboard::Key::Character(c) = key.as_ref() {
             if c == "o" && modifiers.command() {
@@ -2177,6 +2356,16 @@ fn save_reading_state(state: &State) {
     }
 }
 
+fn save_preference(state: &State, key: &'static str, value: impl Into<String>) {
+    if let Some(saves) = &state.reading_state_saves
+        && saves
+            .send(ReadingStateWriterMessage::Preference(key, value.into()))
+            .is_err()
+    {
+        eprintln!("warning: state writer stopped unexpectedly");
+    }
+}
+
 fn start_reading_state_writer(
     store: ReadingStateStore,
 ) -> mpsc::UnboundedSender<ReadingStateWriterMessage> {
@@ -2185,12 +2374,16 @@ fn start_reading_state_writer(
         while let Some(first) = receiver.recv().await {
             let mut pending = HashMap::new();
             let mut language = None;
+            let mut preferences = HashMap::new();
             let mut flushes = Vec::new();
             match first {
                 ReadingStateWriterMessage::Save(save) => {
                     pending.insert((save.book_id, save.path), save.reading);
                 }
                 ReadingStateWriterMessage::Language(preference) => language = Some(preference),
+                ReadingStateWriterMessage::Preference(key, value) => {
+                    preferences.insert(key, value);
+                }
                 ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
             }
             while let Ok(message) = receiver.try_recv() {
@@ -2200,6 +2393,9 @@ fn start_reading_state_writer(
                     }
                     ReadingStateWriterMessage::Language(preference) => {
                         language = Some(preference);
+                    }
+                    ReadingStateWriterMessage::Preference(key, value) => {
+                        preferences.insert(key, value);
                     }
                     ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
                 }
@@ -2221,6 +2417,11 @@ fn start_reading_state_writer(
                     .await
             {
                 eprintln!("warning: failed to save language preference: {error}");
+            }
+            for (key, value) in preferences {
+                if let Err(error) = store.set_pref_async(key, &value).await {
+                    eprintln!("warning: failed to save preference {key}: {error}");
+                }
             }
             for flush in flushes {
                 let _ = flush.send(());
@@ -3417,8 +3618,8 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
     .padding([10, 12])
     .width(Length::Fill);
     let search = container(search_input).width(Length::Fill).max_width(380);
-    let add_message =
-        (state.library.is_some() && !state.adding_books).then_some(Message::OpenAddBooks);
+    let add_message = (state.library.is_some() && !state.adding_books && !state.moving_library)
+        .then_some(Message::OpenAddBooks);
     let add_label = if state.adding_books {
         state.i18n.text("adding-books")
     } else {
@@ -3484,26 +3685,26 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
 
 fn language_selector(state: &State) -> Element<'static, Message> {
     let options = [
-        LanguageOption {
-            preference: LanguagePreference::System,
+        SelectOption {
+            value: LanguagePreference::System,
             label: state.i18n.text("language-system"),
         },
-        LanguageOption {
-            preference: LanguagePreference::English,
+        SelectOption {
+            value: LanguagePreference::English,
             label: state.i18n.text("language-english"),
         },
-        LanguageOption {
-            preference: LanguagePreference::Japanese,
+        SelectOption {
+            value: LanguagePreference::Japanese,
             label: state.i18n.text("language-japanese"),
         },
     ];
     let selected = options
         .iter()
-        .find(|option| option.preference == state.i18n.preference())
+        .find(|option| option.value == state.i18n.preference())
         .cloned();
 
     pick_list(options, selected, |option| {
-        Message::SelectLanguage(option.preference)
+        Message::SelectLanguage(option.value)
     })
     .text_size(14)
     .padding([9, 12])
@@ -3524,9 +3725,9 @@ fn settings_layout(state: &State, available_width: f32) -> Element<'_, Message> 
         state.i18n.text("settings"),
         state.i18n.text("settings-subtitle"),
     );
-    let settings = settings_content(state);
+    let settings = settings_content(state, compact);
 
-    if compact {
+    let content: Element<'_, Message> = if compact {
         column![heading, mobile_library_filters(state), settings]
             .width(Length::Fill)
             .height(Length::Fill)
@@ -3541,6 +3742,15 @@ fn settings_layout(state: &State, available_width: f32) -> Element<'_, Message> 
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+    };
+    if state.pending_library_move.is_some() {
+        modal_overlay(
+            content,
+            managed_library_move_modal(state),
+            Message::CancelManagedLibraryMove,
+        )
+    } else {
+        content
     }
 }
 
@@ -3566,8 +3776,8 @@ fn page_header(title: String, subtitle: String) -> Element<'static, Message> {
     .into()
 }
 
-fn settings_content(state: &State) -> Element<'_, Message> {
-    let language = container(
+fn settings_content(state: &State, compact: bool) -> Element<'_, Message> {
+    let general = container(
         column![
             text(state.i18n.text("language")).size(16),
             text(state.i18n.text("language-description"))
@@ -3581,14 +3791,255 @@ fn settings_content(state: &State) -> Element<'_, Message> {
     .width(Length::Fill)
     .style(app_theme::modal);
 
+    let managed_path = state
+        .library
+        .as_ref()
+        .map(|library| library.managed_dir().display().to_string())
+        .unwrap_or_else(|| state.i18n.text("unavailable"));
+    let library_available = state.library.is_some()
+        && !state.moving_library
+        && !state.adding_books
+        && state.removing_book.is_none();
+    let library_settings = container(
+        column![
+            text(state.i18n.text("managed-books-location")).size(16),
+            text(state.i18n.text("managed-books-location-description"))
+                .size(13)
+                .color(app_theme::TEXT_MUTED),
+            container(text(managed_path).size(12))
+                .padding([9, 12])
+                .width(Length::Fill)
+                .style(app_theme::skeleton),
+            row![
+                widgets::secondary_button(
+                    state.i18n.text("open-folder"),
+                    library_available.then_some(Message::OpenManagedLibraryFolder),
+                ),
+                widgets::secondary_button(
+                    state.i18n.text("change-location"),
+                    library_available.then_some(Message::ChooseManagedLibraryParent),
+                ),
+            ]
+            .spacing(8),
+            iced::widget::Space::new().height(8),
+            text(state.i18n.text("when-adding-books")).size(16),
+            text(state.i18n.text("when-adding-books-description"))
+                .size(13)
+                .color(app_theme::TEXT_MUTED),
+            add_book_behavior_selector(state),
+        ]
+        .spacing(10),
+    )
+    .padding(20)
+    .width(Length::Fill)
+    .style(app_theme::modal);
+
+    let reading_mode = row![
+        reader_control_button(
+            state.i18n.text("paginated"),
+            Some(Message::SelectDefaultReadingMode(ReadingMode::Paginated)),
+            state.reader_defaults.reading_mode == ReadingMode::Paginated,
+        ),
+        reader_control_button(
+            state.i18n.text("continuous"),
+            Some(Message::SelectDefaultReadingMode(ReadingMode::Continuous)),
+            state.reader_defaults.reading_mode == ReadingMode::Continuous,
+        ),
+    ]
+    .spacing(5);
+    let font_size = row![
+        widgets::secondary_button("−", Some(Message::DefaultEpubFontSizeDown)),
+        container(text(format!(
+            "{} px",
+            state.reader_defaults.epub_font_size as u32
+        )))
+        .padding([9, 12]),
+        widgets::secondary_button("+", Some(Message::DefaultEpubFontSizeUp)),
+    ]
+    .spacing(5)
+    .align_y(iced::Alignment::Center);
+    let reading_settings = container(
+        column![
+            setting_control(
+                state.i18n.text("default-reading-mode"),
+                reading_mode.into(),
+                compact,
+            ),
+            setting_control(
+                state.i18n.text("default-theme"),
+                reader_theme_selector(state),
+                compact,
+            ),
+            setting_control(
+                state.i18n.text("default-epub-font-size"),
+                font_size.into(),
+                compact,
+            ),
+            setting_control(
+                state.i18n.text("default-epub-line-spacing"),
+                line_spacing_selector(state),
+                compact,
+            ),
+            setting_control(
+                state.i18n.text("default-pdf-zoom"),
+                pdf_zoom_selector(state),
+                compact,
+            ),
+        ]
+        .spacing(14),
+    )
+    .padding(20)
+    .width(Length::Fill)
+    .style(app_theme::modal);
+
+    let mut content = column![
+        text(state.i18n.text("general")).size(18),
+        general,
+        text(state.i18n.text("library")).size(18),
+        library_settings,
+        text(state.i18n.text("reading-defaults")).size(18),
+        text(state.i18n.text("reading-defaults-description"))
+            .size(13)
+            .color(app_theme::TEXT_MUTED),
+        reading_settings,
+    ]
+    .spacing(14);
+    if let Some(error) = &state.settings_error {
+        content = content.push(
+            container(text(error.clone()).size(12))
+                .padding([8, 12])
+                .width(Length::Fill)
+                .style(app_theme::reader_alert),
+        );
+    }
+
     scrollable(
-        container(column![text(state.i18n.text("general")).size(18), language].spacing(14))
+        container(content)
             .padding([24, 28])
             .width(Length::Fill)
-            .max_width(680),
+            .max_width(760),
     )
     .width(Length::Fill)
     .height(Length::Fill)
+    .into()
+}
+
+fn setting_control(
+    label: String,
+    control: Element<'static, Message>,
+    compact: bool,
+) -> Element<'static, Message> {
+    if compact {
+        column![text(label).size(14), control].spacing(8).into()
+    } else {
+        row![
+            text(label).size(14),
+            iced::widget::Space::new().width(Length::Fill),
+            control,
+        ]
+        .align_y(iced::Alignment::Center)
+        .into()
+    }
+}
+
+fn add_book_behavior_selector(state: &State) -> Element<'static, Message> {
+    let options = [
+        SelectOption {
+            value: AddBookBehavior::Ask,
+            label: state.i18n.text("add-behavior-ask"),
+        },
+        SelectOption {
+            value: AddBookBehavior::Copy,
+            label: state.i18n.text("add-behavior-copy"),
+        },
+        SelectOption {
+            value: AddBookBehavior::CurrentLocation,
+            label: state.i18n.text("add-behavior-current-location"),
+        },
+    ];
+    let selected = options
+        .iter()
+        .find(|option| option.value == state.add_book_behavior)
+        .cloned();
+    pick_list(options, selected, |option| {
+        Message::SelectAddBookBehavior(option.value)
+    })
+    .text_size(14)
+    .padding([9, 12])
+    .into()
+}
+
+fn reader_theme_selector(state: &State) -> Element<'static, Message> {
+    let options = [
+        SelectOption {
+            value: ReaderTheme::Light,
+            label: state.i18n.text("light"),
+        },
+        SelectOption {
+            value: ReaderTheme::Dark,
+            label: state.i18n.text("dark"),
+        },
+        SelectOption {
+            value: ReaderTheme::Sepia,
+            label: state.i18n.text("sepia"),
+        },
+    ];
+    let selected = options
+        .iter()
+        .find(|option| option.value == state.reader_defaults.theme)
+        .cloned();
+    pick_list(options, selected, |option| {
+        Message::SelectDefaultReaderTheme(option.value)
+    })
+    .text_size(14)
+    .padding([9, 12])
+    .into()
+}
+
+fn line_spacing_selector(state: &State) -> Element<'static, Message> {
+    let options = [1.2_f32, 1.4, 1.6, 1.8, 2.0].map(|value| SelectOption {
+        value,
+        label: format!("{value:.1}"),
+    });
+    let selected = options
+        .iter()
+        .find(|option| option.value == state.reader_defaults.epub_line_spacing)
+        .cloned()
+        .or_else(|| {
+            Some(SelectOption {
+                value: state.reader_defaults.epub_line_spacing,
+                label: format!("{:.1}", state.reader_defaults.epub_line_spacing),
+            })
+        });
+    pick_list(options, selected, |option| {
+        Message::SelectDefaultEpubLineSpacing(option.value)
+    })
+    .text_size(14)
+    .padding([9, 12])
+    .into()
+}
+
+fn pdf_zoom_selector(state: &State) -> Element<'static, Message> {
+    let options = [
+        SelectOption {
+            value: false,
+            label: state.i18n.text("fit-page"),
+        },
+        SelectOption {
+            value: true,
+            label: state.i18n.text("fit-width"),
+        },
+    ];
+    let fit_width = state.reader_defaults.pdf_zoom == ZoomMode::FitWidth;
+    let selected = options
+        .iter()
+        .find(|option| option.value == fit_width)
+        .cloned();
+    pick_list(options, selected, |option| {
+        Message::SelectDefaultPdfFitWidth(option.value)
+    })
+    .text_size(14)
+    .padding([9, 12])
     .into()
 }
 
@@ -3703,8 +4154,8 @@ fn library_collection(state: &State) -> Element<'_, Message> {
         .spacing(14)
         .align_x(iced::Center);
         if !state.library_loading && !constrained && state.storage_error.is_none() {
-            let message =
-                (state.library.is_some() && !state.adding_books).then_some(Message::OpenAddBooks);
+            let message = (state.library.is_some() && !state.adding_books && !state.moving_library)
+                .then_some(Message::OpenAddBooks);
             let label = if state.adding_books {
                 state.i18n.text("adding-books")
             } else {
@@ -3797,6 +4248,94 @@ fn modal_overlay<'a>(
         .into()
 }
 
+fn managed_library_move_modal(state: &State) -> Element<'_, Message> {
+    let plan = state
+        .pending_library_move
+        .as_ref()
+        .expect("move modal requires a plan");
+    let current = state
+        .library
+        .as_ref()
+        .map(|library| library.managed_dir().display().to_string())
+        .unwrap_or_default();
+    let summary = state.i18n.text_with_args(
+        "managed-library-move-summary",
+        [
+            ("count", (plan.summary.book_count as i64).into()),
+            ("size", format_bytes(plan.summary.total_bytes).into()),
+        ],
+    );
+    let move_label = if state.moving_library {
+        state.i18n.text("moving-library")
+    } else {
+        state.i18n.text("move-library")
+    };
+    let actions = row![
+        iced::widget::Space::new().width(Length::Fill),
+        widgets::secondary_button(
+            state.i18n.text("cancel"),
+            (!state.moving_library).then_some(Message::CancelManagedLibraryMove),
+        ),
+        widgets::primary_button(
+            move_label,
+            (!state.moving_library).then_some(Message::ConfirmManagedLibraryMove),
+        ),
+    ]
+    .spacing(8);
+    let error: Element<'_, Message> = if let Some(error) = &state.settings_error {
+        container(text(error.clone()).size(12))
+            .padding([8, 10])
+            .width(Length::Fill)
+            .style(app_theme::reader_alert)
+            .into()
+    } else {
+        iced::widget::Space::new().height(0).into()
+    };
+
+    container(
+        column![
+            text(state.i18n.text("move-managed-library-heading")).size(20),
+            text(state.i18n.text("move-managed-library-description"))
+                .size(13)
+                .color(app_theme::TEXT_MUTED),
+            text(state.i18n.text("from-location")).size(12),
+            container(text(current).size(12))
+                .padding([8, 10])
+                .width(Length::Fill)
+                .style(app_theme::skeleton),
+            text(state.i18n.text("to-location")).size(12),
+            container(text(plan.destination.display().to_string()).size(12))
+                .padding([8, 10])
+                .width(Length::Fill)
+                .style(app_theme::skeleton),
+            text(summary).size(13),
+            error,
+            actions,
+        ]
+        .spacing(12),
+    )
+    .padding(24)
+    .width(Length::Fill)
+    .max_width(520)
+    .style(app_theme::modal)
+    .into()
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
 fn add_books_modal(state: &State) -> Element<'_, Message> {
     let cancel = button(text(state.i18n.text("cancel")))
         .on_press(Message::CancelAddBooks)
@@ -3819,37 +4358,76 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                     .text_with_args("selected-book-folder", [("folder", name.into())])
             }
         };
-        column![
-            text(state.i18n.text("book-storage-heading")).size(20),
-            text(selection).size(13).color(app_theme::TEXT_MUTED),
-            widgets::primary_button(
-                state.i18n.text("copy-into-shosai"),
-                Some(Message::AddSelectedBooks { copy: true }),
-            )
-            .width(Length::Fill),
-            text(state.i18n.text("copy-into-shosai-description"))
-                .size(12)
-                .color(app_theme::TEXT_MUTED),
-            widgets::secondary_button(
-                state.i18n.text("use-current-location"),
-                Some(Message::AddSelectedBooks { copy: false }),
-            )
-            .width(Length::Fill),
-            text(state.i18n.text("use-current-location-description"))
-                .size(12)
-                .color(app_theme::TEXT_MUTED),
-            row![
-                button(text(state.i18n.text("back")))
-                    .on_press(Message::ClearAddBooksSelection)
-                    .padding([8, 14])
-                    .style(app_theme::book_card_action),
-                iced::widget::Space::new().width(Length::Fill),
-                cancel,
+        if state.add_book_behavior == AddBookBehavior::Ask || state.add_books_override {
+            column![
+                text(state.i18n.text("book-storage-heading")).size(20),
+                text(selection).size(13).color(app_theme::TEXT_MUTED),
+                widgets::primary_button(
+                    state.i18n.text("copy-into-shosai"),
+                    Some(Message::AddSelectedBooks { copy: true }),
+                )
+                .width(Length::Fill),
+                text(state.i18n.text("copy-into-shosai-description"))
+                    .size(12)
+                    .color(app_theme::TEXT_MUTED),
+                widgets::secondary_button(
+                    state.i18n.text("use-current-location"),
+                    Some(Message::AddSelectedBooks { copy: false }),
+                )
+                .width(Length::Fill),
+                text(state.i18n.text("use-current-location-description"))
+                    .size(12)
+                    .color(app_theme::TEXT_MUTED),
+                row![
+                    button(text(state.i18n.text("back")))
+                        .on_press(Message::ClearAddBooksSelection)
+                        .padding([8, 14])
+                        .style(app_theme::book_card_action),
+                    iced::widget::Space::new().width(Length::Fill),
+                    cancel,
+                ]
+                .align_y(iced::Alignment::Center),
             ]
-            .align_y(iced::Alignment::Center),
-        ]
-        .spacing(12)
-        .into()
+            .spacing(12)
+            .into()
+        } else {
+            let copy = state.add_book_behavior == AddBookBehavior::Copy;
+            let behavior = if copy {
+                state.i18n.text("copy-into-shosai")
+            } else {
+                state.i18n.text("use-current-location")
+            };
+            let description = if copy {
+                state.i18n.text("copy-into-shosai-description")
+            } else {
+                state.i18n.text("use-current-location-description")
+            };
+            column![
+                text(state.i18n.text("ready-to-add-books")).size(20),
+                text(selection).size(13).color(app_theme::TEXT_MUTED),
+                text(behavior).size(15),
+                text(description).size(12).color(app_theme::TEXT_MUTED),
+                button(text(state.i18n.text("change-storage-choice")))
+                    .on_press(Message::ChangeAddBooksStorage)
+                    .padding([8, 0])
+                    .style(app_theme::book_card_action),
+                widgets::primary_button(
+                    state.i18n.text("add-selected-books"),
+                    Some(Message::AddSelectedBooks { copy }),
+                )
+                .width(Length::Fill),
+                row![
+                    button(text(state.i18n.text("back")))
+                        .on_press(Message::ClearAddBooksSelection)
+                        .padding([8, 14])
+                        .style(app_theme::book_card_action),
+                    iced::widget::Space::new().width(Length::Fill),
+                    cancel,
+                ],
+            ]
+            .spacing(12)
+            .into()
+        }
     } else {
         column![
             text(state.i18n.text("add-books-heading")).size(20),
@@ -5917,10 +6495,15 @@ mod tests {
             state.add_books_source,
             Some(AddBooksSource::Files(ref paths)) if paths.len() == 2
         ));
+        state.add_book_behavior = AddBookBehavior::Copy;
+        drop(add_books_modal(&state));
+        let _ = update(&mut state, Message::ChangeAddBooksStorage);
+        assert!(state.add_books_override);
         drop(add_books_modal(&state));
 
         let _ = update(&mut state, Message::ClearAddBooksSelection);
         assert!(state.add_books_source.is_none());
+        assert!(!state.add_books_override);
 
         let _ = update(
             &mut state,
@@ -5934,6 +6517,121 @@ mod tests {
         let _ = update(&mut state, Message::CancelAddBooks);
         assert!(!state.add_books_open);
         assert!(state.add_books_source.is_none());
+    }
+
+    #[tokio::test]
+    async fn settings_preferences_are_persisted_and_do_not_change_open_tabs() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
+        let open_mode = state.reading_mode;
+        let open_theme = state.theme;
+
+        let _ = update(
+            &mut state,
+            Message::SelectAddBookBehavior(AddBookBehavior::Copy),
+        );
+        let _ = update(
+            &mut state,
+            Message::SelectDefaultReadingMode(ReadingMode::Continuous),
+        );
+        let _ = update(
+            &mut state,
+            Message::SelectDefaultReaderTheme(ReaderTheme::Sepia),
+        );
+        let _ = update(&mut state, Message::DefaultEpubFontSizeUp);
+        let _ = update(&mut state, Message::SelectDefaultEpubLineSpacing(1.8));
+        let _ = update(&mut state, Message::SelectDefaultPdfFitWidth(true));
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap();
+
+        assert_eq!(state.reading_mode, open_mode);
+        assert_eq!(state.theme, open_theme);
+        assert_eq!(
+            store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
+            Some("copy")
+        );
+        assert_eq!(
+            store
+                .get_pref_async(DEFAULT_READING_MODE_KEY)
+                .await
+                .as_deref(),
+            Some("continuous")
+        );
+        assert_eq!(
+            store
+                .get_pref_async(DEFAULT_READER_THEME_KEY)
+                .await
+                .as_deref(),
+            Some("sepia")
+        );
+        assert_eq!(
+            store
+                .get_pref_async(DEFAULT_EPUB_FONT_SIZE_KEY)
+                .await
+                .as_deref(),
+            Some("18")
+        );
+        assert_eq!(
+            store
+                .get_pref_async(DEFAULT_EPUB_LINE_SPACING_KEY)
+                .await
+                .as_deref(),
+            Some("1.8")
+        );
+        assert_eq!(
+            store.get_pref_async(DEFAULT_PDF_ZOOM_KEY).await.as_deref(),
+            Some("fit-width")
+        );
+    }
+
+    #[test]
+    fn reader_defaults_seed_new_tabs() {
+        let directory = tempfile::tempdir().unwrap();
+        let epub_path = directory.path().join("book.epub");
+        let pdf_path = directory.path().join("book.pdf");
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../shosai-core/tests/fixtures/sample.epub"),
+            &epub_path,
+        )
+        .unwrap();
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../shosai-core/tests/fixtures/sample.pdf"),
+            &pdf_path,
+        )
+        .unwrap();
+        let (mut state, _) = boot();
+        state.reader_defaults = ReaderDefaults {
+            reading_mode: ReadingMode::Continuous,
+            theme: ReaderTheme::Sepia,
+            epub_font_size: 20.0,
+            epub_line_spacing: 1.8,
+            pdf_zoom: ZoomMode::FitWidth,
+        };
+
+        let _ = open_document(&mut state, epub_path, None);
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        assert_eq!(state.theme, ReaderTheme::Sepia);
+        assert_eq!(state.font_size, 20.0);
+        assert_eq!(state.line_spacing, 1.8);
+
+        let _ = open_document(&mut state, pdf_path, None);
+        assert_eq!(state.zoom, ZoomMode::FitWidth);
     }
 
     #[test]

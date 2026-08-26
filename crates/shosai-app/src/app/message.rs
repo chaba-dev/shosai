@@ -92,6 +92,7 @@ pub enum Message {
     AddBookFilesSelected(Vec<PathBuf>),
     AddBookFolderSelected(Option<PathBuf>),
     ClearAddBooksSelection,
+    ChangeAddBooksStorage,
     AddSelectedBooks {
         copy: bool,
     },
@@ -113,6 +114,28 @@ pub enum Message {
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
     SelectLanguage(crate::i18n::LanguagePreference),
+
+    // Settings
+    SelectAddBookBehavior(super::AddBookBehavior),
+    SelectDefaultReadingMode(super::ReadingMode),
+    SelectDefaultReaderTheme(crate::theme::ReaderTheme),
+    DefaultEpubFontSizeUp,
+    DefaultEpubFontSizeDown,
+    SelectDefaultEpubLineSpacing(f32),
+    SelectDefaultPdfFitWidth(bool),
+    OpenManagedLibraryFolder,
+    ChooseManagedLibraryParent,
+    ManagedLibraryParentSelected(Option<PathBuf>),
+    ManagedLibraryMovePlanned {
+        destination: PathBuf,
+        result: Result<shosai_core::library::ManagedStorageSummary, String>,
+    },
+    CancelManagedLibraryMove,
+    ConfirmManagedLibraryMove,
+    ManagedLibraryMoved {
+        destination: PathBuf,
+        result: Result<Vec<shosai_core::library::ManagedPathChange>, String>,
+    },
 
     // Bookmarks
     ToggleBookmark,
