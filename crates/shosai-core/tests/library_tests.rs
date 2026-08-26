@@ -226,8 +226,57 @@ async fn test_import_directory() {
     // Also a non-book file that should be skipped.
     std::fs::write(import_dir.join("notes.txt"), "some notes").unwrap();
 
-    let books = lib.import_directory(&import_dir).await.unwrap();
-    assert_eq!(books.len(), 2);
+    let report = lib.import_directory(&import_dir).await;
+    assert_eq!(report.books.len(), 2);
+    assert!(report.failures.is_empty());
+}
+
+#[tokio::test]
+async fn directory_import_reports_when_every_supported_file_fails() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::write(import_dir.join("corrupt.epub"), b"not an epub").unwrap();
+
+    let report = lib.import_directory(&import_dir).await;
+
+    assert!(report.books.is_empty());
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, import_dir.join("corrupt.epub"));
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn directory_import_keeps_successes_and_reports_other_failures() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), import_dir.join("valid.epub")).unwrap();
+    std::fs::write(import_dir.join("corrupt.epub"), b"not an epub").unwrap();
+
+    let report = lib.import_directory(&import_dir).await;
+
+    assert_eq!(report.books.len(), 1);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(lib.list_all().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn file_batch_continues_after_a_failure_and_reports_it() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.pdf");
+    let corrupt = dir.path().join("corrupt.epub");
+    let last = dir.path().join("last.cbz");
+    std::fs::copy(fixture_path("sample.pdf"), &first).unwrap();
+    std::fs::write(&corrupt, b"not an epub").unwrap();
+    std::fs::copy(fixture_path("sample.cbz"), &last).unwrap();
+
+    let report = lib.import_files(&[first, corrupt.clone(), last]).await;
+
+    assert_eq!(report.books.len(), 2);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].path, corrupt);
+    assert_eq!(lib.list_all().await.unwrap().len(), 2);
 }
 
 #[tokio::test]
@@ -238,12 +287,13 @@ async fn linked_directory_keeps_books_in_their_original_locations() {
     let source = import_dir.join("book.epub");
     std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
 
-    let books = lib.link_directory(&import_dir).await.unwrap();
+    let report = lib.link_directory(&import_dir).await;
 
-    assert_eq!(books.len(), 1);
-    assert_eq!(books[0].storage_kind, StorageKind::Referenced);
+    assert_eq!(report.books.len(), 1);
+    assert!(report.failures.is_empty());
+    assert_eq!(report.books[0].storage_kind, StorageKind::Referenced);
     assert_eq!(
-        PathBuf::from(&books[0].file_path),
+        PathBuf::from(&report.books[0].file_path),
         source.canonicalize().unwrap()
     );
 }
