@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, grid, image, responsive, row, scrollable, sensor, text,
-    text_input,
+    button, center, column, container, grid, image, opaque, responsive, row, scrollable, sensor,
+    text, text_input, tooltip,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -524,6 +524,7 @@ pub struct State {
     library_generation: u64,
     library_book_ids: Arc<Vec<i64>>,
     library_offset: usize,
+    book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
     removing_book: Option<i64>,
     library_error: Option<AppError>,
@@ -622,6 +623,7 @@ pub fn boot() -> (State, Task<Message>) {
         library_generation: 0,
         library_book_ids: Arc::new(Vec::new()),
         library_offset: 0,
+        book_menu: None,
         pending_remove_book: None,
         removing_book: None,
         library_error: None,
@@ -721,6 +723,7 @@ fn reset_library(state: &mut State) -> Task<Message> {
     state.library_book_ids = Arc::new(Vec::new());
     state.library_offset = 0;
     state.library_has_more = false;
+    state.book_menu = None;
     state.pending_remove_book = None;
     state.library_error = None;
     let Some(library) = state.library.clone() else {
@@ -3730,10 +3733,89 @@ fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message
     .size(10)
     .color(app_theme::TEXT_MUTED);
 
+    let is_removing = state.removing_book == Some(book_id);
+    let is_confirming = state.pending_remove_book == Some(book_id);
+    let menu_open = state.book_menu == Some(book_id);
+    let mut cover_layers = iced::widget::Stack::new()
+        .push(container(cover).style(app_theme::book_cover))
+        .width(Length::Fill)
+        .height(210);
+
+    if is_confirming {
+        let description_key = if book.storage_kind == shosai_core::library::StorageKind::Managed {
+            "remove-managed-book-description"
+        } else {
+            "remove-referenced-book-description"
+        };
+        let confirmation = column![
+            text(state.i18n.text("remove-book-heading")).size(15),
+            text(state.i18n.text(description_key))
+                .size(11)
+                .color(app_theme::TEXT_MUTED),
+            iced::widget::Space::new().height(Length::Fill),
+            row![
+                iced::widget::Space::new().width(Length::Fill),
+                button(text(state.i18n.text("cancel")).size(11))
+                    .on_press(Message::CancelRemoveBook)
+                    .padding([6, 9])
+                    .style(app_theme::book_card_action),
+                button(text(state.i18n.text("remove")).size(11))
+                    .on_press(Message::RemoveBook(book_id))
+                    .padding([6, 9])
+                    .style(app_theme::danger_button),
+            ]
+            .spacing(6),
+        ]
+        .spacing(8)
+        .height(Length::Fill);
+        cover_layers = cover_layers.push(opaque(
+            container(confirmation)
+                .padding(14)
+                .width(Length::Fill)
+                .height(210)
+                .style(app_theme::book_confirmation),
+        ));
+    } else if !is_removing {
+        if menu_open {
+            let menu = column![
+                iced::widget::Space::new().height(38),
+                button(text(state.i18n.text("remove-from-library-menu")).size(11))
+                    .on_press(Message::RequestRemoveBook(book_id))
+                    .padding([7, 10])
+                    .width(Length::Fixed(164.0))
+                    .style(app_theme::danger_button),
+            ];
+            cover_layers = cover_layers.push(opaque(
+                container(container(menu).style(app_theme::book_action_menu))
+                    .padding(8)
+                    .align_right(Length::Fill)
+                    .align_top(210),
+            ));
+        }
+        let menu_trigger = tooltip(
+            button(text("•••").size(13))
+                .on_press_maybe(
+                    state
+                        .removing_book
+                        .is_none()
+                        .then_some(Message::ToggleBookMenu(book_id)),
+                )
+                .padding([5, 8])
+                .style(app_theme::book_card_action),
+            text(state.i18n.text("book-actions")).size(11),
+            tooltip::Position::Bottom,
+        );
+        cover_layers = cover_layers.push(
+            container(menu_trigger)
+                .padding(8)
+                .align_right(Length::Fill)
+                .align_top(210),
+        );
+    }
+
     let mut metadata = row![format_label]
         .spacing(6)
         .align_y(iced::Alignment::Center);
-    let is_removing = state.removing_book == Some(book_id);
     if is_removing {
         metadata = metadata
             .push(iced::widget::Space::new().width(Length::Fill))
@@ -3742,40 +3824,14 @@ fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message
                     .padding([3, 6])
                     .style(app_theme::book_card_action),
             );
-    } else if state.pending_remove_book == Some(book_id) {
-        metadata = metadata
-            .push(iced::widget::Space::new().width(Length::Fill))
-            .push(
-                button(text(state.i18n.text("cancel")).size(10))
-                    .on_press(Message::CancelRemoveBook)
-                    .padding([3, 6])
-                    .style(app_theme::book_card_action),
-            )
-            .push(
-                button(text(state.i18n.text("remove")).size(10))
-                    .on_press(Message::RemoveBook(book_id))
-                    .padding([3, 6])
-                    .style(app_theme::danger_button),
-            );
     } else {
         metadata = metadata
             .push(iced::widget::Space::new().width(Length::Fill))
-            .push(progress_label)
-            .push(
-                button(text(state.i18n.text("remove")).size(10))
-                    .on_press_maybe(
-                        state
-                            .removing_book
-                            .is_none()
-                            .then_some(Message::RequestRemoveBook(book_id)),
-                    )
-                    .padding([3, 6])
-                    .style(app_theme::book_card_action),
-            );
+            .push(progress_label);
     }
 
     let card = column![
-        container(cover).style(app_theme::book_cover),
+        cover_layers,
         container(title_text).height(32),
         container(author).height(28),
         iced::widget::Space::new().height(Length::Fill),
@@ -3788,7 +3844,8 @@ fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message
 
     widgets::book_button(
         card,
-        (!is_removing).then_some(Message::OpenLibraryBook(book_id, file_path)),
+        (!is_removing && !is_confirming && !menu_open)
+            .then_some(Message::OpenLibraryBook(book_id, file_path)),
     )
     .height(330)
     .into()
@@ -5538,9 +5595,16 @@ mod tests {
         let (mut state, _) = boot();
         let book = test_book(42);
 
+        let menu = update(&mut state, Message::ToggleBookMenu(42));
+
+        assert_eq!(menu.units(), 0);
+        assert_eq!(state.book_menu, Some(42));
+        drop(render_book_card(&state, &book));
+
         let request = update(&mut state, Message::RequestRemoveBook(42));
 
         assert_eq!(request.units(), 0);
+        assert_eq!(state.book_menu, None);
         assert_eq!(state.pending_remove_book, Some(42));
         drop(render_book_card(&state, &book));
 
@@ -5549,6 +5613,24 @@ mod tests {
         assert_eq!(cancel.units(), 0);
         assert_eq!(state.pending_remove_book, None);
         drop(render_book_card(&state, &book));
+    }
+
+    #[test]
+    fn removal_confirmation_describes_managed_and_referenced_storage() {
+        let (mut state, _) = boot();
+        state.pending_remove_book = Some(42);
+        let referenced = test_book(42);
+        let mut managed = test_book(42);
+        managed.storage_kind = shosai_core::library::StorageKind::Managed;
+
+        drop(render_book_card(&state, &referenced));
+        drop(render_book_card(&state, &managed));
+
+        for preference in [LanguagePreference::English, LanguagePreference::Japanese] {
+            let i18n = I18n::new(preference);
+            assert!(!i18n.text("remove-managed-book-description").is_empty());
+            assert!(!i18n.text("remove-referenced-book-description").is_empty());
+        }
     }
 
     #[test]

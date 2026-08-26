@@ -508,6 +508,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::OpenLibraryBook(book_id, file_path) => {
+            state.book_menu = None;
             state.pending_remove_book = None;
             let path = PathBuf::from(file_path);
             state.screen = Screen::Reader;
@@ -577,8 +578,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) => state.open_error = Some(AppError::Library(error)),
         },
 
+        Message::ToggleBookMenu(id) => {
+            if state.removing_book.is_none() && state.pending_remove_book.is_none() {
+                state.book_menu = (state.book_menu != Some(id)).then_some(id);
+            }
+        }
+
         Message::RequestRemoveBook(id) => {
             if state.removing_book.is_none() {
+                state.book_menu = None;
                 state.pending_remove_book = Some(id);
                 state.library_error = None;
             }
@@ -597,6 +605,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(lib) = state.library.clone() else {
                 return Task::none();
             };
+            state.book_menu = None;
             state.pending_remove_book = None;
             state.removing_book = Some(id);
             state.library_error = None;
