@@ -762,10 +762,36 @@ impl Library {
             if cancellation.is_cancelled() {
                 break;
             }
+            let fingerprint_path = candidate.path.clone();
+            let fingerprint_cancellation = cancellation.clone();
+            let fingerprint = tokio::task::spawn_blocking(move || {
+                file_fingerprint_cancellable(&fingerprint_path, Some(&fingerprint_cancellation))
+            })
+            .await;
+            let fingerprint = match fingerprint {
+                Ok(Ok(fingerprint)) => fingerprint,
+                Ok(Err(_error)) if cancellation.is_cancelled() => break,
+                Ok(Err(error)) => {
+                    discovery.failures.push(ImportFailure {
+                        path: candidate.path,
+                        error: format!("{error:#}"),
+                    });
+                    progress.completed_file();
+                    continue;
+                }
+                Err(error) => {
+                    discovery.failures.push(ImportFailure {
+                        path: candidate.path,
+                        error: format!("book inspection task failed: {error}"),
+                    });
+                    progress.completed_file();
+                    continue;
+                }
+            };
             let path_str = candidate.path.to_string_lossy();
             let existing = match self.get_by_path(path_str.as_ref()).await {
                 Ok(Some(book)) => Ok(Some(book)),
-                Ok(None) => self.get_by_hash(&candidate.hash).await,
+                Ok(None) => self.get_by_hash(&fingerprint.hash).await,
                 Err(error) => Err(error),
             };
             let existing = match existing {
@@ -782,7 +808,7 @@ impl Library {
             let duplicate = existing.map_or_else(
                 || {
                     selected_hashes
-                        .get(&candidate.hash)
+                        .get(&fingerprint.hash)
                         .cloned()
                         .map(|path| ImportDuplicate::SelectedFile { path })
                 },
@@ -794,15 +820,15 @@ impl Library {
                 },
             );
             selected_hashes
-                .entry(candidate.hash.clone())
+                .entry(fingerprint.hash.clone())
                 .or_insert_with(|| candidate.path.clone());
             discovery.candidates.push(ImportCandidate {
                 title: filename_title(&candidate.path),
                 group_key: import_group_key(&candidate.path),
                 path: candidate.path,
                 format: candidate.format,
-                file_size: candidate.file_size,
-                content_hash: candidate.hash,
+                file_size: fingerprint.size,
+                content_hash: fingerprint.hash,
                 duplicate,
             });
             progress.completed_file();
@@ -1436,13 +1462,6 @@ fn fingerprint_reader(
     })
 }
 
-struct ScannedImportCandidate {
-    path: PathBuf,
-    format: BookFormat,
-    hash: String,
-    file_size: u64,
-}
-
 struct PendingImportCandidate {
     path: PathBuf,
     format: BookFormat,
@@ -1532,33 +1551,13 @@ fn scan_import_candidates(
 
     progress.finish_enumerating();
     candidates.sort_by(|left, right| left.path.cmp(&right.path));
-    for candidate in candidates {
-        if cancellation.is_cancelled() {
-            break;
-        }
-        match file_fingerprint_cancellable(&candidate.path, Some(cancellation)) {
-            Ok(fingerprint) => scan.candidates.push(ScannedImportCandidate {
-                path: candidate.path,
-                format: candidate.format,
-                hash: fingerprint.hash,
-                file_size: fingerprint.size,
-            }),
-            Err(_error) if cancellation.is_cancelled() => break,
-            Err(error) => {
-                scan.failures.push(ImportFailure {
-                    path: candidate.path,
-                    error: format!("{error:#}"),
-                });
-                progress.completed_file();
-            }
-        }
-    }
+    scan.candidates = candidates;
     scan
 }
 
 #[derive(Default)]
 struct ImportDiscoveryScan {
-    candidates: Vec<ScannedImportCandidate>,
+    candidates: Vec<PendingImportCandidate>,
     failures: Vec<ImportFailure>,
 }
 
