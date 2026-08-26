@@ -1205,32 +1205,6 @@ fn sync_parent_directory(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn publishing_rejects_a_stage_that_does_not_match_its_expected_hash() {
-        let directory = tempfile::tempdir().unwrap();
-        let expected = directory.path().join("expected.epub");
-        let stage = directory.path().join("stage.tmp");
-        let destination = directory.path().join("managed.epub");
-        std::fs::write(&expected, b"expected bytes").unwrap();
-        std::fs::write(&stage, b"corrupt bytes").unwrap();
-        std::fs::write(&destination, b"existing destination").unwrap();
-        let expected_hash = file_fingerprint(&expected).unwrap().hash;
-
-        let result = publish_managed_file(&stage, &destination, &expected_hash);
-
-        assert!(result.is_err());
-        assert_eq!(
-            std::fs::read(&destination).unwrap(),
-            b"existing destination"
-        );
-        assert!(stage.exists());
-    }
-}
-
 pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<()> {
     let rows = sqlx::query("SELECT id, file_path FROM books WHERE content_hash IS NULL")
         .fetch_all(pool)
@@ -1357,4 +1331,30 @@ fn encode_cover_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     )
     .ok()?;
     Some(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn publishing_rejects_a_stage_that_does_not_match_its_expected_hash() {
+        let directory = tempfile::tempdir().unwrap();
+        let expected = directory.path().join("expected.epub");
+        let stage = directory.path().join("stage.tmp");
+        let destination = directory.path().join("managed.epub");
+        std::fs::write(&expected, b"expected bytes").unwrap();
+        std::fs::write(&stage, b"corrupt bytes").unwrap();
+        std::fs::write(&destination, b"existing destination").unwrap();
+        let expected_hash = file_fingerprint(&expected).unwrap().hash;
+
+        let result = publish_managed_file(&stage, &destination, &expected_hash);
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"existing destination"
+        );
+        assert!(stage.exists());
+    }
 }
