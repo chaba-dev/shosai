@@ -231,6 +231,24 @@ async fn test_import_directory() {
 }
 
 #[tokio::test]
+async fn linked_directory_keeps_books_in_their_original_locations() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    let source = import_dir.join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+
+    let books = lib.link_directory(&import_dir).await.unwrap();
+
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0].storage_kind, StorageKind::Referenced);
+    assert_eq!(
+        PathBuf::from(&books[0].file_path),
+        source.canonicalize().unwrap()
+    );
+}
+
+#[tokio::test]
 async fn managed_import_survives_the_source_being_removed() {
     let (lib, _, dir) = temp_library().await;
     let source = dir.path().join("source.epub");

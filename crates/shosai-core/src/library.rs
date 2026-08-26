@@ -317,6 +317,15 @@ impl Library {
 
     /// Import all supported files from a directory (recursively).
     pub async fn import_directory(&self, dir: &Path) -> Result<Vec<Book>> {
+        self.add_directory(dir, true).await
+    }
+
+    /// Add all supported files from a directory without copying them (recursively).
+    pub async fn link_directory(&self, dir: &Path) -> Result<Vec<Book>> {
+        self.add_directory(dir, false).await
+    }
+
+    async fn add_directory(&self, dir: &Path, managed: bool) -> Result<Vec<Book>> {
         let mut books = Vec::new();
         let mut dirs = vec![dir.to_path_buf()];
 
@@ -339,7 +348,12 @@ impl Library {
                     .unwrap_or_default();
 
                 if BookFormat::from_extension(&ext).is_some() {
-                    match self.import_managed_file(&path).await {
+                    let result = if managed {
+                        self.import_managed_file(&path).await
+                    } else {
+                        self.import_file(&path).await
+                    };
+                    match result {
                         Ok(book) => books.push(book),
                         Err(e) => {
                             eprintln!("warning: failed to import {}: {e}", path.display());
