@@ -4749,7 +4749,18 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                     .padding(12)
                     .width(Length::Fill)
             } else {
-                container(scrollable(candidates).height(Length::Fill)).height(Length::Fill)
+                container(
+                    scrollable(
+                        container(candidates)
+                            .padding(iced::Padding {
+                                right: 18.0,
+                                ..iced::Padding::default()
+                            })
+                            .width(Length::Fill),
+                    )
+                    .height(Length::Fill),
+                )
+                .height(Length::Fill)
             },
             discovery_error,
             storage,
@@ -4801,7 +4812,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         .width(Length::Fill)
         .max_width(680)
         .style(app_theme::modal);
-    if state.add_books_source.is_some() {
+    if !state.add_books_discovering && !state.staged_imports.is_empty() {
         modal.height(Length::Fill).max_height(760).into()
     } else {
         modal.into()
