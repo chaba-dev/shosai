@@ -440,6 +440,34 @@ pub fn book_button(_theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+pub fn book_card_action(_theme: &Theme, status: button::Status) -> button::Style {
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(SURFACE_MUTED)),
+        text_color: TEXT_MUTED,
+        border: Border {
+            radius: RADIUS_SMALL.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
+pub fn danger_button(_theme: &Theme, status: button::Status) -> button::Style {
+    let danger = Color::from_rgb8(0xA5, 0x43, 0x43);
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(danger.scale_alpha(0.12))),
+        text_color: danger,
+        border: Border {
+            color: danger.scale_alpha(0.35),
+            width: 1.0,
+            radius: RADIUS_SMALL.into(),
+        },
+        ..button::Style::default()
+    }
+}
+
 pub fn progress(_theme: &Theme) -> progress_bar::Style {
     progress_bar::Style {
         background: Background::Color(SURFACE_MUTED),

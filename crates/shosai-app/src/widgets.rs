@@ -57,10 +57,10 @@ pub fn activity_bar<'a, Message: 'a>(active: bool, progress: f32) -> Element<'a,
 
 pub fn book_button<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
-    message: Message,
+    message: Option<Message>,
 ) -> Button<'a, Message> {
     button(content)
-        .on_press(message)
+        .on_press_maybe(message)
         .padding(8)
         .width(Length::Fill)
         .style(theme::book_button)

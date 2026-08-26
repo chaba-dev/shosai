@@ -92,7 +92,13 @@ pub enum Message {
     LocateBook(i64),
     RelinkBookSelected(i64, Option<PathBuf>),
     BookRelinked(Result<Book, String>),
+    RequestRemoveBook(i64),
+    CancelRemoveBook,
     RemoveBook(i64),
+    BookRemoved {
+        id: i64,
+        result: Result<(), String>,
+    },
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
@@ -104,6 +110,7 @@ pub enum Message {
     BookmarksLoaded {
         tab_id: u64,
         file_path: PathBuf,
+        book_id: Option<i64>,
         bookmarks: Vec<Bookmark>,
     },
     GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
