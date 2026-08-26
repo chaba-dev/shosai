@@ -1,5 +1,7 @@
 use shosai_core::bookmarks::BookmarkStore;
-use shosai_core::library::{BookFormat, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind};
+use shosai_core::library::{
+    BookFormat, ImportDuplicate, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
+};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -229,6 +231,73 @@ async fn test_import_directory() {
     let report = lib.import_directory(&import_dir).await;
     assert_eq!(report.books.len(), 2);
     assert!(report.failures.is_empty());
+}
+
+#[tokio::test]
+async fn discovery_groups_exact_filename_stems_without_importing() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::copy(
+        fixture_path("sample.pdf"),
+        import_dir.join("Learning Rust.pdf"),
+    )
+    .unwrap();
+    std::fs::copy(
+        fixture_path("sample.epub"),
+        import_dir.join("Learning   Rust.epub"),
+    )
+    .unwrap();
+    std::fs::write(import_dir.join("notes.txt"), "not a book").unwrap();
+
+    let discovery = lib.discover_directory(&import_dir).await;
+
+    assert_eq!(discovery.candidates.len(), 2);
+    assert!(discovery.failures.is_empty());
+    assert_eq!(discovery.candidates[0].group_key, "learning rust");
+    assert_eq!(discovery.candidates[1].group_key, "learning rust");
+    assert_ne!(
+        discovery.candidates[0].format,
+        discovery.candidates[1].format
+    );
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn discovery_marks_books_already_in_the_library() {
+    let (lib, _, _dir) = temp_library().await;
+    let book = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
+
+    let discovery = lib.discover_files(&[fixture_path("sample.pdf")]).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(
+        discovery.candidates[0].duplicate,
+        Some(ImportDuplicate::ExistingBook {
+            book_id: book.id,
+            title: book.title,
+        })
+    );
+}
+
+#[tokio::test]
+async fn discovery_marks_repeated_content_in_the_selection() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("a.pdf");
+    let second = dir.path().join("b.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &second).unwrap();
+
+    let discovery = lib.discover_files(&[second.clone(), first.clone()]).await;
+
+    assert_eq!(discovery.candidates.len(), 2);
+    assert!(discovery.candidates[0].duplicate.is_none());
+    assert_eq!(
+        discovery.candidates[1].duplicate,
+        Some(ImportDuplicate::SelectedFile {
+            path: first.canonicalize().unwrap(),
+        })
+    );
 }
 
 #[tokio::test]

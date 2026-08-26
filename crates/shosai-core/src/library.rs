@@ -2,7 +2,7 @@
 //!
 //! Uses the same SQLite database as the reading state store.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -108,6 +108,28 @@ pub struct BookPage {
 pub struct ImportFailure {
     pub path: PathBuf,
     pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportDuplicate {
+    ExistingBook { book_id: i64, title: String },
+    SelectedFile { path: PathBuf },
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportCandidate {
+    pub path: PathBuf,
+    pub title: String,
+    pub group_key: String,
+    pub format: BookFormat,
+    pub file_size: u64,
+    pub duplicate: Option<ImportDuplicate>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ImportDiscovery {
+    pub candidates: Vec<ImportCandidate>,
+    pub failures: Vec<ImportFailure>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -513,6 +535,87 @@ impl Library {
     /// Link a list of book files in place, continuing after individual failures.
     pub async fn link_files(&self, paths: &[PathBuf]) -> ImportReport {
         self.add_files(paths, false).await
+    }
+
+    /// Inspect selected files before importing anything.
+    pub async fn discover_files(&self, paths: &[PathBuf]) -> ImportDiscovery {
+        self.discover(paths.to_vec(), false).await
+    }
+
+    /// Recursively inspect a directory before importing anything.
+    pub async fn discover_directory(&self, dir: &Path) -> ImportDiscovery {
+        self.discover(vec![dir.to_path_buf()], true).await
+    }
+
+    async fn discover(&self, roots: Vec<PathBuf>, recursive: bool) -> ImportDiscovery {
+        let mut scanned =
+            tokio::task::spawn_blocking(move || scan_import_candidates(roots, recursive))
+                .await
+                .unwrap_or_else(|error| ImportDiscoveryScan {
+                    candidates: Vec::new(),
+                    failures: vec![ImportFailure {
+                        path: PathBuf::new(),
+                        error: format!("book discovery task failed: {error}"),
+                    }],
+                });
+        scanned
+            .candidates
+            .sort_by(|left, right| left.path.cmp(&right.path));
+        let mut discovery = ImportDiscovery {
+            candidates: Vec::with_capacity(scanned.candidates.len()),
+            failures: scanned.failures,
+        };
+        let mut selected_hashes = HashMap::<String, PathBuf>::new();
+
+        for candidate in scanned.candidates {
+            let path_str = candidate.path.to_string_lossy();
+            let existing = match self.get_by_path(path_str.as_ref()).await {
+                Ok(Some(book)) => Ok(Some(book)),
+                Ok(None) => self.get_by_hash(&candidate.hash).await,
+                Err(error) => Err(error),
+            };
+            let existing = match existing {
+                Ok(existing) => existing,
+                Err(error) => {
+                    discovery.failures.push(ImportFailure {
+                        path: candidate.path,
+                        error: format!("failed to check the library: {error:#}"),
+                    });
+                    continue;
+                }
+            };
+            let duplicate = existing.map_or_else(
+                || {
+                    selected_hashes
+                        .get(&candidate.hash)
+                        .cloned()
+                        .map(|path| ImportDuplicate::SelectedFile { path })
+                },
+                |book| {
+                    Some(ImportDuplicate::ExistingBook {
+                        book_id: book.id,
+                        title: book.title,
+                    })
+                },
+            );
+            selected_hashes
+                .entry(candidate.hash)
+                .or_insert_with(|| candidate.path.clone());
+            discovery.candidates.push(ImportCandidate {
+                title: filename_title(&candidate.path),
+                group_key: import_group_key(&candidate.path),
+                path: candidate.path,
+                format: candidate.format,
+                file_size: candidate.file_size,
+                duplicate,
+            });
+        }
+        discovery.candidates.sort_by(|left, right| {
+            left.group_key
+                .cmp(&right.group_key)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+        discovery
     }
 
     async fn add_files(&self, paths: &[PathBuf], managed: bool) -> ImportReport {
@@ -1094,6 +1197,91 @@ fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
         hash: format!("{:x}", hasher.finalize()),
         size: file_size,
     })
+}
+
+struct ScannedImportCandidate {
+    path: PathBuf,
+    format: BookFormat,
+    hash: String,
+    file_size: u64,
+}
+
+fn scan_import_candidates(roots: Vec<PathBuf>, recursive: bool) -> ImportDiscoveryScan {
+    let mut scan = ImportDiscoveryScan::default();
+    let mut pending = roots;
+    let mut visited_dirs = HashSet::new();
+
+    while let Some(path) = pending.pop() {
+        if recursive && path.is_dir() {
+            let canonical = canonical_path(&path);
+            if !visited_dirs.insert(canonical) {
+                continue;
+            }
+            match std::fs::read_dir(&path) {
+                Ok(entries) => {
+                    for entry in entries {
+                        match entry {
+                            Ok(entry) => pending.push(entry.path()),
+                            Err(error) => scan.failures.push(ImportFailure {
+                                path: path.clone(),
+                                error: format!(
+                                    "failed to read an entry in {}: {error}",
+                                    path.display()
+                                ),
+                            }),
+                        }
+                    }
+                }
+                Err(error) => scan.failures.push(ImportFailure {
+                    path: path.clone(),
+                    error: format!("failed to read directory {}: {error}", path.display()),
+                }),
+            }
+            continue;
+        }
+
+        let extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let Some(format) = BookFormat::from_extension(&extension) else {
+            if !recursive {
+                scan.failures.push(ImportFailure {
+                    path,
+                    error: format!("unsupported format: .{extension}"),
+                });
+            }
+            continue;
+        };
+        let path = canonical_path(&path);
+        match file_fingerprint(&path) {
+            Ok(fingerprint) => scan.candidates.push(ScannedImportCandidate {
+                path,
+                format,
+                hash: fingerprint.hash,
+                file_size: fingerprint.size,
+            }),
+            Err(error) => scan.failures.push(ImportFailure {
+                path,
+                error: format!("{error:#}"),
+            }),
+        }
+    }
+    scan
+}
+
+#[derive(Default)]
+struct ImportDiscoveryScan {
+    candidates: Vec<ScannedImportCandidate>,
+    failures: Vec<ImportFailure>,
+}
+
+fn import_group_key(path: &Path) -> String {
+    filename_title(path)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 struct ManagedStage {
