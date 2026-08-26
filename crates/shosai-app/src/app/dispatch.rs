@@ -4,7 +4,44 @@ fn cancel_add_books_discovery(state: &mut State) {
     if let Some(cancellation) = state.add_books_cancellation.take() {
         cancellation.cancel();
     }
+    state.add_books_progress = None;
     state.add_books_discovering = false;
+}
+
+fn import_next_book(state: &mut State) -> Task<Message> {
+    let (Some(library), Some(candidate)) = (
+        state.library.clone(),
+        state.pending_book_imports.pop_front(),
+    ) else {
+        return Task::none();
+    };
+    let copy = state.book_import_copy;
+    Task::perform(
+        async move {
+            if copy {
+                library.import_discovered_files(&[candidate]).await
+            } else {
+                library.link_discovered_files(&[candidate]).await
+            }
+        },
+        Message::BookAddedToBatch,
+    )
+}
+
+fn book_matches_library_view(state: &State, book: &Book) -> bool {
+    if state
+        .library_filter
+        .is_some_and(|format| format != book.format)
+    {
+        return false;
+    }
+    let query = state.library_search.to_lowercase();
+    query.is_empty()
+        || book.title.to_lowercase().contains(&query)
+        || book
+            .author
+            .as_ref()
+            .is_some_and(|author| author.to_lowercase().contains(&query))
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -534,9 +571,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
+            let progress = ImportDiscoveryProgress::default();
             state.add_books_cancellation = Some(cancellation.clone());
+            state.add_books_progress = Some(progress.clone());
             return Task::perform(
-                async move { lib.discover_files_cancellable(paths, cancellation).await },
+                async move {
+                    lib.discover_files_with_progress(paths, cancellation, progress)
+                        .await
+                },
                 move |discovery| Message::BooksDiscovered {
                     generation,
                     discovery,
@@ -556,9 +598,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
+            let progress = ImportDiscoveryProgress::default();
             state.add_books_cancellation = Some(cancellation.clone());
+            state.add_books_progress = Some(progress.clone());
             return Task::perform(
-                async move { lib.discover_directory_cancellable(path, cancellation).await },
+                async move {
+                    lib.discover_directory_with_progress(path, cancellation, progress)
+                        .await
+                },
                 move |discovery| Message::BooksDiscovered {
                     generation,
                     discovery,
@@ -575,6 +622,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.add_books_discovering = false;
             state.add_books_cancellation = None;
+            state.add_books_progress = None;
             state.staged_imports = discovery
                 .candidates
                 .into_iter()
@@ -636,9 +684,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.adding_books {
                 return Task::none();
             }
-            let (Some(lib), Some(copy)) = (state.library.clone(), state.add_books_copy) else {
+            let Some(copy) = state.add_books_copy else {
                 return Task::none();
             };
+            if state.library.is_none() {
+                return Task::none();
+            }
             let candidates: Vec<_> = state
                 .staged_imports
                 .iter()
@@ -654,22 +705,41 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.import_discovery_failures.clear();
             state.add_books_copy = None;
             state.adding_books = true;
+            state.pending_book_imports = candidates.into();
+            state.book_import_copy = copy;
+            state.book_import_completed = 0;
+            state.book_import_total = state.pending_book_imports.len();
+            state.book_import_report = ImportReport::default();
             state.library_activity_progress = 0.0;
             state.library_error = None;
-            return Task::perform(
-                async move {
-                    if copy {
-                        lib.import_discovered_files(&candidates).await
-                    } else {
-                        lib.link_discovered_files(&candidates).await
-                    }
-                },
-                Message::BooksAdded,
-            );
+            return import_next_book(state);
         }
 
-        Message::BooksAdded(report) => {
+        Message::BookAddedToBatch(report) => {
+            state.book_import_completed += 1;
+            state.library_activity_progress =
+                state.book_import_completed as f32 / state.book_import_total.max(1) as f32;
+            for book in &report.books {
+                if book_matches_library_view(state, book)
+                    && !state
+                        .library_books
+                        .iter()
+                        .any(|existing| existing.id == book.id)
+                {
+                    state.library_books.push(book.clone());
+                }
+            }
+            state.book_import_report.books.extend(report.books);
+            state.book_import_report.failures.extend(report.failures);
+
+            if !state.pending_book_imports.is_empty() {
+                return import_next_book(state);
+            }
+
             state.adding_books = false;
+            let report = std::mem::take(&mut state.book_import_report);
+            state.book_import_total = 0;
+            state.book_import_completed = 0;
             let error = import_report_error(&report, &state.i18n);
             let refresh = reset_library(state);
             if let Some(error) = error {
@@ -871,7 +941,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibraryActivityTick => {
-            if library_activity_active(state) {
+            if state.add_books_discovering {
+                if let Some(progress) = &state.add_books_progress {
+                    let progress = progress.snapshot();
+                    if progress.enumerating {
+                        state.library_activity_progress =
+                            (state.library_activity_progress + LIBRARY_ACTIVITY_STEP).min(1.0);
+                    } else {
+                        state.library_activity_progress =
+                            progress.completed_files as f32 / progress.total_files.max(1) as f32;
+                    }
+                }
+            } else if !state.adding_books && library_activity_active(state) {
                 state.library_activity_progress =
                     (state.library_activity_progress + LIBRARY_ACTIVITY_STEP).min(1.0);
             }

@@ -107,7 +107,7 @@ pub enum Message {
     ClearAddBooksSelection,
     ChangeAddBooksStorage,
     AddSelectedBooks,
-    BooksAdded(ImportReport),
+    BookAddedToBatch(ImportReport),
     OpenLibraryBook(i64, String),
     LocateBook(i64),
     RelinkBookSelected(i64, Option<PathBuf>),

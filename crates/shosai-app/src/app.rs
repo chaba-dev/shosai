@@ -16,8 +16,8 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
-    Book, BookPage, ImportCancellation, ImportCandidate, ImportDuplicate, ImportFailure,
-    ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
+    Book, BookPage, ImportCancellation, ImportCandidate, ImportDiscoveryProgress, ImportDuplicate,
+    ImportFailure, ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -679,10 +679,16 @@ pub struct State {
     add_books_discovering: bool,
     add_books_generation: u64,
     add_books_cancellation: Option<ImportCancellation>,
+    add_books_progress: Option<ImportDiscoveryProgress>,
     staged_imports: Vec<StagedImport>,
     import_discovery_failures: Vec<ImportFailure>,
     add_books_copy: Option<bool>,
     adding_books: bool,
+    pending_book_imports: VecDeque<ImportCandidate>,
+    book_import_copy: bool,
+    book_import_completed: usize,
+    book_import_total: usize,
+    book_import_report: ImportReport,
     library_error: Option<AppError>,
 
     // -- Settings state --
@@ -794,10 +800,16 @@ pub fn boot() -> (State, Task<Message>) {
         add_books_discovering: false,
         add_books_generation: 0,
         add_books_cancellation: None,
+        add_books_progress: None,
         staged_imports: Vec::new(),
         import_discovery_failures: Vec::new(),
         add_books_copy: None,
         adding_books: false,
+        pending_book_imports: VecDeque::new(),
+        book_import_copy: false,
+        book_import_completed: 0,
+        book_import_total: 0,
+        book_import_report: ImportReport::default(),
         library_error: None,
         add_book_behavior: AddBookBehavior::default(),
         reader_defaults: ReaderDefaults::default(),
@@ -983,7 +995,9 @@ fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
 
 fn library_activity_active(state: &State) -> bool {
     state.screen == Screen::Library
-        && (state.adding_books || (state.library_loading && state.library_offset == 0))
+        && (state.add_books_discovering
+            || state.adding_books
+            || (state.library_loading && state.library_offset == 0))
 }
 
 fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
@@ -3689,7 +3703,15 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
     let search = container(search_input).width(Length::Fill).max_width(380);
     let add_message = (state.library.is_some() && !state.adding_books && !state.moving_library)
         .then_some(Message::OpenAddBooks);
-    let add_label = if state.adding_books {
+    let add_label = if state.adding_books && state.book_import_total > 0 {
+        state.i18n.text_with_args(
+            "adding-books-progress",
+            [
+                ("completed", (state.book_import_completed as i64).into()),
+                ("total", (state.book_import_total as i64).into()),
+            ],
+        )
+    } else if state.adding_books {
         state.i18n.text("adding-books")
     } else {
         state.i18n.text("add-books")
@@ -3727,10 +3749,17 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         .into()
     };
 
-    let activity_active = library_activity_active(state);
+    let activity: Element<'_, Message> = if state.adding_books {
+        widgets::reading_progress(f64::from(state.library_activity_progress)).into()
+    } else {
+        widgets::activity_bar(
+            library_activity_active(state),
+            state.library_activity_progress,
+        )
+    };
     let header = column![
         container(content).padding([16, 20]).width(Length::Fill),
-        widgets::activity_bar(activity_active, state.library_activity_progress),
+        activity,
     ];
 
     container(header)
@@ -4488,6 +4517,37 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
     });
 
     let content: Element<'_, Message> = if state.add_books_discovering {
+        let progress = state
+            .add_books_progress
+            .as_ref()
+            .map(ImportDiscoveryProgress::snapshot)
+            .unwrap_or(shosai_core::library::ImportDiscoveryProgressSnapshot {
+                enumerating: true,
+                completed_files: 0,
+                total_files: 0,
+            });
+        let progress_label = if progress.enumerating {
+            state.i18n.text_with_args(
+                "finding-books-progress",
+                [("found", (progress.total_files as i64).into())],
+            )
+        } else {
+            state.i18n.text_with_args(
+                "checking-books-progress",
+                [
+                    ("completed", (progress.completed_files as i64).into()),
+                    ("total", (progress.total_files as i64).into()),
+                ],
+            )
+        };
+        let progress_bar: Element<'_, Message> = if progress.enumerating {
+            widgets::activity_bar(true, state.library_activity_progress)
+        } else {
+            widgets::reading_progress(
+                progress.completed_files as f64 / progress.total_files.max(1) as f64,
+            )
+            .into()
+        };
         column![
             text(state.i18n.text("scanning-books")).size(20),
             text(selection.unwrap_or_default())
@@ -4496,6 +4556,8 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             text(state.i18n.text("scanning-books-description"))
                 .size(12)
                 .color(app_theme::TEXT_MUTED),
+            text(progress_label).size(12),
+            progress_bar,
             row![
                 button(text(state.i18n.text("back")))
                     .on_press(Message::ClearAddBooksSelection)
@@ -4687,7 +4749,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                     .padding(12)
                     .width(Length::Fill)
             } else {
-                container(scrollable(candidates).height(Length::Fixed(280.0)))
+                container(scrollable(candidates).height(Length::Fill)).height(Length::Fill)
             },
             discovery_error,
             storage,
@@ -4708,6 +4770,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             .align_y(iced::Alignment::Center),
         ]
         .spacing(10)
+        .height(Length::Fill)
         .into()
     } else {
         column![
@@ -4733,12 +4796,16 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         .into()
     };
 
-    container(content)
+    let modal = container(content)
         .padding(24)
         .width(Length::Fill)
         .max_width(680)
-        .style(app_theme::modal)
-        .into()
+        .style(app_theme::modal);
+    if state.add_books_source.is_some() {
+        modal.height(Length::Fill).max_height(760).into()
+    } else {
+        modal.into()
+    }
 }
 
 fn remove_book_modal<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
@@ -6769,6 +6836,7 @@ mod tests {
     fn partial_import_completion_keeps_successes_visible_and_surfaces_failures() {
         let (mut state, _) = boot();
         state.adding_books = true;
+        state.book_import_total = 1;
         let report = ImportReport {
             books: vec![test_book(42)],
             failures: vec![shosai_core::library::ImportFailure {
@@ -6777,7 +6845,7 @@ mod tests {
             }],
         };
 
-        let task = update(&mut state, Message::BooksAdded(report));
+        let task = update(&mut state, Message::BookAddedToBatch(report));
 
         assert_eq!(task.units(), 0);
         assert!(!state.adding_books);
@@ -6820,6 +6888,7 @@ mod tests {
             Some(AddBooksSource::Files(ref paths)) if paths.len() == 2
         ));
         assert!(state.add_books_discovering);
+        assert!(state.add_books_progress.is_some());
         assert!(state.staged_imports.is_empty());
         drop(add_books_modal(&state));
 
@@ -6857,6 +6926,7 @@ mod tests {
             },
         );
         assert!(!state.add_books_discovering);
+        assert!(state.add_books_progress.is_none());
         assert_eq!(state.staged_imports.len(), 2);
         assert!(state.staged_imports[0].selected);
         assert!(!state.staged_imports[1].selected);
@@ -6922,7 +6992,48 @@ mod tests {
         assert!(!state.add_books_open);
         assert!(state.add_books_source.is_none());
         assert!(!state.add_books_discovering);
+        assert!(state.add_books_progress.is_none());
         assert!(cancellation.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn batch_import_updates_progress_and_library_before_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.library_loading = false;
+        state.adding_books = true;
+        state.book_import_total = 2;
+        state.pending_book_imports.push_back(ImportCandidate {
+            path: PathBuf::from("second.epub"),
+            title: "second".to_string(),
+            group_key: "second".to_string(),
+            format: shosai_core::library::BookFormat::Epub,
+            file_size: 100,
+            content_hash: "second-hash".to_string(),
+            duplicate: None,
+        });
+
+        let task = update(
+            &mut state,
+            Message::BookAddedToBatch(ImportReport {
+                books: vec![test_book(42)],
+                failures: Vec::new(),
+            }),
+        );
+
+        assert!(task.units() > 0);
+        assert!(state.adding_books);
+        assert_eq!(state.book_import_completed, 1);
+        assert_eq!(state.library_activity_progress, 0.5);
+        assert_eq!(state.library_books.len(), 1);
+        assert_eq!(state.library_books[0].id, 42);
     }
 
     #[tokio::test]
