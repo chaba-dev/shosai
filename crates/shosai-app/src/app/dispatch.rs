@@ -1,5 +1,12 @@
 use super::*;
 
+fn cancel_add_books_discovery(state: &mut State) {
+    if let Some(cancellation) = state.add_books_cancellation.take() {
+        cancellation.cancel();
+    }
+    state.add_books_discovering = false;
+}
+
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     match message {
         Message::Initialized(Ok(initialized)) => {
@@ -447,10 +454,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::OpenAddBooks => {
             if state.library.is_some() && !state.adding_books && !state.moving_library {
+                cancel_add_books_discovery(state);
                 state.book_menu = None;
                 state.pending_remove_book = None;
                 state.add_books_source = None;
-                state.add_books_discovering = false;
                 state.add_books_generation = state.add_books_generation.wrapping_add(1);
                 state.staged_imports.clear();
                 state.import_discovery_failures.clear();
@@ -460,9 +467,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::CancelAddBooks => {
+            cancel_add_books_discovery(state);
             state.add_books_open = false;
             state.add_books_source = None;
-            state.add_books_discovering = false;
             state.add_books_generation = state.add_books_generation.wrapping_add(1);
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
@@ -473,6 +480,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if !state.add_books_open || state.library.is_none() {
                 return Task::none();
             }
+            cancel_add_books_discovery(state);
+            state.add_books_generation = state.add_books_generation.wrapping_add(1);
+            let generation = state.add_books_generation;
             let ebooks = state.i18n.text("ebooks");
             let choose_files = state.i18n.text("choose-book-files");
             return Task::perform(
@@ -487,7 +497,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .map(|file| file.path().to_path_buf())
                         .collect()
                 },
-                Message::AddBookFilesSelected,
+                move |paths| Message::AddBookFilesSelected { generation, paths },
             );
         }
 
@@ -495,6 +505,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if !state.add_books_open || state.library.is_none() {
                 return Task::none();
             }
+            cancel_add_books_discovery(state);
+            state.add_books_generation = state.add_books_generation.wrapping_add(1);
+            let generation = state.add_books_generation;
             let choose_folder = state.i18n.text("choose-book-folder");
             return Task::perform(
                 async move {
@@ -504,25 +517,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .await
                         .map(|folder| folder.path().to_path_buf())
                 },
-                Message::AddBookFolderSelected,
+                move |path| Message::AddBookFolderSelected { generation, path },
             );
         }
 
-        Message::AddBookFilesSelected(paths) => {
+        Message::AddBookFilesSelected { generation, paths } => {
             let Some(lib) = state.library.clone() else {
                 return Task::none();
             };
-            if !state.add_books_open || paths.is_empty() {
+            if !state.add_books_open || generation != state.add_books_generation || paths.is_empty()
+            {
                 return Task::none();
             }
-            state.add_books_generation = state.add_books_generation.wrapping_add(1);
-            let generation = state.add_books_generation;
             state.add_books_source = Some(AddBooksSource::Files(paths.clone()));
             state.add_books_discovering = true;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
+            let cancellation = ImportCancellation::default();
+            state.add_books_cancellation = Some(cancellation.clone());
             return Task::perform(
-                async move { lib.discover_files(&paths).await },
+                async move { lib.discover_files_cancellable(paths, cancellation).await },
                 move |discovery| Message::BooksDiscovered {
                     generation,
                     discovery,
@@ -530,21 +544,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             );
         }
 
-        Message::AddBookFolderSelected(path) => {
+        Message::AddBookFolderSelected { generation, path } => {
             let (Some(lib), Some(path)) = (state.library.clone(), path) else {
                 return Task::none();
             };
-            if !state.add_books_open {
+            if !state.add_books_open || generation != state.add_books_generation {
                 return Task::none();
             }
-            state.add_books_generation = state.add_books_generation.wrapping_add(1);
-            let generation = state.add_books_generation;
             state.add_books_source = Some(AddBooksSource::Folder(path.clone()));
             state.add_books_discovering = true;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
+            let cancellation = ImportCancellation::default();
+            state.add_books_cancellation = Some(cancellation.clone());
             return Task::perform(
-                async move { lib.discover_directory(&path).await },
+                async move { lib.discover_directory_cancellable(path, cancellation).await },
                 move |discovery| Message::BooksDiscovered {
                     generation,
                     discovery,
@@ -560,6 +574,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             state.add_books_discovering = false;
+            state.add_books_cancellation = None;
             state.staged_imports = discovery
                 .candidates
                 .into_iter()
@@ -587,7 +602,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SelectAllStagedBooks(selected) => {
             if state.add_books_open {
                 for staged in &mut state.staged_imports {
-                    staged.selected = selected && staged.candidate.duplicate.is_none();
+                    if staged.candidate.duplicate.is_none() {
+                        staged.selected = selected;
+                    }
                 }
             }
         }
@@ -600,8 +617,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::ClearAddBooksSelection => {
             if state.add_books_open {
+                cancel_add_books_discovery(state);
                 state.add_books_source = None;
-                state.add_books_discovering = false;
                 state.add_books_generation = state.add_books_generation.wrapping_add(1);
                 state.staged_imports.clear();
                 state.import_discovery_failures.clear();
@@ -622,13 +639,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let (Some(lib), Some(copy)) = (state.library.clone(), state.add_books_copy) else {
                 return Task::none();
             };
-            let paths: Vec<_> = state
+            let candidates: Vec<_> = state
                 .staged_imports
                 .iter()
                 .filter(|staged| staged.selected)
-                .map(|staged| staged.candidate.path.clone())
+                .map(|staged| staged.candidate.clone())
                 .collect();
-            if paths.is_empty() {
+            if candidates.is_empty() {
                 return Task::none();
             }
             state.add_books_open = false;
@@ -642,9 +659,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             return Task::perform(
                 async move {
                     if copy {
-                        lib.import_files(&paths).await
+                        lib.import_discovered_files(&candidates).await
                     } else {
-                        lib.link_files(&paths).await
+                        lib.link_discovered_files(&candidates).await
                     }
                 },
                 Message::BooksAdded,

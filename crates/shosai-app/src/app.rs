@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::advanced::widget::{Id as WidgetId, operation};
@@ -16,8 +16,8 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
-    Book, BookPage, ImportCandidate, ImportDuplicate, ImportFailure, ImportReport, Library,
-    ManagedPathChange, ManagedStorageSummary,
+    Book, BookPage, ImportCancellation, ImportCandidate, ImportDuplicate, ImportFailure,
+    ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -678,6 +678,7 @@ pub struct State {
     add_books_source: Option<AddBooksSource>,
     add_books_discovering: bool,
     add_books_generation: u64,
+    add_books_cancellation: Option<ImportCancellation>,
     staged_imports: Vec<StagedImport>,
     import_discovery_failures: Vec<ImportFailure>,
     add_books_copy: Option<bool>,
@@ -792,6 +793,7 @@ pub fn boot() -> (State, Task<Message>) {
         add_books_source: None,
         add_books_discovering: false,
         add_books_generation: 0,
+        add_books_cancellation: None,
         staged_imports: Vec::new(),
         import_discovery_failures: Vec::new(),
         add_books_copy: None,
@@ -4450,6 +4452,19 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn import_candidate_label(source: &AddBooksSource, path: &Path) -> String {
+    match source {
+        AddBooksSource::Folder(root) => {
+            let root = root.canonicalize().unwrap_or_else(|_| root.clone());
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        }
+        AddBooksSource::Files(_) => path.display().to_string(),
+    }
+}
+
 fn add_books_modal(state: &State) -> Element<'_, Message> {
     let cancel = button(text(state.i18n.text("cancel")))
         .on_press(Message::CancelAddBooks)
@@ -4492,7 +4507,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         ]
         .spacing(12)
         .into()
-    } else if state.add_books_source.is_some() {
+    } else if let Some(source) = &state.add_books_source {
         let selected_count = state
             .staged_imports
             .iter()
@@ -4516,12 +4531,8 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 candidates = candidates.push(text(staged.candidate.title.clone()).size(14));
                 previous_group = Some(&staged.candidate.group_key);
             }
-            let file = staged
-                .candidate
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| staged.candidate.path.display().to_string());
+            let label = import_candidate_label(source, &staged.candidate.path);
+            let label_font = typography::font_for_text(&label);
             let badge = container(
                 text(staged.candidate.format.as_str().to_uppercase())
                     .size(10)
@@ -4538,7 +4549,11 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                     })
             });
             let details = row![
-                text(file).size(12),
+                checkbox(staged.selected)
+                    .label(label)
+                    .font(label_font)
+                    .width(Length::Fill)
+                    .on_toggle(move |selected| Message::ToggleStagedBook(index, selected)),
                 badge,
                 text(format_bytes(staged.candidate.file_size))
                     .size(11)
@@ -4572,18 +4587,10 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 None => iced::widget::Space::new().height(0).into(),
             };
             candidates = candidates.push(
-                container(
-                    row![
-                        checkbox(staged.selected)
-                            .on_toggle(move |selected| Message::ToggleStagedBook(index, selected)),
-                        column![details, duplicate].spacing(2).width(Length::Fill),
-                    ]
-                    .spacing(10)
-                    .align_y(iced::Alignment::Center),
-                )
-                .padding([7, 8])
-                .width(Length::Fill)
-                .style(app_theme::surface),
+                container(column![details, duplicate].spacing(2).width(Length::Fill))
+                    .padding([7, 8])
+                    .width(Length::Fill)
+                    .style(app_theme::surface),
             );
         }
 
@@ -6802,7 +6809,11 @@ mod tests {
 
         state.add_book_behavior = AddBookBehavior::Copy;
         let paths = vec![PathBuf::from("one.epub"), PathBuf::from("two.pdf")];
-        let discover = update(&mut state, Message::AddBookFilesSelected(paths));
+        let generation = state.add_books_generation;
+        let discover = update(
+            &mut state,
+            Message::AddBookFilesSelected { generation, paths },
+        );
         assert!(discover.units() > 0);
         assert!(matches!(
             state.add_books_source,
@@ -6825,6 +6836,7 @@ mod tests {
                             group_key: "one".to_string(),
                             format: shosai_core::library::BookFormat::Epub,
                             file_size: 100,
+                            content_hash: "one-hash".to_string(),
                             duplicate: None,
                         },
                         ImportCandidate {
@@ -6833,6 +6845,7 @@ mod tests {
                             group_key: "two".to_string(),
                             format: shosai_core::library::BookFormat::Pdf,
                             file_size: 200,
+                            content_hash: "two-hash".to_string(),
                             duplicate: Some(ImportDuplicate::ExistingBook {
                                 book_id: 7,
                                 title: "Two".to_string(),
@@ -6849,6 +6862,14 @@ mod tests {
         assert!(!state.staged_imports[1].selected);
         assert_eq!(state.add_books_copy, Some(true));
         drop(add_books_modal(&state));
+
+        let _ = update(&mut state, Message::ToggleStagedBook(1, true));
+        let _ = update(&mut state, Message::SelectAllStagedBooks(false));
+        assert!(!state.staged_imports[0].selected);
+        assert!(state.staged_imports[1].selected);
+        let _ = update(&mut state, Message::SelectAllStagedBooks(true));
+        assert!(state.staged_imports[0].selected);
+        assert!(state.staged_imports[1].selected);
 
         let _ = update(&mut state, Message::ChangeAddBooksStorage);
         assert_eq!(state.add_books_copy, None);
@@ -6872,6 +6893,7 @@ mod tests {
                         group_key: "stale".to_string(),
                         format: shosai_core::library::BookFormat::Epub,
                         file_size: 100,
+                        content_hash: "stale-hash".to_string(),
                         duplicate: None,
                     }],
                     failures: Vec::new(),
@@ -6880,9 +6902,13 @@ mod tests {
         );
         assert!(state.staged_imports.is_empty());
 
+        let generation = state.add_books_generation;
         let discover = update(
             &mut state,
-            Message::AddBookFolderSelected(Some(PathBuf::from("books"))),
+            Message::AddBookFolderSelected {
+                generation,
+                path: Some(PathBuf::from("books")),
+            },
         );
         assert!(discover.units() > 0);
         assert!(matches!(
@@ -6890,11 +6916,88 @@ mod tests {
             Some(AddBooksSource::Folder(ref path)) if path == &PathBuf::from("books")
         ));
         assert!(state.add_books_discovering);
+        let cancellation = state.add_books_cancellation.clone().unwrap();
 
         let _ = update(&mut state, Message::CancelAddBooks);
         assert!(!state.add_books_open);
         assert!(state.add_books_source.is_none());
         assert!(!state.add_books_discovering);
+        assert!(cancellation.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn stale_book_picker_results_cannot_replace_a_newer_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+
+        let _ = update(&mut state, Message::OpenAddBooks);
+        let old_session = state.add_books_generation;
+        let _ = update(&mut state, Message::CancelAddBooks);
+        let _ = update(&mut state, Message::OpenAddBooks);
+        let _ = update(
+            &mut state,
+            Message::AddBookFilesSelected {
+                generation: old_session,
+                paths: vec![PathBuf::from("old.epub")],
+            },
+        );
+        assert!(state.add_books_source.is_none());
+
+        let _ = update(&mut state, Message::ChooseBookFiles);
+        let older_picker = state.add_books_generation;
+        let _ = update(&mut state, Message::ChooseBookFolder);
+        let newer_picker = state.add_books_generation;
+        let _ = update(
+            &mut state,
+            Message::AddBookFilesSelected {
+                generation: older_picker,
+                paths: vec![PathBuf::from("older.epub")],
+            },
+        );
+        assert!(state.add_books_source.is_none());
+        let task = update(
+            &mut state,
+            Message::AddBookFolderSelected {
+                generation: newer_picker,
+                path: Some(PathBuf::from("newer")),
+            },
+        );
+        assert!(task.units() > 0);
+        assert!(matches!(
+            state.add_books_source,
+            Some(AddBooksSource::Folder(ref path)) if path == &PathBuf::from("newer")
+        ));
+    }
+
+    #[test]
+    fn import_candidate_labels_distinguish_nested_and_individual_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let nested = directory.path().join("publisher").join("book.epub");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, b"book").unwrap();
+        let canonical = nested.canonicalize().unwrap();
+
+        assert_eq!(
+            import_candidate_label(
+                &AddBooksSource::Folder(directory.path().to_path_buf()),
+                &canonical,
+            ),
+            PathBuf::from("publisher")
+                .join("book.epub")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            import_candidate_label(&AddBooksSource::Files(vec![nested]), &canonical),
+            canonical.display().to_string()
+        );
     }
 
     #[tokio::test]

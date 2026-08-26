@@ -89,8 +89,14 @@ pub enum Message {
     CancelAddBooks,
     ChooseBookFiles,
     ChooseBookFolder,
-    AddBookFilesSelected(Vec<PathBuf>),
-    AddBookFolderSelected(Option<PathBuf>),
+    AddBookFilesSelected {
+        generation: u64,
+        paths: Vec<PathBuf>,
+    },
+    AddBookFolderSelected {
+        generation: u64,
+        path: Option<PathBuf>,
+    },
     BooksDiscovered {
         generation: u64,
         discovery: ImportDiscovery,
