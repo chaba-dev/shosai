@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
@@ -147,6 +147,55 @@ impl ImportCancellation {
 
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Acquire)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportDiscoveryProgressSnapshot {
+    pub enumerating: bool,
+    pub completed_files: u64,
+    pub total_files: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportDiscoveryProgress(Arc<ImportDiscoveryProgressInner>);
+
+#[derive(Debug)]
+struct ImportDiscoveryProgressInner {
+    enumerating: AtomicBool,
+    completed_files: AtomicU64,
+    total_files: AtomicU64,
+}
+
+impl Default for ImportDiscoveryProgress {
+    fn default() -> Self {
+        Self(Arc::new(ImportDiscoveryProgressInner {
+            enumerating: AtomicBool::new(true),
+            completed_files: AtomicU64::new(0),
+            total_files: AtomicU64::new(0),
+        }))
+    }
+}
+
+impl ImportDiscoveryProgress {
+    pub fn snapshot(&self) -> ImportDiscoveryProgressSnapshot {
+        ImportDiscoveryProgressSnapshot {
+            enumerating: self.0.enumerating.load(Ordering::Acquire),
+            completed_files: self.0.completed_files.load(Ordering::Acquire),
+            total_files: self.0.total_files.load(Ordering::Acquire),
+        }
+    }
+
+    fn found_file(&self) {
+        self.0.total_files.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn completed_file(&self) {
+        self.0.completed_files.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn finish_enumerating(&self) {
+        self.0.enumerating.store(false, Ordering::Release);
     }
 }
 
@@ -614,14 +663,24 @@ impl Library {
 
     /// Inspect selected files before importing anything.
     pub async fn discover_files(&self, paths: &[PathBuf]) -> ImportDiscovery {
-        self.discover(paths.to_vec(), false, ImportCancellation::default())
-            .await
+        self.discover(
+            paths.to_vec(),
+            false,
+            ImportCancellation::default(),
+            ImportDiscoveryProgress::default(),
+        )
+        .await
     }
 
     /// Recursively inspect a directory before importing anything.
     pub async fn discover_directory(&self, dir: &Path) -> ImportDiscovery {
-        self.discover(vec![dir.to_path_buf()], true, ImportCancellation::default())
-            .await
+        self.discover(
+            vec![dir.to_path_buf()],
+            true,
+            ImportCancellation::default(),
+            ImportDiscoveryProgress::default(),
+        )
+        .await
     }
 
     pub async fn discover_files_cancellable(
@@ -629,7 +688,13 @@ impl Library {
         paths: Vec<PathBuf>,
         cancellation: ImportCancellation,
     ) -> ImportDiscovery {
-        self.discover(paths, false, cancellation).await
+        self.discover(
+            paths,
+            false,
+            cancellation,
+            ImportDiscoveryProgress::default(),
+        )
+        .await
     }
 
     pub async fn discover_directory_cancellable(
@@ -637,7 +702,31 @@ impl Library {
         dir: PathBuf,
         cancellation: ImportCancellation,
     ) -> ImportDiscovery {
-        self.discover(vec![dir], true, cancellation).await
+        self.discover(
+            vec![dir],
+            true,
+            cancellation,
+            ImportDiscoveryProgress::default(),
+        )
+        .await
+    }
+
+    pub async fn discover_files_with_progress(
+        &self,
+        paths: Vec<PathBuf>,
+        cancellation: ImportCancellation,
+        progress: ImportDiscoveryProgress,
+    ) -> ImportDiscovery {
+        self.discover(paths, false, cancellation, progress).await
+    }
+
+    pub async fn discover_directory_with_progress(
+        &self,
+        dir: PathBuf,
+        cancellation: ImportCancellation,
+        progress: ImportDiscoveryProgress,
+    ) -> ImportDiscovery {
+        self.discover(vec![dir], true, cancellation, progress).await
     }
 
     async fn discover(
@@ -645,10 +734,12 @@ impl Library {
         roots: Vec<PathBuf>,
         recursive: bool,
         cancellation: ImportCancellation,
+        progress: ImportDiscoveryProgress,
     ) -> ImportDiscovery {
         let scan_cancellation = cancellation.clone();
+        let scan_progress = progress.clone();
         let mut scanned = tokio::task::spawn_blocking(move || {
-            scan_import_candidates(roots, recursive, &scan_cancellation)
+            scan_import_candidates(roots, recursive, &scan_cancellation, &scan_progress)
         })
         .await
         .unwrap_or_else(|error| ImportDiscoveryScan {
@@ -684,6 +775,7 @@ impl Library {
                         path: candidate.path,
                         error: format!("failed to check the library: {error:#}"),
                     });
+                    progress.completed_file();
                     continue;
                 }
             };
@@ -713,6 +805,7 @@ impl Library {
                 content_hash: candidate.hash,
                 duplicate,
             });
+            progress.completed_file();
         }
         discovery.candidates.sort_by(|left, right| {
             left.group_key
@@ -1348,14 +1441,21 @@ struct ScannedImportCandidate {
     file_size: u64,
 }
 
+struct PendingImportCandidate {
+    path: PathBuf,
+    format: BookFormat,
+}
+
 fn scan_import_candidates(
     roots: Vec<PathBuf>,
     recursive: bool,
     cancellation: &ImportCancellation,
+    progress: &ImportDiscoveryProgress,
 ) -> ImportDiscoveryScan {
     let mut scan = ImportDiscoveryScan::default();
     let mut pending = roots;
     let mut visited_dirs = HashSet::new();
+    let mut candidates = Vec::new();
 
     while let Some(original_path) = pending.pop() {
         if cancellation.is_cancelled() {
@@ -1424,19 +1524,30 @@ fn scan_import_candidates(
             }
             continue;
         };
-        match file_fingerprint_cancellable(&path, Some(cancellation)) {
+        progress.found_file();
+        candidates.push(PendingImportCandidate { path, format });
+    }
+
+    progress.finish_enumerating();
+    candidates.sort_by(|left, right| left.path.cmp(&right.path));
+    for candidate in candidates {
+        if cancellation.is_cancelled() {
+            break;
+        }
+        match file_fingerprint_cancellable(&candidate.path, Some(cancellation)) {
             Ok(fingerprint) => scan.candidates.push(ScannedImportCandidate {
-                path,
-                format,
+                path: candidate.path,
+                format: candidate.format,
                 hash: fingerprint.hash,
                 file_size: fingerprint.size,
             }),
             Err(_error) if cancellation.is_cancelled() => break,
             Err(error) => {
                 scan.failures.push(ImportFailure {
-                    path,
+                    path: candidate.path,
                     error: format!("{error:#}"),
                 });
+                progress.completed_file();
             }
         }
     }

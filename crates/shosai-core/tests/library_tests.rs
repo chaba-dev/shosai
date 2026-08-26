@@ -1,7 +1,7 @@
 use shosai_core::bookmarks::BookmarkStore;
 use shosai_core::library::{
-    BookFormat, ImportCancellation, ImportDuplicate, Library, MANAGED_LIBRARY_DIR_PREFERENCE,
-    StorageKind,
+    BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, Library,
+    MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
@@ -422,6 +422,31 @@ async fn cancelled_discovery_stops_before_scanning_candidates() {
 
     assert!(discovery.candidates.is_empty());
     assert!(discovery.failures.is_empty());
+}
+
+#[tokio::test]
+async fn discovery_progress_counts_supported_files_through_completion() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("book.epub");
+    let second = dir.path().join("book.pdf");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &second).unwrap();
+    std::fs::write(dir.path().join("notes.txt"), b"ignored").unwrap();
+    let progress = ImportDiscoveryProgress::default();
+
+    let discovery = lib
+        .discover_directory_with_progress(
+            dir.path().to_path_buf(),
+            ImportCancellation::default(),
+            progress.clone(),
+        )
+        .await;
+
+    assert_eq!(discovery.candidates.len(), 2);
+    let snapshot = progress.snapshot();
+    assert!(!snapshot.enumerating);
+    assert_eq!(snapshot.total_files, 2);
+    assert_eq!(snapshot.completed_files, 2);
 }
 
 #[tokio::test]
