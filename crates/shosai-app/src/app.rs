@@ -3366,6 +3366,11 @@ fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
         .height(Length::Fill)
         .into()
     };
+    let content = if state.book_menu.is_some() {
+        mouse_area(content).on_press(Message::CloseBookMenu).into()
+    } else {
+        content
+    };
 
     let Some(book) = state
         .pending_remove_book
@@ -5640,6 +5645,19 @@ mod tests {
         assert_eq!(cancel.units(), 0);
         assert_eq!(state.pending_remove_book, None);
         drop(render_book_card(&state, &book));
+    }
+
+    #[test]
+    fn clicking_outside_a_book_menu_closes_it() {
+        let (mut state, _) = boot();
+        state.library_books.push(test_book(42));
+        let _ = update(&mut state, Message::ToggleBookMenu(42));
+
+        drop(library_layout(&state, 900.0));
+        let close = update(&mut state, Message::CloseBookMenu);
+
+        assert_eq!(close.units(), 0);
+        assert_eq!(state.book_menu, None);
     }
 
     #[test]

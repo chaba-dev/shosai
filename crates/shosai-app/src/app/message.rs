@@ -93,6 +93,7 @@ pub enum Message {
     RelinkBookSelected(i64, Option<PathBuf>),
     BookRelinked(Result<Book, String>),
     ToggleBookMenu(i64),
+    CloseBookMenu,
     RequestRemoveBook(i64),
     CancelRemoveBook,
     RemoveBook(i64),

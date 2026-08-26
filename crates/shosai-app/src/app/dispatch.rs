@@ -584,6 +584,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::CloseBookMenu => {
+            state.book_menu = None;
+        }
+
         Message::RequestRemoveBook(id) => {
             if state.removing_book.is_none() {
                 state.book_menu = None;
