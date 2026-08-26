@@ -5,8 +5,8 @@ use std::sync::Arc;
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
 use iced::widget::{
-    button, center, column, container, grid, image, mouse_area, opaque, pick_list, responsive, row,
-    scrollable, sensor, text_input,
+    button, center, checkbox, column, container, grid, image, mouse_area, opaque, pick_list,
+    responsive, row, scrollable, sensor, text_input,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
@@ -16,7 +16,8 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
-    Book, BookPage, ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
+    Book, BookPage, ImportCandidate, ImportDuplicate, ImportFailure, ImportReport, Library,
+    ManagedPathChange, ManagedStorageSummary,
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -211,6 +212,12 @@ enum Screen {
 enum AddBooksSource {
     Files(Vec<PathBuf>),
     Folder(PathBuf),
+}
+
+#[derive(Debug, Clone)]
+struct StagedImport {
+    candidate: ImportCandidate,
+    selected: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -669,7 +676,11 @@ pub struct State {
     removing_book: Option<i64>,
     add_books_open: bool,
     add_books_source: Option<AddBooksSource>,
-    add_books_override: bool,
+    add_books_discovering: bool,
+    add_books_generation: u64,
+    staged_imports: Vec<StagedImport>,
+    import_discovery_failures: Vec<ImportFailure>,
+    add_books_copy: Option<bool>,
     adding_books: bool,
     library_error: Option<AppError>,
 
@@ -779,7 +790,11 @@ pub fn boot() -> (State, Task<Message>) {
         removing_book: None,
         add_books_open: false,
         add_books_source: None,
-        add_books_override: false,
+        add_books_discovering: false,
+        add_books_generation: 0,
+        staged_imports: Vec::new(),
+        import_discovery_failures: Vec::new(),
+        add_books_copy: None,
         adding_books: false,
         library_error: None,
         add_book_behavior: AddBookBehavior::default(),
@@ -4441,95 +4456,252 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         .padding([8, 14])
         .style(app_theme::book_card_action);
 
-    let content: Element<'_, Message> = if let Some(source) = &state.add_books_source {
-        let selection = match source {
-            AddBooksSource::Files(paths) => state.i18n.text_with_args(
-                "selected-book-files",
-                [("count", (paths.len() as i64).into())],
-            ),
-            AddBooksSource::Folder(path) => {
-                let name = path
+    let selection = state.add_books_source.as_ref().map(|source| match source {
+        AddBooksSource::Files(paths) => state.i18n.text_with_args(
+            "selected-book-files",
+            [("count", (paths.len() as i64).into())],
+        ),
+        AddBooksSource::Folder(path) => {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            state
+                .i18n
+                .text_with_args("selected-book-folder", [("folder", name.into())])
+        }
+    });
+
+    let content: Element<'_, Message> = if state.add_books_discovering {
+        column![
+            text(state.i18n.text("scanning-books")).size(20),
+            text(selection.unwrap_or_default())
+                .size(13)
+                .color(app_theme::TEXT_MUTED),
+            text(state.i18n.text("scanning-books-description"))
+                .size(12)
+                .color(app_theme::TEXT_MUTED),
+            row![
+                button(text(state.i18n.text("back")))
+                    .on_press(Message::ClearAddBooksSelection)
+                    .padding([8, 14])
+                    .style(app_theme::book_card_action),
+                iced::widget::Space::new().width(Length::Fill),
+                cancel,
+            ],
+        ]
+        .spacing(12)
+        .into()
+    } else if state.add_books_source.is_some() {
+        let selected_count = state
+            .staged_imports
+            .iter()
+            .filter(|staged| staged.selected)
+            .count();
+        let new_count = state
+            .staged_imports
+            .iter()
+            .filter(|staged| staged.candidate.duplicate.is_none())
+            .count();
+        let all_new_selected = new_count > 0
+            && state
+                .staged_imports
+                .iter()
+                .filter(|staged| staged.candidate.duplicate.is_none())
+                .all(|staged| staged.selected);
+        let mut candidates = column![].spacing(6);
+        let mut previous_group = None;
+        for (index, staged) in state.staged_imports.iter().enumerate() {
+            if previous_group != Some(staged.candidate.group_key.as_str()) {
+                candidates = candidates.push(text(staged.candidate.title.clone()).size(14));
+                previous_group = Some(&staged.candidate.group_key);
+            }
+            let file = staged
+                .candidate
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| staged.candidate.path.display().to_string());
+            let badge = container(
+                text(staged.candidate.format.as_str().to_uppercase())
+                    .size(10)
+                    .font(state.i18n.ui_font()),
+            )
+            .padding([3, 6])
+            .style(|_| {
+                iced::widget::container::Style::default()
+                    .background(app_theme::SURFACE_MUTED)
+                    .border(iced::Border {
+                        color: app_theme::BORDER,
+                        width: 1.0,
+                        radius: app_theme::RADIUS_SMALL.into(),
+                    })
+            });
+            let details = row![
+                text(file).size(12),
+                badge,
+                text(format_bytes(staged.candidate.file_size))
+                    .size(11)
+                    .color(app_theme::TEXT_MUTED),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+            let duplicate: Element<'_, Message> = match &staged.candidate.duplicate {
+                Some(ImportDuplicate::ExistingBook { title, .. }) => text(
+                    state
+                        .i18n
+                        .text_with_args("already-in-library", [("title", title.clone().into())]),
+                )
+                .size(11)
+                .color(app_theme::TEXT_MUTED)
+                .into(),
+                Some(ImportDuplicate::SelectedFile { path }) => {
+                    let file = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string());
+                    text(
+                        state
+                            .i18n
+                            .text_with_args("duplicate-selected-file", [("file", file.into())]),
+                    )
+                    .size(11)
+                    .color(app_theme::TEXT_MUTED)
+                    .into()
+                }
+                None => iced::widget::Space::new().height(0).into(),
+            };
+            candidates = candidates.push(
+                container(
+                    row![
+                        checkbox(staged.selected)
+                            .on_toggle(move |selected| Message::ToggleStagedBook(index, selected)),
+                        column![details, duplicate].spacing(2).width(Length::Fill),
+                    ]
+                    .spacing(10)
+                    .align_y(iced::Alignment::Center),
+                )
+                .padding([7, 8])
+                .width(Length::Fill)
+                .style(app_theme::surface),
+            );
+        }
+
+        let discovery_error: Element<'_, Message> =
+            if let Some(failure) = state.import_discovery_failures.first() {
+                let file = failure
+                    .path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| path.display().to_string());
-                state
-                    .i18n
-                    .text_with_args("selected-book-folder", [("folder", name.into())])
-            }
-        };
-        if state.add_book_behavior == AddBookBehavior::Ask || state.add_books_override {
-            column![
-                text(state.i18n.text("book-storage-heading")).size(20),
-                text(selection).size(13).color(app_theme::TEXT_MUTED),
-                widgets::primary_button(
-                    state.i18n.text("copy-into-shosai"),
-                    Some(Message::AddSelectedBooks { copy: true }),
-                    state.i18n.ui_font(),
-                )
-                .width(Length::Fill),
-                text(state.i18n.text("copy-into-shosai-description"))
-                    .size(12)
-                    .color(app_theme::TEXT_MUTED),
-                widgets::secondary_button(
-                    state.i18n.text("use-current-location"),
-                    Some(Message::AddSelectedBooks { copy: false }),
-                    state.i18n.ui_font(),
-                )
-                .width(Length::Fill),
-                text(state.i18n.text("use-current-location-description"))
-                    .size(12)
-                    .color(app_theme::TEXT_MUTED),
-                row![
-                    button(text(state.i18n.text("back")))
-                        .on_press(Message::ClearAddBooksSelection)
-                        .padding([8, 14])
-                        .style(app_theme::book_card_action),
-                    iced::widget::Space::new().width(Length::Fill),
-                    cancel,
-                ]
-                .align_y(iced::Alignment::Center),
-            ]
-            .spacing(12)
-            .into()
-        } else {
-            let copy = state.add_book_behavior == AddBookBehavior::Copy;
+                    .unwrap_or_else(|| failure.path.display().to_string());
+                text(state.i18n.text_with_args(
+                    "book-discovery-failed",
+                    [
+                        (
+                            "count",
+                            (state.import_discovery_failures.len() as i64).into(),
+                        ),
+                        ("file", file.into()),
+                        ("error", failure.error.clone().into()),
+                    ],
+                ))
+                .size(11)
+                .color(app_theme::TEXT_MUTED)
+                .into()
+            } else {
+                iced::widget::Space::new().height(0).into()
+            };
+
+        let storage: Element<'_, Message> = if let Some(copy) = state.add_books_copy {
             let behavior = if copy {
                 state.i18n.text("copy-into-shosai")
             } else {
                 state.i18n.text("use-current-location")
             };
-            let description = if copy {
-                state.i18n.text("copy-into-shosai-description")
-            } else {
-                state.i18n.text("use-current-location-description")
-            };
             column![
-                text(state.i18n.text("ready-to-add-books")).size(20),
-                text(selection).size(13).color(app_theme::TEXT_MUTED),
-                text(behavior).size(15),
-                text(description).size(12).color(app_theme::TEXT_MUTED),
-                button(text(state.i18n.text("change-storage-choice")))
-                    .on_press(Message::ChangeAddBooksStorage)
-                    .padding([8, 0])
-                    .style(app_theme::book_card_action),
-                widgets::primary_button(
-                    state.i18n.text("add-selected-books"),
-                    Some(Message::AddSelectedBooks { copy }),
+                text(state.i18n.text("book-storage-heading")).size(14),
+                row![
+                    text(behavior).size(12),
+                    button(text(state.i18n.text("change-storage-choice")))
+                        .on_press(Message::ChangeAddBooksStorage)
+                        .padding([4, 8])
+                        .style(app_theme::book_card_action),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            ]
+            .spacing(4)
+            .into()
+        } else {
+            column![
+                text(state.i18n.text("book-storage-heading")).size(14),
+                widgets::secondary_button(
+                    state.i18n.text("copy-into-shosai"),
+                    Some(Message::SelectAddBooksStorage(true)),
                     state.i18n.ui_font(),
                 )
                 .width(Length::Fill),
-                row![
-                    button(text(state.i18n.text("back")))
-                        .on_press(Message::ClearAddBooksSelection)
-                        .padding([8, 14])
-                        .style(app_theme::book_card_action),
-                    iced::widget::Space::new().width(Length::Fill),
-                    cancel,
-                ],
+                text(state.i18n.text("copy-into-shosai-description"))
+                    .size(11)
+                    .color(app_theme::TEXT_MUTED),
+                widgets::secondary_button(
+                    state.i18n.text("use-current-location"),
+                    Some(Message::SelectAddBooksStorage(false)),
+                    state.i18n.ui_font(),
+                )
+                .width(Length::Fill),
+                text(state.i18n.text("use-current-location-description"))
+                    .size(11)
+                    .color(app_theme::TEXT_MUTED),
             ]
-            .spacing(12)
+            .spacing(6)
             .into()
-        }
+        };
+
+        let add_message = (selected_count > 0 && state.add_books_copy.is_some())
+            .then_some(Message::AddSelectedBooks);
+        column![
+            text(state.i18n.text("review-books-heading")).size(20),
+            text(state.i18n.text_with_args(
+                "review-books-summary",
+                [
+                    ("found", (state.staged_imports.len() as i64).into()),
+                    ("selected", (selected_count as i64).into()),
+                ],
+            ))
+            .size(12)
+            .color(app_theme::TEXT_MUTED),
+            checkbox(all_new_selected)
+                .label(state.i18n.text("select-all-new-books"))
+                .font(state.i18n.ui_font())
+                .on_toggle(Message::SelectAllStagedBooks),
+            if state.staged_imports.is_empty() {
+                container(text(state.i18n.text("no-supported-books-found")))
+                    .padding(12)
+                    .width(Length::Fill)
+            } else {
+                container(scrollable(candidates).height(Length::Fixed(280.0)))
+            },
+            discovery_error,
+            storage,
+            row![
+                button(text(state.i18n.text("back")))
+                    .on_press(Message::ClearAddBooksSelection)
+                    .padding([8, 14])
+                    .style(app_theme::book_card_action),
+                iced::widget::Space::new().width(Length::Fill),
+                cancel,
+                widgets::primary_button(
+                    state.i18n.text("add-selected-books"),
+                    add_message,
+                    state.i18n.ui_font(),
+                ),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        ]
+        .spacing(10)
+        .into()
     } else {
         column![
             text(state.i18n.text("add-books-heading")).size(20),
@@ -4557,7 +4729,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
     container(content)
         .padding(24)
         .width(Length::Fill)
-        .max_width(480)
+        .max_width(680)
         .style(app_theme::modal)
         .into()
 }
@@ -6612,7 +6784,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_books_flow_separates_source_selection_from_storage() {
+    async fn add_books_flow_stages_candidates_before_importing() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
             .await
@@ -6628,34 +6800,101 @@ mod tests {
         assert!(state.add_books_source.is_none());
         drop(add_books_modal(&state));
 
+        state.add_book_behavior = AddBookBehavior::Copy;
         let paths = vec![PathBuf::from("one.epub"), PathBuf::from("two.pdf")];
-        let _ = update(&mut state, Message::AddBookFilesSelected(paths));
+        let discover = update(&mut state, Message::AddBookFilesSelected(paths));
+        assert!(discover.units() > 0);
         assert!(matches!(
             state.add_books_source,
             Some(AddBooksSource::Files(ref paths)) if paths.len() == 2
         ));
-        state.add_book_behavior = AddBookBehavior::Copy;
-        drop(add_books_modal(&state));
-        let _ = update(&mut state, Message::ChangeAddBooksStorage);
-        assert!(state.add_books_override);
+        assert!(state.add_books_discovering);
+        assert!(state.staged_imports.is_empty());
         drop(add_books_modal(&state));
 
+        let generation = state.add_books_generation;
+        let _ = update(
+            &mut state,
+            Message::BooksDiscovered {
+                generation,
+                discovery: shosai_core::library::ImportDiscovery {
+                    candidates: vec![
+                        ImportCandidate {
+                            path: PathBuf::from("one.epub"),
+                            title: "one".to_string(),
+                            group_key: "one".to_string(),
+                            format: shosai_core::library::BookFormat::Epub,
+                            file_size: 100,
+                            duplicate: None,
+                        },
+                        ImportCandidate {
+                            path: PathBuf::from("two.pdf"),
+                            title: "two".to_string(),
+                            group_key: "two".to_string(),
+                            format: shosai_core::library::BookFormat::Pdf,
+                            file_size: 200,
+                            duplicate: Some(ImportDuplicate::ExistingBook {
+                                book_id: 7,
+                                title: "Two".to_string(),
+                            }),
+                        },
+                    ],
+                    failures: Vec::new(),
+                },
+            },
+        );
+        assert!(!state.add_books_discovering);
+        assert_eq!(state.staged_imports.len(), 2);
+        assert!(state.staged_imports[0].selected);
+        assert!(!state.staged_imports[1].selected);
+        assert_eq!(state.add_books_copy, Some(true));
+        drop(add_books_modal(&state));
+
+        let _ = update(&mut state, Message::ChangeAddBooksStorage);
+        assert_eq!(state.add_books_copy, None);
+        let _ = update(&mut state, Message::SelectAddBooksStorage(false));
+        assert_eq!(state.add_books_copy, Some(false));
+        drop(add_books_modal(&state));
+
+        let stale_generation = state.add_books_generation;
         let _ = update(&mut state, Message::ClearAddBooksSelection);
         assert!(state.add_books_source.is_none());
-        assert!(!state.add_books_override);
-
+        assert!(state.staged_imports.is_empty());
+        assert_eq!(state.add_books_copy, None);
         let _ = update(
+            &mut state,
+            Message::BooksDiscovered {
+                generation: stale_generation,
+                discovery: shosai_core::library::ImportDiscovery {
+                    candidates: vec![ImportCandidate {
+                        path: PathBuf::from("stale.epub"),
+                        title: "stale".to_string(),
+                        group_key: "stale".to_string(),
+                        format: shosai_core::library::BookFormat::Epub,
+                        file_size: 100,
+                        duplicate: None,
+                    }],
+                    failures: Vec::new(),
+                },
+            },
+        );
+        assert!(state.staged_imports.is_empty());
+
+        let discover = update(
             &mut state,
             Message::AddBookFolderSelected(Some(PathBuf::from("books"))),
         );
+        assert!(discover.units() > 0);
         assert!(matches!(
             state.add_books_source,
             Some(AddBooksSource::Folder(ref path)) if path == &PathBuf::from("books")
         ));
+        assert!(state.add_books_discovering);
 
         let _ = update(&mut state, Message::CancelAddBooks);
         assert!(!state.add_books_open);
         assert!(state.add_books_source.is_none());
+        assert!(!state.add_books_discovering);
     }
 
     #[tokio::test]

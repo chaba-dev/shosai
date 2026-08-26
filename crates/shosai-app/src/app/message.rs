@@ -4,7 +4,7 @@ use std::sync::Arc;
 use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
-use shosai_core::library::{Book, BookPage, ImportReport};
+use shosai_core::library::{Book, BookPage, ImportDiscovery, ImportReport};
 use shosai_core::search::SearchMatch;
 
 use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
@@ -91,11 +91,16 @@ pub enum Message {
     ChooseBookFolder,
     AddBookFilesSelected(Vec<PathBuf>),
     AddBookFolderSelected(Option<PathBuf>),
+    BooksDiscovered {
+        generation: u64,
+        discovery: ImportDiscovery,
+    },
+    ToggleStagedBook(usize, bool),
+    SelectAllStagedBooks(bool),
+    SelectAddBooksStorage(bool),
     ClearAddBooksSelection,
     ChangeAddBooksStorage,
-    AddSelectedBooks {
-        copy: bool,
-    },
+    AddSelectedBooks,
     BooksAdded(ImportReport),
     OpenLibraryBook(i64, String),
     LocateBook(i64),
