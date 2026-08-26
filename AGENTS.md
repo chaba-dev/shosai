@@ -11,3 +11,7 @@
 - Use `docs(plan): ...` for planning-only changes; these are excluded from changelogs and version inference.
 - Use `!` or a `BREAKING CHANGE:` footer for breaking changes.
 - Pull request titles are validated because squash merges use the title as the commit message. Keep this list aligned with `.github/workflows/commits.yml` and `cliff.toml`.
+
+# Design system
+
+- Follow `docs/typography.md` when adding, replacing, or applying fonts in the application or website.
