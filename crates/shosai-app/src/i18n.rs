@@ -39,14 +39,6 @@ impl LanguagePreference {
             Self::Japanese => "ja",
         }
     }
-
-    pub fn next(self) -> Self {
-        match self {
-            Self::System => Self::English,
-            Self::English => Self::Japanese,
-            Self::Japanese => Self::System,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -90,15 +82,6 @@ impl I18n {
             .map(|(name, value)| (Cow::Borrowed(name), value))
             .collect::<HashMap<_, _>>();
         LOCALES.lookup_with_args(&self.language, key, &args)
-    }
-
-    pub fn selector_label(&self) -> String {
-        let key = match self.preference {
-            LanguagePreference::System => "language-system",
-            LanguagePreference::English => "language-english",
-            LanguagePreference::Japanese => "language-japanese",
-        };
-        self.text(key)
     }
 }
 

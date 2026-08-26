@@ -72,6 +72,7 @@ pub enum Message {
 
     // Library
     ShowLibrary,
+    ShowSettings,
     RefreshLibrary,
     LoadMoreLibrary,
     LibraryIndexLoaded {
@@ -84,11 +85,18 @@ pub enum Message {
         next_offset: usize,
         page: BookPage,
     },
-    ImportFile,
-    LinkFile,
-    ImportDirectory,
+    OpenAddBooks,
+    CancelAddBooks,
+    ChooseBookFiles,
+    ChooseBookFolder,
+    AddBookFilesSelected(Vec<PathBuf>),
+    AddBookFolderSelected(Option<PathBuf>),
+    ClearAddBooksSelection,
+    AddSelectedBooks {
+        copy: bool,
+    },
+    BooksAdded(Result<(), String>),
     OpenLibraryBook(i64, String),
-    ManagedBookImported(Result<Book, String>),
     LocateBook(i64),
     RelinkBookSelected(i64, Option<PathBuf>),
     BookRelinked(Result<Book, String>),
@@ -104,7 +112,7 @@ pub enum Message {
     LibrarySearchChanged(String),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
-    CycleLanguage,
+    SelectLanguage(crate::i18n::LanguagePreference),
 
     // Bookmarks
     ToggleBookmark,
