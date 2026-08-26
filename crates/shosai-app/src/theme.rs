@@ -473,7 +473,25 @@ pub fn book_action_menu(_theme: &Theme) -> container::Style {
         })
 }
 
-pub fn book_confirmation(_theme: &Theme) -> container::Style {
+pub fn book_menu_action(_theme: &Theme, status: button::Status) -> button::Style {
+    let danger = Color::from_rgb8(0xA5, 0x43, 0x43);
+    button::Style {
+        background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+            .then_some(Background::Color(danger.scale_alpha(0.10))),
+        text_color: danger,
+        border: Border {
+            radius: RADIUS_SMALL.into(),
+            ..Border::default()
+        },
+        ..button::Style::default()
+    }
+}
+
+pub fn modal_backdrop(_theme: &Theme) -> container::Style {
+    container::Style::default().background(Color::from_rgba8(0x21, 0x20, 0x1E, 0.42))
+}
+
+pub fn modal(_theme: &Theme) -> container::Style {
     container::Style::default()
         .background(SURFACE)
         .color(TEXT)
@@ -481,6 +499,11 @@ pub fn book_confirmation(_theme: &Theme) -> container::Style {
             color: BORDER,
             width: 1.0,
             radius: RADIUS_SMALL.into(),
+        })
+        .shadow(Shadow {
+            color: Color::from_rgba8(0x21, 0x20, 0x1E, 0.24),
+            offset: Vector::new(0.0, 5.0),
+            blur_radius: 18.0,
         })
 }
 

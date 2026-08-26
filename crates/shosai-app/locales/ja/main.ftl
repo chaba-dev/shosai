@@ -14,7 +14,6 @@ locate-file = ファイルを探す…
 locate-book-dialog = 本のファイルを探す
 remove-from-library = ライブラリから削除
 remove-from-library-menu = ライブラリから削除…
-book-actions = 本の操作
 remove-book-heading = ライブラリから削除しますか？
 remove-managed-book-description = この本と書斎内のコピーを削除します。元のファイルは変更されません。
 remove-referenced-book-description = 書斎からこの本を削除します。元のファイルは変更されません。

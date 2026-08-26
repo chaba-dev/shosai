@@ -14,7 +14,6 @@ locate-file = Locate File…
 locate-book-dialog = Locate Book
 remove-from-library = Remove from Library
 remove-from-library-menu = Remove from Library…
-book-actions = Book actions
 remove-book-heading = Remove from Library?
 remove-managed-book-description = This removes the book and Shosai's copied file. The original file is unchanged.
 remove-referenced-book-description = This removes the book from Shosai. The original file is unchanged.
