@@ -17,6 +17,8 @@ use crate::document::Document;
 use crate::epub::EpubDoc;
 use crate::pdf::PdfDoc;
 
+pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
+
 /// Supported book format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BookFormat {
@@ -102,6 +104,19 @@ pub struct BookPage {
     pub has_more: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ManagedStorageSummary {
+    pub book_count: u64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedPathChange {
+    pub book_id: i64,
+    pub old_path: PathBuf,
+    pub new_path: PathBuf,
+}
+
 struct FileFingerprint {
     hash: String,
     size: u64,
@@ -125,6 +140,157 @@ impl Library {
     /// Create a library handle from an existing connection pool.
     pub fn new(pool: SqlitePool, managed_dir: PathBuf) -> Self {
         Self { pool, managed_dir }
+    }
+
+    pub fn managed_dir(&self) -> &Path {
+        &self.managed_dir
+    }
+
+    pub fn with_managed_dir(&self, managed_dir: PathBuf) -> Self {
+        Self::new(self.pool.clone(), managed_dir)
+    }
+
+    pub async fn managed_storage_summary(&self) -> Result<ManagedStorageSummary> {
+        let row = sqlx::query(
+            "SELECT COUNT(*) AS book_count, COALESCE(SUM(file_size), 0) AS total_bytes
+             FROM books WHERE storage_kind = 'managed'",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("failed to summarize managed books")?;
+        Ok(ManagedStorageSummary {
+            book_count: row.get::<i64, _>("book_count") as u64,
+            total_bytes: row.get::<i64, _>("total_bytes") as u64,
+        })
+    }
+
+    /// Move all private book copies to a new managed directory.
+    ///
+    /// New copies are fully staged before paths are updated transactionally. Old copies are only
+    /// removed after the database commit, so interruption may leave harmless duplicates but never
+    /// database rows pointing at incomplete files.
+    pub async fn relocate_managed_books(&self, new_dir: &Path) -> Result<Vec<ManagedPathChange>> {
+        let new_dir = new_dir.to_path_buf();
+        let create_dir = new_dir.clone();
+        tokio::task::spawn_blocking(move || std::fs::create_dir_all(&create_dir))
+            .await
+            .context("managed library directory task failed")?
+            .with_context(|| format!("failed to create {}", new_dir.display()))?;
+        let new_dir = canonical_path(&new_dir);
+
+        let rows = sqlx::query(
+            "SELECT id, file_path, content_hash FROM books
+             WHERE storage_kind = 'managed' ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list managed books for relocation")?;
+        let mut changes = Vec::with_capacity(rows.len());
+        let mut created_destinations = Vec::new();
+
+        for row in rows {
+            let book_id = row.get::<i64, _>("id");
+            let old_path = PathBuf::from(row.get::<String, _>("file_path"));
+            let expected_hash = row.get::<Option<String>, _>("content_hash");
+            let extension = old_path
+                .extension()
+                .map(|extension| extension.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let source = old_path.clone();
+            let destination_dir = new_dir.clone();
+            let relocation = tokio::task::spawn_blocking(move || -> Result<(PathBuf, bool)> {
+                let fingerprint = file_fingerprint(&source)?;
+                if expected_hash
+                    .as_ref()
+                    .is_some_and(|expected| expected != &fingerprint.hash)
+                {
+                    bail!("managed book failed verification: {}", source.display());
+                }
+                let destination =
+                    destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
+                let existed = destination.exists();
+                let staged = stage_managed_file(&source, &destination_dir)?;
+                publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
+                Ok((canonical_path(&destination), !existed))
+            })
+            .await
+            .context("managed book relocation task failed");
+            let (new_path, created) = match relocation {
+                Ok(Ok(relocation)) => relocation,
+                Ok(Err(error)) | Err(error) => {
+                    for path in created_destinations {
+                        let _ = std::fs::remove_file(path);
+                    }
+                    return Err(error);
+                }
+            };
+            if created {
+                created_destinations.push(new_path.clone());
+            }
+            changes.push(ManagedPathChange {
+                book_id,
+                old_path,
+                new_path,
+            });
+        }
+
+        let database_result = async {
+            let mut transaction = self.pool.begin().await?;
+            for change in &changes {
+                let old_path = change.old_path.to_string_lossy();
+                let new_path = change.new_path.to_string_lossy();
+                sqlx::query("UPDATE books SET file_path = ? WHERE id = ?")
+                    .bind(new_path.as_ref())
+                    .bind(change.book_id)
+                    .execute(&mut *transaction)
+                    .await
+                    .context("failed to update managed book path")?;
+                reconcile_identity(
+                    &mut transaction,
+                    change.book_id,
+                    old_path.as_ref(),
+                    new_path.as_ref(),
+                )
+                .await?;
+            }
+            sqlx::query(
+                "INSERT INTO preferences (key, value, updated_at)
+                 VALUES (?, ?, datetime('now'))
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            )
+            .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
+            .bind(new_dir.to_string_lossy().as_ref())
+            .execute(&mut *transaction)
+            .await
+            .context("failed to save managed library location")?;
+            transaction
+                .commit()
+                .await
+                .context("failed to commit managed library relocation")?;
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        if let Err(error) = database_result {
+            for path in created_destinations {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(error);
+        }
+
+        for change in &changes {
+            if change.old_path != change.new_path
+                && let Err(error) = std::fs::remove_file(&change.old_path)
+            {
+                eprintln!(
+                    "warning: failed to remove old managed book {}: {error}",
+                    change.old_path.display()
+                );
+            }
+        }
+        if self.managed_dir != new_dir {
+            let _ = std::fs::remove_dir(&self.managed_dir);
+        }
+        Ok(changes)
     }
 
     /// Import a single book file into the library.

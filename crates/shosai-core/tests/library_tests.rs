@@ -1,5 +1,5 @@
 use shosai_core::bookmarks::BookmarkStore;
-use shosai_core::library::{BookFormat, Library, StorageKind};
+use shosai_core::library::{BookFormat, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -264,6 +264,59 @@ async fn managed_import_survives_the_source_being_removed() {
             .starts_with(dir.path().join("books").canonicalize().unwrap())
     );
     assert!(book.content_hash.is_some());
+}
+
+#[tokio::test]
+async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    let old_path = PathBuf::from(&book.file_path);
+    store
+        .set_for_book_async(
+            book.id,
+            &old_path,
+            &FileReadingState {
+                page: 3,
+                location_offset: Some(42),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_for_book_at_async(book.id, &old_path, 2, Some(7), None)
+        .await
+        .unwrap();
+    let destination = dir.path().join("external").join("Shosai");
+
+    let changes = lib.relocate_managed_books(&destination).await.unwrap();
+
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].book_id, book.id);
+    assert!(!old_path.exists());
+    assert!(changes[0].new_path.exists());
+    let relocated = lib.get(book.id).await.unwrap().unwrap();
+    assert_eq!(PathBuf::from(relocated.file_path), changes[0].new_path);
+    assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 3);
+    let bookmark = bookmarks
+        .list_for_book_async(book.id)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
+    assert_eq!(
+        store.get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE).await,
+        Some(
+            destination
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
 }
 
 #[tokio::test]
