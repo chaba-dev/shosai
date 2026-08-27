@@ -186,7 +186,11 @@ impl EpubFontBook {
         let mut inspected = HashMap::<Descriptor, bool>::new();
         let mut descriptor_limit_reported = false;
         for chapter in chapters {
-            let normalized = super::render::resolve_xhtml_named_entities(&chapter.content);
+            let Ok(normalized) =
+                super::render::bounded_chapter_xhtml(&chapter.content, &chapter.path, limits)
+            else {
+                continue;
+            };
             let options = super::render::xhtml_parsing_options(normalized.len());
             let Ok(document) = roxmltree::Document::parse_with_options(&normalized, options) else {
                 continue;

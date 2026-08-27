@@ -298,7 +298,7 @@ fn parse_chapter_xhtml_with_owner_and_limits(
 ) -> Result<ParsedChapterContent> {
     // XML parsers do not load the external XHTML DTD (and must not do so for
     // EPUB content). Resolve the fixed, local HTML entity table instead.
-    let normalized_xhtml = resolve_xhtml_named_entities(xhtml);
+    let normalized_xhtml = bounded_chapter_xhtml(xhtml, chapter_path.unwrap_or("chapter"), limits)?;
     let parsing_options = xhtml_parsing_options(normalized_xhtml.len());
     let doc = roxmltree::Document::parse_with_options(&normalized_xhtml, parsing_options)
         .with_context(|| {
@@ -339,6 +339,146 @@ pub(super) fn xhtml_parsing_options<'a>(length: usize) -> roxmltree::ParsingOpti
         nodes_limit: u32::try_from(length).unwrap_or(u32::MAX),
         ..Default::default()
     }
+}
+
+pub(super) fn bounded_chapter_xhtml<'a>(
+    xhtml: &'a str,
+    path: &str,
+    limits: &EpubLimits,
+) -> Result<std::borrow::Cow<'a, str>> {
+    let raw_text_bytes = super::limits::validate_xml_shape(xhtml, path, limits)?;
+    validate_entity_expansion_budget(
+        xhtml,
+        path,
+        limits.max_xml_text_bytes.saturating_sub(raw_text_bytes),
+    )?;
+    Ok(resolve_xhtml_named_entities(xhtml))
+}
+
+fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut entities = HashMap::new();
+    let mut document = xhtml;
+    while let Some(start) = document.find("<!DOCTYPE") {
+        let doctype = &document[start..];
+        let end = doctype_end(doctype).unwrap_or(doctype.len());
+        for start in entity_declaration_starts(&doctype[..end]) {
+            let mut tail = doctype[start + 8..end].trim_start();
+            if tail.starts_with('%') {
+                continue;
+            }
+            let name_len = tail
+                .bytes()
+                .take_while(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
+                })
+                .count();
+            if name_len == 0 {
+                continue;
+            }
+            let name = &tail[..name_len];
+            tail = tail[name_len..].trim_start();
+            let Some(quote) = tail
+                .as_bytes()
+                .first()
+                .copied()
+                .filter(|c| matches!(c, b'\'' | b'"'))
+            else {
+                continue; // External declarations are never resolved.
+            };
+            if let Some(close) = tail[1..].find(char::from(quote)) {
+                entities.insert(name, &tail[1..close + 1]);
+            }
+        }
+        document = &doctype[end..];
+    }
+
+    fn expanded_len<'a>(
+        name: &'a str,
+        entities: &HashMap<&'a str, &'a str>,
+        visiting: &mut HashSet<&'a str>,
+        limit: u64,
+    ) -> Result<u64> {
+        let Some(value) = entities.get(name) else {
+            return Ok(0);
+        };
+        if !visiting.insert(name) {
+            anyhow::bail!("recursive EPUB XHTML entity declaration");
+        }
+        let mut total = value.len() as u64;
+        for reference in entity_references(value) {
+            total = total
+                .checked_add(expanded_len(reference, entities, visiting, limit)?)
+                .context("EPUB XHTML entity expansion byte count overflowed")?;
+            if total > limit {
+                break;
+            }
+        }
+        visiting.remove(name);
+        Ok(total)
+    }
+
+    let mut expanded = 0_u64;
+    for reference in document_entity_references(xhtml) {
+        expanded = expanded
+            .checked_add(expanded_len(
+                reference,
+                &entities,
+                &mut HashSet::new(),
+                limit,
+            )?)
+            .context("EPUB XHTML entity expansion byte count overflowed")?;
+        if expanded > limit {
+            anyhow::bail!(
+                "EPUB XML entry exceeds expanded text limit: {path} ({expanded} > {limit})"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn entity_references(text: &str) -> impl Iterator<Item = &str> {
+    text.split('&').skip(1).filter_map(|tail| {
+        let end = tail.find(';')?;
+        let name = &tail[..end];
+        (!name.starts_with('#') && !name.is_empty()).then_some(name)
+    })
+}
+
+fn document_entity_references(xhtml: &str) -> Vec<&str> {
+    let mut references = Vec::new();
+    let mut position = 0;
+    while position < xhtml.len() {
+        let tail = &xhtml[position..];
+        let skipped = if tail.starts_with("<!DOCTYPE") {
+            doctype_end(tail)
+        } else if tail.starts_with("<!--") {
+            tail.find("-->").map(|end| end + 3)
+        } else if tail.starts_with("<![CDATA[") {
+            tail.find("]]>").map(|end| end + 3)
+        } else if tail.starts_with("<?") {
+            tail.find("?>").map(|end| end + 2)
+        } else {
+            None
+        };
+        if let Some(length) = skipped {
+            position += length;
+        } else if tail.starts_with('&') {
+            if let Some(end) = tail.find(';') {
+                let name = &tail[1..end];
+                if !name.starts_with('#') && !name.is_empty() {
+                    references.push(name);
+                }
+                position += end + 1;
+            } else {
+                break;
+            }
+        } else {
+            position += tail.chars().next().unwrap().len_utf8();
+        }
+    }
+    references
 }
 
 pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
@@ -892,6 +1032,13 @@ fn parse_figure(
         (spans, Some(css_to_node_style(css, "figcaption")))
     };
     let mut anchors = HashMap::new();
+    for ancestor in image
+        .ancestors()
+        .skip(1)
+        .take_while(|node| *node != *figure)
+    {
+        record_element_anchors(&ancestor, 0, &mut anchors);
+    }
     record_element_anchors(&image, 0, &mut anchors);
     let caption_offset = alt.chars().count() + usize::from(!caption.is_empty());
     record_element_anchors(&caption_node, caption_offset, &mut anchors);
@@ -2393,6 +2540,26 @@ mod tests {
     }
 
     #[test]
+    fn dtd_entity_expansion_is_bounded_before_parsing() {
+        let amplified = r#"<!DOCTYPE html [
+          <!ENTITY a "12345678"><!ENTITY b "&a;&a;&a;&a;">
+          <!ENTITY c "&b;&b;&b;&b;">
+        ]><html><body>&c;&c;&c;&c;</body></html>"#;
+        let mut limits = EpubLimits::default();
+        limits.max_xml_text_bytes = 128;
+        let error = parse_chapter_xhtml_with_limits(amplified, "", &Default::default(), &limits)
+            .expect_err("amplified entity text must be rejected before roxmltree expands it");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let valid =
+            r#"<!DOCTYPE html [<!ENTITY word "bounded">]><html><body><p>&word;</p></body></html>"#;
+        limits.max_xml_text_bytes = 32;
+        let nodes = parse_chapter_xhtml_with_limits(valid, "", &Default::default(), &limits)
+            .expect("below-limit DTD text should remain supported");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "bounded\n");
+    }
+
+    #[test]
     fn entity_declaration_scan_ignores_comments_and_quoted_values() {
         let xhtml = r#"<!DOCTYPE html [
           <!-- <!ENTITY copy "fake comment declaration"> -->
@@ -2813,6 +2980,30 @@ mod tests {
             crate::search::extract_text_from_nodes(&nodes),
             "Diagram\nFigure 1: Architecture\n"
         );
+    }
+
+    #[test]
+    fn collapsed_figure_records_only_selected_image_ancestor_anchors() {
+        let xhtml = r#"<html><body><figure><a id="image-wrapper"><img src="figure.png" alt="Diagram"/></a><figcaption>Caption</figcaption></figure><div id="unrelated">After</div></body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("figure should collapse");
+
+        assert!(matches!(
+            parsed.nodes.first(),
+            Some(ContentNode::Image { .. })
+        ));
+        assert_eq!(parsed.anchor_offsets.get("image-wrapper"), Some(&0));
+        assert_ne!(parsed.anchor_offsets.get("unrelated"), Some(&0));
     }
 
     #[test]

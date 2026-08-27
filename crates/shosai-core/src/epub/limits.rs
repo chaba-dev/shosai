@@ -122,7 +122,7 @@ impl Default for EpubLimits {
     }
 }
 
-pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> Result<()> {
+pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> Result<u64> {
     if xml.len() as u64 > limits.max_xml_bytes {
         anyhow::bail!(
             "EPUB XML entry exceeds byte limit: {path} ({} > {})",
@@ -199,7 +199,7 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
         }
     }
 
-    Ok(())
+    Ok(text_bytes)
 }
 
 pub(crate) fn validate_resource(
