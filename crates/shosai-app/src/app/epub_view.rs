@@ -478,8 +478,12 @@ fn render_content_node<'a>(
             let mut table = column![].spacing(EPUB_TABLE_ROW_SPACING);
             let table_width =
                 crate::epub::epub_table_layout_width(row_groups, style, available_width);
-            let table_content_width =
-                (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
+            let table_content_width = crate::epub::epub_table_content_width(
+                style,
+                table_width,
+                available_width,
+                font_size,
+            );
             let column_widths =
                 crate::epub::epub_table_column_widths(row_groups, table_content_width);
             let geometry = crate::epub::epub_table_geometry_bounded(
