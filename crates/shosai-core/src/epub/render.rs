@@ -399,7 +399,11 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
         entities: &HashMap<&'a str, &'a str>,
         visiting: &mut HashSet<&'a str>,
         limit: u64,
+        depth: u8,
     ) -> Result<u64> {
+        if depth >= 10 {
+            anyhow::bail!("EPUB XHTML entity nesting exceeds parser limit");
+        }
         let Some(value) = entities.get(name) else {
             return Ok(0);
         };
@@ -409,7 +413,13 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
         let mut total = value.len() as u64;
         for reference in entity_references(value) {
             total = total
-                .checked_add(expanded_len(reference, entities, visiting, limit)?)
+                .checked_add(expanded_len(
+                    reference,
+                    entities,
+                    visiting,
+                    limit,
+                    depth + 1,
+                )?)
                 .context("EPUB XHTML entity expansion byte count overflowed")?;
             if total > limit {
                 break;
@@ -427,6 +437,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
                 &entities,
                 &mut HashSet::new(),
                 limit,
+                0,
             )?)
             .context("EPUB XHTML entity expansion byte count overflowed")?;
         if expanded > limit {
@@ -2557,6 +2568,20 @@ mod tests {
         let nodes = parse_chapter_xhtml_with_limits(valid, "", &Default::default(), &limits)
             .expect("below-limit DTD text should remain supported");
         assert_eq!(crate::search::extract_text_from_nodes(&nodes), "bounded\n");
+
+        let declarations = (0..32)
+            .map(|index| {
+                if index == 0 {
+                    "<!ENTITY e0 \"x\">".to_owned()
+                } else {
+                    format!("<!ENTITY e{index} \"&e{};\">", index - 1)
+                }
+            })
+            .collect::<String>();
+        let deep = format!("<!DOCTYPE html [{declarations}]><html><body>&e31;</body></html>");
+        let error = parse_chapter_xhtml_with_limits(&deep, "", &Default::default(), &limits)
+            .expect_err("deep entity chains must be rejected without recursive stack growth");
+        assert!(error.to_string().contains("entity nesting"));
     }
 
     #[test]
