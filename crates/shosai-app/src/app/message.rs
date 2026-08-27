@@ -4,7 +4,9 @@ use std::sync::Arc;
 use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
-use shosai_core::library::{Book, BookPage, ImportDiscovery, ImportReport};
+use shosai_core::library::{
+    Book, BookPage, ImportDiscovery, ImportFailure, ImportReport, PreparedManagedImport,
+};
 use shosai_core::search::SearchMatch;
 
 use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
@@ -107,6 +109,10 @@ pub enum Message {
     ClearAddBooksSelection,
     ChangeAddBooksStorage,
     AddSelectedBooks,
+    ManagedBookPrepared {
+        index: usize,
+        result: Result<(PathBuf, Arc<PreparedManagedImport>), ImportFailure>,
+    },
     BookAddedToBatch(ImportReport),
     OpenLibraryBook(i64, String),
     LocateBook(i64),

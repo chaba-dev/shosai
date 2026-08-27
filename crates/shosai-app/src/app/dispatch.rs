@@ -8,24 +8,134 @@ fn cancel_add_books_discovery(state: &mut State) {
     state.add_books_discovering = false;
 }
 
-fn import_next_book(state: &mut State) -> Task<Message> {
-    let (Some(library), Some(candidate)) = (
-        state.library.clone(),
-        state.pending_book_imports.pop_front(),
-    ) else {
+fn record_book_import_report(state: &mut State, report: ImportReport) {
+    state.book_import_completed += 1;
+    state.library_activity_progress =
+        state.book_import_completed as f32 / state.book_import_total.max(1) as f32;
+    for book in &report.books {
+        if book_matches_library_view(state, book)
+            && !state
+                .library_books
+                .iter()
+                .any(|existing| existing.id == book.id)
+        {
+            state.library_books.push(book.clone());
+        }
+    }
+    state.book_import_report.books.extend(report.books);
+    state.book_import_report.failures.extend(report.failures);
+}
+
+fn finish_book_import(state: &mut State) -> Task<Message> {
+    state.adding_books = false;
+    state.pending_book_imports.clear();
+    state.prepared_book_imports.clear();
+    state.book_import_preparing = 0;
+    state.book_import_next_commit = 0;
+    state.book_import_committing = false;
+    let report = std::mem::take(&mut state.book_import_report);
+    state.book_import_total = 0;
+    state.book_import_completed = 0;
+    let error = import_report_error(&report, &state.i18n);
+    let refresh = reset_library(state);
+    if let Some(error) = error {
+        state.library_error = Some(error);
+    }
+    refresh
+}
+
+fn continue_book_import(state: &mut State) -> Task<Message> {
+    if !state.adding_books {
         return Task::none();
+    }
+    let Some(library) = state.library.clone() else {
+        return finish_book_import(state);
     };
-    let copy = state.book_import_copy;
-    Task::perform(
-        async move {
-            if copy {
-                library.import_discovered_files(&[candidate]).await
-            } else {
-                library.link_discovered_files(&[candidate]).await
+
+    if !state.book_import_copy {
+        if state.book_import_committing {
+            return Task::none();
+        }
+        let Some((_index, candidate)) = state.pending_book_imports.pop_front() else {
+            return finish_book_import(state);
+        };
+        state.book_import_committing = true;
+        return Task::perform(
+            async move { library.link_discovered_files(&[candidate]).await },
+            Message::BookAddedToBatch,
+        );
+    }
+
+    let mut tasks = Vec::new();
+    while state.book_import_preparing < MANAGED_IMPORT_PREPARATION_CONCURRENCY {
+        let Some((index, candidate)) = state.pending_book_imports.pop_front() else {
+            break;
+        };
+        let library = library.clone();
+        let path = candidate.path.clone();
+        state.book_import_preparing += 1;
+        tasks.push(Task::perform(
+            async move {
+                match library.prepare_discovered_managed_file(candidate).await {
+                    Ok(prepared) => Ok((path, Arc::new(prepared))),
+                    Err(error) => Err(ImportFailure {
+                        path,
+                        error: format!("{error:#}"),
+                    }),
+                }
+            },
+            move |result| Message::ManagedBookPrepared { index, result },
+        ));
+    }
+
+    if !state.book_import_committing {
+        while let Some(prepared) = state
+            .prepared_book_imports
+            .remove(&state.book_import_next_commit)
+        {
+            state.book_import_next_commit += 1;
+            match prepared {
+                Err(failure) => record_book_import_report(
+                    state,
+                    ImportReport {
+                        books: Vec::new(),
+                        failures: vec![failure],
+                    },
+                ),
+                Ok((path, prepared)) => {
+                    state.book_import_committing = true;
+                    tasks.push(Task::perform(
+                        async move {
+                            match library.commit_prepared_managed_file(&prepared).await {
+                                Ok(book) => ImportReport {
+                                    books: vec![book],
+                                    failures: Vec::new(),
+                                },
+                                Err(error) => ImportReport {
+                                    books: Vec::new(),
+                                    failures: vec![ImportFailure {
+                                        path,
+                                        error: format!("{error:#}"),
+                                    }],
+                                },
+                            }
+                        },
+                        Message::BookAddedToBatch,
+                    ));
+                    break;
+                }
             }
-        },
-        Message::BookAddedToBatch,
-    )
+        }
+    }
+
+    if state.book_import_completed == state.book_import_total
+        && !state.book_import_committing
+        && state.book_import_preparing == 0
+    {
+        tasks.push(finish_book_import(state));
+    }
+
+    Task::batch(tasks)
 }
 
 fn book_matches_library_view(state: &State, book: &Book) -> bool {
@@ -707,47 +817,30 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.import_discovery_failures.clear();
             state.add_books_copy = None;
             state.adding_books = true;
-            state.pending_book_imports = candidates.into();
+            state.pending_book_imports = candidates.into_iter().enumerate().collect();
+            state.prepared_book_imports.clear();
+            state.book_import_preparing = 0;
+            state.book_import_next_commit = 0;
+            state.book_import_committing = false;
             state.book_import_copy = copy;
             state.book_import_completed = 0;
             state.book_import_total = state.pending_book_imports.len();
             state.book_import_report = ImportReport::default();
             state.library_activity_progress = 0.0;
             state.library_error = None;
-            return import_next_book(state);
+            return continue_book_import(state);
+        }
+
+        Message::ManagedBookPrepared { index, result } => {
+            state.book_import_preparing = state.book_import_preparing.saturating_sub(1);
+            state.prepared_book_imports.insert(index, result);
+            return continue_book_import(state);
         }
 
         Message::BookAddedToBatch(report) => {
-            state.book_import_completed += 1;
-            state.library_activity_progress =
-                state.book_import_completed as f32 / state.book_import_total.max(1) as f32;
-            for book in &report.books {
-                if book_matches_library_view(state, book)
-                    && !state
-                        .library_books
-                        .iter()
-                        .any(|existing| existing.id == book.id)
-                {
-                    state.library_books.push(book.clone());
-                }
-            }
-            state.book_import_report.books.extend(report.books);
-            state.book_import_report.failures.extend(report.failures);
-
-            if !state.pending_book_imports.is_empty() {
-                return import_next_book(state);
-            }
-
-            state.adding_books = false;
-            let report = std::mem::take(&mut state.book_import_report);
-            state.book_import_total = 0;
-            state.book_import_completed = 0;
-            let error = import_report_error(&report, &state.i18n);
-            let refresh = reset_library(state);
-            if let Some(error) = error {
-                state.library_error = Some(error);
-            }
-            return refresh;
+            state.book_import_committing = false;
+            record_book_import_report(state, report);
+            return continue_book_import(state);
         }
 
         Message::OpenLibraryBook(book_id, file_path) => {

@@ -18,6 +18,7 @@ use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
     Book, BookPage, ImportCancellation, ImportCandidate, ImportDiscoveryProgress, ImportDuplicate,
     ImportFailure, ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
+    PreparedManagedImport,
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -66,6 +67,7 @@ const DEFAULT_READER_THEME_KEY: &str = "reader.default_theme";
 const DEFAULT_EPUB_FONT_SIZE_KEY: &str = "reader.default_epub_font_size";
 const DEFAULT_EPUB_LINE_SPACING_KEY: &str = "reader.default_epub_line_spacing";
 const DEFAULT_PDF_ZOOM_KEY: &str = "reader.default_pdf_zoom";
+const MANAGED_IMPORT_PREPARATION_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SelectOption<T> {
@@ -684,7 +686,12 @@ pub struct State {
     import_discovery_failures: Vec<ImportFailure>,
     add_books_copy: Option<bool>,
     adding_books: bool,
-    pending_book_imports: VecDeque<ImportCandidate>,
+    pending_book_imports: VecDeque<(usize, ImportCandidate)>,
+    prepared_book_imports:
+        BTreeMap<usize, Result<(PathBuf, Arc<PreparedManagedImport>), ImportFailure>>,
+    book_import_preparing: usize,
+    book_import_next_commit: usize,
+    book_import_committing: bool,
     book_import_copy: bool,
     book_import_completed: usize,
     book_import_total: usize,
@@ -806,6 +813,10 @@ pub fn boot() -> (State, Task<Message>) {
         add_books_copy: None,
         adding_books: false,
         pending_book_imports: VecDeque::new(),
+        prepared_book_imports: BTreeMap::new(),
+        book_import_preparing: 0,
+        book_import_next_commit: 0,
+        book_import_committing: false,
         book_import_copy: false,
         book_import_completed: 0,
         book_import_total: 0,
@@ -7021,15 +7032,18 @@ mod tests {
         state.library_loading = false;
         state.adding_books = true;
         state.book_import_total = 2;
-        state.pending_book_imports.push_back(ImportCandidate {
-            path: PathBuf::from("second.epub"),
-            title: "second".to_string(),
-            group_key: "second".to_string(),
-            format: shosai_core::library::BookFormat::Epub,
-            file_size: 100,
-            content_hash: "second-hash".to_string(),
-            duplicate: None,
-        });
+        state.pending_book_imports.push_back((
+            1,
+            ImportCandidate {
+                path: PathBuf::from("second.epub"),
+                title: "second".to_string(),
+                group_key: "second".to_string(),
+                format: shosai_core::library::BookFormat::Epub,
+                file_size: 100,
+                content_hash: "second-hash".to_string(),
+                duplicate: None,
+            },
+        ));
 
         let task = update(
             &mut state,
@@ -7045,6 +7059,43 @@ mod tests {
         assert_eq!(state.library_activity_progress, 0.5);
         assert_eq!(state.library_books.len(), 1);
         assert_eq!(state.library_books[0].id, 42);
+    }
+
+    #[tokio::test]
+    async fn managed_import_starts_only_four_preparations() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.add_books_open = true;
+        state.add_books_copy = Some(true);
+        state.staged_imports = (0..6)
+            .map(|index| StagedImport {
+                selected: true,
+                candidate: ImportCandidate {
+                    path: PathBuf::from(format!("book-{index}.epub")),
+                    title: format!("book-{index}"),
+                    group_key: format!("book-{index}"),
+                    format: shosai_core::library::BookFormat::Epub,
+                    file_size: 100,
+                    content_hash: format!("hash-{index}"),
+                    duplicate: None,
+                },
+            })
+            .collect();
+
+        let task = update(&mut state, Message::AddSelectedBooks);
+
+        assert_eq!(task.units(), MANAGED_IMPORT_PREPARATION_CONCURRENCY);
+        assert_eq!(state.book_import_preparing, 4);
+        assert_eq!(state.pending_book_imports.len(), 2);
+        assert!(state.prepared_book_imports.is_empty());
+        assert!(!state.book_import_committing);
     }
 
     #[tokio::test]
