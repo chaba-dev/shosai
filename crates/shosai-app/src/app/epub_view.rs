@@ -436,6 +436,7 @@ fn render_content_node<'a>(
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let column_widths =
                 crate::epub::epub_table_column_widths(row_groups, table_content_width);
+            let placements = crate::epub::epub_table_cell_placements(row_groups);
             let mut table_offset = text_offset;
             if !caption.is_empty() {
                 let caption_style = caption_style.as_ref().unwrap_or(style);
@@ -457,9 +458,22 @@ fn render_content_node<'a>(
                 ));
                 table_offset += spans_text_len(caption) + 1;
             }
-            for table_row in row_groups.iter().flat_map(|group| &group.rows) {
+            for (table_row, row_placements) in row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .zip(&placements)
+            {
                 let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
-                for (cell_index, cell) in table_row.cells.iter().enumerate() {
+                let mut previous_column_end = 0;
+                for (cell_index, (cell, placement)) in
+                    table_row.cells.iter().zip(row_placements).enumerate()
+                {
+                    if placement.column > previous_column_end {
+                        let skipped = &column_widths[previous_column_end..placement.column];
+                        let width = skipped.iter().sum::<f32>()
+                            + EPUB_BLOCKQUOTE_SPACING * skipped.len().saturating_sub(1) as f32;
+                        rendered_row = rendered_row.push(iced::widget::Space::new().width(width));
+                    }
                     let mut rendered_cell = column![].spacing(EPUB_TABLE_CELL_SPACING);
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
@@ -472,11 +486,7 @@ fn render_content_node<'a>(
                             palette,
                             image_handles,
                             fill_images,
-                            crate::epub::epub_table_cell_content_width(
-                                table_row,
-                                cell_index,
-                                &column_widths,
-                            ),
+                            crate::epub::epub_table_cell_content_width(*placement, &column_widths),
                             available_height,
                             table_offset,
                             highlights,
@@ -489,8 +499,7 @@ fn render_content_node<'a>(
                     rendered_row = rendered_row.push(
                         container(rendered_cell)
                             .width(Length::Fixed(crate::epub::epub_table_cell_width(
-                                table_row,
-                                cell_index,
+                                *placement,
                                 &column_widths,
                             )))
                             .padding(EPUB_TABLE_CELL_PADDING)
@@ -510,6 +519,7 @@ fn render_content_node<'a>(
                     if cell_index + 1 < table_row.cells.len() {
                         table_offset += 1;
                     }
+                    previous_column_end = placement.column + placement.span;
                 }
                 table = table.push(rendered_row);
                 table_offset += 1;
