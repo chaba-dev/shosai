@@ -186,7 +186,9 @@ impl EpubFontBook {
         let mut inspected = HashMap::<Descriptor, bool>::new();
         let mut descriptor_limit_reported = false;
         for chapter in chapters {
-            let Ok(document) = roxmltree::Document::parse(&chapter.content) else {
+            let normalized = super::render::resolve_xhtml_named_entities(&chapter.content);
+            let options = super::render::xhtml_parsing_options(normalized.len());
+            let Ok(document) = roxmltree::Document::parse_with_options(&normalized, options) else {
                 continue;
             };
             let base = chapter.path.rsplit_once('/').map_or("", |(dir, _)| dir);
@@ -883,6 +885,30 @@ mod tests {
         format!(
             r#"@font-face {{ font-family: "{FAMILY}"; font-style: italic; font-weight: 700; src: url("../fonts/{path}") format("{format}"); }}"#
         )
+    }
+
+    #[test]
+    fn dtd_chapter_discovers_external_font_face() {
+        let css = one_face("book.ttf", "truetype");
+        let styles = EpubStyles::parse([("OPS/styles/book.css", css.as_str())]);
+        let chapters = vec![Chapter {
+            index: 0,
+            title: None,
+            path: "OPS/Text/chapter.xhtml".into(),
+            content: r#"<!DOCTYPE html [<!ENTITY label "Book">]><html><head><link rel="stylesheet" href="../styles/book.css"/></head><body>&label;</body></html>"#.into(),
+        }];
+        let resources = HashMap::from([(
+            CanonicalEpubPath::new("OPS/fonts/book.ttf").unwrap(),
+            StoredEpubResource {
+                media_type: "font/ttf".into(),
+                bytes: INTER.to_vec(),
+            },
+        )]);
+
+        let book = EpubFontBook::new(&chapters, &styles, &resources, &EpubLimits::default())
+            .expect("DTD chapter font discovery should succeed");
+        assert!(book.contains_family_for_chapter("OPS/Text/chapter.xhtml", FAMILY));
+        assert_eq!(book.len(), 1);
     }
 
     #[test]

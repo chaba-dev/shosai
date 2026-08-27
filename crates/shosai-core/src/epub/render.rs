@@ -299,11 +299,7 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     // XML parsers do not load the external XHTML DTD (and must not do so for
     // EPUB content). Resolve the fixed, local HTML entity table instead.
     let normalized_xhtml = resolve_xhtml_named_entities(xhtml);
-    let parsing_options = roxmltree::ParsingOptions {
-        allow_dtd: true,
-        nodes_limit: u32::try_from(normalized_xhtml.len()).unwrap_or(u32::MAX),
-        ..Default::default()
-    };
+    let parsing_options = xhtml_parsing_options(normalized_xhtml.len());
     let doc = roxmltree::Document::parse_with_options(&normalized_xhtml, parsing_options)
         .with_context(|| {
             format!(
@@ -337,7 +333,15 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     Ok(parsed)
 }
 
-fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
+pub(super) fn xhtml_parsing_options<'a>(length: usize) -> roxmltree::ParsingOptions<'a> {
+    roxmltree::ParsingOptions {
+        allow_dtd: true,
+        nodes_limit: u32::try_from(length).unwrap_or(u32::MAX),
+        ..Default::default()
+    }
+}
+
+pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
     use std::collections::HashSet;
 
     let mut declared = HashSet::new();
@@ -959,7 +963,10 @@ fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<
         }
         other => {
             nodes.push(other);
-            return nodes;
+            return vec![ContentNode::Figure {
+                children: nodes,
+                style: figure_style,
+            }];
         }
     };
     let Some(ContentNode::Image {
@@ -2956,6 +2963,21 @@ mod tests {
         assert_eq!(style.margin_left_em, Some(1.0));
         assert_eq!(style.block_before_em, Some(2.0));
         assert_eq!(style.block_after_em, Some(3.0));
+    }
+
+    #[test]
+    fn two_child_non_caption_figure_preserves_container_style() {
+        let xhtml = r#"<html><head><style>figure { width: 60%; margin-left: 2em; }</style></head><body>
+          <figure><img src="figure.png" alt="Diagram"/><ul><li>Legend</li></ul></figure>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OPS", &Default::default());
+
+        let ContentNode::Figure { children, style } = &nodes[0] else {
+            panic!("two-child non-caption figure should retain its container");
+        };
+        assert_eq!(children.len(), 2);
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.6)));
+        assert_eq!(style.margin_left_em, Some(2.0));
     }
 
     #[test]
