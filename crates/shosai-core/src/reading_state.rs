@@ -33,7 +33,8 @@ fn select_development_profile(runtime: Option<&str>, compiled: Option<&str>, deb
     }
 }
 
-fn development_profile() -> bool {
+/// Whether this process uses isolated development storage and branding.
+pub fn is_development_profile() -> bool {
     select_development_profile(
         std::env::var("SHOSAI_DEV_BUILD").ok().as_deref(),
         option_env!("SHOSAI_DEV_BUILD"),
@@ -47,7 +48,7 @@ fn development_profile() -> bool {
 /// isolates release-mode development runs, while `0` permits explicit
 /// production-profile testing.
 pub fn app_data_directory_name() -> &'static str {
-    if development_profile() {
+    if is_development_profile() {
         DEVELOPMENT_APP_DIR
     } else {
         RELEASE_APP_DIR
@@ -56,7 +57,7 @@ pub fn app_data_directory_name() -> &'static str {
 
 /// Return the profile-specific folder created below a user-selected library parent.
 pub fn managed_library_folder_name() -> &'static str {
-    if development_profile() {
+    if is_development_profile() {
         "Shosai Dev"
     } else {
         "Shosai"
@@ -68,7 +69,7 @@ pub fn managed_library_folder_name() -> &'static str {
 /// Development refuses to adopt a non-empty directory without its matching
 /// marker so `make reset` can never infer ownership from a folder name alone.
 pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
-    if !development_profile() {
+    if !is_development_profile() {
         std::fs::create_dir_all(path)
             .with_context(|| format!("failed to create managed library {}", path.display()))?;
         return Ok(());
@@ -80,15 +81,9 @@ pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
         if marker.symlink_metadata().is_ok() {
             return validate_managed_library_directory(path);
         }
-        if std::fs::read_dir(path)
-            .with_context(|| format!("failed to inspect managed library {}", path.display()))?
-            .next()
-            .is_some()
-        {
-            anyhow::bail!(
-                "refusing to use non-empty directory without a Shosai development ownership marker"
-            );
-        }
+        anyhow::bail!(
+            "refusing to use existing directory without a Shosai development ownership marker"
+        );
     } else {
         std::fs::create_dir_all(path)
             .with_context(|| format!("failed to create managed library {}", path.display()))?;
@@ -107,7 +102,7 @@ pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
 
 /// Verify that development-owned external storage still has its regular marker.
 pub fn validate_managed_library_directory(path: &Path) -> Result<()> {
-    if !development_profile() {
+    if !is_development_profile() {
         return Ok(());
     }
     reject_symlink(path, "managed library")?;
@@ -188,6 +183,9 @@ impl ReadingStateStore {
     /// Async: open at default platform path.
     pub async fn open_async() -> Result<Self> {
         let path = db_file_path()?;
+        if is_development_profile() {
+            prepare_development_data_directory(path.parent().context("database has no parent")?)?;
+        }
         Self::open_at_async(&path).await
     }
 
@@ -413,6 +411,24 @@ impl ReadingStateStore {
     }
 }
 
+fn prepare_development_data_directory(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path)
+        .with_context(|| format!("failed to create development data dir {}", path.display()))?;
+    reject_symlink(path, "development data directory")?;
+    let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
+    if marker.symlink_metadata().is_ok() {
+        reject_symlink(&marker, "development data marker")?;
+        let profile = std::fs::read_to_string(&marker)
+            .with_context(|| format!("failed to read data marker {}", marker.display()))?;
+        if profile.trim() != DEVELOPMENT_STORAGE_PROFILE {
+            anyhow::bail!("development data directory belongs to a different Shosai profile");
+        }
+        return Ok(());
+    }
+    std::fs::write(&marker, format!("{DEVELOPMENT_STORAGE_PROFILE}\n"))
+        .with_context(|| format!("failed to write data marker {}", marker.display()))
+}
+
 /// Convert a file path to a canonical string key.
 fn canonical_key(path: &Path) -> String {
     path.canonicalize()
@@ -481,5 +497,17 @@ mod tests {
         symlink(&unrelated, &linked).unwrap();
         let directory_error = validate_managed_library_directory(&linked).unwrap_err();
         assert!(directory_error.to_string().contains("symlinked"));
+    }
+
+    #[test]
+    fn development_storage_does_not_claim_an_existing_unmarked_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let existing = directory.path().join("existing");
+        std::fs::create_dir(&existing).unwrap();
+
+        let error = prepare_managed_library_directory(&existing).unwrap_err();
+
+        assert!(error.to_string().contains("existing directory"));
+        assert!(!existing.join(STORAGE_PROFILE_MARKER_FILE).exists());
     }
 }

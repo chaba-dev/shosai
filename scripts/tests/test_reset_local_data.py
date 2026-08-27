@@ -15,6 +15,7 @@ PROFILE = "shosai-development-v1"
 
 def create_database(root: Path, rows=(), custom: Path | None = None) -> None:
     root.mkdir(parents=True)
+    (root / MARKER).write_text(PROFILE)
     database = sqlite3.connect(root / "shosai.db")
     database.execute("CREATE TABLE books (file_path TEXT, storage_kind TEXT NOT NULL)")
     database.execute("CREATE TABLE preferences (key TEXT, value TEXT)")
@@ -50,6 +51,7 @@ class ResetLocalDataTests(unittest.TestCase):
             (production / "books" / "production.epub").write_bytes(b"production")
             (development / "nested").mkdir(parents=True)
             (development / "nested" / "sentinel").write_text("dev")
+            (development / MARKER).write_text(PROFILE)
 
             result = run_reset(data_home)
 
@@ -57,7 +59,20 @@ class ResetLocalDataTests(unittest.TestCase):
             self.assertFalse(development.exists())
             self.assertTrue((production / "books" / "production.epub").exists())
 
-    def test_marker_validated_custom_directory_is_removed(self):
+    def test_unmarked_development_root_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_home = Path(directory) / "data"
+            development = data_home / "shosai-dev"
+            development.mkdir(parents=True)
+            sentinel = development / "sentinel"
+            sentinel.write_text("keep")
+
+            result = run_reset(data_home)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(sentinel.exists())
+
+    def test_managed_copies_are_removed_without_recursively_deleting_custom_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             data_home = temporary / "data"
@@ -67,6 +82,8 @@ class ResetLocalDataTests(unittest.TestCase):
             (custom / MARKER).write_text(PROFILE)
             managed = custom / "managed.epub"
             managed.write_bytes(b"managed")
+            sentinel = custom / "unrelated.txt"
+            sentinel.write_text("keep")
             referenced = temporary / "original.epub"
             referenced.write_bytes(b"original")
             create_database(
@@ -79,7 +96,9 @@ class ResetLocalDataTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(development.exists())
-            self.assertFalse(custom.exists())
+            self.assertTrue(custom.exists())
+            self.assertFalse(managed.exists())
+            self.assertTrue(sentinel.exists())
             self.assertTrue(referenced.exists())
 
     def test_missing_or_wrong_marker_preserves_same_named_custom_directory(self):

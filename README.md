@@ -39,11 +39,12 @@ make check-rfds
 Development builds use an isolated `shosai-dev` application data directory;
 packaged releases use `shosai`. `make dev` also sets this profile explicitly for
 release-mode development runs. With the development app closed, `make reset`
-recursively deletes only development state. Production data and books referenced
-from their current location are preserved. An external development managed-library
-folder is removed only when it contains `.shosai-storage-profile` with the exact
-value `shosai-development-v1`; reset fails safely if that ownership marker is
-absent or does not match.
+recursively deletes only ownership-marked development state. Production data and
+books referenced from their current location are preserved. Copied books in an
+external development managed-library folder are removed only when it contains
+`.shosai-storage-profile` with the exact value `shosai-development-v1`; the folder
+itself and unrelated files in it are preserved. Reset fails safely if that marker
+is absent or does not match.
 
 The project is a Cargo workspace:
 

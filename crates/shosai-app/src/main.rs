@@ -7,7 +7,7 @@ mod typography;
 mod widgets;
 
 fn application_icon() -> &'static [u8] {
-    if option_env!("SHOSAI_DEV_BUILD") == Some("1") {
+    if shosai_core::reading_state::is_development_profile() {
         include_bytes!("../../../assets/shosai-dev-icon.png")
     } else {
         include_bytes!("../../../assets/shosai-icon.png")

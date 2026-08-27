@@ -4,7 +4,6 @@
 import os
 from pathlib import Path
 import secrets
-import shutil
 import sqlite3
 import stat
 import sys
@@ -34,14 +33,12 @@ def is_within(path: Path, directory: Path) -> bool:
 def open_owned_directory(directory: Path) -> tuple[int, int, os.stat_result]:
     parent_fd = os.open(directory.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        directory_stat = os.stat(directory.name, dir_fd=parent_fd, follow_symlinks=False)
-        if not stat.S_ISDIR(directory_stat.st_mode):
-            raise OSError("managed directory is not a regular directory")
         directory_fd = os.open(
             directory.name,
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
             dir_fd=parent_fd,
         )
+        directory_stat = os.fstat(directory_fd)
         try:
             marker_fd = os.open(MARKER_FILE, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
             try:
@@ -71,10 +68,53 @@ def remove_owned_directory(directory: Path) -> None:
         if (moved.st_dev, moved.st_ino) != (expected.st_dev, expected.st_ino):
             os.rename(quarantine, directory.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
             raise OSError("managed directory changed while reset was validating it")
+        remove_directory_contents(directory_fd)
+        os.rmdir(quarantine, dir_fd=parent_fd)
     finally:
         os.close(directory_fd)
         os.close(parent_fd)
-    shutil.rmtree(directory.parent / quarantine, ignore_errors=False)
+
+
+def remove_directory_contents(directory_fd: int) -> None:
+    for name in os.listdir(directory_fd):
+        metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            try:
+                remove_directory_contents(child_fd)
+            finally:
+                os.close(child_fd)
+            os.rmdir(name, dir_fd=directory_fd)
+        else:
+            os.unlink(name, dir_fd=directory_fd)
+
+
+def unlink_managed_file(directory_fd: int, relative_path: Path) -> None:
+    parts = relative_path.parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise OSError("managed path is not a safe relative file path")
+    current_fd = os.dup(directory_fd)
+    try:
+        for part in parts[:-1]:
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=current_fd,
+            )
+            os.close(current_fd)
+            current_fd = next_fd
+        metadata = os.stat(parts[-1], dir_fd=current_fd, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode):
+            raise OSError("managed book path is a directory")
+        os.unlink(parts[-1], dir_fd=current_fd)
+    except FileNotFoundError:
+        pass
+    finally:
+        os.close(current_fd)
 
 
 def managed_book_data(database: Path) -> tuple[list[Path], Path | None]:
@@ -119,13 +159,12 @@ def main() -> int:
         return 1
 
     external = None
+    external_handle = None
     if custom_managed_directory is not None and not is_within(custom_managed_directory, root):
         external = custom_managed_directory
         if external.exists() or external.is_symlink():
             try:
-                parent_fd, directory_fd, _ = open_owned_directory(external)
-                os.close(directory_fd)
-                os.close(parent_fd)
+                external_handle = open_owned_directory(external)
             except OSError as error:
                 print(
                     f"Refusing to remove external managed directory {external}: {error}",
@@ -141,22 +180,33 @@ def main() -> int:
         print("Refusing reset: managed database paths are outside development-owned storage:", file=sys.stderr)
         for path in unsafe_paths:
             print(f"  {path}", file=sys.stderr)
+        if external_handle is not None:
+            os.close(external_handle[1])
+            os.close(external_handle[0])
         return 1
 
-    if external is not None:
+    if external is not None and external_handle is not None:
+        parent_fd, directory_fd, _ = external_handle
         try:
-            remove_owned_directory(external)
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            failures.append(f"{external}: {error}")
+            external_root = external.resolve()
+            for path in managed_paths:
+                try:
+                    relative = path.resolve().relative_to(external_root)
+                except ValueError:
+                    continue
+                try:
+                    unlink_managed_file(directory_fd, relative)
+                except OSError as error:
+                    failures.append(f"{path}: {error}")
+        finally:
+            os.close(directory_fd)
+            os.close(parent_fd)
 
-    try:
-        shutil.rmtree(root, ignore_errors=False)
-    except FileNotFoundError:
-        pass
-    except OSError as error:
-        failures.append(f"{root}: {error}")
+    if root.exists() or root.is_symlink():
+        try:
+            remove_owned_directory(root)
+        except OSError as error:
+            failures.append(f"{root}: {error}")
 
     if failures:
         print("Shosai could not remove all local data:", file=sys.stderr)
