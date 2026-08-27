@@ -497,10 +497,16 @@ fn render_content_node<'a>(
                     style,
                 ),
             )));
+            let margin_left = crate::epub::epub_figure_margin_left(
+                style,
+                available_width,
+                font_size,
+                figure_width,
+            );
             container(container(figure).width(Length::Fixed(figure_width)))
                 .width(Length::Fill)
                 .padding(iced::Padding {
-                    left: style.margin_left_em.unwrap_or(0.0) * font_size,
+                    left: margin_left,
                     ..iced::Padding::ZERO
                 })
                 .into()
@@ -2362,6 +2368,71 @@ mod tests {
             recorded.container_bounds.iter().any(|bounds| {
                 bounds.x == 190.0 && bounds.width == 20.0 && bounds.height == 10.0
             })
+        );
+    }
+
+    #[test]
+    fn retained_figure_paint_clamps_negative_and_oversized_margins() {
+        let bounds = |margin_left_em: f32| {
+            let node = ContentNode::Figure {
+                children: vec![ContentNode::Paragraph(
+                    vec![shosai_core::epub::render::TextSpan {
+                        text: "figure content".into(),
+                        math: None,
+                        font_family: None,
+                        bold: false,
+                        italic: false,
+                        monospace: false,
+                        font_size_multiplier: 1.0,
+                        preserve_whitespace: false,
+                        link: None,
+                    }],
+                    Default::default(),
+                )],
+                style: shosai_core::epub::render::NodeStyle {
+                    margin_left_em: Some(margin_left_em),
+                    ..Default::default()
+                },
+            };
+            let element = render_content_node(
+                &node,
+                &I18n::new(LanguagePreference::English),
+                16.0,
+                ReaderTheme::Light.palette(),
+                &HashMap::new(),
+                false,
+                300.0,
+                None,
+                Some(200.0),
+                0,
+                &[],
+                None,
+                1.0,
+            );
+            let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+                Font::DEFAULT,
+                iced::Pixels(16.0),
+            ));
+            let mut interface = iced_runtime::UserInterface::build(
+                element,
+                Size::new(300.0, 200.0),
+                iced_runtime::user_interface::Cache::new(),
+                &mut renderer,
+            );
+            let mut recorded = RecordedWidgetIds::default();
+            interface.operate(&renderer, &mut recorded);
+            recorded.container_bounds
+        };
+
+        assert!(
+            bounds(-1.0)
+                .iter()
+                .any(|bounds| bounds.x == 0.0 && bounds.width == 300.0)
+        );
+        assert!(
+            bounds(100.0)
+                .iter()
+                .any(|bounds| bounds.x == 299.0 && bounds.width == 1.0)
         );
     }
 

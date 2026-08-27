@@ -1830,6 +1830,16 @@ pub(crate) fn epub_figure_content_width(
         .max(1.0)
 }
 
+pub(crate) fn epub_figure_margin_left(
+    style: &shosai_core::epub::render::NodeStyle,
+    available_width: f32,
+    font_size: f32,
+    figure_width: f32,
+) -> f32 {
+    (style.margin_left_em.unwrap_or(0.0).max(0.0) * font_size)
+        .min((available_width - figure_width).max(0.0))
+}
+
 pub(crate) fn epub_table_content_width(
     style: &shosai_core::epub::render::NodeStyle,
     table_width: f32,
