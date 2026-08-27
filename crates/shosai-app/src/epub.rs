@@ -863,9 +863,9 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 chars_per_line,
                 lines_per_page,
                 font_size,
-                line_spacing,
                 page_size.width,
                 page_size.height,
+                block_spacing,
                 first_page_has_title,
                 &mut pages,
                 &mut remaining,
@@ -991,9 +991,9 @@ fn paginate_epub_table(
     chars_per_line: usize,
     lines_per_page: usize,
     font_size: f32,
-    line_spacing: f32,
     page_width: f32,
     page_height: f32,
+    trailing_spacing: f32,
     first_page_has_title: bool,
     pages: &mut Vec<PageNodes>,
     remaining: &mut f32,
@@ -1014,86 +1014,89 @@ fn paginate_epub_table(
     let mut pending_height = 0.0;
     let mut fragment_capacity = *remaining;
     let mut page_budget_exhausted = false;
+    let bands = row_groups
+        .iter()
+        .flat_map(|group| {
+            table_row_bands(&group.rows)
+                .into_iter()
+                .map(|rows| (group.kind, rows))
+        })
+        .collect::<Vec<_>>();
+    let compact_height = |node: &ContentNode| -> f32 {
+        estimated_epub_compact_node_height_bounded(
+            node,
+            chars_per_line,
+            lines_per_page,
+            font_size,
+            page_width,
+            page_height,
+            Some(page_height),
+        )
+    };
 
-    for group in row_groups {
-        for rows in table_row_bands(&group.rows) {
-            let band = ContentNode::Table {
-                caption: if include_caption {
-                    caption.clone()
-                } else {
-                    Vec::new()
-                },
-                caption_style: if include_caption {
-                    caption_style.clone()
-                } else {
-                    None
-                },
-                row_groups: vec![TableRowGroup {
-                    kind: group.kind,
-                    rows: rows.to_vec(),
-                }],
-                style: style.clone(),
-            };
-            include_caption = false;
+    for (band_index, (kind, rows)) in bands.iter().copied().enumerate() {
+        let is_final_band = band_index + 1 == bands.len();
+        let band = ContentNode::Table {
+            caption: if include_caption {
+                caption.clone()
+            } else {
+                Vec::new()
+            },
+            caption_style: if include_caption {
+                caption_style.clone()
+            } else {
+                None
+            },
+            row_groups: vec![TableRowGroup {
+                kind,
+                rows: rows.to_vec(),
+            }],
+            style: style.clone(),
+        };
+        include_caption = false;
 
-            let mut candidate = pending.clone().unwrap_or_else(|| band.clone());
-            if pending.is_some() {
-                append_table_band(&mut candidate, group.kind, rows);
-            }
-            let candidate_height = estimated_epub_node_height_bounded(
-                &candidate,
-                chars_per_line,
-                lines_per_page,
-                font_size,
-                line_spacing,
-                page_width,
-                page_height,
-            );
+        let mut candidate = pending.clone().unwrap_or_else(|| band.clone());
+        if pending.is_some() {
+            append_table_band(&mut candidate, kind, rows);
+        }
+        let candidate_height = compact_height(&candidate);
+        let required_height = candidate_height + if is_final_band { trailing_spacing } else { 0.0 };
 
-            if pending.is_some() && candidate_height > fragment_capacity && !page_budget_exhausted {
-                if budget.remaining_page_breaks == 0 {
-                    page_budget_exhausted = true;
-                    pending = Some(candidate);
-                    pending_height = candidate_height;
-                    continue;
-                }
-                let fragment = pending.take().expect("pending table fragment must exist");
-                let fragment_len = content_node_text_len(&fragment);
-                pages.last_mut().unwrap().push(PageNode {
-                    node: fragment,
-                    text_offset: fragment_offset,
-                    block_before: 0.0,
-                    block_after: 0.0,
-                });
-                fragment_offset += fragment_len;
-                *remaining = (fragment_capacity - pending_height).max(0.0);
-                let _ = push_epub_page(pages, budget);
-                *remaining = page_height;
-                fragment_capacity = *remaining;
-                pending_height = estimated_epub_node_height_bounded(
-                    &band,
-                    chars_per_line,
-                    lines_per_page,
-                    font_size,
-                    line_spacing,
-                    page_width,
-                    page_height,
-                );
-                pending = Some(band);
+        if pending.is_some() && required_height > fragment_capacity && !page_budget_exhausted {
+            if budget.remaining_page_breaks == 0 {
+                page_budget_exhausted = true;
+                pending = Some(candidate);
+                pending_height = candidate_height;
                 continue;
             }
-
-            if pending.is_none()
-                && candidate_height > *remaining
-                && page_has_content(pages, first_page_has_title)
-                && push_epub_page(pages, budget)
-            {
-                *remaining = page_height;
-                fragment_capacity = *remaining;
-            }
-            pending = Some(candidate);
-            pending_height = candidate_height;
+            let fragment = pending.take().expect("pending table fragment must exist");
+            let fragment_len = content_node_text_len(&fragment);
+            pages.last_mut().unwrap().push(PageNode {
+                node: fragment,
+                text_offset: fragment_offset,
+                block_before: 0.0,
+                block_after: 0.0,
+            });
+            fragment_offset += fragment_len;
+            *remaining = (fragment_capacity - pending_height).max(0.0);
+            let _ = push_epub_page(pages, budget);
+            *remaining = page_height;
+            fragment_capacity = *remaining;
+            pending_height = compact_height(&band);
+            pending = Some(band);
+            continue;
         }
+
+        if pending.is_none()
+            && required_height > *remaining
+            && page_has_content(pages, first_page_has_title)
+            && push_epub_page(pages, budget)
+        {
+            *remaining = page_height;
+            fragment_capacity = *remaining;
+        }
+        pending = Some(candidate);
+        pending_height = candidate_height;
     }
 
     if let Some(fragment) = pending {
@@ -1101,19 +1104,11 @@ fn paginate_epub_table(
             node: fragment,
             text_offset: fragment_offset,
             block_before: 0.0,
-            block_after: 0.0,
+            block_after: trailing_spacing,
         });
-        *remaining = (fragment_capacity - pending_height).max(0.0);
+        *remaining = (fragment_capacity - pending_height - trailing_spacing).max(0.0);
     } else if !caption.is_empty() {
-        let height = estimated_epub_node_height_bounded(
-            table,
-            chars_per_line,
-            lines_per_page,
-            font_size,
-            line_spacing,
-            page_width,
-            page_height,
-        );
+        let height = compact_height(table) + trailing_spacing;
         if height > *remaining
             && page_has_content(pages, first_page_has_title)
             && push_epub_page(pages, budget)
@@ -1124,7 +1119,7 @@ fn paginate_epub_table(
             node: table.clone(),
             text_offset,
             block_before: 0.0,
-            block_after: 0.0,
+            block_after: trailing_spacing,
         });
         *remaining = (*remaining - height).max(0.0);
     }
@@ -2074,27 +2069,6 @@ fn estimated_epub_node_height(
 ) -> f32 {
     estimated_epub_compact_node_height(node, chars_per_line, lines_per_page, font_size)
         + font_size * line_spacing
-}
-
-#[allow(clippy::too_many_arguments)]
-fn estimated_epub_node_height_bounded(
-    node: &ContentNode,
-    chars_per_line: usize,
-    lines_per_page: usize,
-    font_size: f32,
-    line_spacing: f32,
-    width: f32,
-    height: f32,
-) -> f32 {
-    estimated_epub_compact_node_height_bounded(
-        node,
-        chars_per_line,
-        lines_per_page,
-        font_size,
-        width,
-        height,
-        Some(height),
-    ) + font_size * line_spacing
 }
 
 fn estimated_epub_blockquote_height(
@@ -4140,6 +4114,65 @@ mod tests {
             content_node_text_len(&fragments[0].node),
             content_node_text_len(&table)
         );
+    }
+
+    #[test]
+    fn table_pagination_charges_authored_spacing_only_to_the_final_fragment() {
+        let paragraph = table_test_cell("following", None).children.remove(0);
+        let mut compact_table = one_line_table(1);
+        let ContentNode::Table { style, .. } = &mut compact_table else {
+            unreachable!();
+        };
+        style.block_after_em = Some(0.0);
+        let compact_pages = paginate_epub_chapter(
+            &[compact_table, paragraph.clone()],
+            None,
+            16.0,
+            1.4,
+            Size::new(360.0, 120.0),
+        );
+        assert_eq!(compact_pages.len(), 1);
+
+        let mut spaced_table = one_line_table(1);
+        let ContentNode::Table { style, .. } = &mut spaced_table else {
+            unreachable!();
+        };
+        style.block_after_em = Some(4.0);
+        let spaced_pages = paginate_epub_chapter(
+            &[spaced_table, paragraph.clone()],
+            None,
+            16.0,
+            1.4,
+            Size::new(360.0, 120.0),
+        );
+        assert_eq!(spaced_pages.len(), 2);
+        assert_eq!(spaced_pages[0][0].block_after, 0.0);
+
+        let mut fragmented_table = one_line_table(6);
+        let ContentNode::Table { style, .. } = &mut fragmented_table else {
+            unreachable!();
+        };
+        style.block_after_em = Some(4.0);
+        let pages = paginate_epub_chapter(
+            std::slice::from_ref(&fragmented_table),
+            None,
+            16.0,
+            1.4,
+            Size::new(360.0, 120.0),
+        );
+        let fragments = pages
+            .iter()
+            .flatten()
+            .filter(|page_node| matches!(page_node.node, ContentNode::Table { .. }))
+            .collect::<Vec<_>>();
+
+        assert!(fragments.len() > 1);
+        assert!(
+            fragments[..fragments.len() - 1]
+                .iter()
+                .all(|fragment| fragment.block_after == 0.0)
+        );
+        assert_eq!(fragments.last().unwrap().block_after, 64.0);
     }
 
     #[test]
