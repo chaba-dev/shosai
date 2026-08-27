@@ -282,6 +282,30 @@ async fn discovery_marks_books_already_in_the_library() {
 }
 
 #[tokio::test]
+async fn same_content_duplicates_choose_the_lowest_referenced_book_id() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.pdf");
+    let second = dir.path().join("second.pdf");
+    let third = dir.path().join("third.pdf");
+    for path in [&first, &second, &third] {
+        std::fs::copy(fixture_path("sample.pdf"), path).unwrap();
+    }
+    let first_book = lib.import_file(&first).await.unwrap();
+    let second_book = lib.import_file(&second).await.unwrap();
+    assert!(first_book.id < second_book.id);
+
+    let discovery = lib.discover_files(std::slice::from_ref(&third)).await;
+
+    assert_eq!(
+        discovery.candidates[0].duplicate,
+        Some(ImportDuplicate::ExistingBook {
+            book_id: first_book.id,
+            title: first_book.title,
+        })
+    );
+}
+
+#[tokio::test]
 async fn discovery_marks_repeated_content_in_the_selection() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("a.pdf");

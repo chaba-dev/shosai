@@ -834,7 +834,12 @@ impl Library {
 
             if fingerprint_tasks.len() >= DISCOVERY_HASH_CONCURRENCY || !scanning {
                 if let Some(result) = fingerprint_tasks.join_next().await {
-                    collect_fingerprint_result(result, &progress, &mut fingerprinted);
+                    collect_fingerprint_result(
+                        result,
+                        &progress,
+                        &mut fingerprinted,
+                        &mut discovery.failures,
+                    );
                 }
                 continue;
             }
@@ -868,7 +873,12 @@ impl Library {
                 },
                 result = fingerprint_tasks.join_next() => {
                     if let Some(result) = result {
-                        collect_fingerprint_result(result, &progress, &mut fingerprinted);
+                        collect_fingerprint_result(
+                            result,
+                            &progress,
+                            &mut fingerprinted,
+                            &mut discovery.failures,
+                        );
                     }
                 }
             }
@@ -1289,7 +1299,8 @@ impl Library {
         let row = sqlx::query(
             "SELECT id, title, author, format, file_path, storage_kind, original_path,
                     content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE content_hash = ? ORDER BY storage_kind = 'managed' DESC LIMIT 1",
+             FROM books WHERE content_hash = ?
+             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
         )
         .bind(content_hash)
         .fetch_optional(&self.pool)
@@ -1613,6 +1624,7 @@ fn collect_fingerprint_result(
         PendingImportCandidate,
         std::result::Result<FileFingerprint, String>,
     )>,
+    failures: &mut Vec<ImportFailure>,
 ) {
     match result {
         Ok((candidate, result)) => {
@@ -1621,13 +1633,11 @@ fn collect_fingerprint_result(
         }
         Err(error) => {
             progress.hashed_file();
-            fingerprinted.push((
-                PendingImportCandidate {
-                    path: PathBuf::new(),
-                    format: BookFormat::Epub,
-                },
-                Err(format!("book inspection task failed: {error}")),
-            ));
+            progress.completed_file();
+            failures.push(ImportFailure {
+                path: PathBuf::new(),
+                error: format!("book fingerprint task failed: {error}"),
+            });
         }
     }
 }
@@ -1758,15 +1768,19 @@ fn scan_import_candidates(
     progress.finish_enumerating();
 }
 
-fn import_group_key(path: &Path) -> String {
-    filename_title(path)
-        .nfc()
+/// Normalize user-visible import text for grouping and filtering.
+pub fn normalize_import_text(text: &str) -> String {
+    text.nfc()
         .case_fold()
         .nfc()
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn import_group_key(path: &Path) -> String {
+    normalize_import_text(&filename_title(path))
 }
 
 #[derive(Debug)]
@@ -2074,6 +2088,28 @@ mod tests {
         cancellation.cancel();
         drop(receiver);
         scanner.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn fingerprint_task_failure_is_reported_without_a_fake_candidate() {
+        let progress = ImportDiscoveryProgress::default();
+        progress.found_file();
+        let mut tasks =
+            tokio::task::JoinSet::<(PendingImportCandidate, Result<FileFingerprint>)>::new();
+        tasks.spawn(async { panic!("fingerprint failed") });
+        let result = tasks.join_next().await.unwrap();
+        let mut fingerprinted = Vec::new();
+        let mut failures = Vec::new();
+
+        collect_fingerprint_result(result, &progress, &mut fingerprinted, &mut failures);
+
+        assert!(fingerprinted.is_empty());
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].path.as_os_str().is_empty());
+        assert!(failures[0].error.contains("fingerprint task failed"));
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot.hashed_files, 1);
+        assert_eq!(snapshot.completed_files, 1);
     }
 
     #[test]
