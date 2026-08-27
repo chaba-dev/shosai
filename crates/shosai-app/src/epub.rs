@@ -2933,16 +2933,18 @@ fn split_epub_blockquote_prefix(
 
         if let ContentNode::Paragraph(spans, style) = child {
             let paragraph_available = available_height - prefix_height - spacing;
-            let style_scale = style.font_size_multiplier.unwrap_or(1.0);
-            let line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
+            let base_scale = style.font_size_multiplier.unwrap_or(1.0);
+            let effective_scale = base_scale * spans_font_scale(spans);
+            let base_size = font_size * base_scale;
+            let line_height = font_size * TEXT_LINE_HEIGHT * effective_scale;
             let effective_width = paragraph_width(page_width, font_size, style);
             let paragraph_chars_per_line = (effective_width
-                / (font_size * AVERAGE_CHARACTER_WIDTH * style_scale).max(1.0))
+                / (font_size * AVERAGE_CHARACTER_WIDTH * effective_scale).max(1.0))
             .floor()
             .max(1.0) as usize;
             let pagination_spans = pagination_inline_spans(
                 spans,
-                font_size * style_scale,
+                base_size,
                 effective_width,
                 paragraph_available.max(1.0),
                 style.direction,
@@ -2955,7 +2957,7 @@ fn split_epub_blockquote_prefix(
             let measured = measure_epub_spans(
                 fonts,
                 spans,
-                font_size * style_scale,
+                base_size,
                 effective_width,
                 style.direction,
                 style.text_align,
@@ -2977,7 +2979,7 @@ fn split_epub_blockquote_prefix(
                 let Some(layout) = measure_epub_spans(
                     fonts,
                     &candidate,
-                    font_size * style_scale,
+                    base_size,
                     effective_width,
                     style.direction,
                     style.text_align,
@@ -3009,7 +3011,7 @@ fn split_epub_blockquote_prefix(
                     |layout| layout.height,
                 ) + inline_math_height_reserve_for_context(
                     &prefix_spans,
-                    font_size * style_scale,
+                    base_size,
                     effective_width,
                     paragraph_available.max(1.0),
                     style.direction,
@@ -3766,7 +3768,7 @@ mod tests {
                 bold: false,
                 italic: false,
                 monospace: false,
-                font_size_multiplier: 1.0,
+                font_size_multiplier: 2.0,
                 preserve_whitespace: false,
                 link: None,
             }],
@@ -3795,7 +3797,7 @@ mod tests {
         );
         assert!(narrow > wide);
 
-        let available_height = 16.0 * TEXT_LINE_HEIGHT;
+        let available_height = 16.0 * TEXT_LINE_HEIGHT * 2.0;
         let (prefix, remaining, prefix_height, _) = split_epub_blockquote_prefix(
             std::slice::from_ref(&child),
             available_height,
