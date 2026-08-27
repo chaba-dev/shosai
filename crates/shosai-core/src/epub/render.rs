@@ -45,6 +45,14 @@ pub struct NodeStyle {
     pub margin_left_em: Option<f32>,
     /// Authored vertical block spacing in em.
     pub block_spacing_em: Option<f32>,
+    /// Authored width retained for native table layout.
+    pub width: Option<NodeWidth>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NodeWidth {
+    Percent(f32),
+    Pixels(f32),
 }
 
 /// Semantic row-group role retained from an EPUB table.
@@ -1112,6 +1120,10 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
             None
         },
         block_spacing_em,
+        width: css.width.map(|width| match width {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
     }
 }
 
@@ -1617,7 +1629,7 @@ mod tests {
         let nodes = parse_chapter_xhtml(
             r##"<html><body><table>
                 <caption>Build <em>matrix</em></caption>
-                <thead><tr><th id="platform" scope="col">Platform</th><th scope="col">Status</th></tr></thead>
+                <thead><tr><th id="platform" scope="col" style="width: 15.6%">Platform</th><th scope="col">Status</th></tr></thead>
                 <tbody>
                     <tr><th id="linux" scope="row" rowspan="2">Linux</th><td headers="platform linux"><a href="#pass">Pass</a></td></tr>
                     <tr><td colspan="2">Diagram <img src="../images/table.png" alt="table diagram"/></td></tr>
@@ -1658,6 +1670,7 @@ mod tests {
         assert!(platform.header);
         assert_eq!(platform.id.as_deref(), Some("platform"));
         assert_eq!(platform.scope.as_deref(), Some("col"));
+        assert_eq!(platform.style.width, Some(NodeWidth::Percent(0.156)));
         let linux = &row_groups[1].rows[0].cells[0];
         assert_eq!(linux.row_span, 2);
         let pass = &row_groups[1].rows[0].cells[1];

@@ -803,7 +803,15 @@ fn table_row_bands(rows: &[TableRow]) -> Vec<&[TableRow]> {
 }
 
 pub(crate) fn epub_table_layout_width(row_groups: &[TableRowGroup], available_width: f32) -> f32 {
-    let columns = row_groups
+    let columns = epub_table_column_count(row_groups);
+    (columns as f32 * MIN_EPUB_TABLE_CELL_WIDTH)
+        .max(MIN_EPUB_TABLE_WIDTH)
+        .max(available_width)
+        .min(MAX_EPUB_TABLE_WIDTH)
+}
+
+fn epub_table_column_count(row_groups: &[TableRowGroup]) -> usize {
+    row_groups
         .iter()
         .flat_map(|group| &group.rows)
         .map(|row| {
@@ -813,28 +821,143 @@ pub(crate) fn epub_table_layout_width(row_groups: &[TableRowGroup], available_wi
                 .sum::<usize>()
         })
         .max()
-        .unwrap_or(1);
-    (columns as f32 * MIN_EPUB_TABLE_CELL_WIDTH)
-        .max(MIN_EPUB_TABLE_WIDTH)
-        .max(available_width)
-        .min(MAX_EPUB_TABLE_WIDTH)
+        .unwrap_or(1)
+}
+
+pub(crate) fn epub_table_column_widths(row_groups: &[TableRowGroup], table_width: f32) -> Vec<f32> {
+    let column_count = epub_table_column_count(row_groups);
+    let gaps = BLOCKQUOTE_SPACING * column_count.saturating_sub(1) as f32;
+    let available = (table_width - gaps).max(column_count as f32);
+    let minimum = (2.0 * EPUB_TABLE_CELL_PADDING + 4.0).min(available / column_count as f32);
+    let mut weights = vec![0.25_f32; column_count];
+    let mut authored_widths = vec![None::<f32>; column_count];
+
+    for row in row_groups.iter().flat_map(|group| &group.rows) {
+        let mut column = 0;
+        for cell in &row.cells {
+            let span = usize::from(cell.column_span.max(1)).min(column_count - column);
+            if span == 0 {
+                break;
+            }
+            let weight = table_cell_visual_characters(cell).max(1) as f32 / span as f32;
+            for column_weight in &mut weights[column..column + span] {
+                *column_weight = column_weight.max(weight);
+            }
+            if let Some(width) = cell.style.width {
+                let width = match width {
+                    shosai_core::epub::render::NodeWidth::Percent(value) => value * available,
+                    shosai_core::epub::render::NodeWidth::Pixels(value) => value,
+                } / span as f32;
+                for column_width in &mut authored_widths[column..column + span] {
+                    *column_width = Some(column_width.unwrap_or(0.0).max(width));
+                }
+            }
+            column += span;
+        }
+    }
+
+    if authored_widths.iter().all(Option::is_some) {
+        let widths = authored_widths
+            .into_iter()
+            .map(|width| width.unwrap_or(minimum).max(minimum))
+            .collect::<Vec<_>>();
+        let total = widths.iter().sum::<f32>().max(f32::EPSILON);
+        return widths
+            .into_iter()
+            .map(|width| available * width / total)
+            .collect();
+    }
+
+    let distributable = (available - minimum * column_count as f32).max(0.0);
+    let total_weight = weights.iter().sum::<f32>().max(f32::EPSILON);
+    weights
+        .into_iter()
+        .map(|weight| minimum + distributable * weight / total_weight)
+        .collect()
+}
+
+pub(crate) fn epub_table_cell_width(
+    row: &TableRow,
+    cell_index: usize,
+    column_widths: &[f32],
+) -> f32 {
+    let first_column = row
+        .cells
+        .iter()
+        .take(cell_index)
+        .map(|cell| usize::from(cell.column_span.max(1)))
+        .sum::<usize>()
+        .min(column_widths.len());
+    let span = usize::from(row.cells[cell_index].column_span.max(1))
+        .min(column_widths.len().saturating_sub(first_column));
+    column_widths[first_column..first_column + span]
+        .iter()
+        .sum::<f32>()
+        + BLOCKQUOTE_SPACING * span.saturating_sub(1) as f32
 }
 
 pub(crate) fn epub_table_cell_content_width(
     row: &TableRow,
     cell_index: usize,
-    table_width: f32,
+    column_widths: &[f32],
 ) -> f32 {
-    let portions = row
-        .cells
+    (epub_table_cell_width(row, cell_index, column_widths) - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0)
+}
+
+fn table_cell_visual_characters(cell: &shosai_core::epub::render::TableCell) -> usize {
+    cell.children
         .iter()
-        .map(|cell| f32::from(cell.column_span.max(1)))
-        .sum::<f32>()
-        .max(1.0);
-    let available =
-        (table_width - BLOCKQUOTE_SPACING * row.cells.len().saturating_sub(1) as f32).max(1.0);
-    let portion = f32::from(row.cells[cell_index].column_span.max(1));
-    (available * portion / portions - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0)
+        .map(content_node_visual_characters)
+        .max()
+        .unwrap_or(0)
+}
+
+fn spans_visual_characters(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
+    let mut longest = 0;
+    let mut current = 0;
+    for character in spans.iter().flat_map(|span| span.text.chars()) {
+        if character == '\n' {
+            longest = longest.max(current);
+            current = 0;
+        } else if !character.is_whitespace() && character != '\u{200b}' {
+            current += 1;
+        }
+    }
+    longest.max(current)
+}
+
+fn content_node_visual_characters(node: &ContentNode) -> usize {
+    match node {
+        ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => {
+            spans_visual_characters(spans)
+        }
+        ContentNode::BlockQuote { children, .. } => children
+            .iter()
+            .map(content_node_visual_characters)
+            .max()
+            .unwrap_or(0),
+        ContentNode::Table { row_groups, .. } => row_groups
+            .iter()
+            .flat_map(|group| &group.rows)
+            .flat_map(|row| &row.cells)
+            .map(table_cell_visual_characters)
+            .max()
+            .unwrap_or(0),
+        ContentNode::Math { content, .. } => content.fallback.chars().count(),
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => items
+            .iter()
+            .map(|item| spans_visual_characters(item))
+            .max()
+            .unwrap_or(0),
+        ContentNode::Image { alt, .. } => alt.chars().count().max(8),
+        ContentNode::CodeBlock { code, .. } => code
+            .lines()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0),
+        ContentNode::InlineCode(code) => code.chars().count(),
+        ContentNode::HorizontalRule => 1,
+    }
 }
 
 fn measure_epub_spans(
@@ -1622,6 +1745,7 @@ fn estimated_epub_compact_node_height_bounded(
             let table_width = epub_table_layout_width(row_groups, width);
             let table_content_width =
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
+            let column_widths = epub_table_column_widths(row_groups, table_content_width);
             let caption_height = (!caption.is_empty()).then(|| {
                 let scale = caption_style
                     .as_ref()
@@ -1649,7 +1773,7 @@ fn estimated_epub_compact_node_height_bounded(
                         .enumerate()
                         .map(|(cell_index, cell)| {
                             let cell_width =
-                                epub_table_cell_content_width(row, cell_index, table_content_width);
+                                epub_table_cell_content_width(row, cell_index, &column_widths);
                             let cell_chars_per_line =
                                 (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
                                     .floor()
@@ -2097,6 +2221,41 @@ mod table_layout;
 mod tests {
     use super::*;
 
+    fn table_test_cell(
+        text: &str,
+        width: Option<shosai_core::epub::render::NodeWidth>,
+    ) -> shosai_core::epub::render::TableCell {
+        use shosai_core::epub::render::{NodeStyle, TableCell, TextSpan};
+
+        TableCell {
+            id: None,
+            header: false,
+            scope: None,
+            headers: Vec::new(),
+            row_span: 1,
+            column_span: 1,
+            children: vec![ContentNode::Paragraph(
+                vec![TextSpan {
+                    text: text.into(),
+                    math: None,
+                    font_family: None,
+                    bold: false,
+                    italic: false,
+                    monospace: true,
+                    font_size_multiplier: 1.0,
+                    preserve_whitespace: true,
+                    link: None,
+                }],
+                NodeStyle::default(),
+            )],
+            block_starts: Vec::new(),
+            style: NodeStyle {
+                width,
+                ..Default::default()
+            },
+        }
+    }
+
     fn one_line_table(rows: usize) -> ContentNode {
         use shosai_core::epub::render::{
             NodeStyle, TableCell, TableRow, TableRowGroup, TableRowGroupKind, TextSpan,
@@ -2252,7 +2411,7 @@ mod tests {
                     Box::new(MathExpression::Token(token.into())),
                     Box::new(MathExpression::Token(token.into())),
                 )),
-                fallback,
+                fallback: fallback.clone(),
             }),
             font_family: None,
             bold: false,
@@ -2275,7 +2434,7 @@ mod tests {
             style: NodeStyle::default(),
         };
         let second = TextSpan {
-            text: "second cell".into(),
+            text: fallback.clone(),
             math: None,
             ..math.clone()
         };
@@ -3214,6 +3373,56 @@ mod tests {
         let mut amplified = row_groups.clone();
         amplified[0].rows[0].cells[0].column_span = 1_000;
         assert_eq!(epub_table_layout_width(&amplified, 240.0), 4_096.0);
+    }
+
+    #[test]
+    fn sparse_code_table_prefix_does_not_receive_half_the_table_width() {
+        use shosai_core::epub::render::{TableRow, TableRowGroup, TableRowGroupKind};
+
+        let row_groups = vec![TableRowGroup {
+            kind: TableRowGroupKind::Body,
+            rows: vec![TableRow {
+                cells: vec![
+                    table_test_cell("\u{200b} ", None),
+                    table_test_cell("> =some_long_code_expression", None),
+                ],
+            }],
+        }];
+
+        let widths = epub_table_column_widths(&row_groups, 360.0);
+
+        assert_eq!(widths.len(), 2);
+        assert!(widths[0] < 50.0, "sparse prefix was {widths:?}");
+        assert!(widths[1] > 300.0, "code column was {widths:?}");
+        assert!((widths.iter().sum::<f32>() + BLOCKQUOTE_SPACING - 360.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn authored_table_percentages_prevent_header_and_spacer_columns_from_expanding() {
+        use shosai_core::epub::render::{NodeWidth, TableRow, TableRowGroup, TableRowGroupKind};
+
+        let row_groups = vec![TableRowGroup {
+            kind: TableRowGroupKind::Body,
+            rows: vec![TableRow {
+                cells: vec![
+                    table_test_cell("Autoregressive Model", Some(NodeWidth::Percent(0.156))),
+                    table_test_cell("", Some(NodeWidth::Percent(0.1436))),
+                    table_test_cell(
+                        "The task of predicting the next word in a sequence",
+                        Some(NodeWidth::Percent(0.6846)),
+                    ),
+                ],
+            }],
+        }];
+
+        let widths = epub_table_column_widths(&row_groups, 600.0);
+
+        assert!(
+            widths[2] > widths[0] * 4.0,
+            "authored widths were {widths:?}"
+        );
+        assert!(widths[1] < widths[2] / 4.0, "spacer expanded to {widths:?}");
+        assert!((widths.iter().sum::<f32>() + 2.0 * BLOCKQUOTE_SPACING - 600.0).abs() < 0.001);
     }
 
     #[test]
