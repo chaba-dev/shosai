@@ -1016,13 +1016,15 @@ fn render_epub_image<'a>(
         fonts,
     )
     .expect("image node has fallback layout");
-    let mut fallback = column![
+    let placeholder = container(
         container(rich_text(spans))
             .width(Length::Fixed(layout.width))
             .height(Length::Fixed(layout.height))
-            .clip(true)
-    ]
-    .width(Length::Fill);
+            .clip(true),
+    )
+    .width(Length::Fill)
+    .center_x(Length::Fill);
+    let mut fallback = column![placeholder].width(Length::Fill);
     if !caption.is_empty() {
         let style = caption_style.as_ref().cloned().unwrap_or_default();
         fallback = fallback
@@ -2357,10 +2359,9 @@ mod tests {
         interface.operate(&renderer, &mut recorded);
 
         assert!(
-            recorded
-                .container_bounds
-                .iter()
-                .any(|bounds| bounds.width == 20.0 && bounds.height == 10.0)
+            recorded.container_bounds.iter().any(|bounds| {
+                bounds.x == 190.0 && bounds.width == 20.0 && bounds.height == 10.0
+            })
         );
     }
 

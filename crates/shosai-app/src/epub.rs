@@ -493,16 +493,21 @@ fn split_epub_image_caption(
     let mut style = caption_style.clone().unwrap_or_default();
     style.block_before_em = Some(0.0);
     style.block_after_em = Some(0.0);
-    style.width = epub_image_layout(
+    let detached_layout = epub_image_layout(
         &prefix,
         font_size,
         width,
         Some(maximum_height),
         Some(maximum_height),
         fonts,
-    )
-    .map(|layout| shosai_core::epub::render::NodeWidth::Pixels(layout.width));
-    style.margin_left_em = image_style.margin_left_em;
+    );
+    style.width =
+        detached_layout.map(|layout| shosai_core::epub::render::NodeWidth::Pixels(layout.width));
+    style.margin_left_em = detached_layout.map(|layout| {
+        let margin = epub_image_margin_left(image_style, font_size, width);
+        let post_margin_width = (width - margin).max(1.0);
+        (margin + ((post_margin_width - layout.width) / 2.0).max(0.0)) / font_size
+    });
     Some((
         prefix,
         ContentNode::Paragraph(slice_epub_spans(caption, take, caption_len - take), style),
@@ -7010,6 +7015,24 @@ mod tests {
             120.0,
             "detached caption must retain the image's resolved width"
         );
+        assert_eq!(style.margin_left_em, Some(90.0 / 16.0));
+
+        for (authored_margin, expected_width, expected_left) in
+            [(100.0, 1.0, 299.0), (-5.0, 120.0, 90.0)]
+        {
+            let mut variant = image.clone();
+            let ContentNode::Image { style, .. } = &mut variant else {
+                unreachable!();
+            };
+            style.margin_left_em = Some(authored_margin);
+            let (_, caption_fragment, _) =
+                split_epub_image_caption(&variant, 16.0, 300.0, 180.0, None).unwrap();
+            let ContentNode::Paragraph(_, style) = caption_fragment else {
+                unreachable!();
+            };
+            assert_eq!(paragraph_width(300.0, 16.0, &style), expected_width);
+            assert_eq!(style.margin_left_em, Some(expected_left / 16.0));
+        }
     }
 
     #[test]
