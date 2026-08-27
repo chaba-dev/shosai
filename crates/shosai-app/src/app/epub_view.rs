@@ -426,13 +426,35 @@ fn render_content_node<'a>(
                 crate::epub::epub_figure_content_width(style, available_width, font_size);
             let mut figure = column![];
             let mut child_offset = text_offset;
+            let figure_spacing = (0..=children.len())
+                .map(|boundary| {
+                    crate::epub::epub_fragment_boundary_spacing(
+                        children,
+                        boundary,
+                        font_size,
+                        EPUB_BLOCKQUOTE_SPACING,
+                        style,
+                    )
+                })
+                .sum::<f32>();
+            let mut figure_remaining_height = available_height
+                .map(|height| (height - figure_spacing).max(1.0))
+                .unwrap_or(f32::MAX);
+            let figure_chars_per_line = (figure_width
+                / (font_size * crate::epub::AVERAGE_CHARACTER_WIDTH).max(1.0))
+            .floor()
+            .max(1.0) as usize;
+            let figure_lines_per_page = (figure_remaining_height / (font_size * 1.2))
+                .max(1.0)
+                .min(usize::MAX as f32) as usize;
             for (child_index, child) in children.iter().enumerate() {
                 figure = figure.push(iced::widget::Space::new().height(Length::Fixed(
-                    crate::epub::epub_node_boundary_spacing(
+                    crate::epub::epub_fragment_boundary_spacing(
                         children,
                         child_index,
                         font_size,
                         EPUB_BLOCKQUOTE_SPACING,
+                        style,
                     ),
                 )));
                 figure = figure.push(render_content_node(
@@ -444,20 +466,31 @@ fn render_content_node<'a>(
                     fill_images,
                     figure_width,
                     None,
-                    available_height,
+                    Some(figure_remaining_height),
                     child_offset,
                     highlights,
                     fonts,
                     scale,
                 ));
+                let child_height = crate::epub::epub_bounded_node_height(
+                    fonts,
+                    child,
+                    font_size,
+                    figure_width,
+                    figure_remaining_height,
+                    figure_chars_per_line,
+                    figure_lines_per_page,
+                );
+                figure_remaining_height = (figure_remaining_height - child_height).max(1.0);
                 child_offset += content_node_text_len(child) + 1;
             }
             figure = figure.push(iced::widget::Space::new().height(Length::Fixed(
-                crate::epub::epub_node_boundary_spacing(
+                crate::epub::epub_fragment_boundary_spacing(
                     children,
                     children.len(),
                     font_size,
                     EPUB_BLOCKQUOTE_SPACING,
+                    style,
                 ),
             )));
             container(container(figure).width(Length::Fixed(figure_width)))
@@ -497,12 +530,14 @@ fn render_content_node<'a>(
             );
             let caption_gap = EPUB_TABLE_ROW_SPACING
                 * usize::from(!caption.is_empty() && !row_groups.is_empty()) as f32;
+            let table_content_height = (table_height - caption_height - caption_gap).max(1.0);
+            let table_lines_per_page = (table_height / (font_size * 1.2)).max(1.0) as usize;
             let geometry = crate::epub::epub_table_geometry_bounded(
                 row_groups,
                 &column_widths,
-                (table_height / (font_size * 1.2)).max(1.0) as usize,
+                table_lines_per_page,
                 font_size,
-                (table_height - caption_height - caption_gap).max(1.0),
+                table_content_height,
                 fonts,
             );
             let mut table_offset = text_offset;
@@ -541,6 +576,19 @@ fn render_content_node<'a>(
                     table_row.cells.iter().zip(row_geometry).enumerate()
                 {
                     let mut rendered_cell = column![];
+                    let cell_content_width = crate::epub::epub_table_cell_content_width(
+                        cell_geometry.placement,
+                        &column_widths,
+                    );
+                    let mut cell_remaining_height = crate::epub::epub_table_cell_content_height(
+                        &cell.children,
+                        font_size,
+                        table_content_height,
+                    );
+                    let cell_chars_per_line = (cell_content_width
+                        / (font_size * crate::epub::AVERAGE_CHARACTER_WIDTH).max(1.0))
+                    .floor()
+                    .max(1.0) as usize;
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
                             table_offset += 1;
@@ -560,17 +608,24 @@ fn render_content_node<'a>(
                             palette,
                             image_handles,
                             fill_images,
-                            crate::epub::epub_table_cell_content_width(
-                                cell_geometry.placement,
-                                &column_widths,
-                            ),
+                            cell_content_width,
                             None,
-                            available_height,
+                            Some(cell_remaining_height),
                             table_offset,
                             highlights,
                             fonts,
                             scale,
                         ));
+                        let child_height = crate::epub::epub_bounded_node_height(
+                            fonts,
+                            child,
+                            font_size,
+                            cell_content_width,
+                            cell_remaining_height,
+                            cell_chars_per_line,
+                            table_lines_per_page,
+                        );
+                        cell_remaining_height = (cell_remaining_height - child_height).max(1.0);
                         table_offset += content_node_text_len(child);
                     }
                     rendered_cell = rendered_cell.push(iced::widget::Space::new().height(
@@ -659,7 +714,7 @@ fn render_content_node<'a>(
             let mut col = column![].spacing(4);
             let mut item_offset = text_offset;
             for (i, item_spans) in items.iter().enumerate() {
-                let num_text = format!("  {}. ", start + i);
+                let num_text = format!("  {}. ", start.saturating_add(i));
                 col = col.push(render_spans_with_prefix(
                     &num_text,
                     font_size * spans_font_scale(item_spans),
