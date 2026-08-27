@@ -411,6 +411,28 @@ async fn discovered_import_rejects_a_file_changed_after_review() {
 }
 
 #[tokio::test]
+async fn discovered_referenced_duplicate_rejects_a_file_changed_after_review() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("changing.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    lib.import_file(&source).await.unwrap();
+    let discovery = lib.discover_files(std::slice::from_ref(&source)).await;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&source)
+        .unwrap();
+    file.write_all(b"changed after review").unwrap();
+
+    let linked = lib.link_discovered_files(&discovery.candidates).await;
+
+    assert!(linked.books.is_empty());
+    assert_eq!(linked.failures.len(), 1);
+    assert!(linked.failures[0].error.contains("changed after review"));
+}
+
+#[tokio::test]
 async fn managed_import_preparation_is_concurrent_safe_and_does_not_mutate_the_library() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("first.epub");
@@ -485,6 +507,7 @@ async fn discovery_progress_counts_supported_files_through_completion() {
     let snapshot = progress.snapshot();
     assert!(!snapshot.enumerating);
     assert_eq!(snapshot.total_files, 6);
+    assert_eq!(snapshot.hashed_files, 6);
     assert_eq!(snapshot.completed_files, 6);
 }
 

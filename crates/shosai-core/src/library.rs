@@ -2,7 +2,7 @@
 //!
 //! Uses the same SQLite database as the reading state store.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -154,6 +154,7 @@ impl ImportCancellation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImportDiscoveryProgressSnapshot {
     pub enumerating: bool,
+    pub hashed_files: u64,
     pub completed_files: u64,
     pub total_files: u64,
 }
@@ -164,6 +165,7 @@ pub struct ImportDiscoveryProgress(Arc<ImportDiscoveryProgressInner>);
 #[derive(Debug)]
 struct ImportDiscoveryProgressInner {
     enumerating: AtomicBool,
+    hashed_files: AtomicU64,
     completed_files: AtomicU64,
     total_files: AtomicU64,
 }
@@ -172,6 +174,7 @@ impl Default for ImportDiscoveryProgress {
     fn default() -> Self {
         Self(Arc::new(ImportDiscoveryProgressInner {
             enumerating: AtomicBool::new(true),
+            hashed_files: AtomicU64::new(0),
             completed_files: AtomicU64::new(0),
             total_files: AtomicU64::new(0),
         }))
@@ -182,6 +185,7 @@ impl ImportDiscoveryProgress {
     pub fn snapshot(&self) -> ImportDiscoveryProgressSnapshot {
         ImportDiscoveryProgressSnapshot {
             enumerating: self.0.enumerating.load(Ordering::Acquire),
+            hashed_files: self.0.hashed_files.load(Ordering::Acquire),
             completed_files: self.0.completed_files.load(Ordering::Acquire),
             total_files: self.0.total_files.load(Ordering::Acquire),
         }
@@ -193,6 +197,10 @@ impl ImportDiscoveryProgress {
 
     fn completed_file(&self) {
         self.0.completed_files.fetch_add(1, Ordering::AcqRel);
+    }
+
+    fn hashed_file(&self) {
+        self.0.hashed_files.fetch_add(1, Ordering::AcqRel);
     }
 
     fn finish_enumerating(&self) {
@@ -436,7 +444,19 @@ impl Library {
         let path = canonical_path(path);
         let path_str = path.to_string_lossy().to_string();
 
-        // Check if already imported.
+        if let Some(expected_hash) = expected_hash {
+            let fingerprint_path = path.clone();
+            let actual_hash = tokio::task::spawn_blocking(move || {
+                file_fingerprint(&fingerprint_path).map(|fingerprint| fingerprint.hash)
+            })
+            .await
+            .context("book verification task failed")??;
+            if actual_hash != expected_hash {
+                bail!("file changed after review: {}", path.display());
+            }
+        }
+
+        // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
             return Ok(book);
         }
@@ -789,61 +809,94 @@ impl Library {
         cancellation: ImportCancellation,
         progress: ImportDiscoveryProgress,
     ) -> ImportDiscovery {
+        let (scan_sender, mut scan_receiver) = tokio::sync::mpsc::channel(16);
         let scan_cancellation = cancellation.clone();
         let scan_progress = progress.clone();
-        let mut scanned = tokio::task::spawn_blocking(move || {
-            scan_import_candidates(roots, recursive, &scan_cancellation, &scan_progress)
-        })
-        .await
-        .unwrap_or_else(|error| ImportDiscoveryScan {
-            candidates: Vec::new(),
-            failures: vec![ImportFailure {
+        let scan_task = tokio::task::spawn_blocking(move || {
+            scan_import_candidates(
+                roots,
+                recursive,
+                &scan_cancellation,
+                &scan_progress,
+                &scan_sender,
+            );
+        });
+        let mut fingerprint_tasks = tokio::task::JoinSet::new();
+        let mut fingerprinted = Vec::new();
+        let mut discovery = ImportDiscovery::default();
+        let mut scanning = true;
+
+        while scanning || !fingerprint_tasks.is_empty() {
+            if cancellation.is_cancelled() {
+                fingerprint_tasks.abort_all();
+                break;
+            }
+
+            if fingerprint_tasks.len() >= DISCOVERY_HASH_CONCURRENCY || !scanning {
+                if let Some(result) = fingerprint_tasks.join_next().await {
+                    collect_fingerprint_result(result, &progress, &mut fingerprinted);
+                }
+                continue;
+            }
+
+            if fingerprint_tasks.is_empty() {
+                match scan_receiver.recv().await {
+                    Some(ScannedImport::Candidate(candidate)) => {
+                        spawn_candidate_fingerprint(
+                            &mut fingerprint_tasks,
+                            candidate,
+                            cancellation.clone(),
+                        );
+                    }
+                    Some(ScannedImport::Failure(failure)) => discovery.failures.push(failure),
+                    None => scanning = false,
+                }
+                continue;
+            }
+
+            tokio::select! {
+                item = scan_receiver.recv() => match item {
+                    Some(ScannedImport::Candidate(candidate)) => {
+                        spawn_candidate_fingerprint(
+                            &mut fingerprint_tasks,
+                            candidate,
+                            cancellation.clone(),
+                        );
+                    }
+                    Some(ScannedImport::Failure(failure)) => discovery.failures.push(failure),
+                    None => scanning = false,
+                },
+                result = fingerprint_tasks.join_next() => {
+                    if let Some(result) = result {
+                        collect_fingerprint_result(result, &progress, &mut fingerprinted);
+                    }
+                }
+            }
+        }
+
+        if !cancellation.is_cancelled()
+            && let Err(error) = scan_task.await
+        {
+            discovery.failures.push(ImportFailure {
                 path: PathBuf::new(),
                 error: format!("book discovery task failed: {error}"),
-            }],
-        });
-        scanned
-            .candidates
-            .sort_by(|left, right| left.path.cmp(&right.path));
-        let mut discovery = ImportDiscovery {
-            candidates: Vec::with_capacity(scanned.candidates.len()),
-            failures: scanned.failures,
-        };
+            });
+        }
+
+        fingerprinted.sort_by(|left, right| left.0.path.cmp(&right.0.path));
+        discovery.candidates.reserve(fingerprinted.len());
         let mut selected_hashes = HashMap::<String, PathBuf>::new();
 
-        let mut candidates = scanned.candidates.into_iter();
-        let mut pending_fingerprints = candidates
-            .by_ref()
-            .take(DISCOVERY_HASH_CONCURRENCY)
-            .map(|candidate| start_candidate_fingerprint(candidate, cancellation.clone()))
-            .collect::<VecDeque<_>>();
-
-        while let Some((candidate, fingerprint_task)) = pending_fingerprints.pop_front() {
+        for (candidate, fingerprint) in fingerprinted {
             if cancellation.is_cancelled() {
                 break;
             }
-            let fingerprint = fingerprint_task.await;
-            if !cancellation.is_cancelled()
-                && let Some(next) = candidates.next()
-            {
-                pending_fingerprints
-                    .push_back(start_candidate_fingerprint(next, cancellation.clone()));
-            }
             let fingerprint = match fingerprint {
-                Ok(Ok(fingerprint)) => fingerprint,
-                Ok(Err(_error)) if cancellation.is_cancelled() => break,
-                Ok(Err(error)) => {
-                    discovery.failures.push(ImportFailure {
-                        path: candidate.path,
-                        error: format!("{error:#}"),
-                    });
-                    progress.completed_file();
-                    continue;
-                }
+                Ok(fingerprint) => fingerprint,
                 Err(error) => {
                     discovery.failures.push(ImportFailure {
                         path: candidate.path,
-                        error: format!("book inspection task failed: {error}"),
+                        error,
                     });
                     progress.completed_file();
                     continue;
@@ -1528,18 +1581,55 @@ struct PendingImportCandidate {
     format: BookFormat,
 }
 
-fn start_candidate_fingerprint(
+enum ScannedImport {
+    Candidate(PendingImportCandidate),
+    Failure(ImportFailure),
+}
+
+enum ScanCursor {
+    Path(PathBuf),
+    Directory(PathBuf, std::fs::ReadDir),
+}
+
+fn spawn_candidate_fingerprint(
+    tasks: &mut tokio::task::JoinSet<(PendingImportCandidate, Result<FileFingerprint>)>,
     candidate: PendingImportCandidate,
     cancellation: ImportCancellation,
-) -> (
-    PendingImportCandidate,
-    tokio::task::JoinHandle<Result<FileFingerprint>>,
 ) {
     let path = candidate.path.clone();
-    let task = tokio::task::spawn_blocking(move || {
-        file_fingerprint_cancellable(&path, Some(&cancellation))
+    tasks.spawn_blocking(move || {
+        let fingerprint = file_fingerprint_cancellable(&path, Some(&cancellation));
+        (candidate, fingerprint)
     });
-    (candidate, task)
+}
+
+fn collect_fingerprint_result(
+    result: std::result::Result<
+        (PendingImportCandidate, Result<FileFingerprint>),
+        tokio::task::JoinError,
+    >,
+    progress: &ImportDiscoveryProgress,
+    fingerprinted: &mut Vec<(
+        PendingImportCandidate,
+        std::result::Result<FileFingerprint, String>,
+    )>,
+) {
+    match result {
+        Ok((candidate, result)) => {
+            progress.hashed_file();
+            fingerprinted.push((candidate, result.map_err(|error| format!("{error:#}"))));
+        }
+        Err(error) => {
+            progress.hashed_file();
+            fingerprinted.push((
+                PendingImportCandidate {
+                    path: PathBuf::new(),
+                    format: BookFormat::Epub,
+                },
+                Err(format!("book inspection task failed: {error}")),
+            ));
+        }
+    }
 }
 
 fn scan_import_candidates(
@@ -1547,16 +1637,47 @@ fn scan_import_candidates(
     recursive: bool,
     cancellation: &ImportCancellation,
     progress: &ImportDiscoveryProgress,
-) -> ImportDiscoveryScan {
-    let mut scan = ImportDiscoveryScan::default();
-    let mut pending = roots;
+    sender: &tokio::sync::mpsc::Sender<ScannedImport>,
+) {
+    let mut pending = roots
+        .into_iter()
+        .rev()
+        .map(ScanCursor::Path)
+        .collect::<Vec<_>>();
     let mut visited_dirs = HashSet::new();
-    let mut candidates = Vec::new();
 
-    while let Some(original_path) = pending.pop() {
+    while let Some(cursor) = pending.pop() {
         if cancellation.is_cancelled() {
             break;
         }
+        let original_path = match cursor {
+            ScanCursor::Path(path) => path,
+            ScanCursor::Directory(path, mut entries) => {
+                match entries.next() {
+                    Some(Ok(entry)) => {
+                        pending.push(ScanCursor::Directory(path, entries));
+                        pending.push(ScanCursor::Path(entry.path()));
+                    }
+                    Some(Err(error)) => {
+                        pending.push(ScanCursor::Directory(path.clone(), entries));
+                        if sender
+                            .blocking_send(ScannedImport::Failure(ImportFailure {
+                                path: path.clone(),
+                                error: format!(
+                                    "failed to read an entry in {}: {error}",
+                                    path.display()
+                                ),
+                            }))
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    None => {}
+                }
+                continue;
+            }
+        };
         let path = canonical_path(&original_path);
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) => metadata,
@@ -1565,11 +1686,18 @@ fn scan_import_candidates(
                     .extension()
                     .map(|extension| extension.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
-                if !recursive || BookFormat::from_extension(&extension).is_some() {
-                    scan.failures.push(ImportFailure {
-                        path,
-                        error: format!("failed to inspect {}: {error}", original_path.display()),
-                    });
+                if (!recursive || BookFormat::from_extension(&extension).is_some())
+                    && sender
+                        .blocking_send(ScannedImport::Failure(ImportFailure {
+                            path,
+                            error: format!(
+                                "failed to inspect {}: {error}",
+                                original_path.display()
+                            ),
+                        }))
+                        .is_err()
+                {
+                    break;
                 }
                 continue;
             }
@@ -1579,27 +1707,18 @@ fn scan_import_candidates(
                 continue;
             }
             match std::fs::read_dir(&path) {
-                Ok(entries) => {
-                    for entry in entries {
-                        if cancellation.is_cancelled() {
-                            break;
-                        }
-                        match entry {
-                            Ok(entry) => pending.push(entry.path()),
-                            Err(error) => scan.failures.push(ImportFailure {
-                                path: path.clone(),
-                                error: format!(
-                                    "failed to read an entry in {}: {error}",
-                                    path.display()
-                                ),
-                            }),
-                        }
+                Ok(entries) => pending.push(ScanCursor::Directory(path, entries)),
+                Err(error) => {
+                    if sender
+                        .blocking_send(ScannedImport::Failure(ImportFailure {
+                            path: path.clone(),
+                            error: format!("failed to read directory {}: {error}", path.display()),
+                        }))
+                        .is_err()
+                    {
+                        break;
                     }
                 }
-                Err(error) => scan.failures.push(ImportFailure {
-                    path: path.clone(),
-                    error: format!("failed to read directory {}: {error}", path.display()),
-                }),
             }
             continue;
         }
@@ -1612,28 +1731,31 @@ fn scan_import_candidates(
             .map(|extension| extension.to_string_lossy().to_lowercase())
             .unwrap_or_default();
         let Some(format) = BookFormat::from_extension(&extension) else {
-            if !recursive {
-                scan.failures.push(ImportFailure {
-                    path,
-                    error: format!("unsupported format: .{extension}"),
-                });
+            if !recursive
+                && sender
+                    .blocking_send(ScannedImport::Failure(ImportFailure {
+                        path,
+                        error: format!("unsupported format: .{extension}"),
+                    }))
+                    .is_err()
+            {
+                break;
             }
             continue;
         };
         progress.found_file();
-        candidates.push(PendingImportCandidate { path, format });
+        if sender
+            .blocking_send(ScannedImport::Candidate(PendingImportCandidate {
+                path,
+                format,
+            }))
+            .is_err()
+        {
+            break;
+        }
     }
 
     progress.finish_enumerating();
-    candidates.sort_by(|left, right| left.path.cmp(&right.path));
-    scan.candidates = candidates;
-    scan
-}
-
-#[derive(Default)]
-struct ImportDiscoveryScan {
-    candidates: Vec<PendingImportCandidate>,
-    failures: Vec<ImportFailure>,
 }
 
 fn import_group_key(path: &Path) -> String {
@@ -1919,6 +2041,39 @@ mod tests {
         };
 
         assert!(error.to_string().contains("discovery cancelled"));
+    }
+
+    #[test]
+    fn scanner_streams_candidates_before_directory_enumeration_finishes() {
+        let directory = tempfile::tempdir().unwrap();
+        for index in 0..20 {
+            std::fs::write(directory.path().join(format!("book-{index}.epub")), b"book").unwrap();
+        }
+        let cancellation = ImportCancellation::default();
+        let progress = ImportDiscoveryProgress::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let scan_path = directory.path().to_path_buf();
+        let scan_cancellation = cancellation.clone();
+        let scan_progress = progress.clone();
+        let scanner = std::thread::spawn(move || {
+            scan_import_candidates(
+                vec![scan_path],
+                true,
+                &scan_cancellation,
+                &scan_progress,
+                &sender,
+            );
+        });
+
+        assert!(matches!(
+            receiver.blocking_recv(),
+            Some(ScannedImport::Candidate(_))
+        ));
+        assert!(progress.snapshot().enumerating);
+
+        cancellation.cancel();
+        drop(receiver);
+        scanner.join().unwrap();
     }
 
     #[test]
