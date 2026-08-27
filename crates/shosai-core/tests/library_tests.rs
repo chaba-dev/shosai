@@ -411,6 +411,38 @@ async fn discovered_import_rejects_a_file_changed_after_review() {
 }
 
 #[tokio::test]
+async fn managed_import_preparation_is_concurrent_safe_and_does_not_mutate_the_library() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.epub");
+    let second = dir.path().join("second.epub");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+    let mut candidates = lib.discover_files(&[first, second]).await.candidates;
+    let second_candidate = candidates.pop().unwrap();
+    let first_candidate = candidates.pop().unwrap();
+
+    let (first_prepared, second_prepared) = tokio::join!(
+        lib.prepare_discovered_managed_file(first_candidate),
+        lib.prepare_discovered_managed_file(second_candidate),
+    );
+    let first_prepared = first_prepared.unwrap();
+    let second_prepared = second_prepared.unwrap();
+
+    assert!(lib.list_all().await.unwrap().is_empty());
+    let first_book = lib
+        .commit_prepared_managed_file(&first_prepared)
+        .await
+        .unwrap();
+    let second_book = lib
+        .commit_prepared_managed_file(&second_prepared)
+        .await
+        .unwrap();
+
+    assert_eq!(first_book.id, second_book.id);
+    assert_eq!(lib.list_all().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn cancelled_discovery_stops_before_scanning_candidates() {
     let (lib, _, _dir) = temp_library().await;
     let cancellation = ImportCancellation::default();

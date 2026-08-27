@@ -231,16 +231,28 @@ pub struct ManagedPathChange {
     pub new_path: PathBuf,
 }
 
+#[derive(Debug)]
 struct FileFingerprint {
     hash: String,
     size: u64,
 }
 
+#[derive(Debug)]
 struct BookInspection {
     title: String,
     author: Option<String>,
     cover: Option<Vec<u8>>,
     fingerprint: FileFingerprint,
+}
+
+/// A verified private copy that is ready to be published and recorded in the library.
+#[derive(Debug)]
+pub struct PreparedManagedImport {
+    source_str: String,
+    extension: String,
+    format: BookFormat,
+    staged: ManagedStage,
+    inspection: BookInspection,
 }
 
 /// Library backed by SQLite.
@@ -488,6 +500,24 @@ impl Library {
         source: &Path,
         expected_hash: Option<&str>,
     ) -> Result<Book> {
+        let prepared = self.prepare_managed_file(source, expected_hash).await?;
+        self.commit_prepared_managed_file(&prepared).await
+    }
+
+    /// Prepare a discovered book for managed import without mutating the library database.
+    pub async fn prepare_discovered_managed_file(
+        &self,
+        candidate: ImportCandidate,
+    ) -> Result<PreparedManagedImport> {
+        self.prepare_managed_file(&candidate.path, Some(&candidate.content_hash))
+            .await
+    }
+
+    async fn prepare_managed_file(
+        &self,
+        source: &Path,
+        expected_hash: Option<&str>,
+    ) -> Result<PreparedManagedImport> {
         let source = canonical_path(source);
         let source_str = source.to_string_lossy().to_string();
         let ext = source
@@ -516,9 +546,31 @@ impl Library {
         .await
         .context("book inspection task failed")??;
 
+        Ok(PreparedManagedImport {
+            source_str,
+            extension: ext,
+            format,
+            staged,
+            inspection,
+        })
+    }
+
+    /// Publish one prepared private copy and update the library database.
+    pub async fn commit_prepared_managed_file(
+        &self,
+        prepared: &PreparedManagedImport,
+    ) -> Result<Book> {
+        let PreparedManagedImport {
+            source_str,
+            extension,
+            format,
+            staged,
+            inspection,
+        } = prepared;
+
         let destination = self
             .managed_dir
-            .join(format!("{}.{ext}", inspection.fingerprint.hash));
+            .join(format!("{}.{extension}", inspection.fingerprint.hash));
         let publish_stage = staged.path.clone();
         let copy_destination = destination.clone();
         let expected_hash = inspection.fingerprint.hash.clone();
@@ -537,13 +589,13 @@ impl Library {
             return Ok(existing.clone());
         }
 
-        if let Some(existing) = self.get_by_path(&source_str).await?.or(existing_hash) {
+        if let Some(existing) = self.get_by_path(source_str).await?.or(existing_hash) {
             self.update_location(
                 existing.id,
                 &existing.file_path,
                 &destination_str,
                 StorageKind::Managed,
-                Some(&source_str),
+                Some(source_str),
                 &inspection.fingerprint,
             )
             .await?;
@@ -564,7 +616,7 @@ impl Library {
         .bind(format.as_str())
         .bind(&destination_str)
         .bind(&inspection.cover)
-        .bind(&source_str)
+        .bind(source_str)
         .bind(&inspection.fingerprint.hash)
         .bind(inspection.fingerprint.size as i64)
         .execute(&self.pool)
@@ -579,7 +631,7 @@ impl Library {
             .get_by_path(&destination_str)
             .await?
             .context("managed book not found after insert")?;
-        self.attach_identity(book.id, &source_str, &destination_str)
+        self.attach_identity(book.id, source_str, &destination_str)
             .await?;
         Ok(book)
     }
@@ -1595,6 +1647,7 @@ fn import_group_key(path: &Path) -> String {
         .join(" ")
 }
 
+#[derive(Debug)]
 struct ManagedStage {
     path: PathBuf,
 }
