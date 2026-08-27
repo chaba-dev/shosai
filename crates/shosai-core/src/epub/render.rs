@@ -324,7 +324,9 @@ fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
         for start in entity_declaration_starts(declarations) {
             let tail = &declarations[start + 8..];
             let tail = tail.trim_start();
-            let tail = tail.strip_prefix('%').map(str::trim_start).unwrap_or(tail);
+            if tail.starts_with('%') {
+                continue;
+            }
             let name_len = tail
                 .bytes()
                 .take_while(|byte| {
@@ -443,22 +445,41 @@ fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
 }
 
 fn doctype_end(doctype: &str) -> Option<usize> {
+    let bytes = doctype.as_bytes();
     let mut quote = None;
+    let mut comment = false;
     let mut subset_depth = 0_u32;
-    for (index, byte) in doctype.bytes().enumerate() {
-        if let Some(delimiter) = quote {
-            if byte == delimiter {
-                quote = None;
+    let mut index = 0;
+    while index < bytes.len() {
+        if comment {
+            if bytes[index..].starts_with(b"-->") {
+                comment = false;
+                index += 3;
+            } else {
+                index += 1;
             }
             continue;
         }
-        match byte {
-            b'\'' | b'"' => quote = Some(byte),
+        if let Some(delimiter) = quote {
+            if bytes[index] == delimiter {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<!--") {
+            comment = true;
+            index += 4;
+            continue;
+        }
+        match bytes[index] {
+            b'\'' | b'"' => quote = Some(bytes[index]),
             b'[' => subset_depth = subset_depth.saturating_add(1),
             b']' => subset_depth = subset_depth.saturating_sub(1),
             b'>' if subset_depth == 0 => return Some(index + 1),
             _ => {}
         }
+        index += 1;
     }
     None
 }
@@ -2294,11 +2315,13 @@ mod tests {
         let xhtml = r#"<!DOCTYPE html [
           <!-- <!ENTITY copy "fake comment declaration"> -->
           <!ENTITY marker "<!ENTITY trade 'fake quoted declaration'>">
+          <!ENTITY % reg "fake parameter declaration">
+          <!-- ]> must not end the doctype -->
           <!ENTITY nbsp "actual declaration">
-        ]><html><body>&copy; &trade; &nbsp;</body></html>"#;
+        ]><html><body>&copy; &trade; &reg; &nbsp;</body></html>"#;
         let normalized = resolve_xhtml_named_entities(xhtml);
 
-        assert!(normalized.contains("<body>© ™ &nbsp;</body>"));
+        assert!(normalized.contains("<body>© ™ ® &nbsp;</body>"));
     }
 
     #[test]
