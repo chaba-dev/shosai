@@ -359,12 +359,10 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
     use std::collections::{HashMap, HashSet};
 
     let mut entities = HashMap::new();
-    let mut document = xhtml;
-    while let Some(start) = document.find("<!DOCTYPE") {
-        let doctype = &document[start..];
-        let end = doctype_end(doctype).unwrap_or(doctype.len());
-        for start in entity_declaration_starts(&doctype[..end]) {
-            let mut tail = doctype[start + 8..end].trim_start();
+    if let Some((doctype_start, doctype_end)) = actual_doctype_range(xhtml) {
+        let doctype = &xhtml[doctype_start..doctype_end];
+        for start in entity_declaration_starts(doctype) {
+            let mut tail = doctype[start + 8..].trim_start();
             if tail.starts_with('%') {
                 tail = tail[1..].trim_start();
             }
@@ -391,7 +389,6 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
                 entities.entry(name).or_insert(&tail[1..close + 1]);
             }
         }
-        document = &doctype[end..];
     }
 
     fn expanded_len<'a>(
@@ -496,11 +493,8 @@ pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, 
     use std::collections::HashSet;
 
     let mut declared = HashSet::new();
-    let mut document = xhtml;
-    while let Some(start) = document.find("<!DOCTYPE") {
-        let doctype = &document[start..];
-        let end = doctype_end(doctype).unwrap_or(doctype.len());
-        let declarations = &doctype[..end];
+    if let Some((start, end)) = actual_doctype_range(xhtml) {
+        let declarations = &xhtml[start..end];
         for start in entity_declaration_starts(declarations) {
             let tail = &declarations[start + 8..];
             let tail = tail.trim_start();
@@ -517,7 +511,6 @@ pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, 
                 declared.insert(&tail[..name_len]);
             }
         }
-        document = &doctype[end..];
     }
 
     let mut output = String::new();
@@ -635,6 +628,29 @@ fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
         }
     }
     starts
+}
+
+fn actual_doctype_range(document: &str) -> Option<(usize, usize)> {
+    let mut position = 0;
+    while position < document.len() {
+        let tail = &document[position..];
+        if tail.starts_with("<!--") {
+            position += tail.find("-->")? + 3;
+            continue;
+        } else if tail.starts_with("<?") {
+            position += tail.find("?>")? + 2;
+            continue;
+        } else if tail.starts_with("<![CDATA[") {
+            position += tail.find("]]>")? + 3;
+            continue;
+        }
+        if tail.starts_with("<!DOCTYPE") {
+            return Some((position, position + doctype_end(tail).unwrap_or(tail.len())));
+        } else {
+            position += tail.chars().next()?.len_utf8();
+        }
+    }
+    None
 }
 
 fn doctype_end(doctype: &str) -> Option<usize> {
@@ -2585,6 +2601,11 @@ mod tests {
         let fake_end = "<!DOCTYPE html [<?fake ]> ?><!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
         let error = parse_chapter_xhtml_with_limits(fake_end, "", &Default::default(), &limits)
             .expect_err("doctype delimiters in processing-instruction data must remain opaque");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_doctype = "<!-- <!DOCTYPE html [<!ENTITY bomb \"x\">]> --><!DOCTYPE html [<!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(fake_doctype, "", &Default::default(), &limits)
+            .expect_err("doctype text inside comments must not shadow the real declaration");
         assert!(error.to_string().contains("expanded text limit"));
     }
 
