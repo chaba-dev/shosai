@@ -408,8 +408,9 @@ fn split_epub_image_caption(
     width: f32,
     maximum_height: f32,
     fonts: Option<&EpubFontBook>,
-) -> Option<(ContentNode, ContentNode)> {
+) -> Option<(ContentNode, ContentNode, usize)> {
     let ContentNode::Image {
+        alt,
         caption,
         caption_style,
         ..
@@ -418,7 +419,7 @@ fn split_epub_image_caption(
         return None;
     };
     let caption_len = spans_text_len(caption);
-    if caption_len < 2
+    if caption_len == 0
         || epub_image_layout(
             node,
             font_size,
@@ -458,7 +459,7 @@ fn split_epub_image_caption(
             high = take;
         }
     }
-    let (take, prefix) = fitting.or_else(|| {
+    let fitted = fitting.or_else(|| {
         let mut prefix = node.clone();
         let ContentNode::Image { caption, .. } = &mut prefix else {
             unreachable!();
@@ -474,13 +475,22 @@ fn split_epub_image_caption(
         )
         .is_some_and(|layout| layout.total_height() <= maximum_height)
         .then_some((1, prefix))
-    })?;
+    });
+    let (take, prefix) = fitted.unwrap_or_else(|| {
+        let mut prefix = node.clone();
+        let ContentNode::Image { caption, .. } = &mut prefix else {
+            unreachable!();
+        };
+        caption.clear();
+        (0, prefix)
+    });
     let mut style = caption_style.clone().unwrap_or_default();
     style.block_before_em = Some(0.0);
     style.block_after_em = Some(0.0);
     Some((
         prefix,
         ContentNode::Paragraph(slice_epub_spans(caption, take, caption_len - take), style),
+        alt.chars().count() + 1 + take,
     ))
 }
 
@@ -958,7 +968,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                             let child_page_count = child_pages.len();
                             for (index, child_page) in child_pages.into_iter().enumerate() {
                                 if index > 0 {
-                                    let _ = push_epub_page(&mut pages, budget);
+                                    pages.push(Vec::new());
                                 }
                                 let child_offset =
                                     child_page.first().map_or(0, |node| node.text_offset);
@@ -1107,7 +1117,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
             }
             ContentNode::Image { .. } => {
                 let maximum_height = (page_size.height - block_before - block_spacing).max(1.0);
-                if let Some((image, caption_remainder)) = split_epub_image_caption(
+                if let Some((image, caption_remainder, consumed_text)) = split_epub_image_caption(
                     node,
                     font_size,
                     page_size.width,
@@ -1117,7 +1127,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                     if page_has_content(&pages, first_page_has_title) {
                         let _ = push_epub_page(&mut pages, budget);
                     }
-                    let caption_offset = text_offset + content_node_text_len(&image);
+                    let caption_offset = text_offset + consumed_text;
                     pages.last_mut().unwrap().push(PageNode {
                         node: image,
                         text_offset,
@@ -1338,6 +1348,40 @@ fn paginate_epub_table(
     else {
         unreachable!("table pagination requires a table node");
     };
+    if row_groups.is_empty() {
+        if caption.is_empty() {
+            return;
+        }
+        if page_has_content(pages, first_page_has_title) && push_epub_page(pages, budget) {
+            *remaining = (page_height - leading_spacing).max(0.0);
+        }
+        let mut style = caption_style.clone().unwrap_or_default();
+        style.block_before_em = Some(0.0);
+        style.block_after_em = Some(0.0);
+        let caption_pages = paginate_epub_chapter_with_budget(
+            &[ContentNode::Paragraph(caption.clone(), style)],
+            None,
+            font_size,
+            0.0,
+            Size::new(page_width, (page_height - leading_spacing).max(1.0)),
+            fonts,
+            budget,
+        );
+        for (page_index, caption_page) in caption_pages.into_iter().enumerate() {
+            if page_index > 0 {
+                pages.push(Vec::new());
+            }
+            pages
+                .last_mut()
+                .unwrap()
+                .extend(caption_page.into_iter().map(|mut page_node| {
+                    page_node.text_offset += text_offset;
+                    page_node
+                }));
+        }
+        *remaining = 0.0;
+        return;
+    }
     let mut fragment_offset = text_offset;
     let mut include_caption = !caption.is_empty();
     let mut pending = None;
@@ -1397,9 +1441,7 @@ fn paginate_epub_table(
         caption_height + geometry.height + caption_gap
     };
 
-    if let Some((_, kind, rows)) = bands.first().copied()
-        && !caption.is_empty()
-    {
+    if !caption.is_empty() {
         let table_width = epub_table_layout_width(row_groups, style, page_width);
         let content_width = epub_table_content_width(style, table_width, page_width, font_size);
         let maximum_height = (page_height - leading_spacing - trailing_spacing).max(1.0);
@@ -1410,21 +1452,23 @@ fn paginate_epub_table(
                 .unwrap_or(1.0)
             * spans_font_scale(caption)
             * TEXT_LINE_HEIGHT;
-        let row = ContentNode::Table {
-            caption: Vec::new(),
-            caption_style: None,
-            row_groups: vec![TableRowGroup {
-                kind,
-                rows: rows.to_vec(),
-            }],
-            style: style.clone(),
-        };
-        let row_height = compact_height(
-            &row,
-            (maximum_height - minimum_caption_height - EPUB_TABLE_ROW_SPACING).max(1.0),
-        );
-        let maximum_caption_height =
-            (maximum_height - row_height - EPUB_TABLE_ROW_SPACING).max(1.0);
+        let row_height = bands.first().copied().map_or(0.0, |(_, kind, rows)| {
+            let row = ContentNode::Table {
+                caption: Vec::new(),
+                caption_style: None,
+                row_groups: vec![TableRowGroup {
+                    kind,
+                    rows: rows.to_vec(),
+                }],
+                style: style.clone(),
+            };
+            compact_height(
+                &row,
+                (maximum_height - minimum_caption_height - EPUB_TABLE_ROW_SPACING).max(1.0),
+            )
+        });
+        let caption_gap = EPUB_TABLE_ROW_SPACING * usize::from(!bands.is_empty()) as f32;
+        let maximum_caption_height = (maximum_height - row_height - caption_gap).max(1.0);
         if let Some((caption_prefix, caption_suffix)) = split_epub_caption_suffix(
             caption,
             caption_style.as_ref(),
@@ -1470,9 +1514,12 @@ fn paginate_epub_table(
                 unreachable!();
             };
             *caption = caption_suffix;
+            let suffix_offset = text_offset
+                + spans_text_len(&caption_prefix)
+                + usize::from(caption.is_empty() && !row_groups.is_empty());
             paginate_epub_table(
                 &suffix_table,
-                text_offset + spans_text_len(&caption_prefix),
+                suffix_offset,
                 chars_per_line,
                 lines_per_page,
                 font_size,
@@ -1648,7 +1695,7 @@ fn split_epub_caption_suffix(
     Vec<shosai_core::epub::render::TextSpan>,
 )> {
     let length = spans_text_len(caption);
-    if length < 2
+    if length == 0
         || epub_table_caption_height(fonts, caption, style, font_size, width, maximum_height)
             <= maximum_height
     {
@@ -1669,13 +1716,15 @@ fn split_epub_caption_suffix(
             low = start + 1;
         }
     }
-    let start = split.or_else(|| {
-        let start = length - 1;
-        let suffix = slice_epub_spans(caption, start, 1);
-        (epub_table_caption_height(fonts, &suffix, style, font_size, width, maximum_height)
-            <= maximum_height)
-            .then_some(start)
-    })?;
+    let start = split
+        .or_else(|| {
+            let start = length - 1;
+            let suffix = slice_epub_spans(caption, start, 1);
+            (epub_table_caption_height(fonts, &suffix, style, font_size, width, maximum_height)
+                <= maximum_height)
+                .then_some(start)
+        })
+        .unwrap_or(length);
     Some((
         slice_epub_spans(caption, 0, start),
         slice_epub_spans(caption, start, length - start),
@@ -4731,14 +4780,15 @@ mod tests {
                         .iter()
                         .map(|group| group.rows.len())
                         .sum::<usize>(),
-                    other => panic!("expected table fragment, got {other:?}"),
+                    ContentNode::Paragraph(..) => 0,
+                    other => panic!("expected table or caption fragment, got {other:?}"),
                 })
                 .sum::<usize>(),
             expected_rows
         );
         for (node, _) in &fragments {
             let ContentNode::Table { row_groups, .. } = node else {
-                unreachable!();
+                continue;
             };
             for group in row_groups {
                 for (row_index, row) in group.rows.iter().enumerate() {
@@ -4759,7 +4809,11 @@ mod tests {
             }
         }
         for pair in fragments.windows(2) {
-            assert_eq!(pair[1].1, pair[0].1 + content_node_text_len(pair[0].0));
+            let expected = pair[0].1 + content_node_text_len(pair[0].0);
+            assert!(
+                pair[1].1 == expected || pair[1].1 == expected + 1,
+                "a detached caption may leave only its table separator between fragments"
+            );
         }
         let (last, last_offset) = fragments.last().expect("table must produce fragments");
         assert_eq!(
@@ -5554,7 +5608,11 @@ mod tests {
             &mut budget,
         );
 
-        assert_eq!(first_pages.len() + second_pages.len(), 2);
+        assert_eq!(
+            first_pages.len() + second_pages.len(),
+            5,
+            "the three available breaks must not be charged again when recursive pages are integrated"
+        );
         assert_eq!(budget.remaining_page_breaks, 0);
         assert!(
             first_pages.iter().flatten().count() + second_pages.iter().flatten().count() <= 7,
@@ -6833,6 +6891,51 @@ mod tests {
     }
 
     #[test]
+    fn image_caption_can_fragment_before_its_first_character() {
+        let caption_text = "caption that cannot share the image page";
+        let image = ContentNode::Image {
+            src: "image.png".into(),
+            alt: "diagram".into(),
+            style: Default::default(),
+            caption: vec![shosai_core::epub::render::TextSpan {
+                text: caption_text.into(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            }],
+            caption_style: Some(shosai_core::epub::render::NodeStyle {
+                font_size_multiplier: Some(32.0),
+                ..Default::default()
+            }),
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 120,
+                height: 80,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+
+        let (image_fragment, caption_fragment, consumed) =
+            split_epub_image_caption(&image, 16.0, 300.0, 180.0, None)
+                .expect("oversized caption must split from the image");
+
+        assert!(matches!(
+            image_fragment,
+            ContentNode::Image { caption, .. } if caption.is_empty()
+        ));
+        assert_eq!(
+            shosai_core::search::extract_text_from_nodes(&[caption_fragment])
+                .trim_end_matches('\n'),
+            caption_text
+        );
+        assert_eq!(consumed, "diagram".chars().count() + 1);
+    }
+
+    #[test]
     fn retained_multi_image_figure_uses_shared_page_height() {
         let image = |src: &str| ContentNode::Image {
             src: src.into(),
@@ -6929,6 +7032,98 @@ mod tests {
                 .replace('\n', ""),
             shosai_core::search::extract_text_from_nodes(&paginated).replace('\n', "")
         );
+    }
+
+    #[test]
+    fn table_caption_can_fragment_entirely_before_a_tall_first_row() {
+        let caption = vec![shosai_core::epub::render::TextSpan {
+            text: "caption".into(),
+            math: None,
+            font_family: None,
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        }];
+        let style = shosai_core::epub::render::NodeStyle {
+            font_size_multiplier: Some(32.0),
+            ..Default::default()
+        };
+
+        let (prefix, suffix) =
+            split_epub_caption_suffix(&caption, Some(&style), 16.0, 300.0, 1.0, None)
+                .expect("caption must move ahead of a row when no character fits");
+
+        assert_eq!(spans_text_len(&prefix), spans_text_len(&caption));
+        assert!(suffix.is_empty());
+    }
+
+    #[test]
+    fn caption_only_table_fragments_without_losing_text() {
+        let caption_text = "caption-only table ".repeat(200);
+        let table = ContentNode::Table {
+            caption: vec![shosai_core::epub::render::TextSpan {
+                text: caption_text.clone(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            }],
+            caption_style: None,
+            row_groups: Vec::new(),
+            style: Default::default(),
+        };
+
+        let pages = paginate_epub_chapter(
+            std::slice::from_ref(&table),
+            None,
+            16.0,
+            1.4,
+            Size::new(300.0, 180.0),
+        );
+        let fragments = pages
+            .iter()
+            .flatten()
+            .map(|node| node.node.clone())
+            .collect::<Vec<_>>();
+
+        assert!(pages.len() > 1);
+        assert!(
+            fragments
+                .iter()
+                .all(|node| matches!(node, ContentNode::Paragraph(..)))
+        );
+        assert_eq!(
+            shosai_core::search::extract_text_from_nodes(&fragments).replace('\n', ""),
+            caption_text
+        );
+    }
+
+    #[test]
+    fn raster_fallback_geometry_remains_intrinsically_bounded() {
+        let image = ContentNode::Image {
+            src: "undecodable.png".into(),
+            alt: "very long fallback text ".repeat(200),
+            style: Default::default(),
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 2,
+                height: 1,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+
+        let layout = epub_image_layout(&image, 16.0, 300.0, Some(180.0), Some(180.0), None)
+            .expect("intrinsic image geometry must remain available to fallback painting");
+
+        assert_eq!((layout.width, layout.height), (2.0, 1.0));
     }
 
     #[test]
