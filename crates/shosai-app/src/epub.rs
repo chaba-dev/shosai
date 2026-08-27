@@ -148,7 +148,7 @@ pub(crate) fn epub_image_layout(
     node: &ContentNode,
     font_size: f32,
     available_width: f32,
-    available_height: f32,
+    containing_height: Option<f32>,
     fonts: Option<&EpubFontBook>,
 ) -> Option<EpubImageLayout> {
     let ContentNode::Image {
@@ -162,11 +162,24 @@ pub(crate) fn epub_image_layout(
     else {
         return None;
     };
-    let available_width = available_width.max(1.0);
-    let available_height = available_height.max(1.0);
+    let available_width = if available_width.is_finite() {
+        available_width.max(1.0)
+    } else {
+        1.0
+    };
+    let containing_height = containing_height.filter(|height| height.is_finite() && *height > 0.0);
     let estimate_caption_height = |width: f32, size: f32| {
         let per_line = (width / (size * AVERAGE_CHARACTER_WIDTH)).floor().max(1.0) as usize;
-        spans_visual_characters(caption).div_ceil(per_line).max(1) as f32 * size * TEXT_LINE_HEIGHT
+        let caption_text = caption
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+        let lines = caption_text
+            .split('\n')
+            .map(|line| line.chars().count().div_ceil(per_line).max(1))
+            .sum::<usize>()
+            .max(1);
+        lines as f32 * size * TEXT_LINE_HEIGHT
     };
     let Some(intrinsic_size) = intrinsic_size else {
         let caption_size = font_size
@@ -192,7 +205,7 @@ pub(crate) fn epub_image_layout(
                 |layout| layout.height,
             )
         };
-        return Some(EpubImageLayout {
+        let layout = EpubImageLayout {
             width: available_width,
             height: (alt.chars().count() + 8).div_ceil(
                 (available_width / (font_size * AVERAGE_CHARACTER_WIDTH))
@@ -207,39 +220,65 @@ pub(crate) fn epub_image_layout(
             } else {
                 font_size * 0.5
             },
-        });
+        };
+        return [
+            layout.width,
+            layout.height,
+            layout.caption_height,
+            layout.caption_gap,
+        ]
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 0.0)
+        .then_some(layout);
     };
     let intrinsic_width = intrinsic_size.width as f32;
     let intrinsic_height = intrinsic_size.height as f32;
-    let resolve = |dimension: shosai_core::epub::render::NodeWidth, available| match dimension {
-        shosai_core::epub::render::NodeWidth::Percent(value) => value * available,
-        shosai_core::epub::render::NodeWidth::Pixels(value) => value,
+    let resolve_height = |dimension: shosai_core::epub::render::NodeWidth| match dimension {
+        shosai_core::epub::render::NodeWidth::Percent(value) => {
+            containing_height.map(|height| value * height)
+        }
+        shosai_core::epub::render::NodeWidth::Pixels(value) => Some(value),
     };
     let requested_width = match style.width {
         Some(shosai_core::epub::render::NodeWidth::Percent(value)) => value * available_width,
         Some(shosai_core::epub::render::NodeWidth::Pixels(value)) => value,
-        None => style.height.map_or(intrinsic_width, |height| {
-            resolve(height, available_height) * intrinsic_width / intrinsic_height.max(1.0)
-        }),
+        None => style
+            .height
+            .and_then(resolve_height)
+            .map_or(intrinsic_width, |height| {
+                height * intrinsic_width / intrinsic_height.max(1.0)
+            }),
     };
     let maximum_width = match style.max_width {
         Some(shosai_core::epub::render::NodeWidth::Percent(value)) => value * available_width,
         Some(shosai_core::epub::render::NodeWidth::Pixels(value)) => value,
         None => available_width,
     };
+    let requested_width = requested_width
+        .is_finite()
+        .then_some(requested_width)
+        .unwrap_or(intrinsic_width);
+    let maximum_width = maximum_width
+        .is_finite()
+        .then_some(maximum_width)
+        .unwrap_or(available_width);
     let mut width = requested_width.clamp(1.0, maximum_width.min(available_width).max(1.0));
     // Two authored dimensions intentionally define the replaced-element rectangle;
     // otherwise retain the admitted resource's aspect ratio.
-    let mut height = if style.width.is_some() && style.height.is_some() {
-        resolve(style.height.unwrap(), available_height)
+    let mut height = if style.width.is_some() {
+        style.height.and_then(resolve_height)
     } else {
-        intrinsic_height * width / intrinsic_width.max(1.0)
+        None
     }
+    .filter(|height| height.is_finite() && *height > 0.0)
+    .unwrap_or(intrinsic_height * width / intrinsic_width.max(1.0))
     .max(1.0);
-    if height > available_height {
-        let scale = available_height / height;
-        width *= scale;
-        height = available_height;
+    if let Some(available_height) = containing_height.filter(|height| height.is_finite()) {
+        if height > available_height {
+            let scale = available_height / height;
+            width *= scale;
+            height = available_height;
+        }
     }
     let caption_size = font_size
         * caption_style
@@ -272,17 +311,25 @@ pub(crate) fn epub_image_layout(
     } else {
         font_size * 0.5
     };
-    for _ in 0..3 {
-        let maximum_image_height = (available_height - caption_height - caption_gap).max(1.0);
-        if height <= maximum_image_height {
-            break;
+    if let Some(available_height) = containing_height {
+        for _ in 0..3 {
+            let maximum_image_height = (available_height - caption_height - caption_gap).max(1.0);
+            if height <= maximum_image_height {
+                break;
+            }
+            let scale = maximum_image_height / height;
+            width *= scale;
+            height = maximum_image_height;
+            if !caption.is_empty() {
+                caption_height = measure_caption(width);
+            }
         }
-        let scale = maximum_image_height / height;
-        width *= scale;
-        height = maximum_image_height;
-        if !caption.is_empty() {
-            caption_height = measure_caption(width);
-        }
+    }
+    if ![width, height, caption_height, caption_gap]
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 0.0)
+    {
+        return None;
     }
     Some(EpubImageLayout {
         width,
@@ -773,7 +820,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                     node,
                     font_size,
                     page_size.width,
-                    (page_size.height - block_spacing).max(1.0),
+                    Some((page_size.height - block_spacing).max(1.0)),
                     fonts,
                 )
                 .map_or(page_size.height * 0.5, EpubImageLayout::total_height)
@@ -2335,7 +2382,7 @@ fn estimated_epub_compact_node_height_bounded(
         ContentNode::InlineCode(code) => {
             wrapped(code.chars().count(), 0.9) * text_line_height * 0.9
         }
-        ContentNode::Image { .. } => epub_image_layout(node, font_size, width, height, None)
+        ContentNode::Image { .. } => epub_image_layout(node, font_size, width, Some(height), None)
             .map_or_else(
                 || (lines_per_page / 2).max(4) as f32 * font_size * TEXT_LINE_HEIGHT,
                 EpubImageLayout::total_height,
@@ -5034,7 +5081,7 @@ mod tests {
             }),
         };
 
-        let layout = epub_image_layout(&image, 16.0, 600.0, 800.0, None).unwrap();
+        let layout = epub_image_layout(&image, 16.0, 600.0, Some(800.0), None).unwrap();
 
         assert_eq!(layout.width, 125.0);
         assert_eq!(layout.height, 75.0);
@@ -5057,7 +5104,7 @@ mod tests {
             }),
             kind: Some(shosai_core::epub::render::ImageKind::Raster),
         };
-        let layout = epub_image_layout(&image, 16.0, 400.0, 500.0, None).unwrap();
+        let layout = epub_image_layout(&image, 16.0, 400.0, Some(500.0), None).unwrap();
         assert_eq!((layout.width, layout.height), (300.0, 150.0));
         assert_eq!(layout.total_height(), 150.0);
     }
@@ -5083,7 +5130,7 @@ mod tests {
             intrinsic_size: None,
             kind: None,
         };
-        let layout = epub_image_layout(&image, 16.0, 240.0, 800.0, None).unwrap();
+        let layout = epub_image_layout(&image, 16.0, 240.0, Some(800.0), None).unwrap();
         assert_eq!(layout.height, 16.0 * TEXT_LINE_HEIGHT);
         assert!(layout.caption_height > 0.0);
         assert!(layout.total_height() < 800.0 / 2.0);
@@ -5114,9 +5161,73 @@ mod tests {
             }),
             kind: Some(shosai_core::epub::render::ImageKind::Raster),
         };
-        let layout = epub_image_layout(&image, 16.0, 500.0, 600.0, None).unwrap();
+        let layout = epub_image_layout(&image, 16.0, 500.0, Some(600.0), None).unwrap();
         assert_eq!(layout.width, 80.0);
         assert!(layout.caption_height > 16.0 * TEXT_LINE_HEIGHT);
+    }
+
+    #[test]
+    fn fallback_caption_measurement_counts_explicit_newlines_and_wrapped_segments() {
+        let mut image = ContentNode::Image {
+            src: "narrow.png".into(),
+            alt: String::new(),
+            style: Default::default(),
+            caption: vec![shosai_core::epub::render::TextSpan {
+                text: "abcdefghij\n\nklmnopqrst".into(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: true,
+                link: None,
+            }],
+            caption_style: None,
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 44,
+                height: 22,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+        let layout = epub_image_layout(&image, 16.0, 500.0, None, None).unwrap();
+        // At five characters per line, both ten-character runs wrap twice and
+        // the empty explicit line contributes one more line.
+        assert_eq!(layout.caption_height, 5.0 * 16.0 * TEXT_LINE_HEIGHT);
+
+        if let ContentNode::Image { caption, .. } = &mut image {
+            caption[0].text = "abcdefghijklmnopqrst".into();
+        }
+        let without_newlines = epub_image_layout(&image, 16.0, 500.0, None, None).unwrap();
+        assert!(layout.caption_height > without_newlines.caption_height);
+    }
+
+    #[test]
+    fn indefinite_height_ignores_percent_but_honors_pixel_height() {
+        let mut image = ContentNode::Image {
+            src: "image.png".into(),
+            alt: String::new(),
+            style: shosai_core::epub::render::NodeStyle {
+                height: Some(shosai_core::epub::render::NodeWidth::Percent(0.5)),
+                ..Default::default()
+            },
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 200,
+                height: 100,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+
+        let percentage = epub_image_layout(&image, 16.0, 500.0, None, None).unwrap();
+        assert_eq!((percentage.width, percentage.height), (200.0, 100.0));
+
+        if let ContentNode::Image { style, .. } = &mut image {
+            style.height = Some(shosai_core::epub::render::NodeWidth::Pixels(250.0));
+        }
+        let pixels = epub_image_layout(&image, 16.0, 500.0, None, None).unwrap();
+        assert_eq!((pixels.width, pixels.height), (500.0, 250.0));
     }
 
     #[test]
@@ -5144,7 +5255,7 @@ mod tests {
             }),
         };
 
-        let layout = epub_image_layout(&image, 16.0, 400.0, 300.0, None).unwrap();
+        let layout = epub_image_layout(&image, 16.0, 400.0, Some(300.0), None).unwrap();
 
         assert!(layout.width < 400.0);
         assert!(layout.caption_height > 0.0);

@@ -754,7 +754,7 @@ fn render_epub_image<'a>(
             node,
             font_size,
             available_width,
-            available_height.unwrap_or(f32::MAX),
+            available_height,
             fonts,
         )
         .expect("image node has image layout");
@@ -770,38 +770,42 @@ fn render_epub_image<'a>(
                 .height(Length::Fixed(layout.height))
                 .into(),
         };
-        let image_container = container(rendered)
-            .width(Length::Fill)
-            .center_x(Length::Fill);
+        let alt_highlight = image_alt_highlight(alt, text_offset, highlights);
+        let image_container = container(
+            container(rendered)
+                .width(Length::Fixed(layout.width))
+                .height(Length::Fixed(layout.height))
+                .style(move |_| image_highlight_style(palette, alt_highlight)),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill);
         let mut figure = column![image_container].width(Length::Fill);
         if !caption.is_empty() {
             let style = caption_style.as_ref().cloned().unwrap_or_default();
             let caption_size = font_size * style.font_size_multiplier.unwrap_or(1.0);
             figure = figure
                 .push(iced::widget::Space::new().height(Length::Fixed(layout.caption_gap)))
-                .push(render_spans(
-                    caption,
-                    style.direction,
-                    caption_size,
-                    palette,
-                    text_offset + alt.chars().count() + 1,
-                    highlights,
-                    fonts,
-                    scale,
-                    style.text_align,
-                    layout.width,
-                    Some(layout.caption_height.max(1.0)),
-                ));
-        }
-        if image_alt_highlight(alt, text_offset, highlights).is_some() {
-            figure = figure.push(render_highlighted_text_with_font(
-                alt,
-                text_offset,
-                font_size,
-                palette,
-                Font::DEFAULT,
-                highlights,
-            ));
+                .push(
+                    container(
+                        container(render_spans(
+                            caption,
+                            style.direction,
+                            caption_size,
+                            palette,
+                            text_offset + alt.chars().count() + 1,
+                            highlights,
+                            fonts,
+                            scale,
+                            style.text_align,
+                            layout.width,
+                            Some(layout.caption_height.max(1.0)),
+                        ))
+                        .width(Length::Fixed(layout.width))
+                        .height(Length::Fixed(layout.caption_height)),
+                    )
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+                );
         }
         return figure.into();
     }
@@ -838,7 +842,7 @@ fn render_epub_image<'a>(
         &fallback_node,
         font_size,
         available_width,
-        available_height.unwrap_or(f32::MAX),
+        available_height,
         fonts,
     )
     .expect("image node has fallback layout");
@@ -852,19 +856,27 @@ fn render_epub_image<'a>(
         let style = caption_style.as_ref().cloned().unwrap_or_default();
         fallback = fallback
             .push(iced::widget::Space::new().height(Length::Fixed(layout.caption_gap)))
-            .push(render_spans(
-                caption,
-                style.direction,
-                font_size * style.font_size_multiplier.unwrap_or(1.0),
-                palette,
-                text_offset + alt.chars().count() + 1,
-                highlights,
-                fonts,
-                scale,
-                style.text_align,
-                layout.width,
-                Some(layout.caption_height.max(1.0)),
-            ));
+            .push(
+                container(
+                    container(render_spans(
+                        caption,
+                        style.direction,
+                        font_size * style.font_size_multiplier.unwrap_or(1.0),
+                        palette,
+                        text_offset + alt.chars().count() + 1,
+                        highlights,
+                        fonts,
+                        scale,
+                        style.text_align,
+                        layout.width,
+                        Some(layout.caption_height.max(1.0)),
+                    ))
+                    .width(Length::Fixed(layout.width))
+                    .height(Length::Fixed(layout.caption_height)),
+                )
+                .width(Length::Fill)
+                .center_x(Length::Fill),
+            );
     }
     fallback.into()
 }
@@ -878,6 +890,27 @@ fn image_alt_highlight(
         .into_iter()
         .filter_map(|(_, highlight)| highlight)
         .max()
+}
+
+fn image_highlight_style(palette: ReaderPalette, highlight: Option<bool>) -> container::Style {
+    let Some(current) = highlight else {
+        return container::Style::default();
+    };
+    let color = native_epub_highlight_color(palette, current);
+    container::Style {
+        background: Some(iced::Background::Color(iced::Color::from_rgba8(
+            color[0],
+            color[1],
+            color[2],
+            color[3] as f32 / 255.0,
+        ))),
+        border: iced::Border {
+            color: palette.text,
+            width: 2.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
 }
 
 /// Render a code block with optional syntax highlighting.
@@ -1515,6 +1548,7 @@ mod tests {
     struct RecordedWidgetIds {
         containers: Vec<WidgetId>,
         scrollables: Vec<WidgetId>,
+        container_bounds: Vec<Rectangle>,
     }
 
     impl Operation for RecordedWidgetIds {
@@ -1522,8 +1556,9 @@ mod tests {
             operate(self);
         }
 
-        fn container(&mut self, id: Option<&WidgetId>, _bounds: Rectangle) {
+        fn container(&mut self, id: Option<&WidgetId>, bounds: Rectangle) {
             self.containers.extend(id.cloned());
+            self.container_bounds.push(bounds);
         }
 
         fn scrollable(
@@ -1700,7 +1735,8 @@ mod tests {
             handles.get("figure.svg"),
             Some(EpubImageHandle::Svg(_))
         ));
-        let layout = crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, 300.0, None).unwrap();
+        let layout =
+            crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, Some(300.0), None).unwrap();
         assert_eq!((layout.width, layout.height), (200.0, 100.0));
         assert!(layout.caption_height > 0.0);
     }
@@ -2041,6 +2077,61 @@ mod tests {
 
         assert_eq!(image_alt_highlight("diagram", 10, &highlights), Some(true));
         assert_eq!(image_alt_highlight("diagram", 20, &highlights), None);
+    }
+
+    #[test]
+    fn cached_image_alt_highlight_does_not_change_element_geometry() {
+        let node = ContentNode::Image {
+            src: "image.png".into(),
+            alt: "diagram".into(),
+            style: Default::default(),
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 200,
+                height: 100,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+        let handles = HashMap::from([(
+            "image.png".to_string(),
+            EpubImageHandle::Raster(image::Handle::from_rgba(200, 100, vec![0; 80_000])),
+        )]);
+        let highlighted = [SearchHighlight {
+            start: 0,
+            end: 7,
+            current: true,
+        }];
+        let layout_bounds = |highlights: &[SearchHighlight]| {
+            let element = render_epub_image(
+                &node,
+                &I18n::new(LanguagePreference::English),
+                16.0,
+                ReaderTheme::Light.palette(),
+                &handles,
+                400.0,
+                Some(300.0),
+                0,
+                highlights,
+                None,
+                1.0,
+            );
+            let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+                Font::DEFAULT,
+                iced::Pixels(16.0),
+            ));
+            let mut interface = iced_runtime::UserInterface::build(
+                element,
+                Size::new(400.0, 300.0),
+                iced_runtime::user_interface::Cache::new(),
+                &mut renderer,
+            );
+            let mut recorded = RecordedWidgetIds::default();
+            interface.operate(&renderer, &mut recorded);
+            recorded.container_bounds
+        };
+
+        assert_eq!(layout_bounds(&[]), layout_bounds(&highlighted));
     }
 
     #[test]
