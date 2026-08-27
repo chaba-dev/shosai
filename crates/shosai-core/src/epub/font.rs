@@ -191,7 +191,7 @@ impl EpubFontBook {
             else {
                 continue;
             };
-            let options = super::render::xhtml_parsing_options(normalized.len());
+            let options = super::render::xhtml_parsing_options(limits);
             let Ok(document) = roxmltree::Document::parse_with_options(&normalized, options) else {
                 continue;
             };

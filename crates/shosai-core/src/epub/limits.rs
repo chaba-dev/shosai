@@ -25,6 +25,8 @@ pub struct EpubLimits {
     pub max_xml_bytes: u64,
     /// Maximum element nesting depth in an XML document.
     pub max_xml_depth: usize,
+    /// Maximum presentation nodes admitted from an XML document.
+    pub max_xml_nodes: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
     /// Maximum number of reading-order items admitted from the OPF spine.
@@ -96,6 +98,7 @@ impl Default for EpubLimits {
             max_total_uncompressed_bytes: 512 * MIB,
             max_xml_bytes: 8 * MIB,
             max_xml_depth: 128,
+            max_xml_nodes: 250_000,
             max_xml_text_bytes: 4 * MIB,
             max_spine_items: 10_000,
             max_css_resource_bytes: 8 * MIB,
@@ -142,9 +145,13 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
     reader.config_mut().allow_unmatched_ends = true;
     let mut elements = Vec::<Vec<u8>>::new();
     let mut text_bytes = 0_u64;
+    let mut nodes = 0_usize;
     loop {
         match reader.read_event() {
             Ok(Event::Start(element)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 let depth = elements
                     .len()
                     .checked_add(1)
@@ -158,6 +165,9 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                 elements.push(element.name().as_ref().to_vec());
             }
             Ok(Event::Empty(_)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 let empty_depth = elements
                     .len()
                     .checked_add(1)
@@ -178,16 +188,27 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                 }
             }
             Ok(Event::Text(text)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 text_bytes = text_bytes
                     .checked_add(text.len() as u64)
                     .context("EPUB XML text byte count overflowed")?;
             }
             Ok(Event::CData(text)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 text_bytes = text_bytes
                     .checked_add(text.len() as u64)
                     .context("EPUB XML text byte count overflowed")?;
             }
             Ok(Event::Eof) => break,
+            Ok(Event::Comment(_) | Event::PI(_) | Event::DocType(_)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
+            }
             Ok(_) => {}
             // Structural mismatches remain available for renderer fallback through the tolerant
             // reader configuration. Lexically malformed XML is rejected because its unparsed
@@ -201,6 +222,12 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
             anyhow::bail!(
                 "EPUB XML entry exceeds text limit: {path} ({text_bytes} > {})",
                 limits.max_xml_text_bytes
+            );
+        }
+        if nodes > limits.max_xml_nodes {
+            anyhow::bail!(
+                "EPUB XML entry exceeds node limit: {path} ({nodes} > {})",
+                limits.max_xml_nodes
             );
         }
     }
@@ -508,6 +535,23 @@ mod tests {
             .expect_err("empty child must count as a nested element");
 
         assert!(error.to_string().contains("depth limit"));
+    }
+
+    #[test]
+    fn xml_elements_and_text_share_the_node_budget() {
+        let limits = EpubLimits {
+            max_xml_nodes: 3,
+            ..EpubLimits::default()
+        };
+
+        let error = validate_xml_shape(
+            "<table><tr><td>one</td><td>two</td></tr></table>",
+            "chapter.xhtml",
+            &limits,
+        )
+        .expect_err("dense tables must stop before DOM and layout allocation");
+
+        assert!(error.to_string().contains("node limit"));
     }
 
     #[test]
