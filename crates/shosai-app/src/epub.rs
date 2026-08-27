@@ -130,6 +130,16 @@ pub(crate) fn epub_node_boundary_spacing(
     }
 }
 
+pub(crate) fn epub_node_list_spacing(
+    nodes: &[ContentNode],
+    font_size: f32,
+    default_spacing: f32,
+) -> f32 {
+    (0..=nodes.len())
+        .map(|boundary| epub_node_boundary_spacing(nodes, boundary, font_size, default_spacing))
+        .sum()
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EpubImageLayout {
     pub(crate) width: f32,
@@ -1376,7 +1386,7 @@ pub(crate) fn epub_table_geometry_bounded(
                 )
             })
             .sum::<f32>()
-            + EPUB_TABLE_CELL_SPACING * cell.children.len().saturating_sub(1) as f32
+            + epub_node_list_spacing(&cell.children, font_size, EPUB_TABLE_CELL_SPACING)
             + 2.0 * EPUB_TABLE_CELL_PADDING
     })
 }
@@ -2109,7 +2119,7 @@ fn estimated_epub_blockquote_height(
             )
         })
         .sum::<f32>()
-        + BLOCKQUOTE_SPACING * children.len().saturating_sub(1) as f32
+        + epub_node_list_spacing(children, font_size, BLOCKQUOTE_SPACING)
 }
 
 fn split_epub_blockquote_prefix(
@@ -2125,18 +2135,22 @@ fn split_epub_blockquote_prefix(
     let mut prefix_height = 0.0;
     let mut consumed_text = 0;
     for (index, child) in children.iter().enumerate() {
-        let spacing = if prefix.is_empty() {
-            0.0
+        let spacing = epub_node_boundary_spacing(children, index, font_size, BLOCKQUOTE_SPACING);
+        let trailing = if index + 1 == children.len() {
+            epub_node_boundary_spacing(children, children.len(), font_size, BLOCKQUOTE_SPACING)
         } else {
-            BLOCKQUOTE_SPACING
+            0.0
         };
         let child_height = measured_epub_compact_node_height(fonts, child, font_size, page_width)
             .unwrap_or_else(|| {
                 estimated_epub_compact_node_height(child, chars_per_line, lines_per_page, font_size)
             });
-        if prefix_height + spacing + child_height <= available_height {
+        if prefix_height + spacing + child_height + trailing <= available_height {
             prefix.push(child.clone());
             prefix_height += spacing + child_height;
+            if index + 1 == children.len() {
+                prefix_height += trailing;
+            }
             consumed_text += content_node_text_len(child) + 1;
             continue;
         }
@@ -2558,7 +2572,7 @@ fn measured_epub_compact_node_height_bounded(
                 .collect();
             heights.map(|heights| {
                 heights.into_iter().sum::<f32>()
-                    + BLOCKQUOTE_SPACING * children.len().saturating_sub(1) as f32
+                    + epub_node_list_spacing(children, font_size, BLOCKQUOTE_SPACING)
             })
         }
         _ => None,
@@ -4051,7 +4065,58 @@ mod tests {
         let one_row = one_line_table(1);
         let height = estimated_epub_compact_node_height(&one_row, 40, 20, 16.0);
 
-        assert!((height - (16.0 * TEXT_LINE_HEIGHT + 12.0)).abs() < 0.001);
+        assert!(
+            (height - (16.0 * TEXT_LINE_HEIGHT + 16.0)).abs() < 0.001,
+            "estimated table height was {height}"
+        );
+    }
+
+    #[test]
+    fn nested_authored_margins_replace_container_default_spacing() {
+        let paragraph = |before, after| {
+            let mut cell = table_test_cell("content", None);
+            let ContentNode::Paragraph(_, style) = &mut cell.children[0] else {
+                unreachable!();
+            };
+            style.block_before_em = before;
+            style.block_after_em = after;
+            cell.children.remove(0)
+        };
+        let plain = paragraph(None, None);
+        let authored = paragraph(Some(2.0), Some(3.0));
+
+        assert_eq!(epub_node_list_spacing(&[plain.clone()], 16.0, 8.0), 8.0);
+        assert_eq!(epub_node_list_spacing(&[authored.clone()], 16.0, 8.0), 80.0);
+
+        let plain_quote = ContentNode::BlockQuote {
+            children: vec![plain.clone()],
+            style: Default::default(),
+        };
+        let authored_quote = ContentNode::BlockQuote {
+            children: vec![authored.clone()],
+            style: Default::default(),
+        };
+        assert_eq!(
+            estimated_epub_compact_node_height(&authored_quote, 40, 20, 16.0)
+                - estimated_epub_compact_node_height(&plain_quote, 40, 20, 16.0),
+            72.0
+        );
+
+        let mut plain_table = one_line_table(1);
+        let mut authored_table = plain_table.clone();
+        let ContentNode::Table { row_groups, .. } = &mut plain_table else {
+            unreachable!();
+        };
+        row_groups[0].rows[0].cells[0].children = vec![plain];
+        let ContentNode::Table { row_groups, .. } = &mut authored_table else {
+            unreachable!();
+        };
+        row_groups[0].rows[0].cells[0].children = vec![authored];
+        assert_eq!(
+            estimated_epub_compact_node_height(&authored_table, 40, 20, 16.0)
+                - estimated_epub_compact_node_height(&plain_table, 40, 20, 16.0),
+            76.0
+        );
     }
 
     #[test]
@@ -4648,8 +4713,8 @@ mod tests {
         let pages = paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 180.0));
 
         assert_eq!(pages.len(), 2, "TOC groups should flow by page capacity");
-        assert_eq!(pages[0].len(), 4);
-        assert_eq!(pages[1].len(), 1);
+        assert_eq!(pages[0].len(), 3);
+        assert_eq!(pages[1].len(), 2);
         assert_eq!(pages.iter().map(Vec::len).sum::<usize>(), nodes.len());
     }
 

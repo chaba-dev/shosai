@@ -373,9 +373,17 @@ fn render_content_node<'a>(
         }
 
         ContentNode::BlockQuote { children, style } => {
-            let mut col = column![].spacing(EPUB_BLOCKQUOTE_SPACING);
+            let mut col = column![];
             let mut child_offset = text_offset;
-            for child in children {
+            for (child_index, child) in children.iter().enumerate() {
+                col = col.push(iced::widget::Space::new().height(Length::Fixed(
+                    crate::epub::epub_node_boundary_spacing(
+                        children,
+                        child_index,
+                        font_size,
+                        EPUB_BLOCKQUOTE_SPACING,
+                    ),
+                )));
                 col = col.push(render_content_node(
                     child,
                     i18n,
@@ -393,6 +401,14 @@ fn render_content_node<'a>(
                 ));
                 child_offset += content_node_text_len(child) + 1;
             }
+            col = col.push(iced::widget::Space::new().height(Length::Fixed(
+                crate::epub::epub_node_boundary_spacing(
+                    children,
+                    children.len(),
+                    font_size,
+                    EPUB_BLOCKQUOTE_SPACING,
+                ),
+            )));
             let margin = style.margin_left_em.unwrap_or(1.0) * font_size;
             container(col)
                 .width(Length::Fill)
@@ -458,11 +474,19 @@ fn render_content_node<'a>(
                 for (cell_index, (cell, cell_geometry)) in
                     table_row.cells.iter().zip(row_geometry).enumerate()
                 {
-                    let mut rendered_cell = column![].spacing(EPUB_TABLE_CELL_SPACING);
+                    let mut rendered_cell = column![];
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
                             table_offset += 1;
                         }
+                        rendered_cell = rendered_cell.push(iced::widget::Space::new().height(
+                            Length::Fixed(crate::epub::epub_node_boundary_spacing(
+                                &cell.children,
+                                child_index,
+                                font_size,
+                                EPUB_TABLE_CELL_SPACING,
+                            )),
+                        ));
                         rendered_cell = rendered_cell.push(render_content_node(
                             child,
                             i18n,
@@ -483,6 +507,14 @@ fn render_content_node<'a>(
                         ));
                         table_offset += content_node_text_len(child);
                     }
+                    rendered_cell = rendered_cell.push(iced::widget::Space::new().height(
+                        Length::Fixed(crate::epub::epub_node_boundary_spacing(
+                            &cell.children,
+                            cell.children.len(),
+                            font_size,
+                            EPUB_TABLE_CELL_SPACING,
+                        )),
+                    ));
                     let header = cell.header;
                     let painted_cell = container(rendered_cell)
                         .width(Length::Fixed(cell_geometry.width))
