@@ -1153,11 +1153,20 @@ fn table_row_bands(rows: &[TableRow]) -> Vec<&[TableRow]> {
     bands
 }
 
-pub(crate) fn epub_table_layout_width(row_groups: &[TableRowGroup], available_width: f32) -> f32 {
+pub(crate) fn epub_table_layout_width(
+    row_groups: &[TableRowGroup],
+    style: &shosai_core::epub::render::NodeStyle,
+    available_width: f32,
+) -> f32 {
     let columns = epub_table_column_count(row_groups);
+    let authored_width = match style.width {
+        Some(shosai_core::epub::render::NodeWidth::Percent(value)) => value * available_width,
+        Some(shosai_core::epub::render::NodeWidth::Pixels(value)) => value,
+        None => available_width,
+    };
     (columns as f32 * MIN_EPUB_TABLE_CELL_WIDTH)
         .max(MIN_EPUB_TABLE_WIDTH)
-        .max(available_width)
+        .max(authored_width)
         .min(MAX_EPUB_TABLE_WIDTH)
 }
 
@@ -2316,7 +2325,7 @@ fn estimated_epub_compact_node_height_bounded(
             row_groups,
             style,
         } => {
-            let table_width = epub_table_layout_width(row_groups, width);
+            let table_width = epub_table_layout_width(row_groups, style, width);
             let table_content_width =
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let column_widths = epub_table_column_widths(row_groups, table_content_width);
@@ -4040,7 +4049,9 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/epub-conformance/table.epub").to_vec(),
         )
         .expect("table fixture should be a valid EPUB");
-        let ContentNode::Table { row_groups, .. } = epub
+        let ContentNode::Table {
+            row_groups, style, ..
+        } = epub
             .presentation()
             .chapter(0)
             .unwrap()
@@ -4052,12 +4063,29 @@ mod tests {
             unreachable!();
         };
 
-        assert_eq!(epub_table_layout_width(row_groups, 240.0), 360.0);
-        assert_eq!(epub_table_layout_width(row_groups, 600.0), 600.0);
+        assert_eq!(epub_table_layout_width(row_groups, style, 240.0), 360.0);
+        assert_eq!(epub_table_layout_width(row_groups, style, 600.0), 600.0);
 
         let mut amplified = row_groups.clone();
         amplified[0].rows[0].cells[0].column_span = 1_000;
-        assert_eq!(epub_table_layout_width(&amplified, 240.0), 4_096.0);
+        assert_eq!(epub_table_layout_width(&amplified, style, 240.0), 4_096.0);
+    }
+
+    #[test]
+    fn authored_table_width_is_shared_by_measurement_and_paint() {
+        let ContentNode::Table {
+            row_groups,
+            mut style,
+            ..
+        } = one_line_table(2)
+        else {
+            unreachable!();
+        };
+        style.width = Some(shosai_core::epub::render::NodeWidth::Percent(0.5));
+
+        assert_eq!(epub_table_layout_width(&row_groups, &style, 1_000.0), 500.0);
+        style.width = Some(shosai_core::epub::render::NodeWidth::Pixels(720.0));
+        assert_eq!(epub_table_layout_width(&row_groups, &style, 1_000.0), 720.0);
     }
 
     #[test]
