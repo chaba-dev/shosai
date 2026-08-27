@@ -199,12 +199,19 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 ..
             }]
         );
-        let mut page = column![].spacing(line_gap).width(Length::Fill);
+        let mut page = column![].width(Length::Fill);
         if let Some(title) = &epub_page.title {
-            page = page.push(text(title.clone()).size(font_size * 1.5).color(text_color));
+            page = page.push(
+                container(text(title.clone()).size(font_size * 1.5).color(text_color)).padding(
+                    iced::Padding {
+                        bottom: line_gap,
+                        ..iced::Padding::ZERO
+                    },
+                ),
+            );
         }
         for page_node in &epub_page.nodes {
-            page = page.push(render_content_node(
+            let rendered = render_content_node(
                 &page_node.node,
                 &state.i18n,
                 font_size,
@@ -217,7 +224,11 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &highlights,
                 fonts,
                 state.window_scale_factor,
-            ));
+            );
+            page = page.push(container(rendered).padding(iced::Padding {
+                bottom: crate::epub::epub_node_block_spacing(&page_node.node, font_size, line_gap),
+                ..iced::Padding::ZERO
+            }));
         }
         if !image_only {
             page = page.push(iced::widget::Space::new().height(Length::Fill));

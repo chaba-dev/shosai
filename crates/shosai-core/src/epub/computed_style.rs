@@ -67,6 +67,8 @@ pub(crate) struct ComputedStyle {
     pub(crate) direction: Direction,
     pub(crate) preserve_whitespace: bool,
     pub(crate) margin_left_px: f32,
+    pub(crate) margin_top_px: Option<f32>,
+    pub(crate) margin_bottom_px: Option<f32>,
     pub(crate) text_indent_px: f32,
 }
 
@@ -198,6 +200,8 @@ struct SpecifiedStyle {
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
     margin_left: Slot<RelativeLength>,
+    margin_top: Slot<RelativeLength>,
+    margin_bottom: Slot<RelativeLength>,
     text_indent: Slot<RelativeLength>,
 }
 
@@ -352,12 +356,16 @@ fn compute_element_style(
         direction: Direction::Ltr,
         preserve_whitespace: false,
         margin_left_px: 0.0,
+        margin_top_px: None,
+        margin_bottom_px: None,
         text_indent_px: 0.0,
     });
     let tag = element.tag_name().name();
     let mut style = inherited.clone();
     style.display = ua_display(tag);
     style.margin_left_px = 0.0;
+    style.margin_top_px = None;
+    style.margin_bottom_px = None;
     apply_ua_text_defaults(tag, &mut style);
     if let Some(direction) = element.attribute("dir") {
         if direction.eq_ignore_ascii_case("rtl") {
@@ -433,6 +441,12 @@ fn compute_element_style(
     }
     if let Some(value) = specified.margin_left.value() {
         style.margin_left_px = value.resolve(style.font_size_px, root_font_size);
+    }
+    if let Some(value) = specified.margin_top.value() {
+        style.margin_top_px = Some(value.resolve(style.font_size_px, root_font_size).max(0.0));
+    }
+    if let Some(value) = specified.margin_bottom.value() {
+        style.margin_bottom_px = Some(value.resolve(style.font_size_px, root_font_size).max(0.0));
     }
     if let Some(value) = specified.text_indent.value() {
         style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
@@ -602,6 +616,33 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
             if let Some(value) = margin_length(value) {
                 specified.margin_left.offer(priority, value);
+            }
+        }
+        Property::MarginTop(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            if let Some(value) = margin_length(value) {
+                specified.margin_top.offer(priority, value);
+            }
+        }
+        Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            if let Some(value) = margin_length(value) {
+                specified.margin_bottom.offer(priority, value);
+            }
+        }
+        Property::Margin(margin) => {
+            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.left
+                && let Some(value) = margin_length(value)
+            {
+                specified.margin_left.offer(priority, value);
+            }
+            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.top
+                && let Some(value) = margin_length(value)
+            {
+                specified.margin_top.offer(priority, value);
+            }
+            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.bottom
+                && let Some(value) = margin_length(value)
+            {
+                specified.margin_bottom.offer(priority, value);
             }
         }
         Property::TextIndent(indent) => {
@@ -904,6 +945,20 @@ fn property_supported(property: &Property<'_>) -> bool {
         | Property::WhiteSpace(_) => true,
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
             margin_length(value).is_some()
+        }
+        Property::MarginTop(LengthPercentageOrAuto::LengthPercentage(value))
+        | Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            margin_length(value).is_some()
+        }
+        Property::Margin(margin) => {
+            [&margin.left, &margin.top, &margin.bottom]
+                .into_iter()
+                .any(|value| {
+                    let LengthPercentageOrAuto::LengthPercentage(value) = value else {
+                        return false;
+                    };
+                    margin_length(value).is_some()
+                })
         }
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         _ => false,
@@ -1587,6 +1642,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.element_styles["target"].font_size_px, 16.0);
+    }
+
+    #[test]
+    fn vertical_block_margins_are_computed_without_inheriting() {
+        let report = compute_document_styles(
+            r#"<html><body><div id="parent"><p id="child">Target</p></div></body></html>"#,
+            "#parent { margin: 1em 0 2em; }",
+        )
+        .unwrap();
+
+        let parent = &report.element_styles["parent"];
+        assert_eq!(parent.margin_top_px, Some(16.0));
+        assert_eq!(parent.margin_bottom_px, Some(32.0));
+        let child = &report.element_styles["child"];
+        assert_eq!(child.margin_top_px, None);
+        assert_eq!(child.margin_bottom_px, None);
     }
 
     #[test]

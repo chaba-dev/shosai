@@ -43,6 +43,8 @@ pub struct NodeStyle {
     pub font_size_multiplier: Option<f32>,
     /// Left margin in em.
     pub margin_left_em: Option<f32>,
+    /// Authored vertical block spacing in em.
+    pub block_spacing_em: Option<f32>,
 }
 
 /// Semantic row-group role retained from an EPUB table.
@@ -138,6 +140,20 @@ pub enum ContentNode {
     InlineCode(String),
     /// A horizontal rule / thematic break.
     HorizontalRule,
+}
+
+impl ContentNode {
+    /// Native block style retained for node kinds that support authored CSS.
+    pub fn style(&self) -> Option<&NodeStyle> {
+        match self {
+            Self::Heading { style, .. }
+            | Self::BlockQuote { style, .. }
+            | Self::Table { style, .. }
+            | Self::Math { style, .. } => Some(style),
+            Self::Paragraph(_, style) => Some(style),
+            _ => None,
+        }
+    }
 }
 
 /// Parse chapter XHTML into a list of content nodes.
@@ -1056,6 +1072,12 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
     };
     let font_size_multiplier = css.font_size_px / (16.0 * semantic_scale);
     let margin_left_em = css.margin_left_px / 16.0;
+    let block_spacing_em = css
+        .margin_top_px
+        .into_iter()
+        .chain(css.margin_bottom_px)
+        .reduce(f32::max)
+        .map(|spacing| spacing / 16.0);
     let text_indent_em = css.text_indent_px / 16.0;
     NodeStyle {
         text_align: Some(match css.alignment {
@@ -1089,6 +1111,7 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
         } else {
             None
         },
+        block_spacing_em,
     }
 }
 
@@ -2071,17 +2094,19 @@ mod tests {
         </body></html>"#;
         let styles = super::super::style::EpubStyles::parse([(
             "style.css",
-            ".toc { margin-left: 16px; } .entry { margin-left: 32px; text-indent: -32px; }",
+            ".toc { margin-left: 16px; margin-top: 24px; margin-bottom: 32px; } .entry { margin-left: 32px; margin-bottom: 0; text-indent: -32px; }",
         )]);
         let nodes = parse_chapter_xhtml(xhtml, "", &styles);
 
         match &nodes[0] {
             ContentNode::BlockQuote { children, style } => {
                 assert_eq!(style.margin_left_em, Some(1.0));
+                assert_eq!(style.block_spacing_em, Some(2.0));
                 assert!(matches!(
                     &children[0],
                     ContentNode::Paragraph(_, paragraph_style)
                         if paragraph_style.margin_left_em == Some(0.0)
+                            && paragraph_style.block_spacing_em == Some(0.0)
                 ));
             }
             other => panic!("expected BlockQuote, got {other:?}"),

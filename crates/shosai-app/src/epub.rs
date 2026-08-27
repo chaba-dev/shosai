@@ -85,6 +85,17 @@ pub(crate) fn spread_start(page: usize, page_count: usize, spread: bool) -> usiz
     if spread { page - page % 2 } else { page }
 }
 
+pub(crate) fn epub_node_block_spacing(
+    node: &ContentNode,
+    font_size: f32,
+    default_spacing: f32,
+) -> f32 {
+    node.style()
+        .and_then(|style| style.block_spacing_em)
+        .map_or(default_spacing, |spacing| spacing * font_size)
+        .max(0.0)
+}
+
 pub(crate) fn visible_pages(page: usize, page_count: usize, spread: bool) -> Vec<usize> {
     if page_count == 0 {
         return Vec::new();
@@ -129,8 +140,8 @@ pub(crate) fn paginate_epub_chapter_with_budget(
     let chars_per_line = (page_size.width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
         .floor()
         .max(12.0) as usize;
-    let block_spacing = (font_size * line_spacing).max(1.0);
-    let lines_per_page = (page_size.height / block_spacing).floor().max(4.0) as usize;
+    let default_block_spacing = (font_size * line_spacing).max(1.0);
+    let lines_per_page = (page_size.height / default_block_spacing).floor().max(4.0) as usize;
     let first_page_has_title = title.is_some();
     let title_height = title
         .map(|title| {
@@ -139,7 +150,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 * font_size
                 * 1.5
                 * TEXT_LINE_HEIGHT
-                + block_spacing
+                + default_block_spacing
         })
         .unwrap_or(0.0);
     let mut pages = vec![Vec::new()];
@@ -147,6 +158,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
     let mut text_offset = 0;
 
     for (node_index, node) in nodes.iter().enumerate() {
+        let block_spacing = epub_node_block_spacing(node, font_size, default_block_spacing);
         let keep_with_next = match node {
             ContentNode::Heading { .. } => true,
             ContentNode::Paragraph(spans, _) => spans.iter().any(|span| span.link.is_some()),
@@ -2149,6 +2161,30 @@ mod tests {
             blockquote_continuation_page_size(Size::new(240.0, 320.0), 16.0, &block),
             Size::new(208.0, 320.0),
             "continued quote pages must retain their effective inner width"
+        );
+    }
+
+    #[test]
+    fn authored_block_spacing_overrides_reader_default() {
+        let node = ContentNode::Paragraph(
+            Vec::new(),
+            shosai_core::epub::render::NodeStyle {
+                block_spacing_em: Some(2.0),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(epub_node_block_spacing(&node, 16.0, 20.0), 32.0);
+        assert_eq!(
+            epub_node_block_spacing(
+                &ContentNode::Paragraph(
+                    Vec::new(),
+                    shosai_core::epub::render::NodeStyle::default(),
+                ),
+                16.0,
+                20.0,
+            ),
+            20.0
         );
     }
 
