@@ -1003,18 +1003,8 @@ fn render_epub_image<'a>(
             }),
     );
     spans.push(span("]".to_string()).size(font_size).color(text_color));
-    let mut fallback_node = node.clone();
-    if let ContentNode::Image {
-        intrinsic_size,
-        kind,
-        ..
-    } = &mut fallback_node
-    {
-        *intrinsic_size = None;
-        *kind = None;
-    }
     let layout = crate::epub::epub_image_layout(
-        &fallback_node,
+        node,
         font_size,
         available_width,
         percentage_height_basis,
@@ -1026,6 +1016,7 @@ fn render_epub_image<'a>(
         container(rich_text(spans))
             .width(Length::Fixed(layout.width))
             .height(Length::Fixed(layout.height))
+            .clip(true)
     ]
     .width(Length::Fill);
     if !caption.is_empty() {
@@ -2318,6 +2309,55 @@ mod tests {
         };
 
         assert_eq!(layout_bounds(&[]), layout_bounds(&highlighted));
+    }
+
+    #[test]
+    fn undecodable_raster_fallback_keeps_intrinsic_image_bounds() {
+        let node = ContentNode::Image {
+            src: "undecodable.png".into(),
+            alt: "very long fallback text ".repeat(200),
+            style: Default::default(),
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 20,
+                height: 10,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Raster),
+        };
+        let element = render_epub_image(
+            &node,
+            &I18n::new(LanguagePreference::English),
+            16.0,
+            ReaderTheme::Light.palette(),
+            &HashMap::new(),
+            400.0,
+            Some(300.0),
+            Some(300.0),
+            0,
+            &[],
+            None,
+            1.0,
+        );
+        let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+            Font::DEFAULT,
+            iced::Pixels(16.0),
+        ));
+        let mut interface = iced_runtime::UserInterface::build(
+            element,
+            Size::new(400.0, 300.0),
+            iced_runtime::user_interface::Cache::new(),
+            &mut renderer,
+        );
+        let mut recorded = RecordedWidgetIds::default();
+        interface.operate(&renderer, &mut recorded);
+
+        assert!(
+            recorded
+                .container_bounds
+                .iter()
+                .any(|bounds| bounds.width == 20.0 && bounds.height == 10.0)
+        );
     }
 
     #[test]
