@@ -5488,15 +5488,15 @@ fn relocated_book_title(
         })
         .filter(|title| !title.trim().is_empty())
         .or_else(|| {
+            (!retained_display_title.trim().is_empty()).then(|| retained_display_title.to_owned())
+        })
+        .or_else(|| {
             match document {
                 OpenDocument::Pdf(document) => document.metadata().title,
                 OpenDocument::Epub(document) => document.metadata().title,
                 OpenDocument::Cbz(document) => document.metadata().title,
             }
             .filter(|title| !title.trim().is_empty())
-        })
-        .or_else(|| {
-            (!retained_display_title.trim().is_empty()).then(|| retained_display_title.to_owned())
         })
         .or_else(|| {
             file_path
@@ -8415,6 +8415,35 @@ mod tests {
             Some("Retained library title")
         );
         assert_eq!(state.tabs[0].display_title, "Retained library title");
+    }
+
+    #[test]
+    fn relocating_evicted_managed_tab_prefers_retained_title_to_document_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.epub");
+        let replacement = directory.path().join("content-hash.epub");
+        std::fs::write(
+            &original,
+            epub_with_title_and_chapter("Publisher title", b"<html><body>text</body></html>"),
+        )
+        .unwrap();
+        std::fs::copy(&original, &replacement).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+        let mut book = test_book(42);
+        book.title = "Curated library title".to_string();
+        state.library_books = vec![book];
+
+        let _ = open_document(&mut state, original, Some(42));
+        state.library_books.clear();
+        let _ = open_document(&mut state, replacement, Some(42));
+
+        assert_eq!(
+            state.display_title.as_deref(),
+            Some("Curated library title")
+        );
+        assert_eq!(state.tabs[0].display_title, "Curated library title");
     }
 
     #[test]
