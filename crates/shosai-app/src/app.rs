@@ -2977,23 +2977,7 @@ fn reading_progress_percentage(current_page: usize, total_pages: usize) -> u32 {
 }
 
 fn reader_header(state: &State, compact: bool) -> Element<'_, Message> {
-    let title = state
-        .document
-        .as_ref()
-        .and_then(|document| match document {
-            OpenDocument::Pdf(document) => document.metadata().title,
-            OpenDocument::Epub(document) => document.metadata().title,
-            OpenDocument::Cbz(document) => document.metadata().title,
-        })
-        .filter(|title| !title.trim().is_empty())
-        .or_else(|| {
-            state
-                .file_path
-                .as_ref()
-                .and_then(|path| path.file_stem())
-                .map(|name| name.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| state.i18n.text("reader"));
+    let title = current_book_title(state).unwrap_or_else(|| state.i18n.text("reader"));
     let title = truncate_reader_label(&title, if compact { 24 } else { 58 });
     let actions = row![
         reader_control_button(
@@ -5299,16 +5283,37 @@ fn welcome_view(state: &State) -> Element<'_, Message> {
 // Title
 // ---------------------------------------------------------------------------
 
+fn current_book_title(state: &State) -> Option<String> {
+    state
+        .book_id
+        .and_then(|book_id| {
+            state
+                .library_books
+                .iter()
+                .find(|book| book.id == book_id)
+                .map(|book| book.title.clone())
+        })
+        .or_else(|| {
+            state.document.as_ref().and_then(|document| match document {
+                OpenDocument::Pdf(document) => document.metadata().title,
+                OpenDocument::Epub(document) => document.metadata().title,
+                OpenDocument::Cbz(document) => document.metadata().title,
+            })
+        })
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| {
+            state
+                .file_path
+                .as_ref()
+                .and_then(|path| path.file_stem())
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+}
+
 pub fn title(state: &State) -> String {
-    if let Some(path) = &state.file_path {
-        let filename = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        format!("{filename} - Shosai")
-    } else {
-        "Shosai".to_string()
-    }
+    current_book_title(state)
+        .map(|title| format!("{title} - Shosai"))
+        .unwrap_or_else(|| "Shosai".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -5401,6 +5406,21 @@ mod tests {
     fn reader_labels_truncate_without_splitting_unicode() {
         assert_eq!(truncate_reader_label("短い題名", 8), "短い題名");
         assert_eq!(truncate_reader_label("長い日本語の書名", 5), "長い日本…");
+    }
+
+    #[test]
+    fn managed_book_window_title_uses_document_metadata_instead_of_content_hash() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let expected = epub.metadata().title.expect("fixture should have a title");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from(
+            "/managed/books/1f5f42f7234d111f9aec67d61b2790c85e3054c5efa284c859c6519a7e7ff753.epub",
+        ));
+
+        assert_eq!(title(&state), format!("{expected} - Shosai"));
     }
 
     #[test]
