@@ -218,6 +218,7 @@ struct SpecifiedStyle {
 
 #[derive(Clone, Copy, Debug)]
 enum SpecifiedWidth {
+    Auto,
     Percent(f32),
     Length(RelativeLength),
 }
@@ -473,20 +474,22 @@ fn compute_element_style(
         style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
     }
     if let Some(value) = specified.width.value() {
-        style.width = Some(match value {
-            SpecifiedWidth::Percent(value) => ComputedWidth::Percent(value),
-            SpecifiedWidth::Length(value) => {
-                ComputedWidth::Px(value.resolve(style.font_size_px, root_font_size).max(0.0))
-            }
-        });
+        style.width = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
     }
     if let Some(value) = specified.max_width.value() {
-        style.max_width = Some(match value {
-            SpecifiedWidth::Percent(value) => ComputedWidth::Percent(value),
-            SpecifiedWidth::Length(value) => {
-                ComputedWidth::Px(value.resolve(style.font_size_px, root_font_size).max(0.0))
-            }
-        });
+        style.max_width = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
     }
     Ok(style)
 }
@@ -692,10 +695,14 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
                 specified.width.offer(priority, value);
             }
         }
+        Property::Width(CssSize::Auto) => specified.width.offer(priority, SpecifiedWidth::Auto),
         Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => {
             if let Some(value) = specified_width(value) {
                 specified.max_width.offer(priority, value);
             }
+        }
+        Property::MaxWidth(CssMaxSize::None) => {
+            specified.max_width.offer(priority, SpecifiedWidth::Auto)
         }
         _ => {}
     }
@@ -1009,7 +1016,9 @@ fn property_supported(property: &Property<'_>) -> bool {
         }
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         Property::Width(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::Width(CssSize::Auto) => true,
         Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::MaxWidth(CssMaxSize::None) => true,
         _ => false,
     }
 }
@@ -1748,6 +1757,17 @@ mod tests {
             Some(ComputedWidth::Percent(0.95))
         );
         assert_eq!(report.element_styles["child"].max_width, None);
+    }
+
+    #[test]
+    fn auto_width_and_none_max_width_reset_earlier_cascade_values() {
+        let report = compute_document_styles(
+            r#"<html><body><img id="image"/></body></html>"#,
+            "img { width: 300px; max-width: 50%; } #image { width: auto; max-width: none; }",
+        )
+        .unwrap();
+        assert_eq!(report.element_styles["image"].width, None);
+        assert_eq!(report.element_styles["image"].max_width, None);
     }
 
     #[test]

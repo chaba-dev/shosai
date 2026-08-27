@@ -1,16 +1,14 @@
 //! Parsed EPUB chapter content shared by search and reader presentation.
 
-use anyhow::Result;
-use std::collections::HashMap;
-use std::io::Cursor;
-
-use image::ImageReader;
-
 use super::EpubLimits;
-use super::render::{ContentNode, ImageSize};
+use super::render::{ContentNode, ImageKind, ImageSize};
 use super::resource::CanonicalEpubPath;
 use super::style::EpubStyles;
 use super::types::{Chapter, StoredEpubResource};
+use anyhow::Result;
+use image::ImageReader;
+use std::collections::HashMap;
+use std::io::Cursor;
 
 /// Parsed content and searchable text for one spine chapter.
 #[derive(Debug)]
@@ -54,12 +52,19 @@ impl EpubPresentation {
         let image_sizes = resources
             .iter()
             .filter_map(|(path, resource)| {
-                let format = image::guess_format(&resource.bytes).ok()?;
-                let (width, height) =
-                    ImageReader::with_format(Cursor::new(&resource.bytes), format)
-                        .into_dimensions()
-                        .ok()?;
-                Some((path.as_str(), ImageSize { width, height }))
+                if let Ok(format) = image::guess_format(&resource.bytes) {
+                    let (width, height) =
+                        ImageReader::with_format(Cursor::new(&resource.bytes), format)
+                            .into_dimensions()
+                            .ok()?;
+                    Some((
+                        path.as_str(),
+                        (ImageSize { width, height }, ImageKind::Raster),
+                    ))
+                } else {
+                    svg_intrinsic_size(&resource.bytes)
+                        .map(|size| (path.as_str(), (size, ImageKind::Svg)))
+                }
             })
             .collect::<HashMap<_, _>>();
         let chapters = chapters
@@ -95,15 +100,59 @@ impl EpubPresentation {
     }
 }
 
-fn populate_image_sizes(nodes: &mut [ContentNode], image_sizes: &HashMap<&str, ImageSize>) {
+fn svg_intrinsic_size(bytes: &[u8]) -> Option<ImageSize> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let document = roxmltree::Document::parse(text).ok()?;
+    let root = document.root_element();
+    if root.tag_name().name() != "svg" {
+        return None;
+    }
+    let number = |name| {
+        root.attribute(name)?
+            .trim()
+            .strip_suffix("px")
+            .unwrap_or(root.attribute(name)?.trim())
+            .parse::<f32>()
+            .ok()
+            .filter(|v| v.is_finite() && *v > 0.0)
+    };
+    let dimensions = number("width").zip(number("height")).or_else(|| {
+        let values = root
+            .attribute("viewBox")?
+            .split(|c: char| c.is_ascii_whitespace() || c == ',')
+            .filter(|v| !v.is_empty())
+            .map(str::parse::<f32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        (values.len() == 4
+            && values[2].is_finite()
+            && values[3].is_finite()
+            && values[2] > 0.0
+            && values[3] > 0.0)
+            .then_some((values[2], values[3]))
+    })?;
+    Some(ImageSize {
+        width: dimensions.0.ceil().min(u32::MAX as f32) as u32,
+        height: dimensions.1.ceil().min(u32::MAX as f32) as u32,
+    })
+}
+
+fn populate_image_sizes(
+    nodes: &mut [ContentNode],
+    image_sizes: &HashMap<&str, (ImageSize, ImageKind)>,
+) {
     for node in nodes {
         match node {
             ContentNode::Image {
                 src,
                 intrinsic_size,
+                kind,
                 ..
             } => {
-                *intrinsic_size = image_sizes.get(src.as_str()).copied();
+                if let Some((size, resource_kind)) = image_sizes.get(src.as_str()).copied() {
+                    *intrinsic_size = Some(size);
+                    *kind = Some(resource_kind);
+                }
             }
             ContentNode::BlockQuote { children, .. } => {
                 populate_image_sizes(children, image_sizes);
@@ -119,5 +168,32 @@ fn populate_image_sizes(nodes: &mut [ContentNode], image_sizes: &HashMap<&str, I
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn svg_intrinsic_dimensions_use_the_admitted_viewport_or_viewbox() {
+        assert_eq!(
+            svg_intrinsic_size(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"/>"#
+            ),
+            Some(ImageSize {
+                width: 120,
+                height: 60
+            })
+        );
+        assert_eq!(
+            svg_intrinsic_size(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80"/>"#
+            ),
+            Some(ImageSize {
+                width: 240,
+                height: 80
+            })
+        );
     }
 }

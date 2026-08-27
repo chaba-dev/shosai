@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use iced::widget::{column, container, image, rich_text, row, scrollable, sensor, span, text};
+use iced::widget::{column, container, image, rich_text, row, scrollable, sensor, span, svg, text};
 use iced::{Element, Font, Length};
 use shosai_core::epub::EpubDoc;
 use shosai_core::epub::render::ContentNode;
@@ -141,22 +141,31 @@ pub(super) fn cache_epub_image_handles<'a, F>(
 {
     for node in nodes {
         match node {
-            ContentNode::Image { src, .. } => {
+            ContentNode::Image { src, kind, .. } => {
                 if handles.contains_key(src) {
                     continue;
                 }
                 let Some(data) = resource_bytes(src) else {
                     continue;
                 };
-                let Ok(image) = ::image::load_from_memory(data) else {
-                    continue;
+                let handle = match kind {
+                    Some(shosai_core::epub::render::ImageKind::Svg) => {
+                        EpubImageHandle::Svg(svg::Handle::from_memory(data.to_vec()))
+                    }
+                    _ => {
+                        let Ok(decoded) = ::image::load_from_memory(data) else {
+                            continue;
+                        };
+                        let rgba = decoded.to_rgba8();
+                        let (width, height) = rgba.dimensions();
+                        EpubImageHandle::Raster(image::Handle::from_rgba(
+                            width,
+                            height,
+                            rgba.into_raw(),
+                        ))
+                    }
                 };
-                let rgba = image.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                handles.insert(
-                    src.clone(),
-                    EpubImageHandle(image::Handle::from_rgba(width, height, rgba.into_raw())),
-                );
+                handles.insert(src.clone(), handle);
             }
             ContentNode::BlockQuote { children, .. } => {
                 cache_epub_image_handles(handles, children, resource_bytes);
@@ -714,10 +723,18 @@ fn render_epub_image<'a>(
             fonts,
         )
         .expect("image node has image layout");
-        let rendered = image(&handle.0)
-            .content_fit(iced::ContentFit::ScaleDown)
-            .width(Length::Fixed(layout.width))
-            .height(Length::Fixed(layout.height));
+        let rendered: Element<'a, Message> = match handle {
+            EpubImageHandle::Raster(handle) => image(handle)
+                .content_fit(iced::ContentFit::Fill)
+                .width(Length::Fixed(layout.width))
+                .height(Length::Fixed(layout.height))
+                .into(),
+            EpubImageHandle::Svg(handle) => svg(handle.clone())
+                .content_fit(iced::ContentFit::Fill)
+                .width(Length::Fixed(layout.width))
+                .height(Length::Fixed(layout.height))
+                .into(),
+        };
         let image_container = container(rendered)
             .width(Length::Fill)
             .center_x(Length::Fill);
@@ -772,7 +789,49 @@ fn render_epub_image<'a>(
             }),
     );
     spans.push(span("]".to_string()).size(font_size).color(text_color));
-    rich_text(spans).into()
+    let mut fallback_node = node.clone();
+    if let ContentNode::Image {
+        intrinsic_size,
+        kind,
+        ..
+    } = &mut fallback_node
+    {
+        *intrinsic_size = None;
+        *kind = None;
+    }
+    let layout = crate::epub::epub_image_layout(
+        &fallback_node,
+        font_size,
+        available_width,
+        available_height.unwrap_or(f32::MAX),
+        fonts,
+    )
+    .expect("image node has fallback layout");
+    let mut fallback = column![
+        container(rich_text(spans))
+            .width(Length::Fixed(layout.width))
+            .height(Length::Fixed(layout.height))
+    ]
+    .width(Length::Fill);
+    if !caption.is_empty() {
+        let style = caption_style.as_ref().cloned().unwrap_or_default();
+        fallback = fallback
+            .push(iced::widget::Space::new().height(Length::Fixed(layout.caption_gap)))
+            .push(render_spans(
+                caption,
+                style.direction,
+                font_size * style.font_size_multiplier.unwrap_or(1.0),
+                palette,
+                text_offset + alt.chars().count() + 1,
+                highlights,
+                fonts,
+                scale,
+                style.text_align,
+                layout.width,
+                Some(layout.caption_height.max(1.0)),
+            ));
+    }
+    fallback.into()
 }
 
 fn image_alt_highlight(
@@ -1095,10 +1154,13 @@ fn render_spans_with_prefix<'a>(
     }
     rich_spans.push(span(pop_isolate.to_string()).size(font_size));
 
-    rich_text(rich_spans)
-        .wrapping(epub_fallback_wrapping())
-        .on_link_click(epub_link_clicked)
-        .into()
+    container(
+        rich_text(rich_spans)
+            .wrapping(epub_fallback_wrapping())
+            .on_link_click(epub_link_clicked),
+    )
+    .width(Length::Fixed(available_width.max(1.0)))
+    .into()
 }
 
 fn color_rgba(color: iced::Color) -> [u8; 4] {
@@ -1527,13 +1589,14 @@ mod tests {
             caption: Vec::new(),
             caption_style: None,
             intrinsic_size: None,
+            kind: None,
         }];
         let mut handles = HashMap::new();
 
         cache_epub_image_handles(&mut handles, &nodes, &|path| {
             resources.get(path).map(Vec::as_slice)
         });
-        let first_id = handles.get("image.png").unwrap().0.id();
+        let first_id = handles.get("image.png").unwrap().raster_id();
         drop(render_content_node(
             &nodes[0],
             &I18n::new(LanguagePreference::English),
@@ -1566,7 +1629,45 @@ mod tests {
             1.0,
         ));
 
-        assert_eq!(handles.get("image.png").unwrap().0.id(), first_id);
+        assert_eq!(handles.get("image.png").unwrap().raster_id(), first_id);
+    }
+
+    #[test]
+    fn admitted_svg_figure_is_cached_with_caption_geometry() {
+        let nodes = vec![ContentNode::Image {
+            src: "figure.svg".into(),
+            alt: "diagram".into(),
+            style: Default::default(),
+            caption: vec![shosai_core::epub::render::TextSpan {
+                text: "Caption".into(),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            }],
+            caption_style: Some(Default::default()),
+            intrinsic_size: Some(shosai_core::epub::render::ImageSize {
+                width: 200,
+                height: 100,
+            }),
+            kind: Some(shosai_core::epub::render::ImageKind::Svg),
+        }];
+        let bytes = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100"/></svg>"#;
+        let mut handles = HashMap::new();
+        cache_epub_image_handles(&mut handles, &nodes, &|path| {
+            (path == "figure.svg").then_some(bytes.as_slice())
+        });
+        assert!(matches!(
+            handles.get("figure.svg"),
+            Some(EpubImageHandle::Svg(_))
+        ));
+        let layout = crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, 300.0, None).unwrap();
+        assert_eq!((layout.width, layout.height), (200.0, 100.0));
+        assert!(layout.caption_height > 0.0);
     }
 
     #[test]
@@ -1605,6 +1706,7 @@ mod tests {
                             caption: Vec::new(),
                             caption_style: None,
                             intrinsic_size: None,
+                            kind: None,
                         }],
                         block_starts: Vec::new(),
                         style: Default::default(),

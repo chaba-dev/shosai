@@ -47,6 +47,8 @@ pub struct NodeStyle {
     pub block_spacing_em: Option<f32>,
     /// Authored width retained for native replaced-element and table layout.
     pub width: Option<NodeWidth>,
+    /// Authored height retained for replaced-element layout.
+    pub height: Option<NodeWidth>,
     /// Authored maximum width retained for native replaced-element layout.
     pub max_width: Option<NodeWidth>,
 }
@@ -61,6 +63,12 @@ pub enum NodeWidth {
 pub struct ImageSize {
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Raster,
+    Svg,
 }
 
 /// Semantic row-group role retained from an EPUB table.
@@ -150,6 +158,9 @@ pub enum ContentNode {
         caption_style: Option<NodeStyle>,
         /// Intrinsic raster dimensions populated from the admitted EPUB resource.
         intrinsic_size: Option<ImageSize>,
+        /// Resource representation established while processing the bounded,
+        /// already-admitted resource.
+        kind: Option<ImageKind>,
     },
     /// A code block (`<pre>`, `<code>` block-level, or `<pre><code>`).
     CodeBlock {
@@ -552,10 +563,15 @@ fn parse_block_children(
                         nodes.push(ContentNode::Image {
                             src,
                             alt,
-                            style: node_style,
+                            style: {
+                                let mut style = node_style;
+                                apply_image_dimension_hints(child, &mut style);
+                                style
+                            },
                             caption: Vec::new(),
                             caption_style: None,
                             intrinsic_size: None,
+                            kind: None,
                         });
                     } else if !alt.is_empty() {
                         nodes.push(ContentNode::Paragraph(
@@ -637,6 +653,7 @@ fn parse_figure(
     let src = resolve_relative(base_path, image.attribute("src")?)?;
     let alt = image.attribute("alt").unwrap_or("").to_owned();
     let mut style = css_to_node_style(styles.get(image)?, "img");
+    apply_image_dimension_hints(image, &mut style);
     if figure_style.block_spacing_em.is_some() {
         style.block_spacing_em = figure_style.block_spacing_em;
     }
@@ -704,9 +721,37 @@ fn parse_figure(
             caption,
             caption_style,
             intrinsic_size: None,
+            kind: None,
         },
         anchors,
     ))
+}
+
+fn apply_image_dimension_hints(image: roxmltree::Node<'_, '_>, style: &mut NodeStyle) {
+    fn hint(value: Option<&str>) -> Option<NodeWidth> {
+        let value = value?.trim();
+        if let Some(percent) = value.strip_suffix('%') {
+            return percent
+                .parse::<f32>()
+                .ok()
+                .filter(|v| *v >= 0.0)
+                .map(|v| NodeWidth::Percent(v / 100.0));
+        }
+        value
+            .strip_suffix("px")
+            .unwrap_or(value)
+            .parse::<f32>()
+            .ok()
+            .filter(|v| *v >= 0.0)
+            .map(NodeWidth::Pixels)
+    }
+    // XHTML dimensions are presentational hints: any authored CSS wins.
+    if style.width.is_none() {
+        style.width = hint(image.attribute("width"));
+    }
+    if style.height.is_none() {
+        style.height = hint(image.attribute("height"));
+    }
 }
 
 fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
@@ -1179,18 +1224,21 @@ fn collect_table_cell_inline(
             return;
         };
         flush_table_cell_spans(spans, children, block_style);
+        let mut image_style = css_to_node_style(
+            styles
+                .get(*node)
+                .expect("computed style must exist for image"),
+            "img",
+        );
+        apply_image_dimension_hints(*node, &mut image_style);
         children.push(ContentNode::Image {
             src,
             alt: alt.to_owned(),
-            style: css_to_node_style(
-                styles
-                    .get(*node)
-                    .expect("computed style must exist for image"),
-                "img",
-            ),
+            style: image_style,
             caption: Vec::new(),
             caption_style: None,
             intrinsic_size: None,
+            kind: None,
         });
         return;
     }
@@ -1328,6 +1376,7 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
         }),
+        height: None,
         max_width: css.max_width.map(|width| match width {
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
@@ -2378,6 +2427,20 @@ mod tests {
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn xhtml_image_dimensions_are_low_specificity_hints() {
+        let xhtml = r#"<html><head><style>#css { width: 90px; }</style></head><body><img id="hint" src="a.png" width="40" height="20"/><img id="css" src="b.png" width="40" height="20"/></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+        let styles = nodes
+            .iter()
+            .map(|node| node.style().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(styles[0].width, Some(NodeWidth::Pixels(40.0)));
+        assert_eq!(styles[0].height, Some(NodeWidth::Pixels(20.0)));
+        assert_eq!(styles[1].width, Some(NodeWidth::Pixels(90.0)));
+        assert_eq!(styles[1].height, Some(NodeWidth::Pixels(20.0)));
     }
 
     #[test]

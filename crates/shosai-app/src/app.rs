@@ -194,14 +194,30 @@ impl std::fmt::Debug for RasterImageHandle {
 }
 
 #[derive(Clone)]
-struct EpubImageHandle(image::Handle);
+enum EpubImageHandle {
+    Raster(image::Handle),
+    Svg(iced::widget::svg::Handle),
+}
 
 impl std::fmt::Debug for EpubImageHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_tuple("EpubImageHandle")
-            .field(&self.0.id())
+            .field(&match self {
+                Self::Raster(handle) => format!("raster:{:?}", handle.id()),
+                Self::Svg(_) => "svg".to_owned(),
+            })
             .finish()
+    }
+}
+
+#[cfg(test)]
+impl EpubImageHandle {
+    fn raster_id(&self) -> iced::advanced::image::Id {
+        let Self::Raster(handle) = self else {
+            panic!("expected raster handle")
+        };
+        handle.id()
     }
 }
 
@@ -9172,7 +9188,7 @@ mod tests {
         state.epub_layout_key = Some(epub_layout_key(&state));
         state.epub_image_handles.insert(
             "cached.png".to_string(),
-            EpubImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
+            EpubImageHandle::Raster(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
         );
         state.bookmarks.push(Bookmark {
             id: 1,
@@ -9191,7 +9207,7 @@ mod tests {
         let pages = Arc::clone(&state.epub_pages);
         let layout_key = state.epub_layout_key;
         let render_generation = state.render_generation;
-        let cached_image = state.epub_image_handles["cached.png"].0.id();
+        let cached_image = state.epub_image_handles["cached.png"].raster_id();
         let presentation = match &state.document {
             Some(OpenDocument::Epub(document)) => document.presentation() as *const _,
             _ => panic!("expected EPUB document"),
@@ -9203,7 +9219,10 @@ mod tests {
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
         assert_eq!(state.epub_layout_key, layout_key);
         assert_eq!(state.render_generation, render_generation);
-        assert_eq!(state.epub_image_handles["cached.png"].0.id(), cached_image);
+        assert_eq!(
+            state.epub_image_handles["cached.png"].raster_id(),
+            cached_image
+        );
         let current_presentation = match &state.document {
             Some(OpenDocument::Epub(document)) => document.presentation() as *const _,
             _ => panic!("expected EPUB document"),
@@ -9251,7 +9270,7 @@ mod tests {
         state.epub_layout_key = Some(epub_layout_key(&state));
         state.epub_image_handles.insert(
             "cached.png".to_string(),
-            EpubImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
+            EpubImageHandle::Raster(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
         );
 
         let pages = Arc::clone(&state.epub_pages);
@@ -9259,7 +9278,7 @@ mod tests {
         let render_generation = state.render_generation;
         let search_document_generation = state.search_document_generation;
         let search_query_generation = state.search_query_generation;
-        let cached_image = state.epub_image_handles["cached.png"].0.id();
+        let cached_image = state.epub_image_handles["cached.png"].raster_id();
         let (presentation, fonts, native_text_id) = match &state.document {
             Some(OpenDocument::Epub(document)) => (
                 document.presentation() as *const _,
@@ -9286,7 +9305,10 @@ mod tests {
         assert_eq!(state.search_document_generation, search_document_generation);
         assert_eq!(state.search_query_generation, search_query_generation);
         assert_eq!(state.epub_image_handles.len(), 1);
-        assert_eq!(state.epub_image_handles["cached.png"].0.id(), cached_image);
+        assert_eq!(
+            state.epub_image_handles["cached.png"].raster_id(),
+            cached_image
+        );
         let (current_presentation, current_fonts, current_native_text_id) = match &state.document {
             Some(OpenDocument::Epub(document)) => (
                 document.presentation() as *const _,
