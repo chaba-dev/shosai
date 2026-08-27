@@ -1,6 +1,7 @@
 //! Parsed EPUB chapter content shared by search and reader presentation.
 
 use super::EpubLimits;
+use super::limits::svg_dimensions;
 use super::render::{ContentNode, ImageKind, ImageSize};
 use super::resource::CanonicalEpubPath;
 use super::style::EpubStyles;
@@ -101,39 +102,10 @@ impl EpubPresentation {
 }
 
 fn svg_intrinsic_size(bytes: &[u8]) -> Option<ImageSize> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    let document = roxmltree::Document::parse(text).ok()?;
-    let root = document.root_element();
-    if root.tag_name().name() != "svg" {
-        return None;
-    }
-    let number = |name| {
-        root.attribute(name)?
-            .trim()
-            .strip_suffix("px")
-            .unwrap_or(root.attribute(name)?.trim())
-            .parse::<f32>()
-            .ok()
-            .filter(|v| v.is_finite() && *v > 0.0)
-    };
-    let dimensions = number("width").zip(number("height")).or_else(|| {
-        let values = root
-            .attribute("viewBox")?
-            .split(|c: char| c.is_ascii_whitespace() || c == ',')
-            .filter(|v| !v.is_empty())
-            .map(str::parse::<f32>)
-            .collect::<Result<Vec<_>, _>>()
-            .ok()?;
-        (values.len() == 4
-            && values[2].is_finite()
-            && values[3].is_finite()
-            && values[2] > 0.0
-            && values[3] > 0.0)
-            .then_some((values[2], values[3]))
-    })?;
+    let dimensions = svg_dimensions(bytes)?;
     Some(ImageSize {
-        width: dimensions.0.ceil().min(u32::MAX as f32) as u32,
-        height: dimensions.1.ceil().min(u32::MAX as f32) as u32,
+        width: dimensions.0,
+        height: dimensions.1,
     })
 }
 
@@ -184,6 +156,24 @@ mod tests {
             Some(ImageSize {
                 width: 120,
                 height: 60
+            })
+        );
+        assert_eq!(
+            svg_intrinsic_size(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="1in" height=".5in"/>"#
+            ),
+            Some(ImageSize {
+                width: 96,
+                height: 48
+            })
+        );
+        assert_eq!(
+            svg_intrinsic_size(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="120" viewBox="0 0 240 80"/>"#
+            ),
+            Some(ImageSize {
+                width: 120,
+                height: 40
             })
         );
         assert_eq!(

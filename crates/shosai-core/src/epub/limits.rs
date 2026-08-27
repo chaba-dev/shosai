@@ -334,7 +334,9 @@ fn validate_image_dimensions(
     Ok(())
 }
 
-fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+/// Intrinsic SVG viewport dimensions produced by the same bounded metadata
+/// inspection used during resource admission.
+pub(crate) fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let xml = std::str::from_utf8(bytes).ok()?;
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();

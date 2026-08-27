@@ -313,38 +313,112 @@ fn parse_chapter_xhtml_with_owner_and_limits(
 }
 
 fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
+    use std::collections::HashSet;
+
+    let mut declared = HashSet::new();
+    let mut document = xhtml;
+    while let Some(start) = document.find("<!DOCTYPE") {
+        let doctype = &document[start..];
+        let end = doctype_end(doctype).unwrap_or(doctype.len());
+        let mut declarations = &doctype[..end];
+        while let Some(start) = declarations.find("<!ENTITY") {
+            let tail = &declarations[start + 8..];
+            let tail = tail.trim_start();
+            let tail = tail.strip_prefix('%').map(str::trim_start).unwrap_or(tail);
+            let name_len = tail
+                .bytes()
+                .take_while(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
+                })
+                .count();
+            if name_len > 0 {
+                declared.insert(&tail[..name_len]);
+            }
+            declarations = tail;
+        }
+        document = &doctype[end..];
+    }
+
     let mut output = String::new();
-    let mut remainder = xhtml;
+    let mut position = 0;
     let mut changed = false;
-    while let Some(start) = remainder.find('&') {
-        let (prefix, candidate) = remainder.split_at(start);
-        output.push_str(prefix);
-        let Some(end) = candidate.find(';') else {
-            output.push_str(candidate);
-            remainder = "";
+    while position < xhtml.len() {
+        let remainder = &xhtml[position..];
+        if remainder.starts_with("<!--")
+            || remainder.starts_with("<![CDATA[")
+            || remainder.starts_with("<?")
+            || remainder.starts_with("<!DOCTYPE")
+        {
+            let end = if remainder.starts_with("<!--") {
+                remainder.find("-->").map(|end| end + 3)
+            } else if remainder.starts_with("<![CDATA[") {
+                remainder.find("]]>").map(|end| end + 3)
+            } else if remainder.starts_with("<?") {
+                remainder.find("?>").map(|end| end + 2)
+            } else {
+                doctype_end(remainder)
+            }
+            .unwrap_or(remainder.len());
+            output.push_str(&remainder[..end]);
+            position += end;
+            continue;
+        }
+        if !remainder.starts_with('&') {
+            let length = remainder
+                .chars()
+                .next()
+                .expect("nonempty remainder")
+                .len_utf8();
+            output.push_str(&remainder[..length]);
+            position += length;
+            continue;
+        }
+        let Some(end) = remainder.find(';') else {
+            output.push_str(remainder);
             break;
         };
-        let entity = &candidate[1..end];
+        let entity = &remainder[1..end];
         // Keep XML's built-ins encoded: inserting their literal values can
         // make otherwise valid XML malformed. Numeric and document-defined
         // entities are likewise left to roxmltree.
-        let replacement = (!matches!(entity, "amp" | "apos" | "gt" | "lt" | "quot"))
-            .then(|| quick_xml::escape::resolve_html5_entity(entity))
-            .flatten();
+        let replacement = (!matches!(entity, "amp" | "apos" | "gt" | "lt" | "quot")
+            && !declared.contains(entity))
+        .then(|| quick_xml::escape::resolve_html5_entity(entity))
+        .flatten();
         if let Some(replacement) = replacement {
             output.push_str(&quick_xml::escape::escape(replacement));
             changed = true;
         } else {
-            output.push_str(&candidate[..=end]);
+            output.push_str(&remainder[..=end]);
         }
-        remainder = &candidate[end + 1..];
+        position += end + 1;
     }
-    output.push_str(remainder);
     if changed {
         std::borrow::Cow::Owned(output)
     } else {
         std::borrow::Cow::Borrowed(xhtml)
     }
+}
+
+fn doctype_end(doctype: &str) -> Option<usize> {
+    let mut quote = None;
+    let mut subset_depth = 0_u32;
+    for (index, byte) in doctype.bytes().enumerate() {
+        if let Some(delimiter) = quote {
+            if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'[' => subset_depth = subset_depth.saturating_add(1),
+            b']' => subset_depth = subset_depth.saturating_sub(1),
+            b'>' if subset_depth == 0 => return Some(index + 1),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse block-level children of an element.
@@ -567,7 +641,11 @@ fn parse_block_children(
                             alt,
                             style: {
                                 let mut style = node_style;
-                                apply_image_dimension_hints(child, &mut style);
+                                apply_image_dimension_hints(
+                                    child,
+                                    styles.get(child).expect("image has computed style"),
+                                    &mut style,
+                                );
                                 style
                             },
                             caption: Vec::new(),
@@ -655,7 +733,7 @@ fn parse_figure(
     let src = resolve_relative(base_path, image.attribute("src")?)?;
     let alt = image.attribute("alt").unwrap_or("").to_owned();
     let mut style = css_to_node_style(styles.get(image)?, "img");
-    apply_image_dimension_hints(image, &mut style);
+    apply_image_dimension_hints(image, styles.get(image)?, &mut style);
     if figure_style.block_before_em.is_some() {
         style.block_before_em = figure_style.block_before_em;
     }
@@ -686,6 +764,16 @@ fn parse_figure(
         let css = styles
             .get(caption_node)
             .expect("caption has computed style");
+        let has_block_children = caption_node.children().any(|child| {
+            child.is_element()
+                && styles.get(child).is_some_and(|style| {
+                    !matches!(
+                        style.display,
+                        super::computed_style::DisplayRole::Inline
+                            | super::computed_style::DisplayRole::None
+                    )
+                })
+        });
         let mut spans = Vec::new();
         for child in caption_node
             .children()
@@ -706,8 +794,10 @@ fn parse_figure(
             }
             spans.append(&mut block);
         }
-        if spans.is_empty() {
-            spans = collect_inline_content(&caption_node, styles, css.font_size_px).spans;
+        if !has_block_children {
+            let inline = collect_inline_content(&caption_node, styles, css.font_size_px);
+            spans = inline.spans;
+            caption_anchors = inline.anchors;
         }
         (spans, Some(css_to_node_style(css, "figcaption")))
     };
@@ -732,7 +822,11 @@ fn parse_figure(
     ))
 }
 
-fn apply_image_dimension_hints(image: roxmltree::Node<'_, '_>, style: &mut NodeStyle) {
+fn apply_image_dimension_hints(
+    image: roxmltree::Node<'_, '_>,
+    css: &super::computed_style::ComputedStyle,
+    style: &mut NodeStyle,
+) {
     fn hint(value: Option<&str>) -> Option<NodeWidth> {
         let value = value?.trim();
         if let Some(percent) = value.strip_suffix('%') {
@@ -751,10 +845,10 @@ fn apply_image_dimension_hints(image: roxmltree::Node<'_, '_>, style: &mut NodeS
             .map(NodeWidth::Pixels)
     }
     // XHTML dimensions are presentational hints: any authored CSS wins.
-    if style.width.is_none() {
+    if !css.width_specified {
         style.width = hint(image.attribute("width"));
     }
-    if style.height.is_none() {
+    if !css.height_specified {
         style.height = hint(image.attribute("height"));
     }
 }
@@ -1238,7 +1332,11 @@ fn collect_table_cell_inline(
                 .expect("computed style must exist for image"),
             "img",
         );
-        apply_image_dimension_hints(*node, &mut image_style);
+        apply_image_dimension_hints(
+            *node,
+            styles.get(*node).expect("image has computed style"),
+            &mut image_style,
+        );
         children.push(ContentNode::Image {
             src,
             alt: alt.to_owned(),
@@ -1381,7 +1479,10 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
         }),
-        height: None,
+        height: css.height.map(|height| match height {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
         max_width: css.max_width.map(|width| match width {
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
@@ -2064,6 +2165,28 @@ mod tests {
     }
 
     #[test]
+    fn named_entity_normalization_skips_cdata_and_honors_internal_shadowing() {
+        let cdata = r#"<html><body><p><![CDATA[&copy;]]> &copy;</p></body></html>"#;
+        let nodes =
+            parse_chapter_xhtml_with_limits(cdata, "", &Default::default(), &EpubLimits::default())
+                .expect("CDATA should remain lexical data");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "&copy; ©\n");
+
+        let shadowed = r#"<!DOCTYPE html [<!ENTITY copy "locally declared">]><html><body><p title="&copy;">&copy;</p></body></html>"#;
+        let nodes = parse_chapter_xhtml_with_limits(
+            shadowed,
+            "",
+            &Default::default(),
+            &EpubLimits::default(),
+        )
+        .expect("document entity declarations should take precedence");
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "locally declared\n"
+        );
+    }
+
+    #[test]
     fn malformed_chapter_returns_a_contextual_parse_error() {
         let error = parse_chapter_xhtml_with_limits(
             "<html><body><p>broken</body></html>",
@@ -2437,7 +2560,7 @@ mod tests {
 
     #[test]
     fn xhtml_image_dimensions_are_low_specificity_hints() {
-        let xhtml = r#"<html><head><style>#css { width: 90px; }</style></head><body><img id="hint" src="a.png" width="40" height="20"/><img id="css" src="b.png" width="40" height="20"/></body></html>"#;
+        let xhtml = r#"<html><head><style>#css { width: 90px; height: 25%; } #auto { width: auto; height: auto; }</style></head><body><img id="hint" src="a.png" width="40" height="20"/><img id="css" src="b.png" width="40" height="20"/><img id="auto" src="c.png" width="40" height="20"/></body></html>"#;
         let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
         let styles = nodes
             .iter()
@@ -2446,7 +2569,30 @@ mod tests {
         assert_eq!(styles[0].width, Some(NodeWidth::Pixels(40.0)));
         assert_eq!(styles[0].height, Some(NodeWidth::Pixels(20.0)));
         assert_eq!(styles[1].width, Some(NodeWidth::Pixels(90.0)));
-        assert_eq!(styles[1].height, Some(NodeWidth::Pixels(20.0)));
+        assert_eq!(styles[1].height, Some(NodeWidth::Percent(0.25)));
+        assert_eq!(styles[2].width, None);
+        assert_eq!(styles[2].height, None);
+    }
+
+    #[test]
+    fn semantic_caption_preserves_direct_text_and_inline_style_in_order() {
+        let xhtml = r#"<html><body><figure><img src="figure.png" alt="Diagram"/><figcaption>Figure <em id="number">1</em>: Architecture</figcaption></figure></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+        let ContentNode::Image { caption, .. } = &nodes[0] else {
+            panic!("expected semantic image");
+        };
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Figure 1: Architecture"
+        );
+        assert!(caption.iter().any(|span| span.text == "1" && span.italic));
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nFigure 1: Architecture\n"
+        );
     }
 
     #[test]

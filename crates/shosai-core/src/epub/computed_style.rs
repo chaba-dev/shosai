@@ -78,6 +78,9 @@ pub(crate) struct ComputedStyle {
     pub(crate) margin_bottom_px: Option<f32>,
     pub(crate) text_indent_px: f32,
     pub(crate) width: Option<ComputedWidth>,
+    pub(crate) width_specified: bool,
+    pub(crate) height: Option<ComputedWidth>,
+    pub(crate) height_specified: bool,
     pub(crate) max_width: Option<ComputedWidth>,
 }
 
@@ -213,6 +216,7 @@ struct SpecifiedStyle {
     margin_bottom: Slot<RelativeLength>,
     text_indent: Slot<RelativeLength>,
     width: Slot<SpecifiedWidth>,
+    height: Slot<SpecifiedWidth>,
     max_width: Slot<SpecifiedWidth>,
 }
 
@@ -378,6 +382,9 @@ fn compute_element_style(
         margin_bottom_px: None,
         text_indent_px: 0.0,
         width: None,
+        width_specified: false,
+        height: None,
+        height_specified: false,
         max_width: None,
     });
     let tag = element.tag_name().name();
@@ -387,6 +394,9 @@ fn compute_element_style(
     style.margin_top_px = None;
     style.margin_bottom_px = None;
     style.width = None;
+    style.width_specified = false;
+    style.height = None;
+    style.height_specified = false;
     style.max_width = None;
     apply_ua_text_defaults(tag, &mut style);
     if let Some(direction) = element.attribute("dir") {
@@ -474,7 +484,18 @@ fn compute_element_style(
         style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
     }
     if let Some(value) = specified.width.value() {
+        style.width_specified = true;
         style.width = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
+    }
+    if let Some(value) = specified.height.value() {
+        style.height_specified = true;
+        style.height = match value {
             SpecifiedWidth::Auto => None,
             SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
             SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
@@ -696,6 +717,12 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             }
         }
         Property::Width(CssSize::Auto) => specified.width.offer(priority, SpecifiedWidth::Auto),
+        Property::Height(CssSize::LengthPercentage(value)) => {
+            if let Some(value) = specified_width(value) {
+                specified.height.offer(priority, value);
+            }
+        }
+        Property::Height(CssSize::Auto) => specified.height.offer(priority, SpecifiedWidth::Auto),
         Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => {
             if let Some(value) = specified_width(value) {
                 specified.max_width.offer(priority, value);
@@ -1017,6 +1044,8 @@ fn property_supported(property: &Property<'_>) -> bool {
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         Property::Width(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
         Property::Width(CssSize::Auto) => true,
+        Property::Height(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::Height(CssSize::Auto) => true,
         Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => specified_width(value).is_some(),
         Property::MaxWidth(CssMaxSize::None) => true,
         _ => false,
