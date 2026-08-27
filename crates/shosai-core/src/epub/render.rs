@@ -910,15 +910,7 @@ fn parse_block_children(
                         nodes.push(ContentNode::Image {
                             src,
                             alt,
-                            style: {
-                                let mut style = node_style;
-                                apply_image_dimension_hints(
-                                    child,
-                                    styles.get(child).expect("image has computed style"),
-                                    &mut style,
-                                );
-                                style
-                            },
+                            style: node_style,
                             caption: Vec::new(),
                             caption_style: None,
                             intrinsic_size: None,
@@ -1017,7 +1009,6 @@ fn parse_figure(
     let src = resolve_relative(base_path, image.attribute("src")?)?;
     let alt = image.attribute("alt").unwrap_or("").to_owned();
     let mut style = css_to_node_style(styles.get(image)?, "img");
-    apply_image_dimension_hints(image, styles.get(image)?, &mut style);
     apply_figure_container_style(&mut style, figure_style);
     let captions = figure
         .children()
@@ -1096,37 +1087,6 @@ fn parse_figure(
         },
         anchors,
     ))
-}
-
-fn apply_image_dimension_hints(
-    image: roxmltree::Node<'_, '_>,
-    css: &super::computed_style::ComputedStyle,
-    style: &mut NodeStyle,
-) {
-    fn hint(value: Option<&str>) -> Option<NodeWidth> {
-        let value = value?.trim();
-        if let Some(percent) = value.strip_suffix('%') {
-            return percent
-                .parse::<f32>()
-                .ok()
-                .filter(|v| *v >= 0.0)
-                .map(|v| NodeWidth::Percent(v / 100.0));
-        }
-        value
-            .strip_suffix("px")
-            .unwrap_or(value)
-            .parse::<f32>()
-            .ok()
-            .filter(|v| *v >= 0.0)
-            .map(NodeWidth::Pixels)
-    }
-    // XHTML dimensions are presentational hints: any authored CSS wins.
-    if !css.width_specified {
-        style.width = hint(image.attribute("width"));
-    }
-    if !css.height_specified {
-        style.height = hint(image.attribute("height"));
-    }
 }
 
 fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
@@ -1628,16 +1588,11 @@ fn collect_table_cell_inline(
             return;
         };
         flush_table_cell_spans(spans, children, block_style);
-        let mut image_style = css_to_node_style(
+        let image_style = css_to_node_style(
             styles
                 .get(*node)
                 .expect("computed style must exist for image"),
             "img",
-        );
-        apply_image_dimension_hints(
-            *node,
-            styles.get(*node).expect("image has computed style"),
-            &mut image_style,
         );
         children.push(ContentNode::Image {
             src,

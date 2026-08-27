@@ -329,13 +329,21 @@ fn walk_element(
     processing_budget: &mut ProcessingBudget,
     limits: &EpubLimits,
 ) -> Result<()> {
-    let style = compute_element_style(
+    let mut style = compute_element_style(
         element,
         parent,
         root_font_size.unwrap_or(INITIAL_FONT_SIZE_PX),
         rules,
         processing_budget,
     )?;
+    if element.tag_name().name() == "img" {
+        if !style.width_specified {
+            style.width = image_dimension_hint(element.attribute("width"));
+        }
+        if !style.height_specified {
+            style.height = image_dimension_hint(element.attribute("height"));
+        }
+    }
     if !style.font_size_px.is_finite()
         || style.font_size_px < limits.min_css_computed_font_size_px
         || style.font_size_px > limits.max_css_computed_font_size_px
@@ -393,6 +401,24 @@ fn walk_element(
         )?;
     }
     Ok(())
+}
+
+fn image_dimension_hint(value: Option<&str>) -> Option<ComputedWidth> {
+    let value = value?.trim();
+    if let Some(percent) = value.strip_suffix('%') {
+        return percent
+            .parse::<f32>()
+            .ok()
+            .filter(|value| *value >= 0.0)
+            .map(|value| ComputedWidth::Percent(value / 100.0));
+    }
+    value
+        .strip_suffix("px")
+        .unwrap_or(value)
+        .parse::<f32>()
+        .ok()
+        .filter(|value| *value >= 0.0)
+        .map(ComputedWidth::Px)
 }
 
 fn compute_element_style(
@@ -1854,6 +1880,18 @@ mod tests {
         )
         .expect_err("non-finite geometry limits must be rejected");
         assert!(error.to_string().contains("geometry limits are invalid"));
+
+        for attribute in [
+            r#"width="100000000000000000000""#,
+            r#"height="100000000000000000000""#,
+            r#"width="2000000%""#,
+        ] {
+            let xhtml = format!(r#"<html><body><img id="target" {attribute}/></body></html>"#);
+            let document = roxmltree::Document::parse(&xhtml).unwrap();
+            let error = compute_parsed_document_styles(&document, "", &EpubLimits::default())
+                .expect_err("extreme XHTML image hints must share CSS geometry admission");
+            assert!(error.to_string().contains("outside limits"));
+        }
     }
 
     #[test]
