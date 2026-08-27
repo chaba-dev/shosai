@@ -103,6 +103,49 @@ class ResetLocalDataTests(unittest.TestCase):
                 self.assertTrue(sentinel.exists())
                 self.assertTrue(development.exists())
 
+    @unittest.skipUnless(hasattr(os, "symlink"), "requires symlinks")
+    def test_symlinked_marker_cannot_claim_an_unrelated_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            data_home = temporary / "data"
+            development = data_home / "shosai-dev"
+            custom = temporary / "unrelated"
+            custom.mkdir()
+            sentinel = custom / "sentinel"
+            sentinel.write_text("keep")
+            profile = temporary / "profile"
+            profile.write_text(PROFILE)
+            (custom / MARKER).symlink_to(profile)
+            create_database(development, custom=custom)
+
+            result = run_reset(data_home)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing", result.stderr)
+            self.assertTrue(sentinel.exists())
+            self.assertTrue(development.exists())
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "requires symlinks")
+    def test_symlinked_directory_is_never_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            data_home = temporary / "data"
+            development = data_home / "shosai-dev"
+            unrelated = temporary / "unrelated"
+            unrelated.mkdir()
+            sentinel = unrelated / "sentinel"
+            sentinel.write_text("keep")
+            custom = temporary / "custom-library"
+            custom.symlink_to(unrelated, target_is_directory=True)
+            create_database(development, custom=custom)
+
+            result = run_reset(data_home)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Refusing", result.stderr)
+            self.assertTrue(sentinel.exists())
+            self.assertTrue(development.exists())
+
     def test_out_of_scope_managed_row_cannot_delete_arbitrary_file(self):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)

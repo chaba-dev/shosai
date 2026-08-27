@@ -3,8 +3,10 @@
 
 import os
 from pathlib import Path
+import secrets
 import shutil
 import sqlite3
+import stat
 import sys
 
 DEVELOPMENT_APP_DIR = "shosai-dev"
@@ -29,12 +31,50 @@ def is_within(path: Path, directory: Path) -> bool:
         return False
 
 
-def owns_custom_directory(directory: Path) -> bool:
-    marker = directory / MARKER_FILE
+def open_owned_directory(directory: Path) -> tuple[int, int, os.stat_result]:
+    parent_fd = os.open(directory.parent, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        return marker.is_file() and marker.read_text(encoding="utf-8").strip() == DEVELOPMENT_PROFILE
-    except OSError:
-        return False
+        directory_stat = os.stat(directory.name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(directory_stat.st_mode):
+            raise OSError("managed directory is not a regular directory")
+        directory_fd = os.open(
+            directory.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        try:
+            marker_fd = os.open(MARKER_FILE, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            try:
+                marker_stat = os.fstat(marker_fd)
+                if not stat.S_ISREG(marker_stat.st_mode):
+                    raise OSError("storage marker is not a regular file")
+                with os.fdopen(marker_fd, encoding="utf-8", closefd=False) as marker:
+                    if marker.read().strip() != DEVELOPMENT_PROFILE:
+                        raise OSError("storage marker belongs to a different profile")
+            finally:
+                os.close(marker_fd)
+        except Exception:
+            os.close(directory_fd)
+            raise
+        return parent_fd, directory_fd, directory_stat
+    except Exception:
+        os.close(parent_fd)
+        raise
+
+
+def remove_owned_directory(directory: Path) -> None:
+    parent_fd, directory_fd, expected = open_owned_directory(directory)
+    quarantine = f".{directory.name}.shosai-reset-{secrets.token_hex(8)}"
+    try:
+        os.rename(directory.name, quarantine, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        moved = os.stat(quarantine, dir_fd=parent_fd, follow_symlinks=False)
+        if (moved.st_dev, moved.st_ino) != (expected.st_dev, expected.st_ino):
+            os.rename(quarantine, directory.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            raise OSError("managed directory changed while reset was validating it")
+    finally:
+        os.close(directory_fd)
+        os.close(parent_fd)
+    shutil.rmtree(directory.parent / quarantine, ignore_errors=False)
 
 
 def managed_book_data(database: Path) -> tuple[list[Path], Path | None]:
@@ -81,13 +121,17 @@ def main() -> int:
     external = None
     if custom_managed_directory is not None and not is_within(custom_managed_directory, root):
         external = custom_managed_directory
-        if external.exists() and not owns_custom_directory(external):
-            print(
-                f"Refusing to remove external managed directory {external}: "
-                f"missing {MARKER_FILE} containing {DEVELOPMENT_PROFILE!r}.",
-                file=sys.stderr,
-            )
-            return 1
+        if external.exists() or external.is_symlink():
+            try:
+                parent_fd, directory_fd, _ = open_owned_directory(external)
+                os.close(directory_fd)
+                os.close(parent_fd)
+            except OSError as error:
+                print(
+                    f"Refusing to remove external managed directory {external}: {error}",
+                    file=sys.stderr,
+                )
+                return 1
 
     allowed_directories = [root] + ([external] if external is not None else [])
     unsafe_paths = [
@@ -101,7 +145,7 @@ def main() -> int:
 
     if external is not None:
         try:
-            shutil.rmtree(external, ignore_errors=False)
+            remove_owned_directory(external)
         except FileNotFoundError:
             pass
         except OSError as error:

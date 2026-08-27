@@ -6,14 +6,18 @@ mod theme;
 mod typography;
 mod widgets;
 
-const APPLICATION_ICON: &[u8] = if option_env!("SHOSAI_DEV_BUILD").is_some() {
-    include_bytes!("../../../assets/shosai-dev-icon.png")
-} else {
-    include_bytes!("../../../assets/shosai-icon.png")
-};
+fn application_icon() -> &'static [u8] {
+    if option_env!("SHOSAI_DEV_BUILD") == Some("1") {
+        include_bytes!("../../../assets/shosai-dev-icon.png")
+    } else {
+        include_bytes!("../../../assets/shosai-icon.png")
+    }
+}
 
 fn window_icon() -> Option<iced::window::Icon> {
-    let icon = image::load_from_memory(APPLICATION_ICON).ok()?.into_rgba8();
+    let icon = image::load_from_memory(application_icon())
+        .ok()?
+        .into_rgba8();
     let (width, height) = icon.dimensions();
     iced::window::icon::from_rgba(icon.into_raw(), width, height).ok()
 }
@@ -27,7 +31,7 @@ fn set_macos_application_icon() {
     let Some(main_thread) = MainThreadMarker::new() else {
         return;
     };
-    let data = NSData::with_bytes(APPLICATION_ICON);
+    let data = NSData::with_bytes(application_icon());
     let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
         return;
     };

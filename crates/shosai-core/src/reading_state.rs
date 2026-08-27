@@ -7,6 +7,7 @@
 //! Uses sqlx with SQLite so the same database can be extended for library
 //! management in future phases.
 
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -24,12 +25,20 @@ pub const STORAGE_PROFILE_MARKER_FILE: &str = ".shosai-storage-profile";
 pub const DEVELOPMENT_STORAGE_PROFILE: &str = "shosai-development-v1";
 const DB_FILE: &str = "shosai.db";
 
-fn development_profile() -> bool {
-    match std::env::var("SHOSAI_DEV_BUILD").as_deref() {
-        Ok("1") => true,
-        Ok("0") => false,
-        _ => cfg!(debug_assertions),
+fn select_development_profile(runtime: Option<&str>, compiled: Option<&str>, debug: bool) -> bool {
+    match runtime {
+        Some("1") => true,
+        Some("0") => false,
+        _ => compiled == Some("1") || debug,
     }
+}
+
+fn development_profile() -> bool {
+    select_development_profile(
+        std::env::var("SHOSAI_DEV_BUILD").ok().as_deref(),
+        option_env!("SHOSAI_DEV_BUILD"),
+        cfg!(debug_assertions),
+    )
 }
 
 /// Return the managed application directory name for this process.
@@ -65,15 +74,11 @@ pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
     if path.exists() {
-        if marker.exists() {
-            let profile = std::fs::read_to_string(&marker)
-                .with_context(|| format!("failed to read storage marker {}", marker.display()))?;
-            if profile.trim() != DEVELOPMENT_STORAGE_PROFILE {
-                anyhow::bail!("managed library belongs to a different Shosai profile");
-            }
-            return Ok(());
+        reject_symlink(path, "managed library")?;
+        let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
+        if marker.symlink_metadata().is_ok() {
+            return validate_managed_library_directory(path);
         }
         if std::fs::read_dir(path)
             .with_context(|| format!("failed to inspect managed library {}", path.display()))?
@@ -88,8 +93,44 @@ pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
         std::fs::create_dir_all(path)
             .with_context(|| format!("failed to create managed library {}", path.display()))?;
     }
-    std::fs::write(&marker, format!("{DEVELOPMENT_STORAGE_PROFILE}\n"))
+    let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
+    use std::io::Write;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker)
+        .with_context(|| format!("failed to create storage marker {}", marker.display()))?;
+    writeln!(file, "{DEVELOPMENT_STORAGE_PROFILE}")
         .with_context(|| format!("failed to write storage marker {}", marker.display()))?;
+    Ok(())
+}
+
+/// Verify that development-owned external storage still has its regular marker.
+pub fn validate_managed_library_directory(path: &Path) -> Result<()> {
+    if !development_profile() {
+        return Ok(());
+    }
+    reject_symlink(path, "managed library")?;
+    let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
+    reject_symlink(&marker, "managed library marker")?;
+    let profile = std::fs::read_to_string(&marker)
+        .with_context(|| format!("failed to read storage marker {}", marker.display()))?;
+    if profile.trim() != DEVELOPMENT_STORAGE_PROFILE {
+        anyhow::bail!("managed library belongs to a different Shosai profile");
+    }
+    Ok(())
+}
+
+fn reject_symlink(path: &Path, description: &str) -> Result<()> {
+    let metadata = path
+        .symlink_metadata()
+        .with_context(|| format!("failed to inspect {description} {}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!(
+            "refusing to use symlinked {description}: {}",
+            path.display()
+        );
+    }
     Ok(())
 }
 
@@ -404,5 +445,41 @@ fn data_dir() -> Result<PathBuf> {
     #[cfg(not(target_os = "macos"))]
     {
         Ok(home.join(".local").join("share"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_profile_selection_honors_runtime_and_compiled_flags() {
+        assert!(select_development_profile(Some("1"), None, false));
+        assert!(!select_development_profile(Some("0"), Some("1"), true));
+        assert!(select_development_profile(None, Some("1"), false));
+        assert!(!select_development_profile(None, Some("0"), false));
+        assert!(select_development_profile(None, None, true));
+        assert!(!select_development_profile(None, None, false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn development_storage_rejects_symlinked_markers_and_directories() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let unrelated = directory.path().join("unrelated");
+        std::fs::create_dir(&unrelated).unwrap();
+        let profile = directory.path().join("profile");
+        std::fs::write(&profile, DEVELOPMENT_STORAGE_PROFILE).unwrap();
+        symlink(&profile, unrelated.join(STORAGE_PROFILE_MARKER_FILE)).unwrap();
+
+        let marker_error = validate_managed_library_directory(&unrelated).unwrap_err();
+        assert!(marker_error.to_string().contains("symlinked"));
+
+        let linked = directory.path().join("linked");
+        symlink(&unrelated, &linked).unwrap();
+        let directory_error = validate_managed_library_directory(&linked).unwrap_err();
+        assert!(directory_error.to_string().contains("symlinked"));
     }
 }

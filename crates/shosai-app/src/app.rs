@@ -902,6 +902,10 @@ pub fn boot() -> (State, Task<Message>) {
                 .await
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.managed_books_dir());
+            if managed_books_dir != store.managed_books_dir() {
+                shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)
+                    .map_err(|error| error.to_string())?;
+            }
             let add_book_behavior = AddBookBehavior::from_stored(
                 store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
             );
