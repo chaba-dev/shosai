@@ -8,10 +8,18 @@ fn cancel_add_books_discovery(state: &mut State) {
     state.add_books_discovering = false;
 }
 
+fn update_book_import_progress(state: &mut State) {
+    state.library_activity_progress = if state.book_import_copy {
+        (state.book_import_prepared + state.book_import_completed) as f32
+            / (state.book_import_total.max(1) * 2) as f32
+    } else {
+        state.book_import_completed as f32 / state.book_import_total.max(1) as f32
+    };
+}
+
 fn record_book_import_report(state: &mut State, report: ImportReport) {
     state.book_import_completed += 1;
-    state.library_activity_progress =
-        state.book_import_completed as f32 / state.book_import_total.max(1) as f32;
+    update_book_import_progress(state);
     for book in &report.books {
         if book_matches_library_view(state, book)
             && !state
@@ -35,6 +43,7 @@ fn finish_book_import(state: &mut State) -> Task<Message> {
     state.book_import_committing = false;
     let report = std::mem::take(&mut state.book_import_report);
     state.book_import_total = 0;
+    state.book_import_prepared = 0;
     state.book_import_completed = 0;
     let error = import_report_error(&report, &state.i18n);
     let refresh = reset_library(state);
@@ -67,27 +76,6 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
     }
 
     let mut tasks = Vec::new();
-    while state.book_import_preparing < MANAGED_IMPORT_PREPARATION_CONCURRENCY {
-        let Some((index, candidate)) = state.pending_book_imports.pop_front() else {
-            break;
-        };
-        let library = library.clone();
-        let path = candidate.path.clone();
-        state.book_import_preparing += 1;
-        tasks.push(Task::perform(
-            async move {
-                match library.prepare_discovered_managed_file(candidate).await {
-                    Ok(prepared) => Ok((path, Arc::new(prepared))),
-                    Err(error) => Err(ImportFailure {
-                        path,
-                        error: format!("{error:#}"),
-                    }),
-                }
-            },
-            move |result| Message::ManagedBookPrepared { index, result },
-        ));
-    }
-
     if !state.book_import_committing {
         while let Some(prepared) = state
             .prepared_book_imports
@@ -104,9 +92,10 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
                 ),
                 Ok((path, prepared)) => {
                     state.book_import_committing = true;
+                    let commit_library = library.clone();
                     tasks.push(Task::perform(
                         async move {
-                            match library.commit_prepared_managed_file(&prepared).await {
+                            match commit_library.commit_prepared_managed_file(&prepared).await {
                                 Ok(book) => ImportReport {
                                     books: vec![book],
                                     failures: Vec::new(),
@@ -126,6 +115,31 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
                 }
             }
         }
+    }
+
+    while state.book_import_preparing
+        + state.prepared_book_imports.len()
+        + usize::from(state.book_import_committing)
+        < MANAGED_IMPORT_PREPARATION_CONCURRENCY
+    {
+        let Some((index, candidate)) = state.pending_book_imports.pop_front() else {
+            break;
+        };
+        let library = library.clone();
+        let path = candidate.path.clone();
+        state.book_import_preparing += 1;
+        tasks.push(Task::perform(
+            async move {
+                match library.prepare_discovered_managed_file(candidate).await {
+                    Ok(prepared) => Ok((path, Arc::new(prepared))),
+                    Err(error) => Err(ImportFailure {
+                        path,
+                        error: format!("{error:#}"),
+                    }),
+                }
+            },
+            move |result| Message::ManagedBookPrepared { index, result },
+        ));
     }
 
     if state.book_import_completed == state.book_import_total
@@ -607,6 +621,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.add_books_source = None;
                 state.add_books_generation = state.add_books_generation.wrapping_add(1);
                 state.staged_imports.clear();
+                state.add_books_review_search.clear();
+                state.add_books_review_rows.clear();
+                state.add_books_review_offset = 0.0;
                 state.import_discovery_failures.clear();
                 state.add_books_copy = None;
                 state.add_books_open = true;
@@ -619,6 +636,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_books_source = None;
             state.add_books_generation = state.add_books_generation.wrapping_add(1);
             state.staged_imports.clear();
+            state.add_books_review_search.clear();
+            state.add_books_review_rows.clear();
+            state.add_books_review_offset = 0.0;
             state.import_discovery_failures.clear();
             state.add_books_copy = None;
         }
@@ -743,12 +763,35 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     candidate,
                 })
                 .collect();
+            state.add_books_review_search.clear();
+            rebuild_add_books_review_rows(state);
             state.import_discovery_failures = discovery.failures;
             state.add_books_copy = match state.add_book_behavior {
                 AddBookBehavior::Ask => None,
                 AddBookBehavior::Copy => Some(true),
                 AddBookBehavior::CurrentLocation => Some(false),
             };
+        }
+
+        Message::AddBooksReviewSearchChanged(query) => {
+            if state.add_books_open && !state.add_books_discovering {
+                state.add_books_review_search = query;
+                rebuild_add_books_review_rows(state);
+                return iced::widget::operation::snap_to(
+                    WidgetId::new("add-books-review-scroll"),
+                    iced::widget::operation::RelativeOffset::START,
+                );
+            }
+        }
+
+        Message::AddBooksReviewScrolled {
+            offset,
+            viewport_height,
+        } => {
+            if state.add_books_open && !state.add_books_discovering {
+                state.add_books_review_offset = offset.max(0.0);
+                state.add_books_review_viewport_height = viewport_height.max(1.0);
+            }
         }
 
         Message::ToggleStagedBook(index, selected) => {
@@ -781,6 +824,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.add_books_source = None;
                 state.add_books_generation = state.add_books_generation.wrapping_add(1);
                 state.staged_imports.clear();
+                state.add_books_review_search.clear();
+                state.add_books_review_rows.clear();
+                state.add_books_review_offset = 0.0;
                 state.import_discovery_failures.clear();
                 state.add_books_copy = None;
             }
@@ -814,6 +860,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_books_open = false;
             state.add_books_source = None;
             state.staged_imports.clear();
+            state.add_books_review_search.clear();
+            state.add_books_review_rows.clear();
+            state.add_books_review_offset = 0.0;
             state.import_discovery_failures.clear();
             state.add_books_copy = None;
             state.adding_books = true;
@@ -823,6 +872,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.book_import_next_commit = 0;
             state.book_import_committing = false;
             state.book_import_copy = copy;
+            state.book_import_prepared = 0;
             state.book_import_completed = 0;
             state.book_import_total = state.pending_book_imports.len();
             state.book_import_report = ImportReport::default();
@@ -833,6 +883,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::ManagedBookPrepared { index, result } => {
             state.book_import_preparing = state.book_import_preparing.saturating_sub(1);
+            state.book_import_prepared += 1;
+            update_book_import_progress(state);
             state.prepared_book_imports.insert(index, result);
             return continue_book_import(state);
         }
@@ -1044,7 +1096,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             (state.library_activity_progress + LIBRARY_ACTIVITY_STEP) % 1.0;
                     } else {
                         state.library_activity_progress =
-                            progress.completed_files as f32 / progress.total_files.max(1) as f32;
+                            (progress.hashed_files + progress.completed_files) as f32
+                                / (progress.total_files.max(1) * 2) as f32;
                     }
                 }
             } else if !state.adding_books && library_activity_active(state) {
@@ -1160,7 +1213,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let (Some(parent), Some(library)) = (parent, state.library.clone()) else {
                 return Task::none();
             };
-            let destination = parent.join("Shosai");
+            let destination =
+                parent.join(shosai_core::reading_state::managed_library_folder_name());
             if library.managed_dir() == destination {
                 return Task::none();
             }
@@ -1223,6 +1277,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             let _ = wait.await;
                         }
                     }
+                    shosai_core::reading_state::prepare_managed_library_directory(
+                        &relocation_destination,
+                    )
+                    .map_err(|error| format!("{error:#}"))?;
                     library
                         .relocate_managed_books(&relocation_destination)
                         .await

@@ -103,6 +103,11 @@ pub enum Message {
         generation: u64,
         discovery: ImportDiscovery,
     },
+    AddBooksReviewSearchChanged(String),
+    AddBooksReviewScrolled {
+        offset: f32,
+        viewport_height: f32,
+    },
     ToggleStagedBook(usize, bool),
     SelectAllStagedBooks(bool),
     SelectAddBooksStorage(bool),

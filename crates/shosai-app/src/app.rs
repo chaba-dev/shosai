@@ -68,6 +68,10 @@ const DEFAULT_EPUB_FONT_SIZE_KEY: &str = "reader.default_epub_font_size";
 const DEFAULT_EPUB_LINE_SPACING_KEY: &str = "reader.default_epub_line_spacing";
 const DEFAULT_PDF_ZOOM_KEY: &str = "reader.default_pdf_zoom";
 const MANAGED_IMPORT_PREPARATION_CONCURRENCY: usize = 4;
+const REVIEW_GROUP_ROW_HEIGHT: f32 = 28.0;
+const REVIEW_BOOK_ROW_HEIGHT: f32 = 58.0;
+const REVIEW_VIRTUAL_OVERSCAN: f32 = 180.0;
+const REVIEW_DEFAULT_VIEWPORT_HEIGHT: f32 = 420.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SelectOption<T> {
@@ -220,6 +224,21 @@ enum AddBooksSource {
 struct StagedImport {
     candidate: ImportCandidate,
     selected: bool,
+}
+
+#[derive(Debug, Clone)]
+enum AddBooksReviewRow {
+    Group(String),
+    Book(usize),
+}
+
+impl AddBooksReviewRow {
+    fn height(&self) -> f32 {
+        match self {
+            Self::Group(_) => REVIEW_GROUP_ROW_HEIGHT,
+            Self::Book(_) => REVIEW_BOOK_ROW_HEIGHT,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -683,6 +702,10 @@ pub struct State {
     add_books_cancellation: Option<ImportCancellation>,
     add_books_progress: Option<ImportDiscoveryProgress>,
     staged_imports: Vec<StagedImport>,
+    add_books_review_search: String,
+    add_books_review_rows: Vec<AddBooksReviewRow>,
+    add_books_review_offset: f32,
+    add_books_review_viewport_height: f32,
     import_discovery_failures: Vec<ImportFailure>,
     add_books_copy: Option<bool>,
     adding_books: bool,
@@ -693,6 +716,7 @@ pub struct State {
     book_import_next_commit: usize,
     book_import_committing: bool,
     book_import_copy: bool,
+    book_import_prepared: usize,
     book_import_completed: usize,
     book_import_total: usize,
     book_import_report: ImportReport,
@@ -809,6 +833,10 @@ pub fn boot() -> (State, Task<Message>) {
         add_books_cancellation: None,
         add_books_progress: None,
         staged_imports: Vec::new(),
+        add_books_review_search: String::new(),
+        add_books_review_rows: Vec::new(),
+        add_books_review_offset: 0.0,
+        add_books_review_viewport_height: REVIEW_DEFAULT_VIEWPORT_HEIGHT,
         import_discovery_failures: Vec::new(),
         add_books_copy: None,
         adding_books: false,
@@ -818,6 +846,7 @@ pub fn boot() -> (State, Task<Message>) {
         book_import_next_commit: 0,
         book_import_committing: false,
         book_import_copy: false,
+        book_import_prepared: 0,
         book_import_completed: 0,
         book_import_total: 0,
         book_import_report: ImportReport::default(),
@@ -4499,6 +4528,60 @@ fn import_candidate_label(source: &AddBooksSource, path: &Path) -> String {
     }
 }
 
+fn rebuild_add_books_review_rows(state: &mut State) {
+    let query = state.add_books_review_search.trim().to_lowercase();
+    state.add_books_review_rows.clear();
+    let mut previous_group = None;
+    for (index, staged) in state.staged_imports.iter().enumerate() {
+        let candidate = &staged.candidate;
+        if !query.is_empty()
+            && !candidate.title.to_lowercase().contains(&query)
+            && !candidate
+                .path
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&query)
+            && !candidate.format.as_str().contains(&query)
+        {
+            continue;
+        }
+        if previous_group != Some(candidate.group_key.as_str()) {
+            state
+                .add_books_review_rows
+                .push(AddBooksReviewRow::Group(candidate.title.clone()));
+            previous_group = Some(candidate.group_key.as_str());
+        }
+        state
+            .add_books_review_rows
+            .push(AddBooksReviewRow::Book(index));
+    }
+    state.add_books_review_offset = 0.0;
+}
+
+fn virtual_review_range(
+    rows: &[AddBooksReviewRow],
+    offset: f32,
+    viewport_height: f32,
+) -> (std::ops::Range<usize>, f32, f32) {
+    let visible_start = (offset - REVIEW_VIRTUAL_OVERSCAN).max(0.0);
+    let visible_end = offset + viewport_height.max(1.0) + REVIEW_VIRTUAL_OVERSCAN;
+    let total_height: f32 = rows.iter().map(AddBooksReviewRow::height).sum();
+    let mut top = 0.0;
+    let mut start = 0;
+    while start < rows.len() && top + rows[start].height() < visible_start {
+        top += rows[start].height();
+        start += 1;
+    }
+    let mut end = start;
+    let mut rendered_height = 0.0;
+    while end < rows.len() && top + rendered_height < visible_end {
+        rendered_height += rows[end].height();
+        end += 1;
+    }
+    let bottom = (total_height - top - rendered_height).max(0.0);
+    (start..end, top, bottom)
+}
+
 fn add_books_modal(state: &State) -> Element<'_, Message> {
     let cancel = button(text(state.i18n.text("cancel")))
         .on_press(Message::CancelAddBooks)
@@ -4528,6 +4611,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             .map(ImportDiscoveryProgress::snapshot)
             .unwrap_or(shosai_core::library::ImportDiscoveryProgressSnapshot {
                 enumerating: true,
+                hashed_files: 0,
                 completed_files: 0,
                 total_files: 0,
             });
@@ -4535,6 +4619,14 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             state.i18n.text_with_args(
                 "finding-books-progress",
                 [("found", (progress.total_files as i64).into())],
+            )
+        } else if progress.hashed_files < progress.total_files {
+            state.i18n.text_with_args(
+                "reading-books-progress",
+                [
+                    ("completed", (progress.hashed_files as i64).into()),
+                    ("total", (progress.total_files as i64).into()),
+                ],
             )
         } else {
             state.i18n.text_with_args(
@@ -4545,14 +4637,13 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 ],
             )
         };
-        let progress_bar: Element<'_, Message> = if progress.enumerating {
-            widgets::activity_bar(true, state.library_activity_progress)
+        let progress_value = if progress.enumerating {
+            f64::from(state.library_activity_progress)
         } else {
-            widgets::reading_progress(
-                progress.completed_files as f64 / progress.total_files.max(1) as f64,
-            )
-            .into()
+            (progress.hashed_files + progress.completed_files) as f64
+                / (progress.total_files.max(1) * 2) as f64
         };
+        let progress_bar: Element<'_, Message> = widgets::reading_progress(progress_value).into();
         column![
             text(state.i18n.text("scanning-books")).size(20),
             text(selection.unwrap_or_default())
@@ -4591,13 +4682,28 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 .iter()
                 .filter(|staged| staged.candidate.duplicate.is_none())
                 .all(|staged| staged.selected);
-        let mut candidates = column![].spacing(6);
-        let mut previous_group = None;
-        for (index, staged) in state.staged_imports.iter().enumerate() {
-            if previous_group != Some(staged.candidate.group_key.as_str()) {
-                candidates = candidates.push(text(staged.candidate.title.clone()).size(14));
-                previous_group = Some(&staged.candidate.group_key);
-            }
+        let (visible_rows, top_spacer, bottom_spacer) = virtual_review_range(
+            &state.add_books_review_rows,
+            state.add_books_review_offset,
+            state.add_books_review_viewport_height,
+        );
+        let mut candidates = column![];
+        if top_spacer > 0.0 {
+            candidates = candidates.push(iced::widget::Space::new().height(top_spacer));
+        }
+        for row in &state.add_books_review_rows[visible_rows] {
+            let AddBooksReviewRow::Book(index) = row else {
+                let AddBooksReviewRow::Group(title) = row else {
+                    unreachable!();
+                };
+                candidates = candidates.push(
+                    container(text(title.clone()).size(14))
+                        .height(REVIEW_GROUP_ROW_HEIGHT)
+                        .align_y(iced::Alignment::End),
+                );
+                continue;
+            };
+            let staged = &state.staged_imports[*index];
             let label = import_candidate_label(source, &staged.candidate.path);
             let label_font = typography::font_for_text(&label);
             let badge = container(
@@ -4620,7 +4726,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                     .label(label)
                     .font(label_font)
                     .width(Length::Fill)
-                    .on_toggle(move |selected| Message::ToggleStagedBook(index, selected)),
+                    .on_toggle(move |selected| Message::ToggleStagedBook(*index, selected)),
                 badge,
                 text(format_bytes(staged.candidate.file_size))
                     .size(11)
@@ -4657,8 +4763,12 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                 container(column![details, duplicate].spacing(2).width(Length::Fill))
                     .padding([7, 8])
                     .width(Length::Fill)
+                    .height(REVIEW_BOOK_ROW_HEIGHT)
                     .style(app_theme::surface),
             );
+        }
+        if bottom_spacer > 0.0 {
+            candidates = candidates.push(iced::widget::Space::new().height(bottom_spacer));
         }
 
         let discovery_error: Element<'_, Message> =
@@ -4745,14 +4855,24 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             ))
             .size(12)
             .color(app_theme::TEXT_MUTED),
+            text_input(
+                &state.i18n.text("filter-review-books-placeholder"),
+                &state.add_books_review_search,
+            )
+            .on_input(Message::AddBooksReviewSearchChanged)
+            .padding([8, 10]),
             checkbox(all_new_selected)
                 .label(state.i18n.text("select-all-new-books"))
                 .font(state.i18n.ui_font())
                 .on_toggle(Message::SelectAllStagedBooks),
-            if state.staged_imports.is_empty() {
-                container(text(state.i18n.text("no-supported-books-found")))
-                    .padding(12)
-                    .width(Length::Fill)
+            if state.add_books_review_rows.is_empty() {
+                container(text(state.i18n.text(if state.staged_imports.is_empty() {
+                    "no-supported-books-found"
+                } else {
+                    "no-matching-books-found"
+                })))
+                .padding(12)
+                .width(Length::Fill)
             } else {
                 container(
                     scrollable(
@@ -4763,6 +4883,11 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                             })
                             .width(Length::Fill),
                     )
+                    .id(WidgetId::new("add-books-review-scroll"))
+                    .on_scroll(|viewport| Message::AddBooksReviewScrolled {
+                        offset: viewport.absolute_offset().y,
+                        viewport_height: viewport.bounds().height,
+                    })
                     .height(Length::Fill),
                 )
                 .height(Length::Fill)
@@ -6874,6 +6999,66 @@ mod tests {
         );
     }
 
+    #[test]
+    fn review_virtualization_builds_only_the_visible_window() {
+        let rows: Vec<_> = (0..1_000)
+            .flat_map(|index| {
+                [
+                    AddBooksReviewRow::Group(format!("Book {index}")),
+                    AddBooksReviewRow::Book(index),
+                ]
+            })
+            .collect();
+        let (range, top, bottom) = virtual_review_range(&rows, 30_000.0, 420.0);
+        let rendered: f32 = rows[range.clone()]
+            .iter()
+            .map(AddBooksReviewRow::height)
+            .sum();
+        let total: f32 = rows.iter().map(AddBooksReviewRow::height).sum();
+
+        assert!(range.len() < 30);
+        assert!(top > 0.0);
+        assert!(bottom > 0.0);
+        assert!((top + rendered + bottom - total).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn review_search_filters_without_losing_original_book_indices() {
+        let (mut state, _) = boot();
+        state.staged_imports = [
+            ("Rust", "guide.epub", shosai_core::library::BookFormat::Epub),
+            (
+                "Systems",
+                "manual.pdf",
+                shosai_core::library::BookFormat::Pdf,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (title, path, format))| StagedImport {
+            selected: true,
+            candidate: ImportCandidate {
+                path: PathBuf::from(path),
+                title: title.to_string(),
+                group_key: format!("group-{index}"),
+                format,
+                file_size: 100,
+                content_hash: format!("hash-{index}"),
+                duplicate: None,
+            },
+        })
+        .collect();
+        state.add_books_review_search = "PDF".to_string();
+
+        rebuild_add_books_review_rows(&mut state);
+
+        assert_eq!(state.add_books_review_rows.len(), 2);
+        assert!(matches!(
+            state.add_books_review_rows[1],
+            AddBooksReviewRow::Book(1)
+        ));
+    }
+
     #[tokio::test]
     async fn add_books_flow_stages_candidates_before_importing() {
         let directory = tempfile::tempdir().unwrap();
@@ -7090,6 +7275,54 @@ mod tests {
         assert_eq!(state.pending_book_imports.len(), 2);
         assert!(state.prepared_book_imports.is_empty());
         assert!(!state.book_import_committing);
+    }
+
+    #[tokio::test]
+    async fn managed_import_bounds_completed_preparations_behind_a_slow_first_book() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.add_books_open = true;
+        state.add_books_copy = Some(true);
+        state.staged_imports = (0..8)
+            .map(|index| StagedImport {
+                selected: true,
+                candidate: ImportCandidate {
+                    path: PathBuf::from(format!("book-{index}.epub")),
+                    title: format!("book-{index}"),
+                    group_key: format!("book-{index}"),
+                    format: shosai_core::library::BookFormat::Epub,
+                    file_size: 100,
+                    content_hash: format!("hash-{index}"),
+                    duplicate: None,
+                },
+            })
+            .collect();
+        let _ = update(&mut state, Message::AddSelectedBooks);
+
+        for index in 1..4 {
+            let _ = update(
+                &mut state,
+                Message::ManagedBookPrepared {
+                    index,
+                    result: Err(ImportFailure {
+                        path: PathBuf::from(format!("book-{index}.epub")),
+                        error: "test failure".to_string(),
+                    }),
+                },
+            );
+        }
+
+        assert_eq!(state.pending_book_imports.len(), 4);
+        assert_eq!(state.book_import_preparing, 1);
+        assert_eq!(state.prepared_book_imports.len(), 3);
+        assert_eq!(state.library_activity_progress, 3.0 / 16.0);
     }
 
     #[tokio::test]
