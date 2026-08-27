@@ -1316,12 +1316,21 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     return performance_task;
                 }
             };
+            let retained_display_title = state.tabs[index].display_title.clone();
+            let display_title = relocated_book_title(
+                book_id,
+                &document,
+                &path,
+                &state.library_books,
+                &retained_display_title,
+            );
             save_active_tab(state);
             state.active_tab_id = Some(state.tabs[index].id);
             state.continuous_activation = state.continuous_activation.wrapping_add(1);
             state.open_error = None;
             state.missing_book_id = None;
             install_document(state, path, book_id, document);
+            state.display_title = display_title;
             let task = refresh_content(state);
             if let Some(tab) = capture_reader_tab(state) {
                 state.tabs[index] = tab;
@@ -5463,6 +5472,39 @@ fn book_title(
         })
 }
 
+fn relocated_book_title(
+    book_id: Option<i64>,
+    document: &OpenDocument,
+    file_path: &Path,
+    library_books: &[Book],
+    retained_display_title: &str,
+) -> Option<String> {
+    book_id
+        .and_then(|book_id| {
+            library_books
+                .iter()
+                .find(|book| book.id == book_id)
+                .map(|book| book.title.clone())
+        })
+        .filter(|title| !title.trim().is_empty())
+        .or_else(|| {
+            match document {
+                OpenDocument::Pdf(document) => document.metadata().title,
+                OpenDocument::Epub(document) => document.metadata().title,
+                OpenDocument::Cbz(document) => document.metadata().title,
+            }
+            .filter(|title| !title.trim().is_empty())
+        })
+        .or_else(|| {
+            (!retained_display_title.trim().is_empty()).then(|| retained_display_title.to_owned())
+        })
+        .or_else(|| {
+            file_path
+                .file_stem()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+}
+
 fn current_book_title(state: &State) -> Option<String> {
     state.display_title.clone().or_else(|| {
         book_title(
@@ -8347,6 +8389,32 @@ mod tests {
             panic!("expected EPUB document");
         };
         assert!(!Arc::ptr_eq(document, &old_document));
+    }
+
+    #[test]
+    fn relocating_evicted_managed_tab_retains_its_display_title() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.epub");
+        let replacement = directory.path().join("content-hash.epub");
+        let bytes = epub_with_title_and_chapter("", b"<html><body>text</body></html>");
+        std::fs::write(&original, &bytes).unwrap();
+        std::fs::write(&replacement, bytes).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+        let mut book = test_book(42);
+        book.title = "Retained library title".to_string();
+        state.library_books = vec![book];
+
+        let _ = open_document(&mut state, original, Some(42));
+        state.library_books.clear();
+        let _ = open_document(&mut state, replacement, Some(42));
+
+        assert_eq!(
+            state.display_title.as_deref(),
+            Some("Retained library title")
+        );
+        assert_eq!(state.tabs[0].display_title, "Retained library title");
     }
 
     #[test]
