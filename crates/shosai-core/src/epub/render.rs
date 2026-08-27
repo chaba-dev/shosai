@@ -591,7 +591,17 @@ fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
     let mut index = 0;
     let mut quote = None;
     let mut comment = false;
+    let mut processing_instruction = false;
     while index < bytes.len() {
+        if processing_instruction {
+            if bytes[index..].starts_with(b"?>") {
+                processing_instruction = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
         if comment {
             if bytes[index..].starts_with(b"-->") {
                 comment = false;
@@ -611,6 +621,9 @@ fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
         if bytes[index..].starts_with(b"<!--") {
             comment = true;
             index += 4;
+        } else if bytes[index..].starts_with(b"<?") {
+            processing_instruction = true;
+            index += 2;
         } else if matches!(bytes[index], b'\'' | b'"') {
             quote = Some(bytes[index]);
             index += 1;
@@ -628,9 +641,19 @@ fn doctype_end(doctype: &str) -> Option<usize> {
     let bytes = doctype.as_bytes();
     let mut quote = None;
     let mut comment = false;
+    let mut processing_instruction = false;
     let mut subset_depth = 0_u32;
     let mut index = 0;
     while index < bytes.len() {
+        if processing_instruction {
+            if bytes[index..].starts_with(b"?>") {
+                processing_instruction = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
         if comment {
             if bytes[index..].starts_with(b"-->") {
                 comment = false;
@@ -650,6 +673,11 @@ fn doctype_end(doctype: &str) -> Option<usize> {
         if bytes[index..].starts_with(b"<!--") {
             comment = true;
             index += 4;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<?") {
+            processing_instruction = true;
+            index += 2;
             continue;
         }
         match bytes[index] {
@@ -2591,6 +2619,17 @@ mod tests {
         let duplicate = "<!DOCTYPE html [<!ENTITY bomb \"boundedbounded\"><!ENTITY bomb \"x\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
         let error = parse_chapter_xhtml_with_limits(duplicate, "", &Default::default(), &limits)
             .expect_err("the parser's first duplicate declaration must determine expansion cost");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_declaration = "<!DOCTYPE html [<?fake <!ENTITY bomb \"x\"> ?><!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error =
+            parse_chapter_xhtml_with_limits(fake_declaration, "", &Default::default(), &limits)
+                .expect_err("declaration-like processing-instruction data must remain opaque");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_end = "<!DOCTYPE html [<?fake ]> ?><!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(fake_end, "", &Default::default(), &limits)
+            .expect_err("doctype delimiters in processing-instruction data must remain opaque");
         assert!(error.to_string().contains("expanded text limit"));
     }
 
