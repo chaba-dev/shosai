@@ -4,7 +4,7 @@
 dev:
 	SHOSAI_DEV_BUILD=1 cargo run -p shosai-app
 
-## Delete local Shosai data, preferences, and managed book copies
+## Delete development-only Shosai data and development-owned managed copies
 reset:
 	@python3 scripts/reset-local-data.py
 

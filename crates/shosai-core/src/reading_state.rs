@@ -1,8 +1,8 @@
 //! Persistence for per-file reading state (last page, zoom level, etc.).
 //!
 //! State is stored in a SQLite database in the user's data directory:
-//!   - Linux:   `~/.local/share/shosai/shosai.db`
-//!   - macOS:   `~/Library/Application Support/shosai/shosai.db`
+//!   - Linux:   `~/.local/share/shosai[-dev]/shosai.db`
+//!   - macOS:   `~/Library/Application Support/shosai[-dev]/shosai.db`
 //!
 //! Uses sqlx with SQLite so the same database can be extended for library
 //! management in future phases.
@@ -13,8 +13,85 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
 
-const APP_DIR: &str = "shosai";
+/// Data directory used by normal/release launches.
+pub const RELEASE_APP_DIR: &str = "shosai";
+/// Isolated data directory used when `SHOSAI_DEV_BUILD=1`.
+pub const DEVELOPMENT_APP_DIR: &str = "shosai-dev";
+/// File proving that an external managed-library directory belongs to the
+/// development profile and may be removed by the development reset tool.
+pub const STORAGE_PROFILE_MARKER_FILE: &str = ".shosai-storage-profile";
+/// Exact marker contents required for development-owned external storage.
+pub const DEVELOPMENT_STORAGE_PROFILE: &str = "shosai-development-v1";
 const DB_FILE: &str = "shosai.db";
+
+fn development_profile() -> bool {
+    match std::env::var("SHOSAI_DEV_BUILD").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => cfg!(debug_assertions),
+    }
+}
+
+/// Return the managed application directory name for this process.
+///
+/// Debug builds default to development storage. `SHOSAI_DEV_BUILD=1` also
+/// isolates release-mode development runs, while `0` permits explicit
+/// production-profile testing.
+pub fn app_data_directory_name() -> &'static str {
+    if development_profile() {
+        DEVELOPMENT_APP_DIR
+    } else {
+        RELEASE_APP_DIR
+    }
+}
+
+/// Return the profile-specific folder created below a user-selected library parent.
+pub fn managed_library_folder_name() -> &'static str {
+    if development_profile() {
+        "Shosai Dev"
+    } else {
+        "Shosai"
+    }
+}
+
+/// Claim a user-selected managed-library directory for the current profile.
+///
+/// Development refuses to adopt a non-empty directory without its matching
+/// marker so `make reset` can never infer ownership from a folder name alone.
+pub fn prepare_managed_library_directory(path: &Path) -> Result<()> {
+    if !development_profile() {
+        std::fs::create_dir_all(path)
+            .with_context(|| format!("failed to create managed library {}", path.display()))?;
+        return Ok(());
+    }
+
+    let marker = path.join(STORAGE_PROFILE_MARKER_FILE);
+    if path.exists() {
+        if marker.exists() {
+            let profile = std::fs::read_to_string(&marker)
+                .with_context(|| format!("failed to read storage marker {}", marker.display()))?;
+            if profile.trim() != DEVELOPMENT_STORAGE_PROFILE {
+                anyhow::bail!("managed library belongs to a different Shosai profile");
+            }
+            return Ok(());
+        }
+        if std::fs::read_dir(path)
+            .with_context(|| format!("failed to inspect managed library {}", path.display()))?
+            .next()
+            .is_some()
+        {
+            anyhow::bail!(
+                "refusing to use non-empty directory without a Shosai development ownership marker"
+            );
+        }
+    } else {
+        std::fs::create_dir_all(path)
+            .with_context(|| format!("failed to create managed library {}", path.display()))?;
+    }
+    std::fs::write(&marker, format!("{DEVELOPMENT_STORAGE_PROFILE}\n"))
+        .with_context(|| format!("failed to write storage marker {}", marker.display()))?;
+    Ok(())
+}
 
 /// Per-file reading state.
 #[derive(Debug, Clone)]
@@ -306,7 +383,7 @@ fn canonical_key(path: &Path) -> String {
 /// Get the path to the database file.
 fn db_file_path() -> Result<PathBuf> {
     let data_dir = data_dir()?;
-    Ok(data_dir.join(APP_DIR).join(DB_FILE))
+    Ok(data_dir.join(app_data_directory_name()).join(DB_FILE))
 }
 
 /// Get the platform-specific data directory.

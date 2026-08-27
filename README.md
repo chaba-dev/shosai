@@ -36,8 +36,14 @@ make test
 make check-rfds
 ```
 
-With Shosai closed, `make reset` deletes its local database, preferences, and
-managed book copies. Books used from their current location are preserved.
+Development builds use an isolated `shosai-dev` application data directory;
+packaged releases use `shosai`. `make dev` also sets this profile explicitly for
+release-mode development runs. With the development app closed, `make reset`
+recursively deletes only development state. Production data and books referenced
+from their current location are preserved. An external development managed-library
+folder is removed only when it contains `.shosai-storage-profile` with the exact
+value `shosai-development-v1`; reset fails safely if that ownership marker is
+absent or does not match.
 
 The project is a Cargo workspace:
 
