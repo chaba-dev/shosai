@@ -3760,14 +3760,8 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         .into()
     };
 
-    let activity: Element<'_, Message> = if state.adding_books {
-        widgets::reading_progress(f64::from(state.library_activity_progress)).into()
-    } else {
-        widgets::activity_bar(
-            library_activity_active(state),
-            state.library_activity_progress,
-        )
-    };
+    let activity: Element<'_, Message> =
+        widgets::reading_progress(f64::from(state.library_activity_progress)).into();
     let header = column![
         container(content).padding([16, 20]).width(Length::Fill),
         activity,
