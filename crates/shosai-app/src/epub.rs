@@ -723,8 +723,10 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                 let style_scale =
                     style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
                 let text_line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
-                let paragraph_chars_per_line =
-                    scaled_characters_per_line(chars_per_line, style_scale);
+                let paragraph_chars_per_line = (effective_width
+                    / (font_size * AVERAGE_CHARACTER_WIDTH * style_scale).max(1.0))
+                .floor()
+                .max(1.0) as usize;
                 while cursor.remaining() > 0 {
                     let mut at_page_limit = false;
                     if remaining < text_line_height + block_spacing
@@ -2933,8 +2935,11 @@ fn split_epub_blockquote_prefix(
             let paragraph_available = available_height - prefix_height - spacing;
             let style_scale = style.font_size_multiplier.unwrap_or(1.0);
             let line_height = font_size * TEXT_LINE_HEIGHT * style_scale;
-            let paragraph_chars_per_line = scaled_characters_per_line(chars_per_line, style_scale);
             let effective_width = paragraph_width(page_width, font_size, style);
+            let paragraph_chars_per_line = (effective_width
+                / (font_size * AVERAGE_CHARACTER_WIDTH * style_scale).max(1.0))
+            .floor()
+            .max(1.0) as usize;
             let pagination_spans = pagination_inline_spans(
                 spans,
                 font_size * style_scale,
@@ -3243,11 +3248,18 @@ fn estimated_epub_compact_node_height_bounded(
         ContentNode::HorizontalRule => text_line_height,
         ContentNode::Paragraph(spans, style) => {
             let scale = style.font_size_multiplier.unwrap_or(1.0) * spans_font_scale(spans);
-            wrapped(spans_text_len(spans), scale) * text_line_height * scale
+            let effective_width = paragraph_width(width, font_size, style);
+            let characters_per_line = (effective_width
+                / (font_size * AVERAGE_CHARACTER_WIDTH * scale).max(1.0))
+            .floor()
+            .max(1.0) as usize;
+            spans_text_len(spans).div_ceil(characters_per_line).max(1) as f32
+                * text_line_height
+                * scale
                 + inline_math_height_reserve(
                     spans,
                     font_size * style.font_size_multiplier.unwrap_or(1.0),
-                    width,
+                    effective_width,
                     height,
                 )
         }
@@ -3758,7 +3770,10 @@ mod tests {
                 preserve_whitespace: false,
                 link: None,
             }],
-            Default::default(),
+            shosai_core::epub::render::NodeStyle {
+                margin_left_em: Some(10.0),
+                ..Default::default()
+            },
         );
         let wide = estimated_epub_blockquote_height(
             std::slice::from_ref(&child),
@@ -3780,9 +3795,10 @@ mod tests {
         );
         assert!(narrow > wide);
 
-        let (prefix, remaining, _, _) = split_epub_blockquote_prefix(
+        let available_height = 16.0 * TEXT_LINE_HEIGHT;
+        let (prefix, remaining, prefix_height, _) = split_epub_blockquote_prefix(
             std::slice::from_ref(&child),
-            16.0 * TEXT_LINE_HEIGHT,
+            available_height,
             27,
             20,
             16.0,
@@ -3791,6 +3807,7 @@ mod tests {
         );
         assert!(!prefix.is_empty());
         assert!(!remaining.is_empty());
+        assert!(prefix_height <= available_height);
         assert_eq!(
             prefix.iter().map(content_node_text_len).sum::<usize>()
                 + remaining.iter().map(content_node_text_len).sum::<usize>(),
