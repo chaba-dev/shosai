@@ -45,14 +45,22 @@ pub struct NodeStyle {
     pub margin_left_em: Option<f32>,
     /// Authored vertical block spacing in em.
     pub block_spacing_em: Option<f32>,
-    /// Authored width retained for native table layout.
+    /// Authored width retained for native replaced-element and table layout.
     pub width: Option<NodeWidth>,
+    /// Authored maximum width retained for native replaced-element layout.
+    pub max_width: Option<NodeWidth>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NodeWidth {
     Percent(f32),
     Pixels(f32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageSize {
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Semantic row-group role retained from an EPUB table.
@@ -136,6 +144,12 @@ pub enum ContentNode {
         /// Path to the image within the EPUB archive.
         src: String,
         alt: String,
+        style: NodeStyle,
+        /// Figure caption retained with the image so pagination can keep them together.
+        caption: Vec<TextSpan>,
+        caption_style: Option<NodeStyle>,
+        /// Intrinsic raster dimensions populated from the admitted EPUB resource.
+        intrinsic_size: Option<ImageSize>,
     },
     /// A code block (`<pre>`, `<code>` block-level, or `<pre><code>`).
     CodeBlock {
@@ -157,7 +171,8 @@ impl ContentNode {
             Self::Heading { style, .. }
             | Self::BlockQuote { style, .. }
             | Self::Table { style, .. }
-            | Self::Math { style, .. } => Some(style),
+            | Self::Math { style, .. }
+            | Self::Image { style, .. } => Some(style),
             Self::Paragraph(_, style) => Some(style),
             _ => None,
         }
@@ -498,7 +513,14 @@ fn parse_block_children(
                 if let Some(src) = child.attribute("src") {
                     let alt = child.attribute("alt").unwrap_or("").to_string();
                     if let Some(src) = resolve_relative(base_path, src) {
-                        nodes.push(ContentNode::Image { src, alt });
+                        nodes.push(ContentNode::Image {
+                            src,
+                            alt,
+                            style: node_style,
+                            caption: Vec::new(),
+                            caption_style: None,
+                            intrinsic_size: None,
+                        });
                     } else if !alt.is_empty() {
                         nodes.push(ContentNode::Paragraph(
                             vec![text_span_for_node(&child, alt, None, styles, 16.0)],
@@ -512,7 +534,13 @@ fn parse_block_children(
                 nodes.push(ContentNode::HorizontalRule);
             }
 
-            "div" | "section" | "article" | "main" | "aside" | "header" | "footer" | "figure"
+            "figure" => {
+                let inner = parse_block_children(child, base_path, styles);
+                nested_anchors = inner.anchor_offsets;
+                nodes.extend(collapse_figure(inner.nodes, node_style));
+            }
+
+            "div" | "section" | "article" | "main" | "aside" | "header" | "footer"
             | "figcaption" => {
                 let inner = parse_block_children(child, base_path, styles);
                 nested_anchors = inner.anchor_offsets;
@@ -542,6 +570,36 @@ fn parse_block_children(
         nodes,
         anchor_offsets,
     }
+}
+
+fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
+    if nodes.len() != 2 || !matches!(nodes.first(), Some(ContentNode::Image { .. })) {
+        return nodes;
+    }
+    let (caption, caption_style) = match nodes.pop().expect("figure has two nodes") {
+        ContentNode::Heading { spans, style, .. } | ContentNode::Paragraph(spans, style) => {
+            (spans, style)
+        }
+        other => {
+            nodes.push(other);
+            return nodes;
+        }
+    };
+    let Some(ContentNode::Image {
+        style,
+        caption: image_caption,
+        caption_style: image_caption_style,
+        ..
+    }) = nodes.first_mut()
+    else {
+        unreachable!("checked image node");
+    };
+    if figure_style.block_spacing_em.is_some() {
+        style.block_spacing_em = figure_style.block_spacing_em;
+    }
+    *image_caption = caption;
+    *image_caption_style = Some(caption_style);
+    nodes
 }
 
 fn record_element_anchors(
@@ -987,6 +1045,15 @@ fn collect_table_cell_inline(
         children.push(ContentNode::Image {
             src,
             alt: alt.to_owned(),
+            style: css_to_node_style(
+                styles
+                    .get(*node)
+                    .expect("computed style must exist for image"),
+                "img",
+            ),
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: None,
         });
         return;
     }
@@ -1121,6 +1188,10 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
         },
         block_spacing_em,
         width: css.width.map(|width| match width {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
+        max_width: css.max_width.map(|width| match width {
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
         }),
@@ -1682,7 +1753,7 @@ mod tests {
         let nested = &row_groups[1].rows[1].cells[0];
         assert_eq!(nested.column_span, 2);
         assert!(
-            matches!(nested.children.last(), Some(ContentNode::Image { src, alt }) if
+            matches!(nested.children.last(), Some(ContentNode::Image { src, alt, .. }) if
             src == "OPS/images/table.png" && alt == "table diagram")
         );
 
@@ -2132,12 +2203,34 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "OEBPS", &Default::default());
         assert_eq!(nodes.len(), 1);
         match &nodes[0] {
-            ContentNode::Image { src, alt } => {
+            ContentNode::Image { src, alt, .. } => {
                 assert_eq!(src, "OEBPS/images/fig1.png");
                 assert_eq!(alt, "Figure 1");
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn figure_retains_its_caption_with_the_image() {
+        let xhtml = r#"<html><body><figure><div><img src="images/fig1.png" alt="Diagram"/><h6>Figure 1. Architecture</h6></div></figure><p>Following text</p></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OEBPS", &Default::default());
+
+        assert_eq!(nodes.len(), 2);
+        let ContentNode::Image { caption, .. } = &nodes[0] else {
+            panic!("expected retained figure image");
+        };
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Figure 1. Architecture"
+        );
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nFigure 1. Architecture\nFollowing text\n"
+        );
     }
 
     #[test]

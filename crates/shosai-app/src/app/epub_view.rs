@@ -10,11 +10,10 @@ use shosai_core::epub::{
 
 use super::{
     BOOKMARKS_PANEL_WIDTH, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE, EPUB_TABLE_CELL_PADDING,
-    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubImageHandle, EpubPageNode, Message,
-    OpenDocument, PAGE_GUTTER, SearchHighlight, State, continuous_epub_node_id,
-    continuous_epub_title_id, continuous_item_id, continuous_scroll_id, epub_page_size,
-    epub_uses_spread, epub_visible_pages, search_highlight_models_for_page,
-    uses_compact_reader_layout,
+    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubImageHandle, Message, OpenDocument,
+    PAGE_GUTTER, SearchHighlight, State, continuous_epub_node_id, continuous_epub_title_id,
+    continuous_item_id, continuous_scroll_id, epub_page_size, epub_uses_spread, epub_visible_pages,
+    search_highlight_models_for_page, uses_compact_reader_layout,
 };
 use crate::epub::{
     content_node_text_len, content_starts_with_heading, spans_font_scale, spans_text_len,
@@ -192,13 +191,6 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
     for (visible_index, page_index) in visible_pages.iter().enumerate() {
         let epub_page = &state.epub_pages[*page_index];
         let highlights = search_highlight_models_for_page(state, epub_page.chapter);
-        let image_only = matches!(
-            epub_page.nodes.as_slice(),
-            [EpubPageNode {
-                node: ContentNode::Image { .. },
-                ..
-            }]
-        );
         let mut page = column![].width(Length::Fill);
         if let Some(title) = &epub_page.title {
             page = page.push(
@@ -211,6 +203,8 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
             );
         }
         for page_node in &epub_page.nodes {
+            let block_spacing =
+                crate::epub::epub_node_block_spacing(&page_node.node, font_size, line_gap);
             let rendered = render_content_node(
                 &page_node.node,
                 &state.i18n,
@@ -219,20 +213,18 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &state.epub_image_handles,
                 true,
                 text_width,
-                Some(epub_page_size(state).height),
+                Some((epub_page_size(state).height - block_spacing).max(1.0)),
                 page_node.text_offset,
                 &highlights,
                 fonts,
                 state.window_scale_factor,
             );
             page = page.push(container(rendered).padding(iced::Padding {
-                bottom: crate::epub::epub_node_block_spacing(&page_node.node, font_size, line_gap),
+                bottom: block_spacing,
                 ..iced::Padding::ZERO
             }));
         }
-        if !image_only {
-            page = page.push(iced::widget::Space::new().height(Length::Fill));
-        }
+        page = page.push(iced::widget::Space::new().height(Length::Fill));
         page = page.push(
             text(format!("{}", page_index + 1))
                 .size(EPUB_PAGE_NUMBER_SIZE)
@@ -241,10 +233,10 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                     ..text_color
                 }),
         );
-        let mut page_content = container(page).width(Length::Fill).height(Length::Fill);
-        if !image_only {
-            page_content = page_content.max_width(text_width);
-        }
+        let page_content = container(page)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .max_width(text_width);
         let content_alignment = if epub_uses_spread(state) {
             if visible_index == 0 {
                 iced::Alignment::End
@@ -561,16 +553,18 @@ fn render_content_node<'a>(
             )
         }
 
-        ContentNode::Image { src, alt } => render_epub_image(
-            src,
-            alt,
+        ContentNode::Image { .. } => render_epub_image(
+            node,
             i18n,
             font_size,
             palette,
             image_handles,
-            fill_images,
+            available_width,
+            available_height,
             text_offset,
             highlights,
+            fonts,
+            scale,
         ),
 
         ContentNode::Math {
@@ -688,45 +682,76 @@ fn epub_heading_font_size(
 /// Render a cached EPUB image, falling back to alt text.
 #[allow(clippy::too_many_arguments)]
 fn render_epub_image<'a>(
-    src: &str,
-    alt: &str,
+    node: &ContentNode,
     i18n: &I18n,
     font_size: f32,
     palette: ReaderPalette,
     image_handles: &HashMap<String, EpubImageHandle>,
-    fill: bool,
+    available_width: f32,
+    available_height: Option<f32>,
     text_offset: usize,
     highlights: &[SearchHighlight],
+    fonts: Option<&'a EpubFontBook>,
+    scale: f32,
 ) -> Element<'a, Message> {
+    let ContentNode::Image {
+        src,
+        alt,
+        caption,
+        caption_style,
+        ..
+    } = node
+    else {
+        unreachable!("image renderer requires an image node");
+    };
     let text_color = palette.text;
     if let Some(handle) = image_handles.get(src) {
-        let mut rendered = image(&handle.0)
+        let layout = crate::epub::epub_image_layout(
+            node,
+            font_size,
+            available_width,
+            available_height.unwrap_or(f32::MAX),
+            fonts,
+        )
+        .expect("image node has image layout");
+        let rendered = image(&handle.0)
             .content_fit(iced::ContentFit::ScaleDown)
-            .width(Length::Fill);
-        if fill {
-            rendered = rendered.height(Length::Fill);
-        }
-        let mut image_container = container(rendered)
+            .width(Length::Fixed(layout.width))
+            .height(Length::Fixed(layout.height));
+        let image_container = container(rendered)
             .width(Length::Fill)
             .center_x(Length::Fill);
-        if fill {
-            image_container = image_container.height(Length::Fill);
+        let mut figure = column![image_container].width(Length::Fill);
+        if !caption.is_empty() {
+            let style = caption_style.as_ref().cloned().unwrap_or_default();
+            let caption_size = font_size * style.font_size_multiplier.unwrap_or(1.0);
+            figure = figure
+                .push(iced::widget::Space::new().height(Length::Fixed(layout.caption_gap)))
+                .push(render_spans(
+                    caption,
+                    style.direction,
+                    caption_size,
+                    palette,
+                    text_offset + alt.chars().count() + 1,
+                    highlights,
+                    fonts,
+                    scale,
+                    style.text_align,
+                    layout.width,
+                    Some(layout.caption_height.max(1.0)),
+                ));
         }
         if image_alt_highlight(alt, text_offset, highlights).is_some() {
-            return column![
-                image_container,
-                render_highlighted_text_with_font(
-                    alt,
-                    text_offset,
-                    font_size,
-                    palette,
-                    Font::DEFAULT,
-                    highlights,
-                )
-            ]
-            .into();
+            figure = figure.push(render_highlighted_text_with_font(
+                alt,
+                text_offset,
+                font_size,
+                palette,
+                Font::DEFAULT,
+                highlights,
+            ));
         }
-        return image_container.into();
+        return figure.into();
     }
 
     // Fallback: show alt text placeholder.
@@ -1498,6 +1523,10 @@ mod tests {
         let nodes = vec![ContentNode::Image {
             src: "image.png".to_string(),
             alt: String::new(),
+            style: Default::default(),
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: None,
         }];
         let mut handles = HashMap::new();
 
@@ -1572,6 +1601,10 @@ mod tests {
                         children: vec![ContentNode::Image {
                             src: "table.png".to_string(),
                             alt: "diagram".to_string(),
+                            style: Default::default(),
+                            caption: Vec::new(),
+                            caption_style: None,
+                            intrinsic_size: None,
                         }],
                         block_starts: Vec::new(),
                         style: Default::default(),

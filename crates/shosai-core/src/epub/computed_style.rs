@@ -13,7 +13,7 @@ use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, 
 use lightningcss::properties::font::{
     AbsoluteFontWeight, FamilyName, FontFamily, FontSize, FontStyle, FontWeight, GenericFontFamily,
 };
-use lightningcss::properties::size::Size as CssSize;
+use lightningcss::properties::size::{MaxSize as CssMaxSize, Size as CssSize};
 use lightningcss::properties::text::{Direction as CssDirection, TextAlign, WhiteSpace};
 use lightningcss::rules::{CssRule, font_face::FontFaceProperty};
 use lightningcss::selector::{Combinator, Component, Selector};
@@ -78,6 +78,7 @@ pub(crate) struct ComputedStyle {
     pub(crate) margin_bottom_px: Option<f32>,
     pub(crate) text_indent_px: f32,
     pub(crate) width: Option<ComputedWidth>,
+    pub(crate) max_width: Option<ComputedWidth>,
 }
 
 #[derive(Debug)]
@@ -212,6 +213,7 @@ struct SpecifiedStyle {
     margin_bottom: Slot<RelativeLength>,
     text_indent: Slot<RelativeLength>,
     width: Slot<SpecifiedWidth>,
+    max_width: Slot<SpecifiedWidth>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -375,6 +377,7 @@ fn compute_element_style(
         margin_bottom_px: None,
         text_indent_px: 0.0,
         width: None,
+        max_width: None,
     });
     let tag = element.tag_name().name();
     let mut style = inherited.clone();
@@ -383,6 +386,7 @@ fn compute_element_style(
     style.margin_top_px = None;
     style.margin_bottom_px = None;
     style.width = None;
+    style.max_width = None;
     apply_ua_text_defaults(tag, &mut style);
     if let Some(direction) = element.attribute("dir") {
         if direction.eq_ignore_ascii_case("rtl") {
@@ -470,6 +474,14 @@ fn compute_element_style(
     }
     if let Some(value) = specified.width.value() {
         style.width = Some(match value {
+            SpecifiedWidth::Percent(value) => ComputedWidth::Percent(value),
+            SpecifiedWidth::Length(value) => {
+                ComputedWidth::Px(value.resolve(style.font_size_px, root_font_size).max(0.0))
+            }
+        });
+    }
+    if let Some(value) = specified.max_width.value() {
+        style.max_width = Some(match value {
             SpecifiedWidth::Percent(value) => ComputedWidth::Percent(value),
             SpecifiedWidth::Length(value) => {
                 ComputedWidth::Px(value.resolve(style.font_size_px, root_font_size).max(0.0))
@@ -678,6 +690,11 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
         Property::Width(CssSize::LengthPercentage(value)) => {
             if let Some(value) = specified_width(value) {
                 specified.width.offer(priority, value);
+            }
+        }
+        Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => {
+            if let Some(value) = specified_width(value) {
+                specified.max_width.offer(priority, value);
             }
         }
         _ => {}
@@ -992,6 +1009,7 @@ fn property_supported(property: &Property<'_>) -> bool {
         }
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         Property::Width(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => specified_width(value).is_some(),
         _ => false,
     }
 }
@@ -1709,10 +1727,10 @@ mod tests {
     }
 
     #[test]
-    fn table_width_hints_are_computed_without_inheriting() {
+    fn width_hints_are_computed_without_inheriting() {
         let report = compute_document_styles(
-            r#"<html><body><table><tr><td id="percent"><span id="child">A</span></td><td id="fixed">B</td></tr></table></body></html>"#,
-            "#percent { width: 15.6%; } #fixed { width: 72pt; }",
+            r#"<html><body><table><tr><td id="percent"><span id="child">A</span></td><td id="fixed">B</td></tr></table><img id="bounded"/></body></html>"#,
+            "#percent { width: 15.6%; } #fixed { width: 72pt; } #bounded { max-width: 95%; }",
         )
         .unwrap();
 
@@ -1725,6 +1743,11 @@ mod tests {
             Some(ComputedWidth::Px(96.0))
         );
         assert_eq!(report.element_styles["child"].width, None);
+        assert_eq!(
+            report.element_styles["bounded"].max_width,
+            Some(ComputedWidth::Percent(0.95))
+        );
+        assert_eq!(report.element_styles["child"].max_width, None);
     }
 
     #[test]

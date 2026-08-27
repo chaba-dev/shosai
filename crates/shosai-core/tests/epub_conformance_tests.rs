@@ -297,8 +297,15 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
     assert_eq!(body.rows[2].cells[0].column_span, 2);
     assert!(matches!(
         body.rows[1].cells[0].children.last(),
-        Some(shosai_core::epub::render::ContentNode::Image { src, alt })
-            if src == "OEBPS/Images/pixel.png" && alt == "Q2 chart"
+        Some(shosai_core::epub::render::ContentNode::Image {
+            src,
+            alt,
+            intrinsic_size: Some(size),
+            ..
+        }) if src == "OEBPS/Images/pixel.png"
+            && alt == "Q2 chart"
+            && size.width == 1
+            && size.height == 1
     ));
     let search_text = table_doc.presentation().chapter(0).unwrap().search_text();
     assert!(search_text.contains("Quarter\tValue"));

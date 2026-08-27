@@ -150,7 +150,8 @@ impl EpubDoc {
         )?;
 
         let fonts = super::font::EpubFontBook::new(&chapters, &styles, &resources, &limits)?;
-        let presentation = EpubPresentation::parse(&chapters, &styles, &fonts, &limits)?;
+        let presentation =
+            EpubPresentation::parse(&chapters, &styles, &fonts, &resources, &limits)?;
 
         Ok(Self {
             content: EpubContent {

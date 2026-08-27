@@ -24,11 +24,13 @@ use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 
+#[cfg(test)]
+use crate::epub::PageNode as EpubPageNode;
 use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
     EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
-    PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, PageNode as EpubPageNode,
-    content_node_text_len, content_starts_with_heading, paginate_epub_chapter_with_budget,
+    PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, content_node_text_len,
+    content_starts_with_heading, paginate_epub_chapter_with_budget,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
