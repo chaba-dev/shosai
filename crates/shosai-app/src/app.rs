@@ -9038,6 +9038,8 @@ mod tests {
                 nodes: vec![EpubPageNode {
                     node: paragraph("first"),
                     text_offset: 0,
+                    block_before: 0.0,
+                    block_after: 0.0,
                 }],
             },
             EpubPage {
@@ -9046,6 +9048,8 @@ mod tests {
                 nodes: vec![EpubPageNode {
                     node: paragraph("second"),
                     text_offset: 5,
+                    block_before: 0.0,
+                    block_after: 0.0,
                 }],
             },
         ]);
@@ -9083,6 +9087,8 @@ mod tests {
                 nodes: vec![EpubPageNode {
                     node: paragraph("first"),
                     text_offset: 0,
+                    block_before: 0.0,
+                    block_after: 0.0,
                 }],
             },
             EpubPage {
@@ -9091,6 +9097,8 @@ mod tests {
                 nodes: vec![EpubPageNode {
                     node: paragraph("second"),
                     text_offset: 5,
+                    block_before: 0.0,
+                    block_after: 0.0,
                 }],
             },
             EpubPage {
@@ -9099,6 +9107,8 @@ mod tests {
                 nodes: vec![EpubPageNode {
                     node: paragraph("third"),
                     text_offset: 0,
+                    block_before: 0.0,
+                    block_after: 0.0,
                 }],
             },
         ]);

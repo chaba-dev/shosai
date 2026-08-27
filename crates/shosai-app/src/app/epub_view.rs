@@ -228,30 +228,9 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 ),
             );
         }
-        let page_nodes = epub_page
-            .nodes
-            .iter()
-            .map(|page_node| page_node.node.clone())
-            .collect::<Vec<_>>();
-        let starts_chapter =
-            *page_index == 0 || state.epub_pages[*page_index - 1].chapter != epub_page.chapter;
-        for (node_index, page_node) in epub_page.nodes.iter().enumerate() {
-            let before = if node_index == 0 && !starts_chapter {
-                0.0
-            } else {
-                crate::epub::epub_node_boundary_spacing(
-                    &page_nodes,
-                    node_index,
-                    font_size,
-                    line_gap,
-                )
-            };
-            let block_spacing = crate::epub::epub_node_boundary_spacing(
-                &page_nodes,
-                node_index + 1,
-                font_size,
-                line_gap,
-            );
+        for page_node in &epub_page.nodes {
+            let before = page_node.block_before;
+            let block_spacing = page_node.block_after;
             let rendered = render_content_node(
                 &page_node.node,
                 &state.i18n,
@@ -268,11 +247,7 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
             );
             page = page.push(container(rendered).padding(iced::Padding {
                 top: before,
-                bottom: if node_index + 1 == page_nodes.len() {
-                    block_spacing
-                } else {
-                    0.0
-                },
+                bottom: block_spacing,
                 ..iced::Padding::ZERO
             }));
         }
