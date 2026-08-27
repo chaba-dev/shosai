@@ -185,7 +185,7 @@ pub(super) fn cache_epub_image_handles<'a, F>(
                 };
                 handles.insert(src.clone(), handle);
             }
-            ContentNode::BlockQuote { children, .. } => {
+            ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
                 cache_epub_image_handles(handles, children, resource_bytes);
             }
             ContentNode::Table { row_groups, .. } => {
@@ -377,11 +377,12 @@ fn render_content_node<'a>(
             let mut child_offset = text_offset;
             for (child_index, child) in children.iter().enumerate() {
                 col = col.push(iced::widget::Space::new().height(Length::Fixed(
-                    crate::epub::epub_node_boundary_spacing(
+                    crate::epub::epub_fragment_boundary_spacing(
                         children,
                         child_index,
                         font_size,
                         EPUB_BLOCKQUOTE_SPACING,
+                        style,
                     ),
                 )));
                 col = col.push(render_content_node(
@@ -402,11 +403,12 @@ fn render_content_node<'a>(
                 child_offset += content_node_text_len(child) + 1;
             }
             col = col.push(iced::widget::Space::new().height(Length::Fixed(
-                crate::epub::epub_node_boundary_spacing(
+                crate::epub::epub_fragment_boundary_spacing(
                     children,
                     children.len(),
                     font_size,
                     EPUB_BLOCKQUOTE_SPACING,
+                    style,
                 ),
             )));
             let margin = style.margin_left_em.unwrap_or(1.0) * font_size;
@@ -414,6 +416,54 @@ fn render_content_node<'a>(
                 .width(Length::Fill)
                 .padding(iced::Padding {
                     left: margin,
+                    ..iced::Padding::ZERO
+                })
+                .into()
+        }
+
+        ContentNode::Figure { children, style } => {
+            let figure_width =
+                crate::epub::epub_figure_content_width(style, available_width, font_size);
+            let mut figure = column![];
+            let mut child_offset = text_offset;
+            for (child_index, child) in children.iter().enumerate() {
+                figure = figure.push(iced::widget::Space::new().height(Length::Fixed(
+                    crate::epub::epub_node_boundary_spacing(
+                        children,
+                        child_index,
+                        font_size,
+                        EPUB_BLOCKQUOTE_SPACING,
+                    ),
+                )));
+                figure = figure.push(render_content_node(
+                    child,
+                    i18n,
+                    font_size,
+                    palette,
+                    image_handles,
+                    fill_images,
+                    figure_width,
+                    None,
+                    available_height,
+                    child_offset,
+                    highlights,
+                    fonts,
+                    scale,
+                ));
+                child_offset += content_node_text_len(child) + 1;
+            }
+            figure = figure.push(iced::widget::Space::new().height(Length::Fixed(
+                crate::epub::epub_node_boundary_spacing(
+                    children,
+                    children.len(),
+                    font_size,
+                    EPUB_BLOCKQUOTE_SPACING,
+                ),
+            )));
+            container(container(figure).width(Length::Fixed(figure_width)))
+                .width(Length::Fill)
+                .padding(iced::Padding {
+                    left: style.margin_left_em.unwrap_or(0.0) * font_size,
                     ..iced::Padding::ZERO
                 })
                 .into()
