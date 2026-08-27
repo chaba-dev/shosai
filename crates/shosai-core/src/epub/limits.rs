@@ -227,6 +227,7 @@ pub(crate) fn validate_resource(
     }
 
     let svg = media_type_essence == "image/svg+xml" || has_svg_signature(bytes);
+    let mut xml_text = None;
     if is_xml(&media_type_essence) || svg {
         if bytes.len() as u64 > limits.max_xml_bytes {
             anyhow::bail!(
@@ -238,9 +239,11 @@ pub(crate) fn validate_resource(
         let text = std::str::from_utf8(bytes)
             .with_context(|| format!("EPUB XML resource is not UTF-8: {path}"))?;
         validate_xml_shape(text, path, limits)?;
+        xml_text = Some(text);
     }
 
     if svg {
+        validate_svg_image_references(xml_text.expect("SVG was inspected as XML"), path)?;
         let (width, height) = svg_dimensions(bytes)
             .with_context(|| format!("EPUB SVG dimensions could not be bounded: {path}"))?;
         validate_image_dimensions(path, width, height, limits)?;
@@ -259,6 +262,26 @@ pub(crate) fn validate_resource(
         }
     }
 
+    Ok(())
+}
+
+fn validate_svg_image_references(xml: &str, path: &str) -> Result<()> {
+    let document = roxmltree::Document::parse(xml)
+        .with_context(|| format!("failed to inspect EPUB SVG resource: {path}"))?;
+    for element in document.descendants().filter(roxmltree::Node::is_element) {
+        if !matches!(element.tag_name().name(), "image" | "feImage") {
+            continue;
+        }
+        for href in element
+            .attributes()
+            .filter(|attribute| attribute.name() == "href")
+        {
+            let reference = href.value();
+            if !reference.starts_with('#') || reference.len() == 1 {
+                anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -676,5 +699,39 @@ mod tests {
                 "unexpected SVG dimension error: {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn svg_rejects_local_file_and_data_uri_images() {
+        for (element, reference) in [
+            ("image", "file:///etc/passwd"),
+            ("image", "data:image/png;base64,iVBORw0KGgo="),
+            ("feImage", "../../private.png"),
+            ("feImage", "data:image/png;base64,iVBORw0KGgo="),
+        ] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><{element} href="{reference}"/></svg>"#
+            );
+            let error = validate_resource(
+                "Images/untrusted.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &EpubLimits::default(),
+            )
+            .expect_err("external SVG image references must not be admitted");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsafe external image reference")
+            );
+        }
+
+        validate_resource(
+            "Images/internal.svg",
+            "image/svg+xml",
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="#paint"/></svg>"##,
+            &EpubLimits::default(),
+        )
+        .expect("internal fragment image references remain safe");
     }
 }
