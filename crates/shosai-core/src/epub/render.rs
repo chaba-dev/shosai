@@ -43,8 +43,10 @@ pub struct NodeStyle {
     pub font_size_multiplier: Option<f32>,
     /// Left margin in em.
     pub margin_left_em: Option<f32>,
-    /// Authored vertical block spacing in em.
-    pub block_spacing_em: Option<f32>,
+    /// Authored margin before this block in em.
+    pub block_before_em: Option<f32>,
+    /// Authored margin after this block in em.
+    pub block_after_em: Option<f32>,
     /// Authored width retained for native replaced-element and table layout.
     pub width: Option<NodeWidth>,
     /// Authored height retained for replaced-element layout.
@@ -654,8 +656,11 @@ fn parse_figure(
     let alt = image.attribute("alt").unwrap_or("").to_owned();
     let mut style = css_to_node_style(styles.get(image)?, "img");
     apply_image_dimension_hints(image, &mut style);
-    if figure_style.block_spacing_em.is_some() {
-        style.block_spacing_em = figure_style.block_spacing_em;
+    if figure_style.block_before_em.is_some() {
+        style.block_before_em = figure_style.block_before_em;
+    }
+    if figure_style.block_after_em.is_some() {
+        style.block_after_em = figure_style.block_after_em;
     }
     let captions = figure
         .children()
@@ -776,8 +781,11 @@ fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<
     else {
         unreachable!("checked image node");
     };
-    if figure_style.block_spacing_em.is_some() {
-        style.block_spacing_em = figure_style.block_spacing_em;
+    if figure_style.block_before_em.is_some() {
+        style.block_before_em = figure_style.block_before_em;
+    }
+    if figure_style.block_after_em.is_some() {
+        style.block_after_em = figure_style.block_after_em;
     }
     *image_caption = caption;
     *image_caption_style = Some(caption_style);
@@ -1332,12 +1340,8 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
     };
     let font_size_multiplier = css.font_size_px / (16.0 * semantic_scale);
     let margin_left_em = css.margin_left_px / 16.0;
-    let block_spacing_em = css
-        .margin_top_px
-        .into_iter()
-        .chain(css.margin_bottom_px)
-        .reduce(f32::max)
-        .map(|spacing| spacing / 16.0);
+    let block_before_em = css.margin_top_px.map(|spacing| spacing / 16.0);
+    let block_after_em = css.margin_bottom_px.map(|spacing| spacing / 16.0);
     let text_indent_em = css.text_indent_px / 16.0;
     NodeStyle {
         text_align: Some(match css.alignment {
@@ -1371,7 +1375,8 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
         } else {
             None
         },
-        block_spacing_em,
+        block_before_em,
+        block_after_em,
         width: css.width.map(|width| match width {
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
@@ -2403,12 +2408,13 @@ mod tests {
         match &nodes[0] {
             ContentNode::BlockQuote { children, style } => {
                 assert_eq!(style.margin_left_em, Some(1.0));
-                assert_eq!(style.block_spacing_em, Some(2.0));
+                assert_eq!(style.block_before_em, Some(1.5));
+                assert_eq!(style.block_after_em, Some(2.0));
                 assert!(matches!(
                     &children[0],
                     ContentNode::Paragraph(_, paragraph_style)
                         if paragraph_style.margin_left_em == Some(0.0)
-                            && paragraph_style.block_spacing_em == Some(0.0)
+                            && paragraph_style.block_after_em == Some(0.0)
                 ));
             }
             other => panic!("expected BlockQuote, got {other:?}"),

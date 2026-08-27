@@ -85,15 +85,44 @@ pub(crate) fn spread_start(page: usize, page_count: usize, spread: bool) -> usiz
     if spread { page - page % 2 } else { page }
 }
 
-pub(crate) fn epub_node_block_spacing(
+pub(crate) fn epub_node_block_sides(
     node: &ContentNode,
     font_size: f32,
     default_spacing: f32,
+) -> (f32, f32) {
+    let Some(style) = node.style() else {
+        return (0.0, default_spacing.max(0.0));
+    };
+    if style.block_before_em.is_none() && style.block_after_em.is_none() {
+        return (0.0, default_spacing.max(0.0));
+    }
+    (
+        style.block_before_em.unwrap_or(0.0) * font_size,
+        style.block_after_em.unwrap_or(0.0) * font_size,
+    )
+}
+
+/// Collapsed spacing at a node boundary. The outer boundaries retain the
+/// first node's before and last node's after margin.
+pub(crate) fn epub_node_boundary_spacing(
+    nodes: &[ContentNode],
+    boundary: usize,
+    font_size: f32,
+    default_spacing: f32,
 ) -> f32 {
-    node.style()
-        .and_then(|style| style.block_spacing_em)
-        .map_or(default_spacing, |spacing| spacing * font_size)
-        .max(0.0)
+    match boundary {
+        0 => nodes.first().map_or(0.0, |node| {
+            epub_node_block_sides(node, font_size, default_spacing).0
+        }),
+        boundary if boundary >= nodes.len() => nodes.last().map_or(0.0, |node| {
+            epub_node_block_sides(node, font_size, default_spacing).1
+        }),
+        boundary => {
+            let after = epub_node_block_sides(&nodes[boundary - 1], font_size, default_spacing).1;
+            let before = epub_node_block_sides(&nodes[boundary], font_size, default_spacing).0;
+            after.max(before)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -320,7 +349,14 @@ pub(crate) fn paginate_epub_chapter_with_budget(
     let mut text_offset = 0;
 
     for (node_index, node) in nodes.iter().enumerate() {
-        let block_spacing = epub_node_block_spacing(node, font_size, default_block_spacing);
+        let block_before = if node_index == 0 {
+            epub_node_boundary_spacing(nodes, 0, font_size, default_block_spacing)
+        } else {
+            0.0
+        };
+        remaining = (remaining - block_before).max(0.0);
+        let block_spacing =
+            epub_node_boundary_spacing(nodes, node_index + 1, font_size, default_block_spacing);
         let keep_with_next = match node {
             ContentNode::Heading { .. } => true,
             ContentNode::Paragraph(spans, _) => spans.iter().any(|span| span.link.is_some()),
@@ -485,6 +521,11 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                         let take = cursor.split_length(available_chars);
                         let mut preview = cursor.clone();
                         let chunk = preview.take(take);
+                        let trailing_spacing = if take == cursor.remaining() {
+                            block_spacing
+                        } else {
+                            0.0
+                        };
                         let chunk_height = take.div_ceil(paragraph_chars_per_line).max(1) as f32
                             * text_line_height
                             + inline_math_height_reserve_for_context(
@@ -495,7 +536,7 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                                 style.direction,
                                 style.text_align,
                             )
-                            + block_spacing;
+                            + trailing_spacing;
                         if chunk_height <= remaining || available_lines == 1 || at_page_limit {
                             break (take, chunk_height);
                         }
@@ -510,8 +551,15 @@ pub(crate) fn paginate_epub_chapter_with_budget(
                     }
                     let consumed = cursor.consumed();
                     let chunk = cursor.take(take);
+                    let mut fragment_style = style.clone();
+                    if consumed > 0 {
+                        fragment_style.block_before_em = Some(0.0);
+                    }
+                    if cursor.remaining() > 0 {
+                        fragment_style.block_after_em = Some(0.0);
+                    }
                     pages.last_mut().unwrap().push(PageNode {
-                        node: ContentNode::Paragraph(chunk, style.clone()),
+                        node: ContentNode::Paragraph(chunk, fragment_style),
                         text_offset: text_offset + consumed,
                     });
                     remaining = (remaining - chunk_height).max(0.0);
@@ -1339,11 +1387,21 @@ fn paginate_measured_paragraph(
             page_spans = adjusted_spans;
             page_layout = adjusted;
         }
+        let is_last = start + length >= text_len;
+        let mut fragment_style = style.clone();
+        if start > 0 {
+            fragment_style.block_before_em = Some(0.0);
+        }
+        if !is_last {
+            fragment_style.block_after_em = Some(0.0);
+        }
         pages.last_mut().unwrap().push(PageNode {
-            node: ContentNode::Paragraph(page_spans, style.clone()),
+            node: ContentNode::Paragraph(page_spans, fragment_style),
             text_offset: text_offset + start,
         });
-        *remaining = (*remaining - (page_layout.height + block_spacing)).max(0.0);
+        *remaining = (*remaining
+            - (page_layout.height + if is_last { block_spacing } else { 0.0 }))
+        .max(0.0);
         start += length;
         shape_window = length
             .saturating_mul(2)
@@ -2510,14 +2568,15 @@ mod tests {
         let node = ContentNode::Paragraph(
             Vec::new(),
             shosai_core::epub::render::NodeStyle {
-                block_spacing_em: Some(2.0),
+                block_before_em: Some(2.0),
+                block_after_em: Some(0.0),
                 ..Default::default()
             },
         );
 
-        assert_eq!(epub_node_block_spacing(&node, 16.0, 20.0), 32.0);
+        assert_eq!(epub_node_block_sides(&node, 16.0, 20.0), (32.0, 0.0));
         assert_eq!(
-            epub_node_block_spacing(
+            epub_node_block_sides(
                 &ContentNode::Paragraph(
                     Vec::new(),
                     shosai_core::epub::render::NodeStyle::default(),
@@ -2525,8 +2584,51 @@ mod tests {
                 16.0,
                 20.0,
             ),
-            20.0
+            (0.0, 20.0)
         );
+    }
+
+    #[test]
+    fn authored_margins_collapse_at_outer_and_adjacent_boundaries() {
+        use shosai_core::epub::render::NodeStyle;
+        let paragraph = |before, after| {
+            ContentNode::Paragraph(
+                Vec::new(),
+                NodeStyle {
+                    block_before_em: Some(before),
+                    block_after_em: Some(after),
+                    ..NodeStyle::default()
+                },
+            )
+        };
+        let nodes = vec![paragraph(1.0, 0.0), paragraph(2.0, 3.0)];
+        assert_eq!(epub_node_boundary_spacing(&nodes, 0, 10.0, 16.0), 10.0);
+        assert_eq!(epub_node_boundary_spacing(&nodes, 1, 10.0, 16.0), 20.0);
+        assert_eq!(epub_node_boundary_spacing(&nodes, 2, 10.0, 16.0), 30.0);
+    }
+
+    #[test]
+    fn following_top_margin_is_between_blocks_not_after_the_following_block() {
+        use shosai_core::epub::render::NodeStyle;
+        let nodes = vec![
+            ContentNode::Paragraph(
+                Vec::new(),
+                NodeStyle {
+                    block_after_em: Some(0.0),
+                    ..NodeStyle::default()
+                },
+            ),
+            ContentNode::Paragraph(
+                Vec::new(),
+                NodeStyle {
+                    block_before_em: Some(2.0),
+                    block_after_em: Some(0.0),
+                    ..NodeStyle::default()
+                },
+            ),
+        ];
+        assert_eq!(epub_node_boundary_spacing(&nodes, 1, 16.0, 20.0), 32.0);
+        assert_eq!(epub_node_boundary_spacing(&nodes, 2, 16.0, 20.0), 0.0);
     }
 
     #[test]
@@ -3622,7 +3724,14 @@ mod tests {
             link: Some("chapter-2.xhtml".to_string()),
         }];
         let pages = paginate_epub_chapter(
-            &[ContentNode::Paragraph(spans, Default::default())],
+            &[ContentNode::Paragraph(
+                spans,
+                shosai_core::epub::render::NodeStyle {
+                    block_before_em: Some(2.0),
+                    block_after_em: Some(3.0),
+                    ..Default::default()
+                },
+            )],
             None,
             16.0,
             1.6,
@@ -3650,6 +3759,35 @@ mod tests {
             chunks
                 .iter()
                 .all(|span| span.link.as_deref() == Some("chapter-2.xhtml"))
+        );
+        let styles = pages
+            .iter()
+            .flatten()
+            .map(|page_node| {
+                page_node
+                    .node
+                    .style()
+                    .expect("paragraph fragment has style")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            styles.first().and_then(|style| style.block_before_em),
+            Some(2.0)
+        );
+        assert_eq!(
+            styles.first().and_then(|style| style.block_after_em),
+            Some(0.0)
+        );
+        assert!(styles[1..styles.len() - 1].iter().all(|style| {
+            style.block_before_em == Some(0.0) && style.block_after_em == Some(0.0)
+        }));
+        assert_eq!(
+            styles.last().and_then(|style| style.block_before_em),
+            Some(0.0)
+        );
+        assert_eq!(
+            styles.last().and_then(|style| style.block_after_em),
+            Some(3.0)
         );
     }
 

@@ -30,7 +30,7 @@ pub(super) fn continuous_epub_content_view<'a>(
     let mut chapters = column![].spacing(32).padding(20).width(Length::Fill);
     for (chapter_index, presentation) in doc.presentation().chapters().iter().enumerate() {
         let nodes = presentation.nodes();
-        let mut chapter = column![].spacing(state.font_size * state.line_spacing);
+        let mut chapter = column![];
         if let Some(title) = doc
             .chapter(chapter_index)
             .and_then(|chapter| chapter.title.as_ref())
@@ -48,6 +48,12 @@ pub(super) fn continuous_epub_content_view<'a>(
         let highlights = search_highlight_models_for_page(state, chapter_index);
         let mut text_offset = 0;
         for (node_index, node) in nodes.iter().enumerate() {
+            let before = crate::epub::epub_node_boundary_spacing(
+                nodes,
+                node_index,
+                state.font_size,
+                state.font_size * state.line_spacing,
+            );
             chapter = chapter.push(
                 container(render_content_node(
                     node,
@@ -72,10 +78,21 @@ pub(super) fn continuous_epub_content_view<'a>(
                     chapter_index,
                     node_index,
                 ))
+                .padding(iced::Padding {
+                    top: before,
+                    ..iced::Padding::ZERO
+                })
                 .width(Length::Fill),
             );
             text_offset += content_node_text_len(node) + 1;
         }
+        let after = crate::epub::epub_node_boundary_spacing(
+            nodes,
+            nodes.len(),
+            state.font_size,
+            state.font_size * state.line_spacing,
+        );
+        chapter = chapter.push(iced::widget::Space::new().height(after));
         chapters = chapters.push(
             sensor(
                 container(chapter.width(Length::Fill))
@@ -211,9 +228,30 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 ),
             );
         }
-        for page_node in &epub_page.nodes {
-            let block_spacing =
-                crate::epub::epub_node_block_spacing(&page_node.node, font_size, line_gap);
+        let page_nodes = epub_page
+            .nodes
+            .iter()
+            .map(|page_node| page_node.node.clone())
+            .collect::<Vec<_>>();
+        let starts_chapter =
+            *page_index == 0 || state.epub_pages[*page_index - 1].chapter != epub_page.chapter;
+        for (node_index, page_node) in epub_page.nodes.iter().enumerate() {
+            let before = if node_index == 0 && !starts_chapter {
+                0.0
+            } else {
+                crate::epub::epub_node_boundary_spacing(
+                    &page_nodes,
+                    node_index,
+                    font_size,
+                    line_gap,
+                )
+            };
+            let block_spacing = crate::epub::epub_node_boundary_spacing(
+                &page_nodes,
+                node_index + 1,
+                font_size,
+                line_gap,
+            );
             let rendered = render_content_node(
                 &page_node.node,
                 &state.i18n,
@@ -229,7 +267,12 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 state.window_scale_factor,
             );
             page = page.push(container(rendered).padding(iced::Padding {
-                bottom: block_spacing,
+                top: before,
+                bottom: if node_index + 1 == page_nodes.len() {
+                    block_spacing
+                } else {
+                    0.0
+                },
                 ..iced::Padding::ZERO
             }));
         }
