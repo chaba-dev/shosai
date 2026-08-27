@@ -55,6 +55,10 @@ pub struct EpubLimits {
     pub min_css_computed_font_size_px: f32,
     /// Maximum computed CSS font size admitted into native presentation.
     pub max_css_computed_font_size_px: f32,
+    /// Maximum absolute computed CSS length admitted into native presentation.
+    pub max_css_computed_length_px: f32,
+    /// Maximum absolute CSS percentage ratio admitted into native presentation (`1.0` is 100%).
+    pub max_css_computed_percentage_ratio: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
     /// Maximum font faces admitted for one EPUB.
@@ -107,6 +111,8 @@ impl Default for EpubLimits {
             max_css_font_family_bytes_per_declaration: 2_048,
             min_css_computed_font_size_px: 1.0,
             max_css_computed_font_size_px: 512.0,
+            max_css_computed_length_px: 16_384.0,
+            max_css_computed_percentage_ratio: 100.0,
             max_font_bytes: 16 * MIB,
             max_font_faces_per_book: 64,
             max_font_face_descriptors_per_book: 256,

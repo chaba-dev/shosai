@@ -262,6 +262,13 @@ pub(crate) fn compute_parsed_document_styles(
     {
         anyhow::bail!("EPUB computed font size limits are invalid");
     }
+    if !limits.max_css_computed_length_px.is_finite()
+        || limits.max_css_computed_length_px <= 0.0
+        || !limits.max_css_computed_percentage_ratio.is_finite()
+        || limits.max_css_computed_percentage_ratio <= 0.0
+    {
+        anyhow::bail!("EPUB computed geometry limits are invalid");
+    }
     let sheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     validate_stylesheet_complexity(&sheet.rules.0, limits)?;
@@ -339,6 +346,34 @@ fn walk_element(
             limits.min_css_computed_font_size_px,
             limits.max_css_computed_font_size_px
         );
+    }
+    let lengths = [
+        Some(style.margin_left_px),
+        style.margin_top_px,
+        style.margin_bottom_px,
+        Some(style.text_indent_px),
+    ];
+    if lengths
+        .into_iter()
+        .flatten()
+        .any(|value| !value.is_finite() || value.abs() > limits.max_css_computed_length_px)
+    {
+        anyhow::bail!(
+            "EPUB document computed CSS length is outside limits (max {}px)",
+            limits.max_css_computed_length_px
+        );
+    }
+    for dimension in [style.width, style.height, style.max_width]
+        .into_iter()
+        .flatten()
+    {
+        let (value, maximum) = match dimension {
+            ComputedWidth::Px(value) => (value, limits.max_css_computed_length_px),
+            ComputedWidth::Percent(value) => (value, limits.max_css_computed_percentage_ratio),
+        };
+        if !value.is_finite() || value.abs() > maximum {
+            anyhow::bail!("EPUB document computed CSS dimension is outside limits");
+        }
     }
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
     node_styles.insert(element.id(), style.clone());
@@ -1786,6 +1821,39 @@ mod tests {
             Some(ComputedWidth::Percent(0.95))
         );
         assert_eq!(report.element_styles["child"].max_width, None);
+    }
+
+    #[test]
+    fn extreme_computed_geometry_stops_before_native_presentation() {
+        let document =
+            roxmltree::Document::parse(r#"<html><body><p id="target">Target</p></body></html>"#)
+                .unwrap();
+        for css in [
+            "#target { margin-top: 3e38px; }",
+            "#target { margin-left: -3e38em; }",
+            "#target { text-indent: 20000px; }",
+            "#target { width: 20000px; }",
+            "#target { height: 2000000%; }",
+            "#target { max-width: 20000px; }",
+        ] {
+            let error = compute_parsed_document_styles(&document, css, &EpubLimits::default())
+                .expect_err("extreme CSS geometry must be rejected before widget construction");
+            assert!(
+                error.to_string().contains("outside limits"),
+                "unexpected error for {css}: {error:#}"
+            );
+        }
+
+        let error = compute_parsed_document_styles(
+            &document,
+            "",
+            &EpubLimits {
+                max_css_computed_length_px: f32::INFINITY,
+                ..EpubLimits::default()
+            },
+        )
+        .expect_err("non-finite geometry limits must be rejected");
+        assert!(error.to_string().contains("geometry limits are invalid"));
     }
 
     #[test]
