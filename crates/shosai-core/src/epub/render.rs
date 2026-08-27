@@ -299,7 +299,7 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     // XML parsers do not load the external XHTML DTD (and must not do so for
     // EPUB content). Resolve the fixed, local HTML entity table instead.
     let normalized_xhtml = bounded_chapter_xhtml(xhtml, chapter_path.unwrap_or("chapter"), limits)?;
-    let parsing_options = xhtml_parsing_options(normalized_xhtml.len());
+    let parsing_options = xhtml_parsing_options(limits);
     let doc = roxmltree::Document::parse_with_options(&normalized_xhtml, parsing_options)
         .with_context(|| {
             format!(
@@ -333,10 +333,10 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     Ok(parsed)
 }
 
-pub(super) fn xhtml_parsing_options<'a>(length: usize) -> roxmltree::ParsingOptions<'a> {
+pub(super) fn xhtml_parsing_options<'a>(limits: &EpubLimits) -> roxmltree::ParsingOptions<'a> {
     roxmltree::ParsingOptions {
         allow_dtd: true,
-        nodes_limit: u32::try_from(length).unwrap_or(u32::MAX),
+        nodes_limit: u32::try_from(limits.max_xml_nodes).unwrap_or(u32::MAX),
         ..Default::default()
     }
 }
@@ -366,12 +366,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
             if tail.starts_with('%') {
                 tail = tail[1..].trim_start();
             }
-            let name_len = tail
-                .bytes()
-                .take_while(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
-                })
-                .count();
+            let name_len = xml_name_len(tail);
             if name_len == 0 {
                 continue;
             }
@@ -501,12 +496,7 @@ pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, 
             if tail.starts_with('%') {
                 continue;
             }
-            let name_len = tail
-                .bytes()
-                .take_while(|byte| {
-                    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b':')
-                })
-                .count();
+            let name_len = xml_name_len(tail);
             if name_len > 0 {
                 declared.insert(&tail[..name_len]);
             }
@@ -628,6 +618,31 @@ fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
         }
     }
     starts
+}
+
+fn xml_name_len(text: &str) -> usize {
+    fn is_start(character: char) -> bool {
+        matches!(character, ':' | '_' | 'A'..='Z' | 'a'..='z')
+            || matches!(character as u32,
+                0xC0..=0xD6 | 0xD8..=0xF6 | 0xF8..=0x2FF | 0x370..=0x37D
+                | 0x37F..=0x1FFF | 0x200C..=0x200D | 0x2070..=0x218F
+                | 0x2C00..=0x2FEF | 0x3001..=0xD7FF | 0xF900..=0xFDCF
+                | 0xFDF0..=0xFFFD | 0x10000..=0xEFFFF)
+    }
+    fn is_continue(character: char) -> bool {
+        is_start(character)
+            || matches!(character, '-' | '.' | '0'..='9' | '\u{B7}')
+            || matches!(character as u32, 0x0300..=0x036F | 0x203F..=0x2040)
+    }
+
+    let mut end = 0;
+    for (index, character) in text.char_indices() {
+        if (index == 0 && !is_start(character)) || (index > 0 && !is_continue(character)) {
+            break;
+        }
+        end = index + character.len_utf8();
+    }
+    end
 }
 
 fn actual_doctype_range(document: &str) -> Option<(usize, usize)> {
@@ -2606,6 +2621,21 @@ mod tests {
         let fake_doctype = "<!-- <!DOCTYPE html [<!ENTITY bomb \"x\">]> --><!DOCTYPE html [<!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
         let error = parse_chapter_xhtml_with_limits(fake_doctype, "", &Default::default(), &limits)
             .expect_err("doctype text inside comments must not shadow the real declaration");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let parameter_shadow = "<!DOCTYPE html [<!ENTITY % bomb \"x\"><!ENTITY bomb \"bounded\">]><html><body>&bomb;</body></html>";
+        let nodes = parse_chapter_xhtml_with_limits(
+            parameter_shadow,
+            "",
+            &Default::default(),
+            &EpubLimits::default(),
+        )
+        .expect("parameter/general duplicate semantics should match parser admission");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "x\n");
+
+        let unicode_name = "<!DOCTYPE html [<!ENTITY é \"boundedbounded\"><!ENTITY y \"&é;&é;&é;\">]><html><body>&y;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(unicode_name, "", &Default::default(), &limits)
+            .expect_err("Unicode XML entity names must count toward expansion limits");
         assert!(error.to_string().contains("expanded text limit"));
     }
 
