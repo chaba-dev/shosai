@@ -1325,16 +1325,19 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                 &retained_display_title,
             );
             save_active_tab(state);
-            state.active_tab_id = Some(state.tabs[index].id);
+            let relocated_tab = state.tabs[index].clone();
+            restore_reader_tab(state, relocated_tab);
+            let retained_zoom = state.zoom;
+            state.active_tab = Some(index);
             state.continuous_activation = state.continuous_activation.wrapping_add(1);
             state.open_error = None;
             state.missing_book_id = None;
             install_document(state, path, book_id, document);
+            state.zoom = retained_zoom;
             state.display_title = display_title;
             let task = refresh_content(state);
             if let Some(tab) = capture_reader_tab(state) {
                 state.tabs[index] = tab;
-                state.active_tab = Some(index);
                 state.screen = Screen::Reader;
             }
             return task;
@@ -5459,6 +5462,7 @@ fn book_title(
                 .find(|book| book.id == book_id)
                 .map(|book| book.title.clone())
         })
+        .filter(|title| !title.trim().is_empty())
         .or_else(|| match document {
             OpenDocument::Pdf(document) => document.metadata().title,
             OpenDocument::Epub(document) => document.metadata().title,
@@ -5633,6 +5637,28 @@ mod tests {
         ));
 
         assert_eq!(title(&state), format!("{expected} - Shosai"));
+    }
+
+    #[test]
+    fn blank_library_title_falls_back_to_document_metadata() {
+        let epub = EpubDoc::from_bytes(epub_with_title_and_chapter(
+            "Publisher title",
+            b"<html><body>text</body></html>",
+        ))
+        .expect("fixture should be a valid EPUB");
+        let mut book = test_book(42);
+        book.title = "   ".to_string();
+
+        assert_eq!(
+            book_title(
+                Some(42),
+                &OpenDocument::Epub(Arc::new(epub)),
+                Some(Path::new("/managed/books/content-hash.epub")),
+                &[book],
+            )
+            .as_deref(),
+            Some("Publisher title")
+        );
     }
 
     #[test]
@@ -8389,6 +8415,73 @@ mod tests {
             panic!("expected EPUB document");
         };
         assert!(!Arc::ptr_eq(document, &old_document));
+    }
+
+    #[test]
+    fn relocating_inactive_tab_preserves_that_tabs_reader_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.epub");
+        let relocated = directory.path().join("relocated.epub");
+        let second = directory.path().join("second.epub");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/sample.epub");
+        std::fs::copy(&fixture, &first).unwrap();
+        std::fs::copy(&fixture, &relocated).unwrap();
+        std::fs::copy(&fixture, &second).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+
+        let _ = open_document(&mut state, first, Some(42));
+        state.font_size = 22.0;
+        state.line_spacing = 1.8;
+        state.theme = ReaderTheme::Dark;
+        state.reading_mode = ReadingMode::Continuous;
+        state.reader_overrides = ReaderOverrides {
+            reading_mode: true,
+            theme: true,
+            epub_font_size: true,
+            pdf_zoom: false,
+        };
+        let _ = open_document(&mut state, second, Some(43));
+        state.font_size = 12.0;
+        state.line_spacing = 1.2;
+        state.theme = ReaderTheme::Sepia;
+        state.reading_mode = ReadingMode::Paginated;
+
+        let _ = open_document(&mut state, relocated, Some(42));
+
+        assert_eq!(state.active_tab, Some(0));
+        assert_eq!(state.font_size, 22.0);
+        assert_eq!(state.line_spacing, 1.8);
+        assert_eq!(state.theme, ReaderTheme::Dark);
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        assert!(state.reader_overrides.reading_mode);
+        assert!(state.reader_overrides.theme);
+        assert!(state.reader_overrides.epub_font_size);
+    }
+
+    #[test]
+    fn relocating_active_pdf_preserves_its_local_zoom() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.pdf");
+        let relocated = directory.path().join("relocated.pdf");
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../shosai-core/tests/fixtures/sample.pdf");
+        std::fs::copy(&fixture, &original).unwrap();
+        std::fs::copy(&fixture, &relocated).unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+
+        let _ = open_document(&mut state, original, Some(42));
+        state.zoom = ZoomMode::FitWidth;
+        state.reader_overrides.pdf_zoom = true;
+        let _ = open_document(&mut state, relocated, Some(42));
+
+        assert_eq!(state.zoom, ZoomMode::FitWidth);
+        assert!(state.reader_overrides.pdf_zoom);
+        assert_eq!(state.tabs[0].zoom, ZoomMode::FitWidth);
     }
 
     #[test]
