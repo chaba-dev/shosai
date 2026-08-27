@@ -366,7 +366,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
         for start in entity_declaration_starts(&doctype[..end]) {
             let mut tail = doctype[start + 8..end].trim_start();
             if tail.starts_with('%') {
-                continue;
+                tail = tail[1..].trim_start();
             }
             let name_len = tail
                 .bytes()
@@ -388,7 +388,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
                 continue; // External declarations are never resolved.
             };
             if let Some(close) = tail[1..].find(char::from(quote)) {
-                entities.insert(name, &tail[1..close + 1]);
+                entities.entry(name).or_insert(&tail[1..close + 1]);
             }
         }
         document = &doctype[end..];
@@ -2582,6 +2582,16 @@ mod tests {
         let error = parse_chapter_xhtml_with_limits(&deep, "", &Default::default(), &limits)
             .expect_err("deep entity chains must be rejected without recursive stack growth");
         assert!(error.to_string().contains("entity nesting"));
+
+        let parameter = "<!DOCTYPE html [<!ENTITY % bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(parameter, "", &Default::default(), &limits)
+            .expect_err("parameter declarations expanded by the parser must count toward limits");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let duplicate = "<!DOCTYPE html [<!ENTITY bomb \"boundedbounded\"><!ENTITY bomb \"x\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(duplicate, "", &Default::default(), &limits)
+            .expect_err("the parser's first duplicate declaration must determine expansion cost");
+        assert!(error.to_string().contains("expanded text limit"));
     }
 
     #[test]
