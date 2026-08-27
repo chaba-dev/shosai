@@ -2,7 +2,7 @@
 //!
 //! Uses the same SQLite database as the reading state store.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -22,6 +22,7 @@ use crate::epub::EpubDoc;
 use crate::pdf::PdfDoc;
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
+const DISCOVERY_HASH_CONCURRENCY: usize = 4;
 
 /// Supported book format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -758,16 +759,24 @@ impl Library {
         };
         let mut selected_hashes = HashMap::<String, PathBuf>::new();
 
-        for candidate in scanned.candidates {
+        let mut candidates = scanned.candidates.into_iter();
+        let mut pending_fingerprints = candidates
+            .by_ref()
+            .take(DISCOVERY_HASH_CONCURRENCY)
+            .map(|candidate| start_candidate_fingerprint(candidate, cancellation.clone()))
+            .collect::<VecDeque<_>>();
+
+        while let Some((candidate, fingerprint_task)) = pending_fingerprints.pop_front() {
             if cancellation.is_cancelled() {
                 break;
             }
-            let fingerprint_path = candidate.path.clone();
-            let fingerprint_cancellation = cancellation.clone();
-            let fingerprint = tokio::task::spawn_blocking(move || {
-                file_fingerprint_cancellable(&fingerprint_path, Some(&fingerprint_cancellation))
-            })
-            .await;
+            let fingerprint = fingerprint_task.await;
+            if !cancellation.is_cancelled()
+                && let Some(next) = candidates.next()
+            {
+                pending_fingerprints
+                    .push_back(start_candidate_fingerprint(next, cancellation.clone()));
+            }
             let fingerprint = match fingerprint {
                 Ok(Ok(fingerprint)) => fingerprint,
                 Ok(Err(_error)) if cancellation.is_cancelled() => break,
@@ -1465,6 +1474,20 @@ fn fingerprint_reader(
 struct PendingImportCandidate {
     path: PathBuf,
     format: BookFormat,
+}
+
+fn start_candidate_fingerprint(
+    candidate: PendingImportCandidate,
+    cancellation: ImportCancellation,
+) -> (
+    PendingImportCandidate,
+    tokio::task::JoinHandle<Result<FileFingerprint>>,
+) {
+    let path = candidate.path.clone();
+    let task = tokio::task::spawn_blocking(move || {
+        file_fingerprint_cancellable(&path, Some(&cancellation))
+    });
+    (candidate, task)
 }
 
 fn scan_import_candidates(

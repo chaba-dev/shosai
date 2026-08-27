@@ -431,6 +431,13 @@ async fn discovery_progress_counts_supported_files_through_completion() {
     let second = dir.path().join("book.pdf");
     std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
     std::fs::copy(fixture_path("sample.pdf"), &second).unwrap();
+    for index in 3..=6 {
+        std::fs::copy(
+            fixture_path("sample.epub"),
+            dir.path().join(format!("book-{index}.epub")),
+        )
+        .unwrap();
+    }
     std::fs::write(dir.path().join("notes.txt"), b"ignored").unwrap();
     let progress = ImportDiscoveryProgress::default();
 
@@ -442,11 +449,11 @@ async fn discovery_progress_counts_supported_files_through_completion() {
         )
         .await;
 
-    assert_eq!(discovery.candidates.len(), 2);
+    assert_eq!(discovery.candidates.len(), 6);
     let snapshot = progress.snapshot();
     assert!(!snapshot.enumerating);
-    assert_eq!(snapshot.total_files, 2);
-    assert_eq!(snapshot.completed_files, 2);
+    assert_eq!(snapshot.total_files, 6);
+    assert_eq!(snapshot.completed_files, 6);
 }
 
 #[tokio::test]
