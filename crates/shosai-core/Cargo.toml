@@ -15,7 +15,7 @@ tokio = { version = "1", features = ["rt", "macros", "sync"] }
 zip = { version = "8.4.0", default-features = false, features = ["deflate"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 roxmltree = "0.21.1"
-quick-xml = "0.39.2"
+quick-xml = { version = "0.39.2", features = ["escape-html"] }
 syntect = { version = "5.3.0", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
 lightningcss = { version = "1.0.0-alpha.71", default-features = false }
 cssparser = "0.33.0"
