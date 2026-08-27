@@ -240,8 +240,8 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 &state.epub_image_handles,
                 true,
                 text_width,
-                Some((epub_page_size(state).height - block_spacing).max(1.0)),
-                Some((epub_page_size(state).height - block_spacing).max(1.0)),
+                Some(epub_page_size(state).height),
+                Some((epub_page_size(state).height - before - block_spacing).max(1.0)),
                 page_node.text_offset,
                 &highlights,
                 fonts,
@@ -486,12 +486,24 @@ fn render_content_node<'a>(
             );
             let column_widths =
                 crate::epub::epub_table_column_widths(row_groups, table_content_width);
+            let table_height = available_height.unwrap_or(f32::MAX);
+            let caption_height = crate::epub::epub_table_caption_height(
+                fonts,
+                caption,
+                caption_style.as_ref(),
+                font_size,
+                table_content_width,
+                table_height,
+            );
+            let caption_gap = EPUB_TABLE_ROW_SPACING
+                * usize::from(!caption.is_empty() && !row_groups.is_empty()) as f32;
             let geometry = crate::epub::epub_table_geometry_bounded(
                 row_groups,
                 &column_widths,
-                (available_height.unwrap_or(f32::MAX) / (font_size * 1.2)).max(1.0) as usize,
+                (table_height / (font_size * 1.2)).max(1.0) as usize,
                 font_size,
-                available_height.unwrap_or(f32::MAX),
+                (table_height - caption_height - caption_gap).max(1.0),
+                fonts,
             );
             let mut table_offset = text_offset;
             if !caption.is_empty() {
@@ -598,13 +610,18 @@ fn render_content_node<'a>(
                 table_offset += 1;
             }
             table = table.push(grid);
-            let mut table = container(table).width(Length::Fixed(table_width));
-            if let Some(margin) = style.margin_left_em {
-                table = table.padding(iced::Padding {
-                    left: margin * font_size,
+            let margin_left = crate::epub::epub_table_margin_left(
+                style,
+                font_size,
+                available_width,
+                table_content_width,
+            );
+            let table = container(container(table).width(Length::Fixed(table_content_width)))
+                .width(Length::Fixed(table_content_width + margin_left))
+                .padding(iced::Padding {
+                    left: margin_left,
                     ..iced::Padding::ZERO
                 });
-            }
             scrollable(table)
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::default(),
@@ -835,6 +852,7 @@ fn render_epub_image<'a>(
     let ContentNode::Image {
         src,
         alt,
+        style: image_style,
         caption,
         caption_style,
         ..
@@ -842,6 +860,7 @@ fn render_epub_image<'a>(
     else {
         unreachable!("image renderer requires an image node");
     };
+    let margin_left = crate::epub::epub_image_margin_left(image_style, font_size, available_width);
     let text_color = palette.text;
     if let Some(handle) = image_handles.get(src) {
         let layout = crate::epub::epub_image_layout(
@@ -902,7 +921,13 @@ fn render_epub_image<'a>(
                     .center_x(Length::Fill),
                 );
         }
-        return figure.into();
+        return container(figure)
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                left: margin_left,
+                ..iced::Padding::ZERO
+            })
+            .into();
     }
 
     // Fallback: show alt text placeholder.
@@ -974,7 +999,13 @@ fn render_epub_image<'a>(
                 .center_x(Length::Fill),
             );
     }
-    fallback.into()
+    container(fallback)
+        .width(Length::Fill)
+        .padding(iced::Padding {
+            left: margin_left,
+            ..iced::Padding::ZERO
+        })
+        .into()
 }
 
 fn image_alt_highlight(
