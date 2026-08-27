@@ -2812,12 +2812,16 @@ fn estimated_epub_node_height(
 fn estimated_epub_blockquote_height(
     children: &[ContentNode],
     style: &shosai_core::epub::render::NodeStyle,
-    chars_per_line: usize,
+    _chars_per_line: usize,
     lines_per_page: usize,
     font_size: f32,
     width: f32,
     height: f32,
 ) -> f32 {
+    let width = blockquote_width(width, font_size, style);
+    let chars_per_line = (width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+        .floor()
+        .max(1.0) as usize;
     children
         .iter()
         .map(|child| {
@@ -2838,12 +2842,15 @@ fn estimated_epub_blockquote_height(
 fn split_epub_blockquote_prefix(
     children: &[ContentNode],
     available_height: f32,
-    chars_per_line: usize,
+    _chars_per_line: usize,
     lines_per_page: usize,
     font_size: f32,
     page_width: f32,
     fonts: Option<&EpubFontBook>,
 ) -> (Vec<ContentNode>, Vec<ContentNode>, f32, usize) {
+    let chars_per_line = (page_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+        .floor()
+        .max(1.0) as usize;
     let mut prefix = Vec::new();
     let mut prefix_height = 0.0;
     let mut consumed_text = 0;
@@ -3737,6 +3744,57 @@ mod tests {
             blockquote_continuation_page_size(Size::new(240.0, 320.0), 16.0, &block),
             Size::new(208.0, 320.0),
             "continued quote pages must retain their effective inner width"
+        );
+
+        let child = ContentNode::Paragraph(
+            vec![shosai_core::epub::render::TextSpan {
+                text: "x".repeat(25),
+                math: None,
+                font_family: None,
+                bold: false,
+                italic: false,
+                monospace: false,
+                font_size_multiplier: 1.0,
+                preserve_whitespace: false,
+                link: None,
+            }],
+            Default::default(),
+        );
+        let wide = estimated_epub_blockquote_height(
+            std::slice::from_ref(&child),
+            &Default::default(),
+            27,
+            20,
+            16.0,
+            240.0,
+            320.0,
+        );
+        let narrow = estimated_epub_blockquote_height(
+            std::slice::from_ref(&child),
+            &block,
+            27,
+            20,
+            16.0,
+            240.0,
+            320.0,
+        );
+        assert!(narrow > wide);
+
+        let (prefix, remaining, _, _) = split_epub_blockquote_prefix(
+            std::slice::from_ref(&child),
+            16.0 * TEXT_LINE_HEIGHT,
+            27,
+            20,
+            16.0,
+            208.0,
+            None,
+        );
+        assert!(!prefix.is_empty());
+        assert!(!remaining.is_empty());
+        assert_eq!(
+            prefix.iter().map(content_node_text_len).sum::<usize>()
+                + remaining.iter().map(content_node_text_len).sum::<usize>(),
+            content_node_text_len(&child)
         );
     }
 
