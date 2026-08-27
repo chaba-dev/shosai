@@ -755,6 +755,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_books_discovering = false;
             state.add_books_cancellation = None;
             state.add_books_progress = None;
+            state.library_activity_progress = 1.0;
             state.staged_imports = discovery
                 .candidates
                 .into_iter()
@@ -785,10 +786,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::AddBooksReviewScrolled {
+            generation,
+            revision,
             offset,
             viewport_height,
         } => {
-            if state.add_books_open && !state.add_books_discovering {
+            if state.add_books_open
+                && !state.add_books_discovering
+                && generation == state.add_books_generation
+                && revision == state.add_books_review_revision
+            {
                 state.add_books_review_offset = offset.max(0.0);
                 state.add_books_review_viewport_height = viewport_height.max(1.0);
             }
@@ -1091,14 +1098,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.add_books_discovering {
                 if let Some(progress) = &state.add_books_progress {
                     let progress = progress.snapshot();
-                    if progress.enumerating {
-                        state.library_activity_progress =
-                            (state.library_activity_progress + LIBRARY_ACTIVITY_STEP) % 1.0;
-                    } else {
-                        state.library_activity_progress =
-                            (progress.hashed_files + progress.completed_files) as f32
-                                / (progress.total_files.max(1) * 2) as f32;
-                    }
+                    state.library_activity_progress =
+                        discovery_progress_value(state.library_activity_progress, progress);
                 }
             } else if !state.adding_books && library_activity_active(state) {
                 state.library_activity_progress =

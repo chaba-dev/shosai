@@ -105,6 +105,8 @@ pub enum Message {
     },
     AddBooksReviewSearchChanged(String),
     AddBooksReviewScrolled {
+        generation: u64,
+        revision: u64,
         offset: f32,
         viewport_height: f32,
     },

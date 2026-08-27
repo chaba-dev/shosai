@@ -16,9 +16,9 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
-    Book, BookPage, ImportCancellation, ImportCandidate, ImportDiscoveryProgress, ImportDuplicate,
-    ImportFailure, ImportReport, Library, ManagedPathChange, ManagedStorageSummary,
-    PreparedManagedImport,
+    Book, BookPage, ImportCancellation, ImportCandidate, ImportDiscoveryProgress,
+    ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, Library,
+    ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -704,6 +704,7 @@ pub struct State {
     staged_imports: Vec<StagedImport>,
     add_books_review_search: String,
     add_books_review_rows: Vec<AddBooksReviewRow>,
+    add_books_review_revision: u64,
     add_books_review_offset: f32,
     add_books_review_viewport_height: f32,
     import_discovery_failures: Vec<ImportFailure>,
@@ -835,6 +836,7 @@ pub fn boot() -> (State, Task<Message>) {
         staged_imports: Vec::new(),
         add_books_review_search: String::new(),
         add_books_review_rows: Vec::new(),
+        add_books_review_revision: 0,
         add_books_review_offset: 0.0,
         add_books_review_viewport_height: REVIEW_DEFAULT_VIEWPORT_HEIGHT,
         import_discovery_failures: Vec::new(),
@@ -4533,17 +4535,14 @@ fn import_candidate_label(source: &AddBooksSource, path: &Path) -> String {
 }
 
 fn rebuild_add_books_review_rows(state: &mut State) {
-    let query = state.add_books_review_search.trim().to_lowercase();
+    let query = shosai_core::library::normalize_import_text(&state.add_books_review_search);
     state.add_books_review_rows.clear();
     let mut previous_group = None;
     for (index, staged) in state.staged_imports.iter().enumerate() {
         let candidate = &staged.candidate;
         if !query.is_empty()
-            && !candidate.title.to_lowercase().contains(&query)
-            && !candidate
-                .path
-                .to_string_lossy()
-                .to_lowercase()
+            && !shosai_core::library::normalize_import_text(&candidate.title).contains(&query)
+            && !shosai_core::library::normalize_import_text(&candidate.path.to_string_lossy())
                 .contains(&query)
             && !candidate.format.as_str().contains(&query)
         {
@@ -4559,6 +4558,7 @@ fn rebuild_add_books_review_rows(state: &mut State) {
             .add_books_review_rows
             .push(AddBooksReviewRow::Book(index));
     }
+    state.add_books_review_revision = state.add_books_review_revision.wrapping_add(1);
     state.add_books_review_offset = 0.0;
 }
 
@@ -4567,9 +4567,11 @@ fn virtual_review_range(
     offset: f32,
     viewport_height: f32,
 ) -> (std::ops::Range<usize>, f32, f32) {
-    let visible_start = (offset - REVIEW_VIRTUAL_OVERSCAN).max(0.0);
-    let visible_end = offset + viewport_height.max(1.0) + REVIEW_VIRTUAL_OVERSCAN;
     let total_height: f32 = rows.iter().map(AddBooksReviewRow::height).sum();
+    let viewport_height = viewport_height.max(1.0);
+    let offset = offset.clamp(0.0, (total_height - viewport_height).max(0.0));
+    let visible_start = (offset - REVIEW_VIRTUAL_OVERSCAN).max(0.0);
+    let visible_end = offset + viewport_height + REVIEW_VIRTUAL_OVERSCAN;
     let mut top = 0.0;
     let mut start = 0;
     while start < rows.len() && top + rows[start].height() < visible_start {
@@ -4584,6 +4586,19 @@ fn virtual_review_range(
     }
     let bottom = (total_height - top - rendered_height).max(0.0);
     (start..end, top, bottom)
+}
+
+fn discovery_progress_value(current: f32, progress: ImportDiscoveryProgressSnapshot) -> f32 {
+    if !progress.enumerating && progress.completed_files >= progress.total_files {
+        return 1.0;
+    }
+    let work = progress.hashed_files + progress.completed_files;
+    let target = if progress.enumerating {
+        0.45 * work as f32 / (work + 8).max(1) as f32
+    } else {
+        0.5 + 0.5 * work as f32 / (progress.total_files.max(1) * 2) as f32
+    };
+    current.max(target).min(0.99)
 }
 
 fn add_books_modal(state: &State) -> Element<'_, Message> {
@@ -4622,7 +4637,10 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         let progress_label = if progress.enumerating {
             state.i18n.text_with_args(
                 "finding-books-progress",
-                [("found", (progress.total_files as i64).into())],
+                [
+                    ("found", (progress.total_files as i64).into()),
+                    ("read", (progress.hashed_files as i64).into()),
+                ],
             )
         } else if progress.hashed_files < progress.total_files {
             state.i18n.text_with_args(
@@ -4642,10 +4660,12 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
             )
         };
         let progress_value = if progress.enumerating {
-            f64::from(state.library_activity_progress)
+            f64::from(discovery_progress_value(
+                state.library_activity_progress,
+                progress,
+            ))
         } else {
-            (progress.hashed_files + progress.completed_files) as f64
-                / (progress.total_files.max(1) * 2) as f64
+            f64::from(state.library_activity_progress)
         };
         let progress_bar: Element<'_, Message> = widgets::reading_progress(progress_value).into();
         column![
@@ -4888,7 +4908,9 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                             .width(Length::Fill),
                     )
                     .id(WidgetId::new("add-books-review-scroll"))
-                    .on_scroll(|viewport| Message::AddBooksReviewScrolled {
+                    .on_scroll(move |viewport| Message::AddBooksReviewScrolled {
+                        generation: state.add_books_generation,
+                        revision: state.add_books_review_revision,
                         offset: viewport.absolute_offset().y,
                         viewport_height: viewport.bounds().height,
                     })
@@ -7063,6 +7085,73 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn review_search_uses_unicode_normalization_and_case_folding() {
+        let (mut state, _) = boot();
+        state.staged_imports = ["Straße.pdf", "か\u{3099}.epub"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| StagedImport {
+                selected: true,
+                candidate: ImportCandidate {
+                    path: PathBuf::from(path),
+                    title: path.to_string(),
+                    group_key: format!("group-{index}"),
+                    format: shosai_core::library::BookFormat::Epub,
+                    file_size: 100,
+                    content_hash: format!("hash-{index}"),
+                    duplicate: None,
+                },
+            })
+            .collect();
+
+        state.add_books_review_search = "STRASSE".to_string();
+        rebuild_add_books_review_rows(&mut state);
+        assert!(matches!(
+            state.add_books_review_rows[1],
+            AddBooksReviewRow::Book(0)
+        ));
+
+        state.add_books_review_search = "が".to_string();
+        rebuild_add_books_review_rows(&mut state);
+        assert!(matches!(
+            state.add_books_review_rows[1],
+            AddBooksReviewRow::Book(1)
+        ));
+    }
+
+    #[test]
+    fn virtual_review_range_clamps_stale_offsets_to_short_content() {
+        let rows = vec![
+            AddBooksReviewRow::Group("Book".to_string()),
+            AddBooksReviewRow::Book(0),
+        ];
+
+        let (range, _, _) = virtual_review_range(&rows, 30_000.0, 420.0);
+
+        assert_eq!(range, 0..2);
+    }
+
+    #[test]
+    fn stale_review_scroll_message_cannot_replace_the_current_offset() {
+        let (mut state, _) = boot();
+        state.add_books_open = true;
+        state.add_books_generation = 4;
+        state.add_books_review_revision = 2;
+
+        let _ = update(
+            &mut state,
+            Message::AddBooksReviewScrolled {
+                generation: 4,
+                revision: 1,
+                offset: 30_000.0,
+                viewport_height: 420.0,
+            },
+        );
+
+        assert_eq!(state.add_books_review_offset, 0.0);
+    }
+
     #[tokio::test]
     async fn add_books_flow_stages_candidates_before_importing() {
         let directory = tempfile::tempdir().unwrap();
@@ -7778,16 +7867,40 @@ mod tests {
     }
 
     #[test]
-    fn discovery_activity_wraps_instead_of_freezing_at_the_right_edge() {
-        let (mut state, _) = boot();
-        state.library_loading = false;
-        state.add_books_discovering = true;
-        state.add_books_progress = Some(ImportDiscoveryProgress::default());
-        state.library_activity_progress = 0.99;
-
-        let _ = update(&mut state, Message::LibraryActivityTick);
-
-        assert!(state.library_activity_progress < 0.1);
+    fn discovery_activity_is_monotonic_and_reaches_completion() {
+        let snapshots = [
+            ImportDiscoveryProgressSnapshot {
+                enumerating: true,
+                hashed_files: 1,
+                completed_files: 0,
+                total_files: 4,
+            },
+            ImportDiscoveryProgressSnapshot {
+                enumerating: true,
+                hashed_files: 3,
+                completed_files: 0,
+                total_files: 20,
+            },
+            ImportDiscoveryProgressSnapshot {
+                enumerating: false,
+                hashed_files: 20,
+                completed_files: 4,
+                total_files: 20,
+            },
+            ImportDiscoveryProgressSnapshot {
+                enumerating: false,
+                hashed_files: 20,
+                completed_files: 20,
+                total_files: 20,
+            },
+        ];
+        let mut value = 0.0;
+        for snapshot in snapshots {
+            let next = discovery_progress_value(value, snapshot);
+            assert!(next >= value);
+            value = next;
+        }
+        assert_eq!(value, 1.0);
     }
 
     #[test]
