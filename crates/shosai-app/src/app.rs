@@ -541,6 +541,7 @@ impl ReadingMode {
 struct ReaderTab {
     id: u64,
     book_id: Option<i64>,
+    display_title: String,
     file_path: PathBuf,
     document: OpenDocument,
     current_page: usize,
@@ -632,6 +633,7 @@ pub struct State {
 
     // -- Reader state --
     book_id: Option<i64>,
+    display_title: Option<String>,
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
     current_page: usize,
@@ -768,6 +770,7 @@ pub fn boot() -> (State, Task<Message>) {
         i18n: I18n::new(LanguagePreference::System),
 
         book_id: None,
+        display_title: None,
         file_path: None,
         document: None,
         current_page: 0,
@@ -1063,6 +1066,10 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
     Some(ReaderTab {
         id: state.active_tab_id?,
         book_id: state.book_id,
+        display_title: state
+            .display_title
+            .clone()
+            .or_else(|| current_book_title(state))?,
         file_path: state.file_path.clone()?,
         document: state.document.clone()?,
         current_page: state.current_page,
@@ -1109,6 +1116,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
 fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.active_tab_id = Some(tab.id);
     state.book_id = tab.book_id;
+    state.display_title = Some(tab.display_title);
     state.file_path = Some(tab.file_path);
     state.document = Some(tab.document);
     state.current_page = tab.current_page;
@@ -1249,6 +1257,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.active_tab = None;
         state.active_tab_id = None;
         state.book_id = None;
+        state.display_title = None;
         state.file_path = None;
         state.document = None;
         state.rendered_page = None;
@@ -1307,8 +1316,18 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         }
         if let Some(book_id) = book_id {
             state.tabs[index].book_id = Some(book_id);
+            if let Some(title) = state
+                .library_books
+                .iter()
+                .find(|book| book.id == book_id)
+                .map(|book| book.title.trim())
+                .filter(|title| !title.is_empty())
+            {
+                state.tabs[index].display_title = title.to_owned();
+            }
             if state.active_tab == Some(index) {
                 state.book_id = Some(book_id);
+                state.display_title = Some(state.tabs[index].display_title.clone());
             }
         }
         return select_tab(state, index);
@@ -1490,6 +1509,7 @@ fn install_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) {
+    state.display_title = book_title(book_id, &document, Some(&path), &state.library_books);
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.render_generation = state.render_generation.wrapping_add(1);
@@ -5428,22 +5448,18 @@ fn book_title(
 }
 
 fn current_book_title(state: &State) -> Option<String> {
-    book_title(
-        state.book_id,
-        state.document.as_ref()?,
-        state.file_path.as_deref(),
-        &state.library_books,
-    )
+    state.display_title.clone().or_else(|| {
+        book_title(
+            state.book_id,
+            state.document.as_ref()?,
+            state.file_path.as_deref(),
+            &state.library_books,
+        )
+    })
 }
 
-fn reader_tab_title(state: &State, tab: &ReaderTab) -> String {
-    book_title(
-        tab.book_id,
-        &tab.document,
-        Some(&tab.file_path),
-        &state.library_books,
-    )
-    .unwrap_or_default()
+fn reader_tab_title(_state: &State, tab: &ReaderTab) -> String {
+    tab.display_title.clone()
 }
 
 pub fn title(state: &State) -> String {
@@ -5481,6 +5497,10 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     fn epub_with_chapter(chapter: &[u8]) -> Vec<u8> {
+        epub_with_title_and_chapter("Limits", chapter)
+    }
+
+    fn epub_with_title_and_chapter(title: &str, chapter: &[u8]) -> Vec<u8> {
         let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
         for (path, bytes) in [
@@ -5489,15 +5509,13 @@ mod tests {
                 "META-INF/container.xml",
                 br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#,
             ),
-            (
-                "OPS/content.opf",
-                br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Limits</dc:title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
-            ),
             ("OPS/chapter.xhtml", chapter),
         ] {
             archive.start_file(path, options).unwrap();
             archive.write_all(bytes).unwrap();
         }
+        archive.start_file("OPS/content.opf", options).unwrap();
+        write!(archive, r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{title}</dc:title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#).unwrap();
         archive.finish().unwrap().into_inner()
     }
 
@@ -5573,6 +5591,49 @@ mod tests {
         let tab = capture_reader_tab(&state).expect("reader state should create a tab");
 
         assert_eq!(reader_tab_title(&state, &tab), expected);
+    }
+
+    #[test]
+    fn managed_book_window_title_survives_library_page_eviction() {
+        let bytes = epub_with_title_and_chapter("", b"<html><body>text</body></html>");
+        let epub = Arc::new(EpubDoc::from_bytes(bytes).expect("fixture should be a valid EPUB"));
+        assert!(epub.metadata().title.is_none());
+        let mut state = state_with_document(OpenDocument::Epub(Arc::clone(&epub)));
+        let mut book = test_book(42);
+        book.title = "Original library title".to_string();
+        state.library_books = vec![book];
+        install_document(
+            &mut state,
+            PathBuf::from("/managed/books/content-hash.epub"),
+            Some(42),
+            OpenDocument::Epub(epub),
+        );
+
+        state.library_books.clear();
+
+        assert_eq!(title(&state), "Original library title - Shosai");
+    }
+
+    #[test]
+    fn managed_book_tab_title_survives_library_page_replacement() {
+        let bytes = epub_with_title_and_chapter("", b"<html><body>text</body></html>");
+        let epub = Arc::new(EpubDoc::from_bytes(bytes).expect("fixture should be a valid EPUB"));
+        assert!(epub.metadata().title.is_none());
+        let mut state = state_with_document(OpenDocument::Epub(Arc::clone(&epub)));
+        let mut book = test_book(42);
+        book.title = "Original library title".to_string();
+        state.library_books = vec![book];
+        install_document(
+            &mut state,
+            PathBuf::from("/managed/books/content-hash.epub"),
+            Some(42),
+            OpenDocument::Epub(epub),
+        );
+        let tab = capture_reader_tab(&state).expect("reader state should create a tab");
+
+        state.library_books = vec![test_book(7)];
+
+        assert_eq!(reader_tab_title(&state, &tab), "Original library title");
     }
 
     #[test]
