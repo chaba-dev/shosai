@@ -349,6 +349,7 @@ fn render_content_node<'a>(
                 .map(|m| font_size * m)
                 .unwrap_or(font_size);
             let align = node_style_to_alignment(style);
+            let content_width = crate::epub::paragraph_width(available_width, font_size, style);
             let rendered = render_spans(
                 spans,
                 style.direction,
@@ -359,10 +360,13 @@ fn render_content_node<'a>(
                 fonts,
                 scale,
                 style.text_align,
-                crate::epub::paragraph_width(available_width, font_size, style),
+                content_width,
                 available_height,
             );
-            let mut c = container(rendered).width(Length::Fill).align_x(align);
+            let paragraph = container(rendered)
+                .width(Length::Fixed(content_width))
+                .align_x(align);
+            let mut c = container(paragraph).width(Length::Fill);
             if let Some(margin) = style.margin_left_em {
                 c = c.padding(iced::Padding {
                     left: margin * font_size,
