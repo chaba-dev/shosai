@@ -190,6 +190,19 @@ impl ContentNode {
             _ => None,
         }
     }
+
+    /// Mutable native block style for pagination-owned fragment geometry.
+    pub fn style_mut(&mut self) -> Option<&mut NodeStyle> {
+        match self {
+            Self::Heading { style, .. }
+            | Self::BlockQuote { style, .. }
+            | Self::Table { style, .. }
+            | Self::Math { style, .. }
+            | Self::Image { style, .. } => Some(style),
+            Self::Paragraph(_, style) => Some(style),
+            _ => None,
+        }
+    }
 }
 
 /// Parse chapter XHTML into a list of content nodes.
@@ -797,31 +810,43 @@ fn parse_figure(
     let alt = image.attribute("alt").unwrap_or("").to_owned();
     let mut style = css_to_node_style(styles.get(image)?, "img");
     apply_image_dimension_hints(image, styles.get(image)?, &mut style);
-    if figure_style.block_before_em.is_some() {
-        style.block_before_em = figure_style.block_before_em;
-    }
-    if figure_style.block_after_em.is_some() {
-        style.block_after_em = figure_style.block_after_em;
-    }
+    apply_figure_container_style(&mut style, figure_style);
     let captions = figure
         .children()
         .filter(|node| {
             node.is_element() && node.tag_name().name() == "figcaption" && visible(*node)
         })
         .collect::<Vec<_>>();
-    let caption_node = captions
-        .first()
-        .copied()
-        .filter(|node| figure.children().find(|child| child.is_element()) == Some(*node))
-        .or_else(|| {
-            captions.last().copied().filter(|node| {
-                figure
-                    .children()
-                    .filter(|child| child.is_element())
-                    .next_back()
-                    == Some(*node)
-            })
-        })?;
+    let caption_node = captions.last().copied().filter(|node| {
+        figure
+            .children()
+            .filter(|child| child.is_element() && visible(*child))
+            .next_back()
+            == Some(*node)
+            && image.range().start < node.range().start
+    })?;
+    let belongs_to_selected_content = |node: roxmltree::Node<'_, '_>| {
+        node == image
+            || node == caption_node
+            || image.descendants().any(|descendant| descendant == node)
+            || caption_node
+                .descendants()
+                .any(|descendant| descendant == node)
+            || node
+                .descendants()
+                .any(|descendant| descendant == image || descendant == caption_node)
+    };
+    if figure.descendants().skip(1).any(|node| {
+        if node.is_text() {
+            return node.text().is_some_and(|text| !text.trim().is_empty())
+                && !caption_node
+                    .descendants()
+                    .any(|descendant| descendant == node);
+        }
+        node.is_element() && visible(node) && !belongs_to_selected_content(node)
+    }) {
+        return None;
+    }
     let mut caption_anchors = HashMap::new();
     let (caption, caption_style) = {
         let css = styles
@@ -890,6 +915,12 @@ fn apply_image_dimension_hints(
 }
 
 fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
+    if nodes.len() == 1 {
+        if let Some(ContentNode::Image { style, .. }) = nodes.first_mut() {
+            apply_figure_container_style(style, &figure_style);
+        }
+        return nodes;
+    }
     if nodes.len() != 2 || !matches!(nodes.first(), Some(ContentNode::Image { .. })) {
         return nodes;
     }
@@ -911,15 +942,28 @@ fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<
     else {
         unreachable!("checked image node");
     };
+    apply_figure_container_style(style, &figure_style);
+    *image_caption = caption;
+    *image_caption_style = Some(caption_style);
+    nodes
+}
+
+fn apply_figure_container_style(style: &mut NodeStyle, figure_style: &NodeStyle) {
     if figure_style.block_before_em.is_some() {
         style.block_before_em = figure_style.block_before_em;
     }
     if figure_style.block_after_em.is_some() {
         style.block_after_em = figure_style.block_after_em;
     }
-    *image_caption = caption;
-    *image_caption_style = Some(caption_style);
-    nodes
+    if figure_style.margin_left_em.is_some() {
+        style.margin_left_em = figure_style.margin_left_em;
+    }
+    if figure_style.width.is_some() {
+        style.width = figure_style.width;
+    }
+    if figure_style.max_width.is_some() {
+        style.max_width = figure_style.max_width;
+    }
 }
 
 fn record_element_anchors(
@@ -2798,7 +2842,7 @@ mod tests {
     }
 
     #[test]
-    fn figure_accepts_caption_before_image_and_preserves_multiblock_content_and_style() {
+    fn figure_preserves_caption_before_image_as_ordered_content() {
         let xhtml = r#"<html><head><style>figcaption { text-align: right; font-size: 20px; }</style></head><body>
           <p>Before</p><figure id="figure"><figcaption id="caption"><p>First <em>paragraph</em>.</p><p>Second paragraph.</p></figcaption><img id="image" src="figure.png" alt="Diagram"/></figure><p id="after">After</p>
         </body></html>"#;
@@ -2814,46 +2858,55 @@ mod tests {
             &limits,
         )
         .expect("figure should parse");
-        let ContentNode::Image {
-            caption,
-            caption_style,
-            ..
-        } = &parsed.nodes[1]
-        else {
-            panic!("figure should produce one semantic image");
+        assert!(matches!(parsed.nodes[0], ContentNode::Paragraph(..)));
+        assert!(matches!(parsed.nodes[1], ContentNode::Paragraph(..)));
+        assert!(matches!(parsed.nodes[2], ContentNode::Paragraph(..)));
+        assert!(matches!(parsed.nodes[3], ContentNode::Image { .. }));
+        assert!(matches!(parsed.nodes[4], ContentNode::Paragraph(..)));
+        let ContentNode::Paragraph(first_caption, style) = &parsed.nodes[1] else {
+            unreachable!();
         };
-
-        assert_eq!(
-            caption
-                .iter()
-                .map(|span| span.text.as_str())
-                .collect::<String>(),
-            "First paragraph.\nSecond paragraph."
-        );
         assert!(
-            caption
+            first_caption
                 .iter()
                 .any(|span| span.text == "paragraph" && span.italic)
         );
+        assert_eq!(style.font_size_multiplier, Some(1.25));
         assert_eq!(
-            caption_style
-                .as_ref()
-                .and_then(|style| style.font_size_multiplier),
-            Some(1.25)
-        );
-        assert_eq!(
-            caption_style.as_ref().and_then(|style| style.text_align),
+            style.text_align,
             Some(super::super::style::TextAlignment::Right)
         );
         let search = crate::search::extract_text_from_nodes(&parsed.nodes);
         assert_eq!(
             search,
-            "Before\nDiagram\nFirst paragraph.\nSecond paragraph.\nAfter\n"
+            "Before\nFirst paragraph.\nSecond paragraph.\nDiagram\nAfter\n"
         );
         assert_eq!(parsed.anchor_offsets.get("figure"), Some(&7));
-        assert_eq!(parsed.anchor_offsets.get("image"), Some(&7));
-        assert_eq!(parsed.anchor_offsets.get("caption"), Some(&15));
+        assert_eq!(parsed.anchor_offsets.get("caption"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("image"), Some(&42));
         assert_eq!(parsed.anchor_offsets.get("after"), Some(&50));
+    }
+
+    #[test]
+    fn figure_collapse_preserves_extra_content_and_captionless_geometry() {
+        let xhtml = r#"<html><head><style>figure { width: 50%; max-width: 320px; margin: 2em 0 3em 1em; }</style></head><body>
+          <figure><img src="figure.png" alt="Diagram"/><figcaption>Caption</figcaption><p>Credit</p></figure>
+          <figure><img src="standalone.png" alt="Standalone"/></figure>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OPS", &Default::default());
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nCaption\nCredit\nStandalone\n"
+        );
+        let ContentNode::Image { style, .. } = nodes.last().unwrap() else {
+            panic!("captionless figure should retain its image");
+        };
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.5)));
+        assert_eq!(style.max_width, Some(NodeWidth::Pixels(320.0)));
+        assert_eq!(style.margin_left_em, Some(1.0));
+        assert_eq!(style.block_before_em, Some(2.0));
+        assert_eq!(style.block_after_em, Some(3.0));
     }
 
     #[test]
