@@ -320,8 +320,8 @@ fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
     while let Some(start) = document.find("<!DOCTYPE") {
         let doctype = &document[start..];
         let end = doctype_end(doctype).unwrap_or(doctype.len());
-        let mut declarations = &doctype[..end];
-        while let Some(start) = declarations.find("<!ENTITY") {
+        let declarations = &doctype[..end];
+        for start in entity_declaration_starts(declarations) {
             let tail = &declarations[start + 8..];
             let tail = tail.trim_start();
             let tail = tail.strip_prefix('%').map(str::trim_start).unwrap_or(tail);
@@ -334,7 +334,6 @@ fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
             if name_len > 0 {
                 declared.insert(&tail[..name_len]);
             }
-            declarations = tail;
         }
         document = &doctype[end..];
     }
@@ -398,6 +397,49 @@ fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
     } else {
         std::borrow::Cow::Borrowed(xhtml)
     }
+}
+
+/// Finds actual entity declarations while ignoring declaration-like bytes in
+/// DTD comments and quoted literals. The scan is bounded to the supplied
+/// doctype slice and deliberately treats parameter and general declarations
+/// alike, matching the entity-shadowing behavior above.
+fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
+    let bytes = doctype.as_bytes();
+    let mut starts = Vec::new();
+    let mut index = 0;
+    let mut quote = None;
+    let mut comment = false;
+    while index < bytes.len() {
+        if comment {
+            if bytes[index..].starts_with(b"-->") {
+                comment = false;
+                index += 3;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if bytes[index] == delimiter {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<!--") {
+            comment = true;
+            index += 4;
+        } else if matches!(bytes[index], b'\'' | b'"') {
+            quote = Some(bytes[index]);
+            index += 1;
+        } else if bytes[index..].starts_with(b"<!ENTITY") {
+            starts.push(index);
+            index += 8;
+        } else {
+            index += 1;
+        }
+    }
+    starts
 }
 
 fn doctype_end(doctype: &str) -> Option<usize> {
@@ -764,41 +806,14 @@ fn parse_figure(
         let css = styles
             .get(caption_node)
             .expect("caption has computed style");
-        let has_block_children = caption_node.children().any(|child| {
-            child.is_element()
-                && styles.get(child).is_some_and(|style| {
-                    !matches!(
-                        style.display,
-                        super::computed_style::DisplayRole::Inline
-                            | super::computed_style::DisplayRole::None
-                    )
-                })
-        });
         let mut spans = Vec::new();
-        for child in caption_node
-            .children()
-            .filter(|child| child.is_element() && visible(*child))
-        {
-            let inline = collect_inline_content(&child, styles, css.font_size_px);
-            let mut block = inline.spans;
-            if !spans.is_empty() && !block.is_empty() {
-                let mut separator = block[0].clone();
-                separator.text = "\n".to_owned();
-                separator.math = None;
-                spans.push(separator);
-            }
-            let block_offset = spans.iter().map(|span| span.text.chars().count()).sum();
-            record_element_anchors(&child, block_offset, &mut caption_anchors);
-            for (name, offset) in inline.anchors {
-                record_anchor_name(&name, block_offset + offset, &mut caption_anchors);
-            }
-            spans.append(&mut block);
-        }
-        if !has_block_children {
-            let inline = collect_inline_content(&caption_node, styles, css.font_size_px);
-            spans = inline.spans;
-            caption_anchors = inline.anchors;
-        }
+        collect_caption_runs(
+            &caption_node,
+            styles,
+            css.font_size_px,
+            &mut spans,
+            &mut caption_anchors,
+        );
         (spans, Some(css_to_node_style(css, "figcaption")))
     };
     let mut anchors = HashMap::new();
@@ -1590,6 +1605,94 @@ fn collect_inline_content(
     InlineContent { spans, anchors }
 }
 
+fn collect_caption_runs(
+    caption: &roxmltree::Node,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    base_font_size: f32,
+    spans: &mut Vec<TextSpan>,
+    anchors: &mut HashMap<String, usize>,
+) {
+    let mut run_spans = Vec::new();
+    let mut run_anchors = HashMap::new();
+    let mut raw_offset = 0;
+    for child in caption.children() {
+        let is_block = child.is_element()
+            && styles.get(child).is_some_and(|style| {
+                !matches!(
+                    style.display,
+                    super::computed_style::DisplayRole::Inline
+                        | super::computed_style::DisplayRole::None
+                )
+            });
+        if is_block {
+            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            raw_offset = 0;
+        }
+        if child.is_text() {
+            let text = child.text().unwrap_or("");
+            raw_offset += text.chars().count();
+            run_spans.push(text_span_for_node(
+                caption,
+                text.to_owned(),
+                None,
+                styles,
+                base_font_size,
+            ));
+        } else if child.is_element()
+            && styles
+                .get(child)
+                .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+        {
+            record_element_anchors(&child, raw_offset, &mut run_anchors);
+            collect_inline_spans_recursive(
+                &child,
+                base_font_size,
+                child
+                    .tag_name()
+                    .name()
+                    .eq("a")
+                    .then(|| child.attribute("href"))
+                    .flatten(),
+                styles,
+                &mut run_spans,
+                &mut run_anchors,
+                &mut raw_offset,
+            );
+        }
+        if is_block {
+            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            raw_offset = 0;
+        }
+    }
+    append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+}
+
+fn append_caption_run(
+    output: &mut Vec<TextSpan>,
+    output_anchors: &mut HashMap<String, usize>,
+    run: &mut Vec<TextSpan>,
+    run_anchors: &mut HashMap<String, usize>,
+) {
+    collapse_inline_whitespace_with_anchors(run, run_anchors);
+    merge_spans(run);
+    if run.is_empty() {
+        run_anchors.clear();
+        return;
+    }
+    let mut offset: usize = output.iter().map(|span| span.text.chars().count()).sum();
+    if !output.is_empty() {
+        let mut separator = run[0].clone();
+        separator.text = "\n".to_owned();
+        separator.math = None;
+        output.push(separator);
+        offset += 1;
+    }
+    for (name, anchor_offset) in run_anchors.drain() {
+        record_anchor_name(&name, offset + anchor_offset, output_anchors);
+    }
+    output.append(run);
+}
+
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
     collapse_inline_whitespace_with_anchors(spans, &mut HashMap::new());
 }
@@ -2187,6 +2290,18 @@ mod tests {
     }
 
     #[test]
+    fn entity_declaration_scan_ignores_comments_and_quoted_values() {
+        let xhtml = r#"<!DOCTYPE html [
+          <!-- <!ENTITY copy "fake comment declaration"> -->
+          <!ENTITY marker "<!ENTITY trade 'fake quoted declaration'>">
+          <!ENTITY nbsp "actual declaration">
+        ]><html><body>&copy; &trade; &nbsp;</body></html>"#;
+        let normalized = resolve_xhtml_named_entities(xhtml);
+
+        assert!(normalized.contains("<body>© ™ &nbsp;</body>"));
+    }
+
+    #[test]
     fn malformed_chapter_returns_a_contextual_parse_error() {
         let error = parse_chapter_xhtml_with_limits(
             "<html><body><p>broken</body></html>",
@@ -2593,6 +2708,48 @@ mod tests {
             crate::search::extract_text_from_nodes(&nodes),
             "Diagram\nFigure 1: Architecture\n"
         );
+    }
+
+    #[test]
+    fn semantic_caption_collects_mixed_inline_and_block_runs_in_source_order() {
+        let xhtml = r#"<html><body><figure><img src="figure.png" alt="Diagram"/><figcaption>Lead <strong id="bold">bold</strong><p id="block">Block <em id="italic">italic</em></p><span id="tail">tail</span></figcaption></figure></body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("mixed caption should parse");
+        let ContentNode::Image { caption, .. } = &parsed.nodes[0] else {
+            panic!("expected semantic image");
+        };
+
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Lead bold\nBlock italic\ntail"
+        );
+        assert!(caption.iter().any(|span| span.text == "bold" && span.bold));
+        assert!(
+            caption
+                .iter()
+                .any(|span| span.text == "italic" && span.italic)
+        );
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "Diagram\nLead bold\nBlock italic\ntail\n"
+        );
+        assert_eq!(parsed.anchor_offsets.get("bold"), Some(&13));
+        assert_eq!(parsed.anchor_offsets.get("block"), Some(&18));
+        assert_eq!(parsed.anchor_offsets.get("italic"), Some(&24));
+        assert_eq!(parsed.anchor_offsets.get("tail"), Some(&31));
     }
 
     #[test]
