@@ -347,6 +347,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ToggleReadingMode => {
+            state.reader_overrides.reading_mode = true;
             invalidate_continuous_layout(state);
             state.reading_mode = match state.reading_mode {
                 ReadingMode::Paginated => ReadingMode::Continuous,
@@ -471,6 +472,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.document,
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
             ) {
+                state.reader_overrides.pdf_zoom = true;
                 let new_scale = zoom_step_scale(state, 0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
                 invalidate_continuous_rasters(state);
@@ -484,6 +486,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.document,
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
             ) {
+                state.reader_overrides.pdf_zoom = true;
                 let new_scale = zoom_step_scale(state, -0.25);
                 state.zoom = ZoomMode::Manual(new_scale);
                 invalidate_continuous_rasters(state);
@@ -493,6 +496,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SetZoomFitWidth => {
+            state.reader_overrides.pdf_zoom = true;
             state.zoom = ZoomMode::FitWidth;
             invalidate_continuous_rasters(state);
             save_reading_state(state);
@@ -500,6 +504,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SetZoomFitPage => {
+            state.reader_overrides.pdf_zoom = true;
             state.zoom = ZoomMode::FitPage;
             invalidate_continuous_rasters(state);
             save_reading_state(state);
@@ -507,6 +512,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FontSizeUp => {
+            state.reader_overrides.epub_font_size = true;
             perf::begin_relayout(state);
             state.font_size = (state.font_size + 2.0).min(48.0);
             invalidate_continuous_layout(state);
@@ -517,6 +523,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FontSizeDown => {
+            state.reader_overrides.epub_font_size = true;
             perf::begin_relayout(state);
             state.font_size = (state.font_size - 2.0).max(8.0);
             invalidate_continuous_layout(state);
@@ -527,6 +534,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::CycleTheme => {
+            state.reader_overrides.theme = true;
             state.theme = state.theme.next();
         }
 
@@ -1128,11 +1136,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::SelectDefaultReadingMode(mode) => {
             state.reader_defaults.reading_mode = mode;
             save_preference(state, DEFAULT_READING_MODE_KEY, mode.stored());
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::SelectDefaultReaderTheme(theme) => {
             state.reader_defaults.theme = theme;
             save_preference(state, DEFAULT_READER_THEME_KEY, theme.stored());
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::DefaultEpubFontSizeUp => {
@@ -1143,6 +1155,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 DEFAULT_EPUB_FONT_SIZE_KEY,
                 state.reader_defaults.epub_font_size.to_string(),
             );
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::DefaultEpubFontSizeDown => {
@@ -1153,6 +1167,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 DEFAULT_EPUB_FONT_SIZE_KEY,
                 state.reader_defaults.epub_font_size.to_string(),
             );
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::SelectDefaultEpubLineSpacing(line_spacing) => {
@@ -1162,6 +1178,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 DEFAULT_EPUB_LINE_SPACING_KEY,
                 state.reader_defaults.epub_line_spacing.to_string(),
             );
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::SelectDefaultPdfFitWidth(fit_width) => {
@@ -1175,6 +1193,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 DEFAULT_PDF_ZOOM_KEY,
                 if fit_width { "fit-width" } else { "fit-page" },
             );
+            let changes = apply_reader_defaults_to_open_tabs(state);
+            return reader_defaults_changed_task(state, changes);
         }
 
         Message::OpenManagedLibraryFolder => {

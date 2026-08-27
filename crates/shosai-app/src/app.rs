@@ -288,6 +288,14 @@ impl Default for ReaderDefaults {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ReaderOverrides {
+    reading_mode: bool,
+    theme: bool,
+    epub_font_size: bool,
+    pdf_zoom: bool,
+}
+
 #[derive(Debug, Clone)]
 struct LibraryMovePlan {
     destination: PathBuf,
@@ -558,6 +566,7 @@ struct ReaderTab {
     line_spacing: f32,
     theme: ReaderTheme,
     reading_mode: ReadingMode,
+    reader_overrides: ReaderOverrides,
     bookmarks: Vec<Bookmark>,
     show_bookmarks_panel: bool,
     show_reader_settings: bool,
@@ -650,6 +659,7 @@ pub struct State {
     line_spacing: f32,
     theme: ReaderTheme,
     reading_mode: ReadingMode,
+    reader_overrides: ReaderOverrides,
     tabs: Vec<ReaderTab>,
     active_tab: Option<usize>,
     active_tab_id: Option<u64>,
@@ -785,6 +795,7 @@ pub fn boot() -> (State, Task<Message>) {
         line_spacing: 1.6,
         theme: ReaderTheme::default(),
         reading_mode: ReadingMode::default(),
+        reader_overrides: ReaderOverrides::default(),
         tabs: Vec::new(),
         active_tab: None,
         active_tab_id: None,
@@ -1077,6 +1088,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         line_spacing: state.line_spacing,
         theme: state.theme,
         reading_mode: state.reading_mode,
+        reader_overrides: state.reader_overrides,
         bookmarks: state.bookmarks.clone(),
         show_bookmarks_panel: state.show_bookmarks_panel,
         show_reader_settings: state.show_reader_settings,
@@ -1121,6 +1133,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.line_spacing = tab.line_spacing;
     state.theme = tab.theme;
     state.reading_mode = tab.reading_mode;
+    state.reader_overrides = tab.reader_overrides;
     state.bookmarks = tab.bookmarks;
     state.show_bookmarks_panel = tab.show_bookmarks_panel;
     state.show_reader_settings = tab.show_reader_settings;
@@ -1329,8 +1342,115 @@ fn apply_reader_defaults(state: &mut State) {
     state.theme = state.reader_defaults.theme;
     state.font_size = state.reader_defaults.epub_font_size;
     state.line_spacing = state.reader_defaults.epub_line_spacing;
+    state.reader_overrides = ReaderOverrides::default();
     if matches!(state.document, Some(OpenDocument::Pdf(_))) {
         state.zoom = state.reader_defaults.pdf_zoom;
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct AppliedReaderDefaultChanges {
+    reading_mode: bool,
+    epub_typography: bool,
+    pdf_zoom: bool,
+}
+
+fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefaultChanges {
+    let defaults = state.reader_defaults;
+    let mut changes = AppliedReaderDefaultChanges::default();
+
+    if state.document.is_some() {
+        if !state.reader_overrides.reading_mode && state.reading_mode != defaults.reading_mode {
+            state.reading_mode = defaults.reading_mode;
+            changes.reading_mode = true;
+        }
+        if !state.reader_overrides.theme {
+            state.theme = defaults.theme;
+        }
+        if matches!(state.document, Some(OpenDocument::Epub(_))) {
+            if !state.reader_overrides.epub_font_size && state.font_size != defaults.epub_font_size
+            {
+                state.font_size = defaults.epub_font_size;
+                changes.epub_typography = true;
+            }
+            if state.line_spacing != defaults.epub_line_spacing {
+                state.line_spacing = defaults.epub_line_spacing;
+                changes.epub_typography = true;
+            }
+        }
+        if matches!(state.document, Some(OpenDocument::Pdf(_)))
+            && !state.reader_overrides.pdf_zoom
+            && state.zoom != defaults.pdf_zoom
+        {
+            state.zoom = defaults.pdf_zoom;
+            changes.pdf_zoom = true;
+        }
+    }
+
+    for tab in &mut state.tabs {
+        if !tab.reader_overrides.reading_mode && tab.reading_mode != defaults.reading_mode {
+            tab.reading_mode = defaults.reading_mode;
+            tab.continuous_pages.clear();
+            tab.continuous_pending.clear();
+            tab.continuous_visible.clear();
+            tab.render_generation = tab.render_generation.wrapping_add(1);
+        }
+        if !tab.reader_overrides.theme {
+            tab.theme = defaults.theme;
+        }
+        if matches!(tab.document, OpenDocument::Epub(_)) {
+            if !tab.reader_overrides.epub_font_size {
+                tab.font_size = defaults.epub_font_size;
+            }
+            tab.line_spacing = defaults.epub_line_spacing;
+        }
+        if matches!(tab.document, OpenDocument::Pdf(_))
+            && !tab.reader_overrides.pdf_zoom
+            && tab.zoom != defaults.pdf_zoom
+        {
+            tab.zoom = defaults.pdf_zoom;
+            tab.rendered_page = None;
+            tab.rendered_page_index = None;
+            tab.rendered_page_handle = None;
+            tab.rendered_facing_page = None;
+            tab.rendered_facing_page_handle = None;
+            tab.continuous_pages.clear();
+            tab.continuous_pending.clear();
+            tab.page_cache.clear();
+            tab.render_generation = tab.render_generation.wrapping_add(1);
+        }
+    }
+
+    changes
+}
+
+fn reader_defaults_changed_task(
+    state: &mut State,
+    changes: AppliedReaderDefaultChanges,
+) -> Task<Message> {
+    if changes.reading_mode {
+        invalidate_continuous_layout(state);
+        state.continuous_pages.clear();
+        state.continuous_visible.clear();
+        state.render_generation = state.render_generation.wrapping_add(1);
+    }
+    if changes.epub_typography {
+        perf::begin_relayout(state);
+        invalidate_continuous_layout(state);
+    }
+    if changes.pdf_zoom {
+        invalidate_continuous_rasters(state);
+    }
+    if changes.reading_mode || changes.epub_typography || changes.pdf_zoom {
+        let task = refresh_content(state);
+        state.page_input = if uses_paginated_epub_layout(state) {
+            (state.epub_page + 1).to_string()
+        } else {
+            (state.current_page + 1).to_string()
+        };
+        task
+    } else {
+        Task::none()
     }
 }
 
@@ -7544,7 +7664,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn settings_preferences_are_persisted_and_do_not_change_open_tabs() {
+    async fn settings_preferences_are_persisted_and_update_open_books() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
             .await
@@ -7555,9 +7675,6 @@ mod tests {
         .unwrap();
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
-        let open_mode = state.reading_mode;
-        let open_theme = state.theme;
-
         let _ = update(
             &mut state,
             Message::SelectAddBookBehavior(AddBookBehavior::Copy),
@@ -7582,8 +7699,10 @@ mod tests {
             .unwrap();
         wait.await.unwrap();
 
-        assert_eq!(state.reading_mode, open_mode);
-        assert_eq!(state.theme, open_theme);
+        assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        assert_eq!(state.theme, ReaderTheme::Sepia);
+        assert_eq!(state.font_size, 18.0);
+        assert_eq!(state.line_spacing, 1.8);
         assert_eq!(
             store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
             Some("copy")
@@ -7620,6 +7739,70 @@ mod tests {
             store.get_pref_async(DEFAULT_PDF_ZOOM_KEY).await.as_deref(),
             Some("fit-width")
         );
+    }
+
+    #[test]
+    fn local_reader_overrides_only_protect_the_setting_changed_for_that_book() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let _ = update(&mut state, Message::ToggleReadingMode);
+        let _ = update(&mut state, Message::FontSizeUp);
+        let _ = update(&mut state, Message::CycleTheme);
+        let local_mode = state.reading_mode;
+        let local_font_size = state.font_size;
+        let local_theme = state.theme;
+
+        let _ = update(
+            &mut state,
+            Message::SelectDefaultReadingMode(ReadingMode::Paginated),
+        );
+        let _ = update(
+            &mut state,
+            Message::SelectDefaultReaderTheme(ReaderTheme::Dark),
+        );
+        let _ = update(&mut state, Message::DefaultEpubFontSizeUp);
+        let _ = update(&mut state, Message::DefaultEpubFontSizeUp);
+        let _ = update(&mut state, Message::SelectDefaultEpubLineSpacing(1.8));
+
+        assert_eq!(state.reading_mode, local_mode);
+        assert_eq!(state.font_size, local_font_size);
+        assert_eq!(state.theme, local_theme);
+        assert_eq!(state.line_spacing, 1.8);
+    }
+
+    #[test]
+    fn defaults_update_inactive_tabs_before_they_are_selected_again() {
+        let directory = tempfile::tempdir().unwrap();
+        let epub_path = directory.path().join("book.epub");
+        let pdf_path = directory.path().join("book.pdf");
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../shosai-core/tests/fixtures/sample.epub"),
+            &epub_path,
+        )
+        .unwrap();
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../shosai-core/tests/fixtures/sample.pdf"),
+            &pdf_path,
+        )
+        .unwrap();
+        let (mut state, _) = boot();
+
+        let _ = open_document(&mut state, epub_path, None);
+        let _ = open_document(&mut state, pdf_path, None);
+        let _ = update(&mut state, Message::DefaultEpubFontSizeUp);
+        let _ = update(&mut state, Message::SelectDefaultEpubLineSpacing(1.8));
+        let _ = update(&mut state, Message::SelectDefaultPdfFitWidth(true));
+
+        assert_eq!(state.zoom, ZoomMode::FitWidth);
+        let _ = select_tab(&mut state, 0);
+        assert_eq!(state.font_size, 18.0);
+        assert_eq!(state.line_spacing, 1.8);
     }
 
     #[test]
