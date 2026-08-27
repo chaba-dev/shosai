@@ -126,7 +126,7 @@ fn populate_image_sizes(
                     *kind = Some(resource_kind);
                 }
             }
-            ContentNode::BlockQuote { children, .. } => {
+            ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
                 populate_image_sizes(children, image_sizes);
             }
             ContentNode::Table { row_groups, .. } => {

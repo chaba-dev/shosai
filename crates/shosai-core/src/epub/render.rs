@@ -53,6 +53,10 @@ pub struct NodeStyle {
     pub height: Option<NodeWidth>,
     /// Authored maximum width retained for native replaced-element layout.
     pub max_width: Option<NodeWidth>,
+    /// Pagination truncated the first nested child boundary of this fragment.
+    pub fragment_before: bool,
+    /// Pagination truncated the last nested child boundary of this fragment.
+    pub fragment_after: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,6 +133,12 @@ pub enum ContentNode {
         children: Vec<ContentNode>,
         style: NodeStyle,
     },
+    /// An ordered figure container retained when it cannot be represented as
+    /// one image with a trailing caption.
+    Figure {
+        children: Vec<ContentNode>,
+        style: NodeStyle,
+    },
     /// A semantic EPUB table. Layout is owned by the native app layer.
     Table {
         caption: Vec<TextSpan>,
@@ -183,6 +193,7 @@ impl ContentNode {
         match self {
             Self::Heading { style, .. }
             | Self::BlockQuote { style, .. }
+            | Self::Figure { style, .. }
             | Self::Table { style, .. }
             | Self::Math { style, .. }
             | Self::Image { style, .. } => Some(style),
@@ -196,6 +207,7 @@ impl ContentNode {
         match self {
             Self::Heading { style, .. }
             | Self::BlockQuote { style, .. }
+            | Self::Figure { style, .. }
             | Self::Table { style, .. }
             | Self::Math { style, .. }
             | Self::Image { style, .. } => Some(style),
@@ -755,11 +767,24 @@ fn parse_block_children(
                 }
             }
 
-            "div" | "section" | "article" | "main" | "aside" | "header" | "footer"
-            | "figcaption" => {
+            "div" | "section" | "article" | "main" | "aside" | "header" | "footer" => {
                 let inner = parse_block_children(child, base_path, styles);
                 nested_anchors = inner.anchor_offsets;
                 nodes.extend(inner.nodes);
+            }
+
+            "figcaption" => {
+                let mut spans = Vec::new();
+                collect_caption_runs(
+                    &child,
+                    styles,
+                    css_style.font_size_px,
+                    &mut spans,
+                    &mut nested_anchors,
+                );
+                if !spans.is_empty() {
+                    nodes.push(ContentNode::Paragraph(spans, node_style));
+                }
             }
 
             _ => {
@@ -915,14 +940,18 @@ fn apply_image_dimension_hints(
 }
 
 fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
-    if nodes.len() == 1 {
-        if let Some(ContentNode::Image { style, .. }) = nodes.first_mut() {
-            apply_figure_container_style(style, &figure_style);
-        }
+    if nodes.is_empty() {
+        return nodes;
+    }
+    if let [ContentNode::Image { style, .. }] = nodes.as_mut_slice() {
+        apply_figure_container_style(style, &figure_style);
         return nodes;
     }
     if nodes.len() != 2 || !matches!(nodes.first(), Some(ContentNode::Image { .. })) {
-        return nodes;
+        return vec![ContentNode::Figure {
+            children: nodes,
+            style: figure_style,
+        }];
     }
     let (caption, caption_style) = match nodes.pop().expect("figure has two nodes") {
         ContentNode::Heading { spans, style, .. } | ContentNode::Paragraph(spans, style) => {
@@ -1567,6 +1596,8 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
             super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
             super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
         }),
+        fragment_before: false,
+        fragment_after: false,
     }
 }
 
@@ -2859,17 +2890,26 @@ mod tests {
         )
         .expect("figure should parse");
         assert!(matches!(parsed.nodes[0], ContentNode::Paragraph(..)));
-        assert!(matches!(parsed.nodes[1], ContentNode::Paragraph(..)));
-        assert!(matches!(parsed.nodes[2], ContentNode::Paragraph(..)));
-        assert!(matches!(parsed.nodes[3], ContentNode::Image { .. }));
-        assert!(matches!(parsed.nodes[4], ContentNode::Paragraph(..)));
-        let ContentNode::Paragraph(first_caption, style) = &parsed.nodes[1] else {
+        let ContentNode::Figure { children, .. } = &parsed.nodes[1] else {
+            panic!("caption-first figure should retain its ordered container");
+        };
+        assert_eq!(children.len(), 2);
+        let ContentNode::Paragraph(first_caption, style) = &children[0] else {
             unreachable!();
         };
+        assert!(matches!(children[1], ContentNode::Image { .. }));
+        assert!(matches!(parsed.nodes[2], ContentNode::Paragraph(..)));
         assert!(
             first_caption
                 .iter()
                 .any(|span| span.text == "paragraph" && span.italic)
+        );
+        assert_eq!(
+            first_caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "First paragraph.\nSecond paragraph."
         );
         assert_eq!(style.font_size_multiplier, Some(1.25));
         assert_eq!(
@@ -2899,6 +2939,15 @@ mod tests {
             crate::search::extract_text_from_nodes(&nodes),
             "Diagram\nCaption\nCredit\nStandalone\n"
         );
+        let ContentNode::Figure { children, style } = &nodes[0] else {
+            panic!("figure with extra content should retain its container");
+        };
+        assert_eq!(children.len(), 3);
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.5)));
+        assert_eq!(style.max_width, Some(NodeWidth::Pixels(320.0)));
+        assert_eq!(style.margin_left_em, Some(1.0));
+        assert_eq!(style.block_before_em, Some(2.0));
+        assert_eq!(style.block_after_em, Some(3.0));
         let ContentNode::Image { style, .. } = nodes.last().unwrap() else {
             panic!("captionless figure should retain its image");
         };

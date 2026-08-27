@@ -95,6 +95,14 @@ fn extract_node_text(node: &ContentNode, out: &mut String) {
                 out.push('\n');
             }
         }
+        ContentNode::Figure { children, .. } => {
+            for (index, child) in children.iter().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                }
+                extract_node_text(child, out);
+            }
+        }
         ContentNode::Table {
             caption,
             row_groups,
