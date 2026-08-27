@@ -101,7 +101,7 @@ impl Default for EpubLimits {
             max_css_rules_per_document: 50_000,
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
-            max_css_processing_steps_per_document: 10_000_000,
+            max_css_processing_steps_per_document: 25_000_000,
             max_css_font_families_per_declaration: 32,
             max_css_font_family_name_bytes: 256,
             max_css_font_family_bytes_per_declaration: 2_048,

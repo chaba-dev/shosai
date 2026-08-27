@@ -563,7 +563,7 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             }
         }
         Property::FontSize(FontSize::Length(value)) => {
-            if let Some(value) = relative_length(value) {
+            if let Some(value) = font_size_length(value) {
                 specified.font_size.offer(priority, value);
             }
         }
@@ -895,7 +895,7 @@ fn unsupported_rule_name(rule: &CssRule<'_>) -> &'static str {
 fn property_supported(property: &Property<'_>) -> bool {
     match property {
         Property::Display(display) => css_display(display).is_some(),
-        Property::FontSize(FontSize::Length(value)) => relative_length(value).is_some(),
+        Property::FontSize(FontSize::Length(value)) => font_size_length(value).is_some(),
         Property::FontWeight(FontWeight::Absolute(_)) => true,
         Property::FontStyle(_)
         | Property::FontFamily(_)
@@ -1260,6 +1260,21 @@ fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeL
     }
 }
 
+fn font_size_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
+    let value = relative_length(value)?;
+    match value {
+        RelativeLength::Em(value)
+        | RelativeLength::Rem(value)
+        | RelativeLength::Px(value)
+        | RelativeLength::Percent(value)
+            if value < 0.0 =>
+        {
+            None
+        }
+        value => Some(value),
+    }
+}
+
 fn margin_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
     match value {
         DimensionPercentage::Percentage(_) => None,
@@ -1561,6 +1576,17 @@ mod tests {
                 .to_string()
                 .contains("computed font size is outside limits")
         );
+    }
+
+    #[test]
+    fn invalid_negative_font_size_does_not_hide_document_content() {
+        let report = compute_document_styles(
+            r#"<html><body><p id="target" style="font-size: -1">Target</p></body></html>"#,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(report.element_styles["target"].font_size_px, 16.0);
     }
 
     #[test]

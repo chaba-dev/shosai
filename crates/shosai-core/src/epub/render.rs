@@ -219,7 +219,12 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     fonts: Option<&super::font::EpubFontBook>,
     limits: &EpubLimits,
 ) -> Result<ParsedChapterContent> {
-    let doc = match roxmltree::Document::parse(xhtml) {
+    let parsing_options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        nodes_limit: u32::try_from(xhtml.len()).unwrap_or(u32::MAX),
+        ..Default::default()
+    };
+    let doc = match roxmltree::Document::parse_with_options(xhtml, parsing_options) {
         Ok(d) => d,
         Err(_) => {
             return Ok(ParsedChapterContent {
@@ -1726,6 +1731,22 @@ mod tests {
             !nodes
                 .iter()
                 .any(|node| matches!(node, ContentNode::Image { .. }))
+        );
+    }
+
+    #[test]
+    fn xhtml_doctype_does_not_hide_epub_chapter_content() {
+        let nodes = parse_chapter_xhtml(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Introduction</h1><p>Visible chapter text.</p></body></html>"#,
+            "",
+            &Default::default(),
+        );
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Introduction\nVisible chapter text.\n"
         );
     }
 
