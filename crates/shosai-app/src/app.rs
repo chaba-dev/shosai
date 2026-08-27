@@ -2858,16 +2858,12 @@ fn reader_edge_button(
 fn tabs_view(state: &State) -> Element<'_, Message> {
     let mut tabs = row![].spacing(3).padding([5, 10]);
     for (index, tab) in state.tabs.iter().enumerate() {
-        let name = tab
-            .file_path
-            .file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_default();
+        let title = reader_tab_title(state, tab);
         let selected = state.active_tab == Some(index);
         tabs = tabs.push(
             container(
                 row![
-                    button(text(truncate_reader_label(&name, 34)).size(12))
+                    button(text(truncate_reader_label(&title, 34)).size(12))
                         .on_press(Message::SelectTab(index))
                         .padding(iced::Padding {
                             top: 6.0,
@@ -5283,31 +5279,49 @@ fn welcome_view(state: &State) -> Element<'_, Message> {
 // Title
 // ---------------------------------------------------------------------------
 
-fn current_book_title(state: &State) -> Option<String> {
-    state
-        .book_id
+fn book_title(
+    book_id: Option<i64>,
+    document: &OpenDocument,
+    file_path: Option<&Path>,
+    library_books: &[Book],
+) -> Option<String> {
+    book_id
         .and_then(|book_id| {
-            state
-                .library_books
+            library_books
                 .iter()
                 .find(|book| book.id == book_id)
                 .map(|book| book.title.clone())
         })
-        .or_else(|| {
-            state.document.as_ref().and_then(|document| match document {
-                OpenDocument::Pdf(document) => document.metadata().title,
-                OpenDocument::Epub(document) => document.metadata().title,
-                OpenDocument::Cbz(document) => document.metadata().title,
-            })
+        .or_else(|| match document {
+            OpenDocument::Pdf(document) => document.metadata().title,
+            OpenDocument::Epub(document) => document.metadata().title,
+            OpenDocument::Cbz(document) => document.metadata().title,
         })
         .filter(|title| !title.trim().is_empty())
         .or_else(|| {
-            state
-                .file_path
-                .as_ref()
+            file_path
                 .and_then(|path| path.file_stem())
                 .map(|name| name.to_string_lossy().into_owned())
         })
+}
+
+fn current_book_title(state: &State) -> Option<String> {
+    book_title(
+        state.book_id,
+        state.document.as_ref()?,
+        state.file_path.as_deref(),
+        &state.library_books,
+    )
+}
+
+fn reader_tab_title(state: &State, tab: &ReaderTab) -> String {
+    book_title(
+        tab.book_id,
+        &tab.document,
+        Some(&tab.file_path),
+        &state.library_books,
+    )
+    .unwrap_or_default()
 }
 
 pub fn title(state: &State) -> String {
@@ -5421,6 +5435,22 @@ mod tests {
         ));
 
         assert_eq!(title(&state), format!("{expected} - Shosai"));
+    }
+
+    #[test]
+    fn managed_book_tab_uses_document_metadata_instead_of_content_hash() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let expected = epub.metadata().title.expect("fixture should have a title");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from(
+            "/managed/books/1f5f42f7234d111f9aec67d61b2790c85e3054c5efa284c859c6519a7e7ff753.epub",
+        ));
+        let tab = capture_reader_tab(&state).expect("reader state should create a tab");
+
+        assert_eq!(reader_tab_title(&state, &tab), expected);
     }
 
     #[test]
