@@ -67,6 +67,7 @@ pub(super) fn continuous_epub_content_view<'a>(
                         state.show_bookmarks_panel,
                     ),
                     None,
+                    None,
                     text_offset,
                     &highlights,
                     Some(doc.fonts()),
@@ -240,6 +241,7 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 true,
                 text_width,
                 Some((epub_page_size(state).height - block_spacing).max(1.0)),
+                Some((epub_page_size(state).height - block_spacing).max(1.0)),
                 page_node.text_offset,
                 &highlights,
                 fonts,
@@ -309,6 +311,7 @@ fn render_content_node<'a>(
     image_handles: &HashMap<String, EpubImageHandle>,
     fill_images: bool,
     available_width: f32,
+    percentage_height_basis: Option<f32>,
     available_height: Option<f32>,
     text_offset: usize,
     highlights: &[SearchHighlight],
@@ -381,6 +384,7 @@ fn render_content_node<'a>(
                     image_handles,
                     fill_images,
                     (available_width - style.margin_left_em.unwrap_or(1.0) * font_size).max(1.0),
+                    None,
                     available_height,
                     child_offset,
                     highlights,
@@ -470,6 +474,7 @@ fn render_content_node<'a>(
                                 cell_geometry.placement,
                                 &column_widths,
                             ),
+                            None,
                             available_height,
                             table_offset,
                             highlights,
@@ -605,6 +610,7 @@ fn render_content_node<'a>(
             palette,
             image_handles,
             available_width,
+            percentage_height_basis,
             available_height,
             text_offset,
             highlights,
@@ -733,6 +739,7 @@ fn render_epub_image<'a>(
     palette: ReaderPalette,
     image_handles: &HashMap<String, EpubImageHandle>,
     available_width: f32,
+    percentage_height_basis: Option<f32>,
     available_height: Option<f32>,
     text_offset: usize,
     highlights: &[SearchHighlight],
@@ -755,6 +762,7 @@ fn render_epub_image<'a>(
             node,
             font_size,
             available_width,
+            percentage_height_basis,
             available_height,
             fonts,
         )
@@ -843,6 +851,7 @@ fn render_epub_image<'a>(
         &fallback_node,
         font_size,
         available_width,
+        percentage_height_basis,
         available_height,
         fonts,
     )
@@ -1677,6 +1686,7 @@ mod tests {
             false,
             600.0,
             None,
+            None,
             0,
             &[],
             None,
@@ -1693,6 +1703,7 @@ mod tests {
             &handles,
             false,
             600.0,
+            None,
             None,
             0,
             &[],
@@ -1737,7 +1748,8 @@ mod tests {
             Some(EpubImageHandle::Svg(_))
         ));
         let layout =
-            crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, Some(300.0), None).unwrap();
+            crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, Some(300.0), Some(300.0), None)
+                .unwrap();
         assert_eq!((layout.width, layout.height), (200.0, 100.0));
         assert!(layout.caption_height > 0.0);
     }
@@ -2111,6 +2123,7 @@ mod tests {
                 ReaderTheme::Light.palette(),
                 &handles,
                 400.0,
+                Some(300.0),
                 Some(300.0),
                 0,
                 highlights,
