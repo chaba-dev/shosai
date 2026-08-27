@@ -25,6 +25,7 @@ pub(crate) const MAX_INLINE_MATH_FLOW_ITEMS: usize = 256;
 const MAX_INLINE_MATH_LINE_HEIGHTS: f32 = 3.0;
 const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
+const MAX_EPUB_TABLE_COLUMNS: usize = 256;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
 
 pub(crate) struct EpubPaginationBudget {
@@ -1047,6 +1048,22 @@ pub(crate) struct EpubTableCellPlacement {
     pub(crate) span: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct EpubTableCellGeometry {
+    pub(crate) placement: EpubTableCellPlacement,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct EpubTableGeometry {
+    pub(crate) row_heights: Vec<f32>,
+    pub(crate) cells: Vec<Vec<EpubTableCellGeometry>>,
+    pub(crate) height: f32,
+}
+
 /// Builds the logical grid used by both measurement and painting. Row spans are
 /// scoped to their row group, as required by the table model's group semantics.
 pub(crate) fn epub_table_cell_placements(
@@ -1054,17 +1071,23 @@ pub(crate) fn epub_table_cell_placements(
 ) -> Vec<Vec<EpubTableCellPlacement>> {
     let mut placements = Vec::new();
     for group in row_groups {
-        let mut occupied_until = Vec::<usize>::new();
+        let mut occupied_until = vec![0_usize; MAX_EPUB_TABLE_COLUMNS];
         for (row_index, row) in group.rows.iter().enumerate() {
             let mut row_placements = Vec::with_capacity(row.cells.len());
             let mut column = 0_usize;
             for cell in &row.cells {
-                let span = usize::from(cell.column_span.max(1));
-                while (column..column.saturating_add(span))
-                    .any(|slot| occupied_until.get(slot).copied().unwrap_or(0) > row_index)
+                let requested_span = usize::from(cell.column_span.max(1));
+                let span = requested_span.min(MAX_EPUB_TABLE_COLUMNS);
+                while column < MAX_EPUB_TABLE_COLUMNS
+                    && (column..column.saturating_add(span).min(MAX_EPUB_TABLE_COLUMNS))
+                        .any(|slot| occupied_until[slot] > row_index)
                 {
                     column += 1;
                 }
+                // Malicious aggregate spans can exhaust the bounded grid. Clamp
+                // deterministically to its final slot instead of growing storage.
+                column = column.min(MAX_EPUB_TABLE_COLUMNS - 1);
+                let span = span.min(MAX_EPUB_TABLE_COLUMNS - column).max(1);
                 let row_end = if cell.row_span == 0 {
                     group.rows.len()
                 } else {
@@ -1072,7 +1095,6 @@ pub(crate) fn epub_table_cell_placements(
                         .saturating_add(usize::from(cell.row_span))
                         .min(group.rows.len())
                 };
-                occupied_until.resize(column.saturating_add(span), 0);
                 occupied_until[column..column + span].fill(row_end);
                 row_placements.push(EpubTableCellPlacement { column, span });
                 column += span;
@@ -1081,6 +1103,136 @@ pub(crate) fn epub_table_cell_placements(
         }
     }
     placements
+}
+
+/// Measures the complete logical table once. Pagination and painting provide
+/// the same intrinsic-cell measurer and consume these row and cell rectangles.
+pub(crate) fn epub_table_geometry(
+    row_groups: &[TableRowGroup],
+    column_widths: &[f32],
+    mut measure_cell: impl FnMut(&shosai_core::epub::render::TableCell, f32) -> f32,
+) -> EpubTableGeometry {
+    let placements = epub_table_cell_placements(row_groups);
+    let rows = row_groups
+        .iter()
+        .flat_map(|group| &group.rows)
+        .collect::<Vec<_>>();
+    let mut row_heights = vec![2.0 * EPUB_TABLE_CELL_PADDING; rows.len()];
+    let mut intrinsic = Vec::with_capacity(rows.len());
+    let mut global_row = 0;
+    for group in row_groups {
+        for (group_row, row) in group.rows.iter().enumerate() {
+            let measured = row
+                .cells
+                .iter()
+                .zip(&placements[global_row])
+                .map(|(cell, placement)| {
+                    let height = measure_cell(
+                        cell,
+                        epub_table_cell_content_width(*placement, column_widths),
+                    );
+                    let span = if cell.row_span == 0 {
+                        group.rows.len() - group_row
+                    } else {
+                        usize::from(cell.row_span)
+                    }
+                    .min(group.rows.len() - group_row)
+                    .max(1);
+                    (height, span)
+                })
+                .collect::<Vec<_>>();
+            for &(height, span) in &measured {
+                if span == 1 {
+                    row_heights[global_row] = row_heights[global_row].max(height);
+                }
+            }
+            intrinsic.push(measured);
+            global_row += 1;
+        }
+    }
+    for (row, measured) in intrinsic.iter().enumerate() {
+        for &(height, span) in measured {
+            if span > 1 {
+                let current = row_heights[row..row + span].iter().sum::<f32>()
+                    + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
+                let deficit = (height - current).max(0.0) / span as f32;
+                for row_height in &mut row_heights[row..row + span] {
+                    *row_height += deficit;
+                }
+            }
+        }
+    }
+    let mut y = 0.0;
+    let row_y = row_heights
+        .iter()
+        .map(|height| {
+            let current = y;
+            y += *height + EPUB_TABLE_ROW_SPACING;
+            current
+        })
+        .collect::<Vec<_>>();
+    let cells = rows
+        .iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            row.cells
+                .iter()
+                .zip(&placements[row_index])
+                .zip(&intrinsic[row_index])
+                .map(|((_cell, placement), &(_, span))| {
+                    let x = column_widths[..placement.column].iter().sum::<f32>()
+                        + BLOCKQUOTE_SPACING * placement.column as f32;
+                    let height = row_heights[row_index..row_index + span].iter().sum::<f32>()
+                        + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
+                    EpubTableCellGeometry {
+                        placement: *placement,
+                        x,
+                        y: row_y[row_index],
+                        width: epub_table_cell_width(*placement, column_widths),
+                        height,
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    EpubTableGeometry {
+        row_heights,
+        cells,
+        height: y - if rows.is_empty() {
+            0.0
+        } else {
+            EPUB_TABLE_ROW_SPACING
+        },
+    }
+}
+
+pub(crate) fn epub_table_geometry_bounded(
+    row_groups: &[TableRowGroup],
+    column_widths: &[f32],
+    lines_per_page: usize,
+    font_size: f32,
+    height: f32,
+) -> EpubTableGeometry {
+    epub_table_geometry(row_groups, column_widths, |cell, cell_width| {
+        let chars_per_line = (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
+            .floor()
+            .max(1.0) as usize;
+        cell.children
+            .iter()
+            .map(|child| {
+                estimated_epub_compact_node_height_bounded(
+                    child,
+                    chars_per_line,
+                    lines_per_page,
+                    font_size,
+                    cell_width,
+                    height,
+                )
+            })
+            .sum::<f32>()
+            + EPUB_TABLE_CELL_SPACING * cell.children.len().saturating_sub(1) as f32
+            + 2.0 * EPUB_TABLE_CELL_PADDING
+    })
 }
 
 pub(crate) fn epub_table_column_widths(row_groups: &[TableRowGroup], table_width: f32) -> Vec<f32> {
@@ -2032,7 +2184,6 @@ fn estimated_epub_compact_node_height_bounded(
             let table_content_width =
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let column_widths = epub_table_column_widths(row_groups, table_content_width);
-            let placements = epub_table_cell_placements(row_groups);
             let caption_height = (!caption.is_empty()).then(|| {
                 let scale = caption_style
                     .as_ref()
@@ -2051,45 +2202,18 @@ fn estimated_epub_compact_node_height_bounded(
                         height,
                     )
             });
-            let row_heights = row_groups
-                .iter()
-                .flat_map(|group| &group.rows)
-                .zip(&placements)
-                .map(|(row, row_placements)| {
-                    row.cells
-                        .iter()
-                        .zip(row_placements)
-                        .map(|(cell, placement)| {
-                            let cell_width =
-                                epub_table_cell_content_width(*placement, &column_widths);
-                            let cell_chars_per_line =
-                                (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
-                                    .floor()
-                                    .max(1.0) as usize;
-                            cell.children
-                                .iter()
-                                .map(|child| {
-                                    estimated_epub_compact_node_height_bounded(
-                                        child,
-                                        cell_chars_per_line,
-                                        lines_per_page,
-                                        font_size,
-                                        cell_width,
-                                        height,
-                                    )
-                                })
-                                .sum::<f32>()
-                                + EPUB_TABLE_CELL_SPACING
-                                    * cell.children.len().saturating_sub(1) as f32
-                                + 2.0 * EPUB_TABLE_CELL_PADDING
-                        })
-                        .fold(2.0 * EPUB_TABLE_CELL_PADDING, f32::max)
-                })
-                .collect::<Vec<_>>();
-            let table_children = row_heights.len() + usize::from(caption_height.is_some());
+            let geometry = epub_table_geometry_bounded(
+                row_groups,
+                &column_widths,
+                lines_per_page,
+                font_size,
+                height,
+            );
             caption_height.unwrap_or(0.0)
-                + row_heights.into_iter().sum::<f32>()
-                + EPUB_TABLE_ROW_SPACING * table_children.saturating_sub(1) as f32
+                + geometry.height
+                + EPUB_TABLE_ROW_SPACING
+                    * usize::from(caption_height.is_some() && !geometry.row_heights.is_empty())
+                        as f32
         }
         ContentNode::Math { content, style, .. } => {
             let scale = style.font_size_multiplier.unwrap_or(1.0);
@@ -3837,6 +3961,58 @@ mod tests {
             epub_table_cell_width(placements[1][0], &widths) - 2.0 * EPUB_TABLE_CELL_PADDING;
         assert!((measured - painted).abs() < 0.001);
         assert!((widths.iter().sum::<f32>() + 2.0 * BLOCKQUOTE_SPACING - 600.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn malicious_aggregate_colspans_are_clamped_to_the_bounded_grid() {
+        use shosai_core::epub::render::{TableRow, TableRowGroup, TableRowGroupKind};
+        let mut cell = table_test_cell("wide", None);
+        cell.column_span = u16::MAX;
+        let row_groups = vec![TableRowGroup {
+            kind: TableRowGroupKind::Body,
+            rows: vec![TableRow {
+                cells: vec![cell; 300],
+            }],
+        }];
+        let placements = epub_table_cell_placements(&row_groups);
+        assert_eq!(epub_table_column_count(&row_groups), MAX_EPUB_TABLE_COLUMNS);
+        assert!(
+            placements[0]
+                .iter()
+                .all(|cell| cell.column + cell.span <= MAX_EPUB_TABLE_COLUMNS)
+        );
+        assert_eq!(
+            placements[0].last().unwrap(),
+            &EpubTableCellPlacement {
+                column: 255,
+                span: 1
+            }
+        );
+    }
+
+    #[test]
+    fn tall_rowspan_geometry_combines_rows_and_keeps_later_cells_beside_it() {
+        use shosai_core::epub::render::{TableRow, TableRowGroup, TableRowGroupKind};
+        let mut spanning = table_test_cell("span", None);
+        spanning.row_span = 2;
+        let groups = vec![TableRowGroup {
+            kind: TableRowGroupKind::Body,
+            rows: vec![
+                TableRow {
+                    cells: vec![spanning, table_test_cell("right", None)],
+                },
+                TableRow {
+                    cells: vec![table_test_cell("below right", None)],
+                },
+            ],
+        }];
+        let widths = epub_table_column_widths(&groups, 360.0);
+        let geometry = epub_table_geometry(&groups, &widths, |cell, _| {
+            if cell.row_span == 2 { 100.0 } else { 20.0 }
+        });
+        assert!((geometry.cells[0][0].height - geometry.height).abs() < 0.001);
+        assert_eq!(geometry.cells[1][0].x, geometry.cells[0][1].x);
+        assert!(geometry.cells[1][0].y > geometry.cells[0][1].y);
     }
 
     #[test]

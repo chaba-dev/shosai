@@ -436,7 +436,13 @@ fn render_content_node<'a>(
                 (table_width - style.margin_left_em.unwrap_or(0.0) * font_size).max(1.0);
             let column_widths =
                 crate::epub::epub_table_column_widths(row_groups, table_content_width);
-            let placements = crate::epub::epub_table_cell_placements(row_groups);
+            let geometry = crate::epub::epub_table_geometry_bounded(
+                row_groups,
+                &column_widths,
+                (available_height.unwrap_or(f32::MAX) / (font_size * 1.2)).max(1.0) as usize,
+                font_size,
+                available_height.unwrap_or(f32::MAX),
+            );
             let mut table_offset = text_offset;
             if !caption.is_empty() {
                 let caption_style = caption_style.as_ref().unwrap_or(style);
@@ -458,22 +464,20 @@ fn render_content_node<'a>(
                 ));
                 table_offset += spans_text_len(caption) + 1;
             }
-            for (table_row, row_placements) in row_groups
+            let mut grid = iced::widget::Stack::new().push(
+                iced::widget::Space::new()
+                    .width(table_content_width)
+                    .height(geometry.height),
+            );
+            for ((table_row, row_geometry), _row_index) in row_groups
                 .iter()
                 .flat_map(|group| &group.rows)
-                .zip(&placements)
+                .zip(&geometry.cells)
+                .zip(0..)
             {
-                let mut rendered_row = row![].spacing(EPUB_BLOCKQUOTE_SPACING);
-                let mut previous_column_end = 0;
-                for (cell_index, (cell, placement)) in
-                    table_row.cells.iter().zip(row_placements).enumerate()
+                for (cell_index, (cell, cell_geometry)) in
+                    table_row.cells.iter().zip(row_geometry).enumerate()
                 {
-                    if placement.column > previous_column_end {
-                        let skipped = &column_widths[previous_column_end..placement.column];
-                        let width = skipped.iter().sum::<f32>()
-                            + EPUB_BLOCKQUOTE_SPACING * skipped.len().saturating_sub(1) as f32;
-                        rendered_row = rendered_row.push(iced::widget::Space::new().width(width));
-                    }
                     let mut rendered_cell = column![].spacing(EPUB_TABLE_CELL_SPACING);
                     for (child_index, child) in cell.children.iter().enumerate() {
                         if cell.block_starts.contains(&child_index) {
@@ -486,7 +490,10 @@ fn render_content_node<'a>(
                             palette,
                             image_handles,
                             fill_images,
-                            crate::epub::epub_table_cell_content_width(*placement, &column_widths),
+                            crate::epub::epub_table_cell_content_width(
+                                cell_geometry.placement,
+                                &column_widths,
+                            ),
                             available_height,
                             table_offset,
                             highlights,
@@ -496,34 +503,34 @@ fn render_content_node<'a>(
                         table_offset += content_node_text_len(child);
                     }
                     let header = cell.header;
-                    rendered_row = rendered_row.push(
-                        container(rendered_cell)
-                            .width(Length::Fixed(crate::epub::epub_table_cell_width(
-                                *placement,
-                                &column_widths,
-                            )))
-                            .padding(EPUB_TABLE_CELL_PADDING)
-                            .clip(true)
-                            .style(move |_| container::Style {
-                                background: header.then_some(iced::Background::Color(
-                                    palette.table_header_background,
-                                )),
-                                border: iced::Border {
-                                    color: palette.table_header_border,
-                                    width: if header { 1.0 } else { 0.0 },
-                                    ..Default::default()
-                                },
-                                ..container::Style::default()
-                            }),
-                    );
+                    let painted_cell = container(rendered_cell)
+                        .width(Length::Fixed(cell_geometry.width))
+                        .height(Length::Fixed(cell_geometry.height))
+                        .padding(EPUB_TABLE_CELL_PADDING)
+                        .clip(true)
+                        .style(move |_| container::Style {
+                            background: header.then_some(iced::Background::Color(
+                                palette.table_header_background,
+                            )),
+                            border: iced::Border {
+                                color: palette.table_header_border,
+                                width: if header { 1.0 } else { 0.0 },
+                                ..Default::default()
+                            },
+                            ..container::Style::default()
+                        });
+                    grid = grid.push(container(painted_cell).padding(iced::Padding {
+                        top: cell_geometry.y,
+                        left: cell_geometry.x,
+                        ..iced::Padding::ZERO
+                    }));
                     if cell_index + 1 < table_row.cells.len() {
                         table_offset += 1;
                     }
-                    previous_column_end = placement.column + placement.span;
                 }
-                table = table.push(rendered_row);
                 table_offset += 1;
             }
+            table = table.push(grid);
             let mut table = container(table).width(Length::Fixed(table_width));
             if let Some(margin) = style.margin_left_em {
                 table = table.padding(iced::Padding {
