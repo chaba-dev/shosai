@@ -1328,12 +1328,17 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             let relocated_tab = state.tabs[index].clone();
             restore_reader_tab(state, relocated_tab);
             let retained_zoom = state.zoom;
+            let retained_page = state.current_page;
+            let retained_epub_offset = state.epub_offset;
             state.active_tab = Some(index);
             state.continuous_activation = state.continuous_activation.wrapping_add(1);
             state.open_error = None;
             state.missing_book_id = None;
             install_document(state, path, book_id, document);
             state.zoom = retained_zoom;
+            state.current_page = retained_page.min(state.total_pages.saturating_sub(1));
+            state.epub_offset = retained_epub_offset;
+            state.page_input = format!("{}", state.current_page + 1);
             state.display_title = display_title;
             let task = refresh_content(state);
             if let Some(tab) = capture_reader_tab(state) {
@@ -8433,6 +8438,8 @@ mod tests {
         state.storage_initializing = false;
 
         let _ = open_document(&mut state, first, Some(42));
+        state.current_page = 1;
+        state.epub_offset = 25;
         state.font_size = 22.0;
         state.line_spacing = 1.8;
         state.theme = ReaderTheme::Dark;
@@ -8456,6 +8463,7 @@ mod tests {
         assert_eq!(state.line_spacing, 1.8);
         assert_eq!(state.theme, ReaderTheme::Dark);
         assert_eq!(state.reading_mode, ReadingMode::Continuous);
+        assert_eq!((state.current_page, state.epub_offset), (1, 25));
         assert!(state.reader_overrides.reading_mode);
         assert!(state.reader_overrides.theme);
         assert!(state.reader_overrides.epub_font_size);
