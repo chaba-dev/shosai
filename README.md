@@ -36,6 +36,17 @@ make test
 make check-rfds
 ```
 
+`make dev` stores its isolated database, preferences, and default managed book
+copies in `target/shosai-dev`; packaged releases use the platform `shosai` data
+directory. Deleting `target` or running `cargo clean` therefore also clears the
+default development state. With the development app closed, `make reset` removes
+only the ownership-marked `target/shosai-dev` state. Production data and books
+referenced from their current location are preserved. Copied books in an external
+development managed-library folder are removed only when it contains
+`.shosai-storage-profile` with the exact value `shosai-development-v1`; the folder
+itself and unrelated files in it are preserved. Reset fails safely if that marker
+is absent or does not match.
+
 The project is a Cargo workspace:
 
 - `crates/shosai-core` contains document formats, library storage, and reader logic.

@@ -4,7 +4,9 @@ use std::sync::Arc;
 use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
-use shosai_core::library::{Book, BookPage, ImportReport};
+use shosai_core::library::{
+    Book, BookPage, ImportDiscovery, ImportFailure, ImportReport, PreparedManagedImport,
+};
 use shosai_core::search::SearchMatch;
 
 use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
@@ -89,14 +91,36 @@ pub enum Message {
     CancelAddBooks,
     ChooseBookFiles,
     ChooseBookFolder,
-    AddBookFilesSelected(Vec<PathBuf>),
-    AddBookFolderSelected(Option<PathBuf>),
+    AddBookFilesSelected {
+        generation: u64,
+        paths: Vec<PathBuf>,
+    },
+    AddBookFolderSelected {
+        generation: u64,
+        path: Option<PathBuf>,
+    },
+    BooksDiscovered {
+        generation: u64,
+        discovery: ImportDiscovery,
+    },
+    AddBooksReviewSearchChanged(String),
+    AddBooksReviewScrolled {
+        generation: u64,
+        revision: u64,
+        offset: f32,
+        viewport_height: f32,
+    },
+    ToggleStagedBook(usize, bool),
+    SelectAllStagedBooks(bool),
+    SelectAddBooksStorage(bool),
     ClearAddBooksSelection,
     ChangeAddBooksStorage,
-    AddSelectedBooks {
-        copy: bool,
+    AddSelectedBooks,
+    ManagedBookPrepared {
+        index: usize,
+        result: Result<(PathBuf, Arc<PreparedManagedImport>), ImportFailure>,
     },
-    BooksAdded(ImportReport),
+    BookAddedToBatch(ImportReport),
     OpenLibraryBook(i64, String),
     LocateBook(i64),
     RelinkBookSelected(i64, Option<PathBuf>),

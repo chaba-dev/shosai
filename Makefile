@@ -1,8 +1,14 @@
-.PHONY: dev lint fmt test test-scripts check-rfds changelog next-version
+.PHONY: dev reset lint fmt test test-scripts check-rfds changelog next-version
+
+DEV_DATA_HOME := $(CURDIR)/target
 
 ## Run the application in debug mode
 dev:
-	SHOSAI_DEV_BUILD=1 cargo run -p shosai-app
+	XDG_DATA_HOME="$(DEV_DATA_HOME)" SHOSAI_DEV_BUILD=1 cargo run -p shosai-app
+
+## Delete development-only Shosai data and development-owned managed copies
+reset:
+	@XDG_DATA_HOME="$(DEV_DATA_HOME)" python3 scripts/reset-local-data.py
 
 ## Run clippy lints on the workspace
 lint:

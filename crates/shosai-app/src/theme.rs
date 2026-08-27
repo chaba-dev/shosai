@@ -342,12 +342,6 @@ pub fn bookmark_link(_theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-pub fn activity_bar(active: bool) -> impl Fn(&Theme) -> container::Style {
-    move |_theme| {
-        container::Style::default().background(if active { ACCENT } else { Color::TRANSPARENT })
-    }
-}
-
 pub fn skeleton(_theme: &Theme) -> container::Style {
     container::Style::default()
         .background(SURFACE_MUTED)

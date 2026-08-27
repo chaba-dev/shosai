@@ -1,5 +1,8 @@
 use shosai_core::bookmarks::BookmarkStore;
-use shosai_core::library::{BookFormat, Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind};
+use shosai_core::library::{
+    BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, Library,
+    MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
+};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -229,6 +232,307 @@ async fn test_import_directory() {
     let report = lib.import_directory(&import_dir).await;
     assert_eq!(report.books.len(), 2);
     assert!(report.failures.is_empty());
+}
+
+#[tokio::test]
+async fn discovery_groups_exact_filename_stems_without_importing() {
+    let (lib, _, dir) = temp_library().await;
+    let import_dir = dir.path().join("imports");
+    std::fs::create_dir_all(&import_dir).unwrap();
+    std::fs::copy(
+        fixture_path("sample.pdf"),
+        import_dir.join("Learning Rust.pdf"),
+    )
+    .unwrap();
+    std::fs::copy(
+        fixture_path("sample.epub"),
+        import_dir.join("Learning   Rust.epub"),
+    )
+    .unwrap();
+    std::fs::write(import_dir.join("notes.txt"), "not a book").unwrap();
+
+    let discovery = lib.discover_directory(&import_dir).await;
+
+    assert_eq!(discovery.candidates.len(), 2);
+    assert!(discovery.failures.is_empty());
+    assert_eq!(discovery.candidates[0].group_key, "learning rust");
+    assert_eq!(discovery.candidates[1].group_key, "learning rust");
+    assert_ne!(
+        discovery.candidates[0].format,
+        discovery.candidates[1].format
+    );
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn discovery_marks_books_already_in_the_library() {
+    let (lib, _, _dir) = temp_library().await;
+    let book = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
+
+    let discovery = lib.discover_files(&[fixture_path("sample.pdf")]).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(
+        discovery.candidates[0].duplicate,
+        Some(ImportDuplicate::ExistingBook {
+            book_id: book.id,
+            title: book.title,
+        })
+    );
+}
+
+#[tokio::test]
+async fn same_content_duplicates_choose_the_lowest_referenced_book_id() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.pdf");
+    let second = dir.path().join("second.pdf");
+    let third = dir.path().join("third.pdf");
+    for path in [&first, &second, &third] {
+        std::fs::copy(fixture_path("sample.pdf"), path).unwrap();
+    }
+    let first_book = lib.import_file(&first).await.unwrap();
+    let second_book = lib.import_file(&second).await.unwrap();
+    assert!(first_book.id < second_book.id);
+
+    let discovery = lib.discover_files(std::slice::from_ref(&third)).await;
+
+    assert_eq!(
+        discovery.candidates[0].duplicate,
+        Some(ImportDuplicate::ExistingBook {
+            book_id: first_book.id,
+            title: first_book.title,
+        })
+    );
+}
+
+#[tokio::test]
+async fn discovery_marks_repeated_content_in_the_selection() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("a.pdf");
+    let second = dir.path().join("b.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &second).unwrap();
+
+    let discovery = lib.discover_files(&[second.clone(), first.clone()]).await;
+
+    assert_eq!(discovery.candidates.len(), 2);
+    assert!(discovery.candidates[0].duplicate.is_none());
+    assert_eq!(
+        discovery.candidates[1].duplicate,
+        Some(ImportDuplicate::SelectedFile {
+            path: first.canonicalize().unwrap(),
+        })
+    );
+}
+
+#[tokio::test]
+async fn discovery_failure_order_is_stable() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("a.pdf");
+    let second = dir.path().join("z.epub");
+
+    let forward = lib.discover_files(&[first.clone(), second.clone()]).await;
+    let reverse = lib.discover_files(&[second.clone(), first.clone()]).await;
+
+    let forward_paths: Vec<_> = forward
+        .failures
+        .iter()
+        .map(|failure| &failure.path)
+        .collect();
+    let reverse_paths: Vec<_> = reverse
+        .failures
+        .iter()
+        .map(|failure| &failure.path)
+        .collect();
+    assert_eq!(forward_paths, vec![&first, &second]);
+    assert_eq!(reverse_paths, forward_paths);
+}
+
+#[tokio::test]
+async fn discovery_groups_unicode_equivalent_stems() {
+    let (lib, _, dir) = temp_library().await;
+    let paths = [
+        ("Straße.pdf", "sample.pdf"),
+        ("STRASSE.epub", "sample.epub"),
+        ("か\u{3099}.pdf", "sample.pdf"),
+        ("が.epub", "sample.epub"),
+    ]
+    .map(|(name, fixture)| {
+        let path = dir.path().join(name);
+        std::fs::copy(fixture_path(fixture), &path).unwrap();
+        path
+    });
+
+    let discovery = lib.discover_files(&paths).await;
+
+    let mut keys: Vec<_> = discovery
+        .candidates
+        .iter()
+        .map(|candidate| candidate.group_key.as_str())
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["strasse", "strasse", "が", "が"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_skips_non_regular_files() {
+    use std::os::unix::net::UnixListener;
+
+    let (lib, _, dir) = temp_library().await;
+    let socket_path = dir.path().join("not-a-book.pdf");
+    let _listener = UnixListener::bind(&socket_path).unwrap();
+
+    let discovery = lib.discover_directory(dir.path()).await;
+
+    assert!(discovery.candidates.is_empty());
+    assert!(discovery.failures.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn discovery_uses_a_symlink_targets_format_and_path() {
+    use std::os::unix::fs::symlink;
+
+    let (lib, _, dir) = temp_library().await;
+    let target = dir.path().join("actual.epub");
+    let alias = dir.path().join("misleading.pdf");
+    std::fs::copy(fixture_path("sample.epub"), &target).unwrap();
+    symlink(&target, &alias).unwrap();
+
+    let discovery = lib.discover_files(&[alias]).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(discovery.candidates[0].format, BookFormat::Epub);
+    assert_eq!(discovery.candidates[0].path, target.canonicalize().unwrap());
+    assert_eq!(discovery.candidates[0].title, "actual");
+}
+
+#[tokio::test]
+async fn discovered_import_rejects_a_file_changed_after_review() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("changing.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let discovery = lib.discover_files(std::slice::from_ref(&source)).await;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&source)
+        .unwrap();
+    file.write_all(b"changed after review").unwrap();
+
+    let linked = lib.link_discovered_files(&discovery.candidates).await;
+    let copied = lib.import_discovered_files(&discovery.candidates).await;
+
+    assert!(linked.books.is_empty());
+    assert_eq!(linked.failures.len(), 1);
+    assert!(linked.failures[0].error.contains("changed after review"));
+    assert!(copied.books.is_empty());
+    assert_eq!(copied.failures.len(), 1);
+    assert!(copied.failures[0].error.contains("changed after review"));
+    assert!(lib.list_all().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn discovered_referenced_duplicate_rejects_a_file_changed_after_review() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("changing.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    lib.import_file(&source).await.unwrap();
+    let discovery = lib.discover_files(std::slice::from_ref(&source)).await;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&source)
+        .unwrap();
+    file.write_all(b"changed after review").unwrap();
+
+    let linked = lib.link_discovered_files(&discovery.candidates).await;
+
+    assert!(linked.books.is_empty());
+    assert_eq!(linked.failures.len(), 1);
+    assert!(linked.failures[0].error.contains("changed after review"));
+}
+
+#[tokio::test]
+async fn managed_import_preparation_is_concurrent_safe_and_does_not_mutate_the_library() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("first.epub");
+    let second = dir.path().join("second.epub");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+    let mut candidates = lib.discover_files(&[first, second]).await.candidates;
+    let second_candidate = candidates.pop().unwrap();
+    let first_candidate = candidates.pop().unwrap();
+
+    let (first_prepared, second_prepared) = tokio::join!(
+        lib.prepare_discovered_managed_file(first_candidate),
+        lib.prepare_discovered_managed_file(second_candidate),
+    );
+    let first_prepared = first_prepared.unwrap();
+    let second_prepared = second_prepared.unwrap();
+
+    assert!(lib.list_all().await.unwrap().is_empty());
+    let first_book = lib
+        .commit_prepared_managed_file(&first_prepared)
+        .await
+        .unwrap();
+    let second_book = lib
+        .commit_prepared_managed_file(&second_prepared)
+        .await
+        .unwrap();
+
+    assert_eq!(first_book.id, second_book.id);
+    assert_eq!(lib.list_all().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cancelled_discovery_stops_before_scanning_candidates() {
+    let (lib, _, _dir) = temp_library().await;
+    let cancellation = ImportCancellation::default();
+    cancellation.cancel();
+
+    let discovery = lib
+        .discover_files_cancellable(vec![fixture_path("sample.epub")], cancellation)
+        .await;
+
+    assert!(discovery.candidates.is_empty());
+    assert!(discovery.failures.is_empty());
+}
+
+#[tokio::test]
+async fn discovery_progress_counts_supported_files_through_completion() {
+    let (lib, _, dir) = temp_library().await;
+    let first = dir.path().join("book.epub");
+    let second = dir.path().join("book.pdf");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &second).unwrap();
+    for index in 3..=6 {
+        std::fs::copy(
+            fixture_path("sample.epub"),
+            dir.path().join(format!("book-{index}.epub")),
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.path().join("notes.txt"), b"ignored").unwrap();
+    let progress = ImportDiscoveryProgress::default();
+
+    let discovery = lib
+        .discover_directory_with_progress(
+            dir.path().to_path_buf(),
+            ImportCancellation::default(),
+            progress.clone(),
+        )
+        .await;
+
+    assert_eq!(discovery.candidates.len(), 6);
+    let snapshot = progress.snapshot();
+    assert!(!snapshot.enumerating);
+    assert_eq!(snapshot.total_files, 6);
+    assert_eq!(snapshot.hashed_files, 6);
+    assert_eq!(snapshot.completed_files, 6);
 }
 
 #[tokio::test]
@@ -570,15 +874,22 @@ async fn concurrent_identical_managed_imports_return_the_same_book() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("first.epub");
     let second = dir.path().join("second.epub");
+    let third = dir.path().join("third.epub");
+    let fourth = dir.path().join("fourth.epub");
     std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
     std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &third).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &fourth).unwrap();
 
-    let (first_result, second_result) = tokio::join!(
+    let results = tokio::join!(
         lib.import_managed_file(&first),
-        lib.import_managed_file(&second)
+        lib.import_managed_file(&second),
+        lib.import_managed_file(&third),
+        lib.import_managed_file(&fourth),
     );
 
-    assert_eq!(first_result.unwrap().id, second_result.unwrap().id);
+    let ids = [results.0, results.1, results.2, results.3].map(|result| result.unwrap().id);
+    assert!(ids.iter().all(|id| *id == ids[0]));
     assert_eq!(lib.list_all().await.unwrap().len(), 1);
 }
 

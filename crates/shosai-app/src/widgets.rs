@@ -1,4 +1,4 @@
-use iced::widget::{Button, ProgressBar, button, container, progress_bar, row, text};
+use iced::widget::{Button, ProgressBar, button, progress_bar, text};
 use iced::{Element, Font, Length};
 
 use crate::theme;
@@ -36,26 +36,6 @@ pub fn navigation_button<'a, Message: Clone + 'a>(
         .padding([9, 12])
         .width(Length::Fill)
         .style(theme::navigation_button(selected))
-}
-
-pub fn activity_bar<'a, Message: 'a>(active: bool, progress: f32) -> Element<'a, Message> {
-    let leading = (progress.clamp(0.0, 1.0) * 800.0).round() as u16;
-    let trailing = 800 - leading;
-    let mut line = row![].height(2);
-    if leading > 0 {
-        line = line.push(iced::widget::Space::new().width(Length::FillPortion(leading)));
-    }
-    line = line.push(
-        container(iced::widget::Space::new())
-            .width(Length::FillPortion(200))
-            .height(2)
-            .style(theme::activity_bar(active)),
-    );
-    if trailing > 0 {
-        line = line.push(iced::widget::Space::new().width(Length::FillPortion(trailing)));
-    }
-
-    container(line).width(Length::Fill).height(2).into()
 }
 
 pub fn book_button<'a, Message: Clone + 'a>(

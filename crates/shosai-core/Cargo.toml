@@ -11,7 +11,7 @@ bytes.workspace = true
 percent-encoding.workspace = true
 pdfium-render = { version = "0.8", features = ["thread_safe", "sync", "image"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "macros", "sync"] }
 zip = { version = "8.4.0", default-features = false, features = ["deflate"] }
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 roxmltree = "0.21.1"
@@ -26,6 +26,7 @@ wuff = { version = "=0.2.8", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["default-formats"] }
 natord = "1.0.9"
 unicode-casefold = "0.2.0"
+unicode-normalization = "0.1.25"
 sha2 = "0.10.9"
 
 [dev-dependencies]
