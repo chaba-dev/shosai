@@ -956,6 +956,34 @@ fn parse_block_children(
                 }
             }
 
+            "svg" => {
+                let mut images = child.descendants().filter(|node| {
+                    node.is_element()
+                        && node.tag_name().name() == "image"
+                        && styles.get(*node).is_some_and(|style| {
+                            style.display != super::computed_style::DisplayRole::None
+                        })
+                });
+                if let Some(image) = images.next()
+                    && images.next().is_none()
+                    && let Some(href) = image
+                        .attributes()
+                        .find(|attribute| attribute.name() == "href")
+                        .map(|attribute| attribute.value())
+                    && let Some(src) = resolve_relative(base_path, href)
+                {
+                    nodes.push(ContentNode::Image {
+                        src,
+                        alt: image.attribute("aria-label").unwrap_or("").to_string(),
+                        style: node_style,
+                        caption: Vec::new(),
+                        caption_style: None,
+                        intrinsic_size: None,
+                        kind: None,
+                    });
+                }
+            }
+
             "hr" => {
                 nodes.push(ContentNode::HorizontalRule);
             }
@@ -3024,6 +3052,17 @@ mod tests {
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn svg_wrapped_cover_image_is_preserved() {
+        let xhtml = r#"<html xmlns="http://www.w3.org/1999/xhtml"><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 550 690" xmlns:xlink="http://www.w3.org/1999/xlink"><image width="550" height="690" xlink:href="../Images/cover.jpeg"/></svg></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OEBPS/Text", &Default::default());
+
+        assert!(matches!(
+            nodes.as_slice(),
+            [ContentNode::Image { src, .. }] if src == "OEBPS/Images/cover.jpeg"
+        ));
     }
 
     #[test]
