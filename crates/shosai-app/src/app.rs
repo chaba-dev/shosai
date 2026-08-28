@@ -324,6 +324,7 @@ const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
 const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
+const SEARCH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
@@ -8345,6 +8346,37 @@ mod tests {
         assert_eq!(state.library_books.len(), 1);
     }
 
+    #[tokio::test]
+    async fn library_search_waits_for_the_latest_debounce_before_querying() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.library_loading = false;
+
+        let debounce = update(
+            &mut state,
+            Message::LibrarySearchChanged("machine".to_string()),
+        );
+        let generation = state.library_generation;
+
+        assert!(debounce.units() > 0);
+        assert!(!state.library_loading);
+        assert_eq!(
+            update(&mut state, Message::LibrarySearchDebounced(generation - 1)).units(),
+            0
+        );
+
+        let query = update(&mut state, Message::LibrarySearchDebounced(generation));
+        assert!(query.units() > 0);
+        assert!(state.library_loading);
+    }
+
     #[test]
     fn library_covers_are_decoded_once_and_installed_with_the_page() {
         let (mut state, _) = boot();
@@ -10156,6 +10188,46 @@ mod tests {
         assert_eq!(state.search_query, "new");
         assert!(state.search_results.is_empty());
         assert_eq!(state.search_current, 0);
+    }
+
+    #[test]
+    fn document_search_runs_only_after_the_latest_debounce() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let debounce = update(
+            &mut state,
+            Message::SearchQueryChanged("sample".to_string()),
+        );
+        let query_generation = state.search_query_generation;
+        let document_generation = state.search_document_generation;
+
+        assert!(debounce.units() > 0);
+        assert_eq!(
+            update(
+                &mut state,
+                Message::SearchQueryDebounced {
+                    tab_id: 1,
+                    document_generation,
+                    query_generation: query_generation - 1,
+                },
+            )
+            .units(),
+            0
+        );
+
+        let search = update(
+            &mut state,
+            Message::SearchQueryDebounced {
+                tab_id: 1,
+                document_generation,
+                query_generation,
+            },
+        );
+        assert!(search.units() > 0);
     }
 
     #[test]

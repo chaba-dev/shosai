@@ -141,6 +141,7 @@ pub enum Message {
         result: Result<(), String>,
     },
     LibrarySearchChanged(String),
+    LibrarySearchDebounced(u64),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
     SelectLanguage(crate::i18n::LanguagePreference),
@@ -187,6 +188,11 @@ pub enum Message {
     // In-document search
     ToggleSearchBar,
     SearchQueryChanged(String),
+    SearchQueryDebounced {
+        tab_id: u64,
+        document_generation: u64,
+        query_generation: u64,
+    },
     SearchTextExtracted {
         tab_id: u64,
         document_generation: u64,

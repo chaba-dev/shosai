@@ -1106,7 +1106,29 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::LibrarySearchChanged(query) => {
             state.library_search = query;
-            return reset_library(state);
+            state.library_generation = state.library_generation.wrapping_add(1);
+            let generation = state.library_generation;
+            state.library_loading = false;
+            return Task::perform(
+                async move {
+                    tokio::time::sleep(SEARCH_DEBOUNCE).await;
+                    generation
+                },
+                Message::LibrarySearchDebounced,
+            );
+        }
+
+        Message::LibrarySearchDebounced(generation) => {
+            if generation != state.library_generation {
+                return Task::none();
+            }
+            state.library_offset = 0;
+            state.library_has_more = false;
+            state.book_menu = None;
+            state.pending_remove_book = None;
+            state.library_error = None;
+            state.library_activity_progress = 0.0;
+            return load_library_page(state, false);
         }
 
         Message::LibraryFilterChanged(filter) => {
@@ -1505,9 +1527,41 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_current = 0;
             let render_task = refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
             if !state.search_query.is_empty() {
-                return Task::batch([render_task, perform_search(state)]);
+                let Some(tab_id) = state.active_tab_id else {
+                    return render_task;
+                };
+                let document_generation = state.search_document_generation;
+                let query_generation = state.search_query_generation;
+                let debounce = Task::perform(
+                    async move {
+                        tokio::time::sleep(SEARCH_DEBOUNCE).await;
+                        (tab_id, document_generation, query_generation)
+                    },
+                    |(tab_id, document_generation, query_generation)| {
+                        Message::SearchQueryDebounced {
+                            tab_id,
+                            document_generation,
+                            query_generation,
+                        }
+                    },
+                );
+                return Task::batch([render_task, debounce]);
             }
             return render_task;
+        }
+
+        Message::SearchQueryDebounced {
+            tab_id,
+            document_generation,
+            query_generation,
+        } => {
+            if state.active_tab_id == Some(tab_id)
+                && state.search_document_generation == document_generation
+                && state.search_query_generation == query_generation
+                && !state.search_query.is_empty()
+            {
+                return perform_search(state);
+            }
         }
 
         Message::SearchTextExtracted {
