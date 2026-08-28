@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,7 +10,9 @@ use shosai_core::library::{
 };
 use shosai_core::search::SearchMatch;
 
-use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
+use super::{
+    ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey, RasterImageHandle,
+};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -82,6 +85,7 @@ pub enum Message {
         offset: usize,
         next_offset: usize,
         page: BookPage,
+        cover_handles: HashMap<i64, RasterImageHandle>,
     },
     OpenAddBooks,
     CancelAddBooks,

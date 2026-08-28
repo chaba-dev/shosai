@@ -182,7 +182,7 @@ fn import_report_error(report: &ImportReport, i18n: &I18n) -> Option<AppError> {
 }
 
 #[derive(Clone)]
-struct RasterImageHandle(image::Handle);
+pub(crate) struct RasterImageHandle(image::Handle);
 
 impl std::fmt::Debug for RasterImageHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -322,6 +322,8 @@ struct LibraryMovePlan {
 
 const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
+const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
+const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
@@ -713,6 +715,7 @@ pub struct State {
 
     // -- Library state --
     library_books: Vec<Book>,
+    library_cover_handles: HashMap<i64, RasterImageHandle>,
     library_search: String,
     library_filter: Option<shosai_core::library::BookFormat>,
     library_has_more: bool,
@@ -846,6 +849,7 @@ pub fn boot() -> (State, Task<Message>) {
         search_query_generation: 0,
 
         library_books: Vec::new(),
+        library_cover_handles: HashMap::new(),
         library_search: String::new(),
         library_filter: None,
         library_has_more: false,
@@ -1010,21 +1014,55 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
 
     Task::perform(
         async move {
-            library
+            let page = library
                 .page(Some(&search), filter, LIBRARY_PAGE_SIZE, offset as u32)
                 .await
                 .unwrap_or(BookPage {
                     books: Vec::new(),
                     has_more: false,
-                })
+                });
+            tokio::task::spawn_blocking(move || {
+                let covers = page
+                    .books
+                    .iter()
+                    .filter_map(|book| {
+                        decode_library_cover(book.cover.as_deref()).map(|cover| (book.id, cover))
+                    })
+                    .collect();
+                (page, covers)
+            })
+            .await
+            .unwrap_or_else(|_| {
+                (
+                    BookPage {
+                        books: Vec::new(),
+                        has_more: false,
+                    },
+                    HashMap::new(),
+                )
+            })
         },
-        move |page| Message::LibraryLoaded {
+        move |(page, cover_handles)| Message::LibraryLoaded {
             generation,
             offset,
             next_offset: offset + page.books.len(),
             page,
+            cover_handles,
         },
     )
+}
+
+fn decode_library_cover(data: Option<&[u8]>) -> Option<RasterImageHandle> {
+    let image = ::image::load_from_memory(data?)
+        .ok()?
+        .thumbnail(LIBRARY_COVER_MAX_WIDTH, LIBRARY_COVER_MAX_HEIGHT);
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some(RasterImageHandle(image::Handle::from_rgba(
+        width,
+        height,
+        rgba.into_raw(),
+    )))
 }
 
 fn reset_library(state: &mut State) -> Task<Message> {
@@ -5269,7 +5307,7 @@ fn library_search_input_id() -> iced::widget::Id {
 fn render_book_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Message> {
     let file_path = book.file_path.clone();
     let book_id = book.id;
-    let cover = render_book_cover(book, Length::Fill, 210.0);
+    let cover = render_book_cover(state, book, Length::Fill, 210.0);
     let title_text = text(book.title.clone())
         .size(13)
         .wrapping(iced::widget::text::Wrapping::WordOrGlyph);
@@ -5405,7 +5443,7 @@ fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Mes
     .height(100)
     .width(Length::Fill);
     let content = row![
-        render_book_cover(book, Length::Fixed(72.0), 100.0),
+        render_book_cover(state, book, Length::Fixed(72.0), 100.0),
         details,
         text(state.i18n.text("continue"))
             .size(13)
@@ -5425,14 +5463,14 @@ fn render_continue_card<'a>(state: &'a State, book: &'a Book) -> Element<'a, Mes
     .into()
 }
 
-fn render_book_cover(book: &Book, width: Length, height: f32) -> Element<'_, Message> {
-    if let Some(ref cover_data) = book.cover
-        && let Ok(img) = ::image::load_from_memory(cover_data)
-    {
-        let rgba = img.to_rgba8();
-        let (w, h) = rgba.dimensions();
-        let handle = image::Handle::from_rgba(w, h, rgba.into_raw());
-        return image(handle)
+fn render_book_cover<'a>(
+    state: &'a State,
+    book: &'a Book,
+    width: Length,
+    height: f32,
+) -> Element<'a, Message> {
+    if let Some(handle) = state.library_cover_handles.get(&book.id) {
+        return image(handle.0.clone())
             .width(width)
             .height(Length::Fixed(height))
             .content_fit(iced::ContentFit::Contain)
@@ -7285,6 +7323,7 @@ mod tests {
                     books: vec![test_book(1)],
                     has_more: false,
                 },
+                cover_handles: HashMap::new(),
             },
         );
 
@@ -8254,6 +8293,37 @@ mod tests {
     }
 
     #[test]
+    fn library_covers_are_decoded_once_and_installed_with_the_page() {
+        let (mut state, _) = boot();
+        let generation = state.library_generation;
+        let cover = decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
+            .expect("application icon should decode as a cover");
+        let cover_id = cover.0.id();
+
+        let _ = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation,
+                offset: 0,
+                next_offset: 1,
+                page: BookPage {
+                    books: vec![test_book(1)],
+                    has_more: false,
+                },
+                cover_handles: HashMap::from([(1, cover)]),
+            },
+        );
+
+        assert_eq!(state.library_cover_handles[&1].0.id(), cover_id);
+    }
+
+    #[test]
+    fn malformed_library_cover_is_rejected_before_view_construction() {
+        assert!(decode_library_cover(Some(b"not an image")).is_none());
+        assert!(decode_library_cover(None).is_none());
+    }
+
+    #[test]
     fn library_activity_advances_only_while_loading() {
         let (mut state, _) = boot();
 
@@ -8302,6 +8372,7 @@ mod tests {
                     books: vec![test_book(1)],
                     has_more: false,
                 },
+                cover_handles: HashMap::new(),
             },
         );
 
@@ -8381,6 +8452,7 @@ mod tests {
                     books: Vec::new(),
                     has_more: false,
                 },
+                cover_handles: HashMap::new(),
             },
         );
 
@@ -8411,6 +8483,7 @@ mod tests {
                     books: vec![test_book(2)],
                     has_more: false,
                 },
+                cover_handles: HashMap::new(),
             },
         );
 

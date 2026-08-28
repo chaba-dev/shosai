@@ -593,14 +593,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             offset,
             next_offset,
             page,
+            cover_handles,
         } => {
             if generation != state.library_generation || offset != state.library_offset {
                 return Task::none();
             }
             if offset > 0 {
                 state.library_books.extend(page.books);
+                state.library_cover_handles.extend(cover_handles);
             } else {
                 state.library_books = page.books;
+                state.library_cover_handles = cover_handles;
             }
             state.library_offset = next_offset;
             state.library_has_more = page.has_more;
@@ -1011,6 +1014,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(()) => {
                     state.library_books.retain(|book| book.id != id);
+                    state.library_cover_handles.remove(&id);
                     let mut detached_paths = BTreeSet::new();
                     let mut detached_saves = Vec::new();
                     if state.book_id == Some(id) {
