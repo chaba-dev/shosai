@@ -7,6 +7,7 @@
 //! Uses sqlx with SQLite so the same database can be extended for library
 //! management in future phases.
 
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
@@ -343,6 +344,17 @@ impl ReadingStateStore {
             .ok()
             .flatten()
             .map(|row| row.get::<String, _>("value"))
+    }
+
+    /// Get all stored preferences in one query.
+    pub async fn get_prefs_async(&self) -> HashMap<String, String> {
+        sqlx::query("SELECT key, value FROM preferences")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| (row.get::<String, _>("key"), row.get::<String, _>("value")))
+            .collect()
     }
 
     /// Set a stored preference value.

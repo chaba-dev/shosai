@@ -918,11 +918,17 @@ pub fn boot() -> (State, Task<Message>) {
             let store = ReadingStateStore::open_async()
                 .await
                 .map_err(|error| error.to_string())?;
+            let preferences = store.get_prefs_async().await;
+            let pref_int = |key: &str| {
+                preferences
+                    .get(key)
+                    .and_then(|value| value.parse::<i64>().ok())
+            };
             let geometry = match (
-                store.get_pref_int_async(WINDOW_WIDTH_KEY).await,
-                store.get_pref_int_async(WINDOW_HEIGHT_KEY).await,
-                store.get_pref_int_async(WINDOW_X_KEY).await,
-                store.get_pref_int_async(WINDOW_Y_KEY).await,
+                pref_int(WINDOW_WIDTH_KEY),
+                pref_int(WINDOW_HEIGHT_KEY),
+                pref_int(WINDOW_X_KEY),
+                pref_int(WINDOW_Y_KEY),
             ) {
                 (Some(width), Some(height), Some(x), Some(y)) if width >= 480 && height >= 360 => {
                     Some((
@@ -933,14 +939,11 @@ pub fn boot() -> (State, Task<Message>) {
                 _ => None,
             };
             let language_preference = LanguagePreference::from_stored(
-                store
-                    .get_pref_async(LANGUAGE_PREFERENCE_KEY)
-                    .await
-                    .as_deref(),
+                preferences.get(LANGUAGE_PREFERENCE_KEY).map(String::as_str),
             );
-            let managed_books_dir = store
-                .get_pref_async(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
-                .await
+            let managed_books_dir = preferences
+                .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
+                .cloned()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| store.managed_books_dir());
             if managed_books_dir != store.managed_books_dir() {
@@ -948,32 +951,30 @@ pub fn boot() -> (State, Task<Message>) {
                     .map_err(|error| error.to_string())?;
             }
             let add_book_behavior = AddBookBehavior::from_stored(
-                store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
+                preferences.get(ADD_BOOK_BEHAVIOR_KEY).map(String::as_str),
             );
             let reader_defaults = ReaderDefaults {
                 reading_mode: ReadingMode::from_stored(
-                    store
-                        .get_pref_async(DEFAULT_READING_MODE_KEY)
-                        .await
-                        .as_deref(),
+                    preferences
+                        .get(DEFAULT_READING_MODE_KEY)
+                        .map(String::as_str),
                 ),
                 theme: ReaderTheme::from_stored(
-                    store
-                        .get_pref_async(DEFAULT_READER_THEME_KEY)
-                        .await
-                        .as_deref(),
+                    preferences
+                        .get(DEFAULT_READER_THEME_KEY)
+                        .map(String::as_str),
                 ),
                 epub_font_size: stored_f32(
-                    store.get_pref_async(DEFAULT_EPUB_FONT_SIZE_KEY).await,
+                    preferences.get(DEFAULT_EPUB_FONT_SIZE_KEY).cloned(),
                     16.0,
                     8.0..=48.0,
                 ),
                 epub_line_spacing: stored_f32(
-                    store.get_pref_async(DEFAULT_EPUB_LINE_SPACING_KEY).await,
+                    preferences.get(DEFAULT_EPUB_LINE_SPACING_KEY).cloned(),
                     1.6,
                     1.0..=2.4,
                 ),
-                pdf_zoom: match store.get_pref_async(DEFAULT_PDF_ZOOM_KEY).await.as_deref() {
+                pdf_zoom: match preferences.get(DEFAULT_PDF_ZOOM_KEY).map(String::as_str) {
                     Some("fit-width") => ZoomMode::FitWidth,
                     _ => ZoomMode::FitPage,
                 },

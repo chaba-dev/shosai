@@ -260,6 +260,18 @@ async fn test_preferences_persist_across_opens() {
 }
 
 #[tokio::test]
+async fn all_preferences_are_loaded_together() {
+    let (store, _dir) = temp_store().await;
+    store.set_pref_async("first", "one").await.unwrap();
+    store.set_pref_async("second", "2").await.unwrap();
+
+    let preferences = store.get_prefs_async().await;
+
+    assert_eq!(preferences.get("first").map(String::as_str), Some("one"));
+    assert_eq!(preferences.get("second").map(String::as_str), Some("2"));
+}
+
+#[tokio::test]
 async fn test_multiple_preferences_are_saved_atomically() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
