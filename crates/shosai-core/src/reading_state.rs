@@ -190,8 +190,26 @@ impl ReadingStateStore {
         Self::open_at_async(&path).await
     }
 
+    /// Open the default store without waiting for legacy book fingerprints to be backfilled.
+    pub async fn open_async_deferred_backfill() -> Result<Self> {
+        let path = db_file_path()?;
+        if is_development_profile() {
+            prepare_development_data_directory(path.parent().context("database has no parent")?)?;
+        }
+        Self::open_at_async_deferred_backfill(&path).await
+    }
+
     /// Async: open at a specific database path.
     pub async fn open_at_async(db_path: &Path) -> Result<Self> {
+        Self::open_at_inner(db_path, true).await
+    }
+
+    /// Open a specific store without waiting for legacy book fingerprints.
+    pub async fn open_at_async_deferred_backfill(db_path: &Path) -> Result<Self> {
+        Self::open_at_inner(db_path, false).await
+    }
+
+    async fn open_at_inner(db_path: &Path, backfill_fingerprints: bool) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create data dir {}", parent.display()))?;
@@ -212,8 +230,15 @@ impl ReadingStateStore {
             db_path: db_path.to_path_buf(),
         };
         store.migrate().await?;
-        crate::library::backfill_missing_fingerprints(&store.pool).await?;
+        if backfill_fingerprints {
+            store.backfill_missing_fingerprints().await?;
+        }
         Ok(store)
+    }
+
+    /// Fill legacy library fingerprints after the store is available to the UI.
+    pub async fn backfill_missing_fingerprints(&self) -> Result<()> {
+        crate::library::backfill_missing_fingerprints(&self.pool).await
     }
 
     /// Run database migrations from the `migrations/` directory.

@@ -17,6 +17,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub enum Message {
     Initialized(Result<InitializedState, String>),
+    FingerprintBackfillFinished(Result<(), String>),
 
     // File
     OpenFile,

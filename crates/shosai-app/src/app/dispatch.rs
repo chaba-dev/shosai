@@ -181,6 +181,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } = initialized;
             state.i18n.set_preference(language_preference);
             let pool = store.pool().clone();
+            let backfill_store = store.clone();
+            let backfill_task = Task::perform(
+                async move {
+                    backfill_store
+                        .backfill_missing_fingerprints()
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                },
+                Message::FingerprintBackfillFinished,
+            );
             state.library = Some(Library::new(pool.clone(), managed_books_dir));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
@@ -203,10 +213,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(pending) = state.pending_open.take() {
                 return Task::batch([
                     geometry_task,
+                    backfill_task,
                     Task::done(Message::FileSelected(Some(pending))),
                 ]);
             }
-            return Task::batch([geometry_task, reset_library(state)]);
+            return Task::batch([geometry_task, backfill_task, reset_library(state)]);
         }
 
         Message::Initialized(Err(error)) => {
@@ -218,6 +229,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::done(Message::FileSelected(Some(pending)));
             }
         }
+
+        Message::FingerprintBackfillFinished(Err(error)) => {
+            eprintln!("warning: failed to backfill legacy book fingerprints: {error}");
+        }
+
+        Message::FingerprintBackfillFinished(Ok(())) => {}
 
         Message::OpenFile => {
             let ebooks = state.i18n.text("ebooks");

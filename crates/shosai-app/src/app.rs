@@ -915,7 +915,7 @@ pub fn boot() -> (State, Task<Message>) {
     let initialize = Task::perform(
         async {
             let started = std::time::Instant::now();
-            let store = ReadingStateStore::open_async()
+            let store = ReadingStateStore::open_async_deferred_backfill()
                 .await
                 .map_err(|error| error.to_string())?;
             let preferences = store.get_prefs_async().await;

@@ -318,7 +318,7 @@ async fn test_migrations_are_idempotent() {
 }
 
 #[tokio::test]
-async fn migrating_a_v5_database_fingerprints_reachable_legacy_books() {
+async fn legacy_fingerprints_can_be_backfilled_after_migration() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
     let reachable = dir.path().join("reachable.epub");
@@ -347,7 +347,16 @@ async fn migrating_a_v5_database_fingerprints_reachable_legacy_books() {
     }
     pool.close().await;
 
-    let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+    let store = ReadingStateStore::open_at_async_deferred_backfill(&db_path)
+        .await
+        .unwrap();
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE content_hash IS NULL")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(pending, 2);
+
+    store.backfill_missing_fingerprints().await.unwrap();
     let rows: Vec<(String, Option<String>, Option<i64>)> =
         sqlx::query_as("SELECT file_path, content_hash, file_size FROM books ORDER BY id")
             .fetch_all(store.pool())
