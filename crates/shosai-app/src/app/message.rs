@@ -29,6 +29,7 @@ pub enum Message {
         book_id: Option<i64>,
         result: Result<super::OpenDocument, super::AppError>,
     },
+    ShowDocumentOpenNotice(u64),
 
     // Navigation
     NextPage,

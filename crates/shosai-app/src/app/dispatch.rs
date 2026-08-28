@@ -276,6 +276,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             state.document_opening = false;
+            state.document_open_notice_visible = false;
             match result {
                 Ok(document) => return finish_open_document(state, path, book_id, document),
                 Err(error) => {
@@ -285,6 +286,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             }
         }
+
+        Message::ShowDocumentOpenNotice(generation)
+            if generation == state.document_open_generation && state.document_opening =>
+        {
+            state.document_open_notice_visible = true;
+        }
+
+        Message::ShowDocumentOpenNotice(_) => {}
 
         Message::NextPage => {
             if uses_paginated_epub_layout(state) {

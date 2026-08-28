@@ -350,6 +350,7 @@ const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
 const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
 const SEARCH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
+const DOCUMENT_OPEN_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
@@ -752,6 +753,7 @@ pub struct State {
     open_error: Option<AppError>,
     document_open_generation: u64,
     document_opening: bool,
+    document_open_notice_visible: bool,
     missing_book_id: Option<i64>,
     show_reader_settings: bool,
     show_reader_more: bool,
@@ -897,6 +899,7 @@ pub fn boot() -> (State, Task<Message>) {
         open_error: None,
         document_open_generation: 0,
         document_opening: false,
+        document_open_notice_visible: false,
         missing_book_id: None,
         show_reader_settings: false,
         show_reader_more: false,
@@ -1425,6 +1428,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     {
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
+        state.document_open_notice_visible = false;
         if let Some(book_id) = book_id {
             state.tabs[index].book_id = Some(book_id);
             if let Some(title) = state
@@ -1447,11 +1451,12 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
     state.document_opening = true;
+    state.document_open_notice_visible = false;
     state.screen = Screen::Reader;
     state.open_error = None;
     state.missing_book_id = None;
     let task_path = path.clone();
-    Task::perform(
+    let open = Task::perform(
         async move {
             tokio::task::spawn_blocking(move || load_document(&task_path))
                 .await
@@ -1468,7 +1473,12 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             book_id,
             result,
         },
-    )
+    );
+    let notice = Task::perform(
+        async move { tokio::time::sleep(DOCUMENT_OPEN_NOTICE_DELAY).await },
+        move |_| Message::ShowDocumentOpenNotice(generation),
+    );
+    Task::batch([open, notice])
 }
 
 fn finish_open_document(
@@ -3247,7 +3257,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         layout = layout.push(search_bar(state, compact));
     }
 
-    if state.document_opening {
+    if state.document_open_notice_visible {
         layout = layout.push(
             container(
                 text(state.i18n.text("opening-document"))
@@ -3256,7 +3266,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
             )
             .padding([7, 14])
             .width(Length::Fill)
-            .style(app_theme::reader_alert),
+            .style(app_theme::reader_loading),
         );
     }
 
@@ -9548,6 +9558,43 @@ mod tests {
         );
 
         assert!(state.rendered_page.is_none());
+    }
+
+    #[test]
+    fn document_open_notice_is_delayed_and_scoped_to_the_latest_request() {
+        let (mut state, _) = boot();
+        let first = open_document(&mut state, PathBuf::from("first.epub"), None);
+        let first_generation = state.document_open_generation;
+
+        assert_eq!(first.units(), 2);
+        assert!(state.document_opening);
+        assert!(!state.document_open_notice_visible);
+
+        let _ = open_document(&mut state, PathBuf::from("second.epub"), None);
+        let second_generation = state.document_open_generation;
+        let _ = update(
+            &mut state,
+            Message::ShowDocumentOpenNotice(first_generation),
+        );
+        assert!(!state.document_open_notice_visible);
+
+        let _ = update(
+            &mut state,
+            Message::ShowDocumentOpenNotice(second_generation),
+        );
+        assert!(state.document_open_notice_visible);
+
+        let _ = update(
+            &mut state,
+            Message::DocumentOpened {
+                generation: second_generation,
+                path: PathBuf::from("second.epub"),
+                book_id: None,
+                result: Err(AppError::UnsupportedFormat("epub".to_string())),
+            },
+        );
+        assert!(!state.document_opening);
+        assert!(!state.document_open_notice_visible);
     }
 
     #[test]
