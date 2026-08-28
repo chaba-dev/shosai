@@ -239,7 +239,7 @@ pub struct ManagedPathChange {
     pub new_path: PathBuf,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct FileFingerprint {
     hash: String,
     size: u64,
@@ -444,17 +444,19 @@ impl Library {
         let path = canonical_path(path);
         let path_str = path.to_string_lossy().to_string();
 
-        if let Some(expected_hash) = expected_hash {
+        let initial_fingerprint = if let Some(expected_hash) = expected_hash {
             let fingerprint_path = path.clone();
-            let actual_hash = tokio::task::spawn_blocking(move || {
-                file_fingerprint(&fingerprint_path).map(|fingerprint| fingerprint.hash)
-            })
-            .await
-            .context("book verification task failed")??;
-            if actual_hash != expected_hash {
+            let fingerprint =
+                tokio::task::spawn_blocking(move || file_fingerprint(&fingerprint_path))
+                    .await
+                    .context("book verification task failed")??;
+            if fingerprint.hash != expected_hash {
                 bail!("file changed after review: {}", path.display());
             }
-        }
+            Some(fingerprint)
+        } else {
+            None
+        };
 
         // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
@@ -479,6 +481,7 @@ impl Library {
                 &metadata_path,
                 format,
                 expected_hash.as_deref(),
+                initial_fingerprint,
             )
         })
         .await
@@ -561,6 +564,7 @@ impl Library {
                 &title_path,
                 format,
                 expected_hash.as_deref(),
+                None,
             )
         })
         .await
@@ -1528,15 +1532,39 @@ fn inspect_book(
     title_path: &Path,
     format: BookFormat,
     expected_hash: Option<&str>,
+    initial_fingerprint: Option<FileFingerprint>,
 ) -> Result<BookInspection> {
-    if let Some(expected_hash) = expected_hash
-        && file_fingerprint(path)?.hash != expected_hash
+    inspect_book_with(
+        path,
+        title_path,
+        expected_hash,
+        initial_fingerprint,
+        || extract_metadata_and_cover(path, title_path, format),
+        file_fingerprint,
+    )
+}
+
+fn inspect_book_with(
+    path: &Path,
+    title_path: &Path,
+    expected_hash: Option<&str>,
+    initial_fingerprint: Option<FileFingerprint>,
+    extract: impl FnOnce() -> Result<(String, Option<String>, Option<Vec<u8>>)>,
+    mut fingerprint: impl FnMut(&Path) -> Result<FileFingerprint>,
+) -> Result<BookInspection> {
+    let before = match (initial_fingerprint, expected_hash) {
+        (Some(fingerprint), _) => Some(fingerprint),
+        (None, Some(_)) => Some(fingerprint(path)?),
+        (None, None) => None,
+    };
+    if let (Some(expected_hash), Some(before)) = (expected_hash, &before)
+        && before.hash != expected_hash
     {
         bail!("file changed after review: {}", title_path.display());
     }
-    let (title, author, cover) = extract_metadata_and_cover(path, title_path, format)?;
-    let fingerprint = file_fingerprint(path)?;
-    if expected_hash.is_some_and(|expected| expected != fingerprint.hash) {
+    let (title, author, cover) = extract()?;
+    let fingerprint = fingerprint(path)?;
+    if before.as_ref().is_some_and(|before| before != &fingerprint) {
         bail!("file changed after review: {}", title_path.display());
     }
     Ok(BookInspection {
@@ -2049,6 +2077,73 @@ mod tests {
         };
 
         assert!(error.to_string().contains("discovery cancelled"));
+    }
+
+    #[test]
+    fn reviewed_inspection_reuses_preinspection_fingerprint_then_hashes_after_extraction() {
+        use std::cell::RefCell;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, b"reviewed bytes").unwrap();
+        let before = file_fingerprint(&path).unwrap();
+        let expected_hash = before.hash.clone();
+        let events = RefCell::new(vec!["pre"]);
+
+        let inspection = inspect_book_with(
+            &path,
+            &path,
+            Some(&expected_hash),
+            Some(before),
+            || {
+                events.borrow_mut().push("inspect");
+                Ok(("Book".into(), None, None))
+            },
+            |path| {
+                events.borrow_mut().push("post");
+                file_fingerprint(path)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(&*events.borrow(), &["pre", "inspect", "post"]);
+        assert_eq!(inspection.fingerprint.hash, expected_hash);
+    }
+
+    #[test]
+    fn reviewed_inspection_rejects_changes_before_or_during_extraction() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, b"reviewed bytes").unwrap();
+        let reviewed = file_fingerprint(&path).unwrap();
+        let expected_hash = reviewed.hash.clone();
+
+        std::fs::write(&path, b"changed before inspection").unwrap();
+        let before_error = inspect_book_with(
+            &path,
+            &path,
+            Some(&expected_hash),
+            None,
+            || panic!("changed file must be rejected before extraction"),
+            file_fingerprint,
+        )
+        .unwrap_err();
+        assert!(before_error.to_string().contains("changed after review"));
+
+        std::fs::write(&path, b"reviewed bytes").unwrap();
+        let during_error = inspect_book_with(
+            &path,
+            &path,
+            Some(&expected_hash),
+            Some(reviewed),
+            || {
+                std::fs::write(&path, b"replacement during inspection")?;
+                Ok(("Book".into(), None, None))
+            },
+            file_fingerprint,
+        )
+        .unwrap_err();
+        assert!(during_error.to_string().contains("changed after review"));
     }
 
     #[test]
