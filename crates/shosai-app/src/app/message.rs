@@ -201,6 +201,7 @@ pub enum Message {
         tab_id: u64,
         generation: u64,
         layout_key: EpubLayoutKey,
+        complete: bool,
         pages: Arc<Vec<EpubPage>>,
     },
     PageRendered {

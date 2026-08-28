@@ -1788,7 +1788,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
-            let page_size = epub_page_size(state);
             let layout_key = epub_layout_key(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
@@ -1809,9 +1808,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 generation,
                 Arc::clone(doc),
                 layout_key,
-                state.font_size,
-                state.line_spacing,
-                page_size,
+                state.current_page,
             );
         }
         Some(OpenDocument::Cbz(doc)) => {
@@ -1935,25 +1932,49 @@ fn paginate_epub_task(
     generation: u64,
     document: Arc<EpubDoc>,
     layout_key: EpubLayoutKey,
-    font_size: f32,
-    line_spacing: f32,
-    page_size: Size,
+    current_chapter: usize,
 ) -> Task<Message> {
-    Task::perform(
-        async move {
-            tokio::task::spawn_blocking(move || {
-                paginate_epub_document(&document, font_size, line_spacing, page_size)
+    let font_size = f32::from_bits(layout_key.font_size);
+    let line_spacing = f32::from_bits(layout_key.line_spacing);
+    let page_size = Size::new(
+        f32::from_bits(layout_key.width),
+        f32::from_bits(layout_key.height),
+    );
+    let pagination =
+        iced::futures::stream::unfold(Some((document, false)), move |state| async move {
+            let (document, complete) = state?;
+            let worker_document = Arc::clone(&document);
+            let pages = tokio::task::spawn_blocking(move || {
+                if complete {
+                    paginate_epub_document(&worker_document, font_size, line_spacing, page_size)
+                } else {
+                    let mut budget = EpubPaginationBudget::for_document(
+                        worker_document.presentation().chapters().len(),
+                    );
+                    paginate_epub_document_chapter(
+                        &worker_document,
+                        current_chapter,
+                        font_size,
+                        line_spacing,
+                        page_size,
+                        &mut budget,
+                    )
+                }
             })
             .await
-            .unwrap_or_default()
-        },
-        move |pages| Message::EpubPaginated {
+            .unwrap_or_default();
+            let next = (!complete).then_some((document, true));
+            Some(((complete, pages), next))
+        });
+    Task::run(pagination, move |(complete, pages)| {
+        Message::EpubPaginated {
             tab_id,
             generation,
             layout_key,
+            complete,
             pages: Arc::new(pages),
-        },
-    )
+        }
+    })
 }
 
 fn paginate_epub_document(
@@ -1965,40 +1986,60 @@ fn paginate_epub_document(
     let mut pages = Vec::new();
     let chapters = document.presentation().chapters();
     let mut budget = EpubPaginationBudget::for_document(chapters.len());
-    for (chapter_index, presentation) in chapters.iter().enumerate() {
+    for chapter_index in 0..chapters.len() {
         if pages.len() >= MAX_EPUB_PAGES {
             break;
         }
-        let nodes = presentation.nodes();
-        let source = document
-            .chapter(chapter_index)
-            .expect("presentation chapters match source chapters");
-        let title = source
-            .title
-            .as_deref()
-            .filter(|title| !content_starts_with_heading(nodes, title));
-        pages.extend(
-            paginate_epub_chapter_with_budget(
-                nodes,
-                title,
-                font_size,
-                line_spacing,
-                page_size,
-                Some(document.fonts()),
-                &mut budget,
-            )
-            .into_iter()
-            .enumerate()
-            .map(|(page_index, nodes)| EpubPage {
-                chapter: chapter_index,
-                title: (page_index == 0)
-                    .then(|| title.map(str::to_string))
-                    .flatten(),
-                nodes,
-            }),
-        );
+        pages.extend(paginate_epub_document_chapter(
+            document,
+            chapter_index,
+            font_size,
+            line_spacing,
+            page_size,
+            &mut budget,
+        ));
     }
     pages
+}
+
+fn paginate_epub_document_chapter(
+    document: &EpubDoc,
+    chapter_index: usize,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: Size,
+    budget: &mut EpubPaginationBudget,
+) -> Vec<EpubPage> {
+    let Some(presentation) = document.presentation().chapter(chapter_index) else {
+        return Vec::new();
+    };
+    let nodes = presentation.nodes();
+    let source = document
+        .chapter(chapter_index)
+        .expect("presentation chapters match source chapters");
+    let title = source
+        .title
+        .as_deref()
+        .filter(|title| !content_starts_with_heading(nodes, title));
+    paginate_epub_chapter_with_budget(
+        nodes,
+        title,
+        font_size,
+        line_spacing,
+        page_size,
+        Some(document.fonts()),
+        budget,
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(page_index, nodes)| EpubPage {
+        chapter: chapter_index,
+        title: (page_index == 0)
+            .then(|| title.map(str::to_string))
+            .flatten(),
+        nodes,
+    })
+    .collect()
 }
 
 fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
@@ -5963,6 +6004,7 @@ mod tests {
                 tab_id: state.active_tab_id.unwrap(),
                 generation: state.render_generation,
                 layout_key,
+                complete: true,
                 pages: Arc::new(pages),
             },
         );
@@ -8770,6 +8812,7 @@ mod tests {
                 tab_id: 1,
                 generation: 1,
                 layout_key,
+                complete: true,
                 pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,
@@ -8799,6 +8842,7 @@ mod tests {
                 tab_id: 1,
                 generation: 2,
                 layout_key,
+                complete: true,
                 pages: Arc::new(vec![
                     EpubPage {
                         chapter: 0,
@@ -8845,6 +8889,7 @@ mod tests {
                 tab_id: 1,
                 generation: 4,
                 layout_key,
+                complete: true,
                 pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,
@@ -8885,6 +8930,7 @@ mod tests {
                 tab_id: 1,
                 generation: 4,
                 layout_key: obsolete_layout,
+                complete: true,
                 pages: Arc::new(vec![EpubPage {
                     chapter: 0,
                     title: None,

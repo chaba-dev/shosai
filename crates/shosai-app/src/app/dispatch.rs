@@ -1572,12 +1572,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             tab_id,
             generation,
             layout_key,
+            complete,
             pages,
         } => {
             if state.active_tab_id == Some(tab_id)
                 && generation == state.render_generation
                 && layout_key == epub_layout_key(state)
             {
+                if !complete && state.epub_layout_key == Some(layout_key) {
+                    return Task::none();
+                }
                 state.epub_pages = pages;
                 state.epub_layout_key = Some(layout_key);
                 if state.epub_pages.is_empty() {
@@ -1596,6 +1600,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     && layout_key == epub_layout_key_for_tab(state, &state.tabs[index]);
                 if accepts_layout {
                     let tab = &mut state.tabs[index];
+                    if !complete && tab.epub_layout_key == Some(layout_key) {
+                        return Task::none();
+                    }
                     tab.epub_pages = pages;
                     tab.epub_layout_key = Some(layout_key);
                     if tab.epub_pages.is_empty() {
