@@ -277,6 +277,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.document_opening = false;
             state.document_open_notice_visible = false;
+            state.document_open_preview = None;
             match result {
                 Ok(document) => return finish_open_document(state, path, book_id, document),
                 Err(error) => {

@@ -309,10 +309,6 @@ pub fn reader_alert(_theme: &Theme) -> container::Style {
     container::Style::default().background(Color::from_rgb8(0xF6, 0xE5, 0xE2))
 }
 
-pub fn reader_loading(_theme: &Theme) -> container::Style {
-    container::Style::default().background(ACCENT_SOFT)
-}
-
 pub fn bookmarks_panel(_theme: &Theme) -> container::Style {
     container::Style::default()
         .background(Color::from_rgb8(0xEE, 0xEB, 0xE4))

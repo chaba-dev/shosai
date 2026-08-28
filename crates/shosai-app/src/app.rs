@@ -702,6 +702,12 @@ pub(crate) struct PageCacheKey {
 // State
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone)]
+struct DocumentOpenPreview {
+    path: PathBuf,
+    book_id: Option<i64>,
+}
+
 #[derive(Debug)]
 pub struct State {
     screen: Screen,
@@ -754,6 +760,7 @@ pub struct State {
     document_open_generation: u64,
     document_opening: bool,
     document_open_notice_visible: bool,
+    document_open_preview: Option<DocumentOpenPreview>,
     missing_book_id: Option<i64>,
     show_reader_settings: bool,
     show_reader_more: bool,
@@ -900,6 +907,7 @@ pub fn boot() -> (State, Task<Message>) {
         document_open_generation: 0,
         document_opening: false,
         document_open_notice_visible: false,
+        document_open_preview: None,
         missing_book_id: None,
         show_reader_settings: false,
         show_reader_more: false,
@@ -1429,6 +1437,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
         state.document_open_notice_visible = false;
+        state.document_open_preview = None;
         if let Some(book_id) = book_id {
             state.tabs[index].book_id = Some(book_id);
             if let Some(title) = state
@@ -1452,6 +1461,10 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     let generation = state.document_open_generation;
     state.document_opening = true;
     state.document_open_notice_visible = false;
+    state.document_open_preview = Some(DocumentOpenPreview {
+        path: path.clone(),
+        book_id,
+    });
     state.screen = Screen::Reader;
     state.open_error = None;
     state.missing_book_id = None;
@@ -3224,8 +3237,13 @@ fn uses_compact_reader_layout(width: f32) -> bool {
 }
 
 fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
-    let main_content = reader_surface(state, compact);
-    let body: Element<'_, Message> = if state.show_bookmarks_panel {
+    let loading = state.document_open_notice_visible;
+    let main_content = if loading {
+        document_opening_view(state)
+    } else {
+        reader_surface(state, compact)
+    };
+    let body: Element<'_, Message> = if !loading && state.show_bookmarks_panel {
         if compact {
             bookmarks_panel(state, Length::Fill)
         } else {
@@ -3245,29 +3263,16 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
 
     let mut layout = column![tabs_view(state), reader_header(state, compact)].spacing(0);
 
-    if state.show_reader_settings {
+    if !loading && state.show_reader_settings {
         layout = layout.push(reader_settings(state, compact));
     }
 
-    if state.show_reader_more {
+    if !loading && state.show_reader_more {
         layout = layout.push(reader_more_panel(state, compact));
     }
 
-    if state.show_search_bar {
+    if !loading && state.show_search_bar {
         layout = layout.push(search_bar(state, compact));
-    }
-
-    if state.document_open_notice_visible {
-        layout = layout.push(
-            container(
-                text(state.i18n.text("opening-document"))
-                    .size(13)
-                    .color(app_theme::TEXT_MUTED),
-            )
-            .padding([7, 14])
-            .width(Length::Fill)
-            .style(app_theme::reader_loading),
-        );
     }
 
     if let Some(error) = &state.open_error {
@@ -3304,9 +3309,57 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         );
     }
 
-    layout = layout.push(body).push(status_bar(state));
+    layout = layout.push(body);
+    if !loading {
+        layout = layout.push(status_bar(state));
+    }
 
     layout.width(Length::Fill).height(Length::Fill).into()
+}
+
+fn document_opening_view(state: &State) -> Element<'_, Message> {
+    let preview = state.document_open_preview.as_ref();
+    let book = preview
+        .and_then(|preview| preview.book_id)
+        .and_then(|book_id| state.library_books.iter().find(|book| book.id == book_id));
+    let title = book
+        .map(|book| book.title.clone())
+        .or_else(|| {
+            preview
+                .and_then(|preview| preview.path.file_stem())
+                .and_then(|title| title.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| state.i18n.text("opening-document"));
+    let cover = if let Some(book) = book {
+        render_book_cover(state, book, Length::Fixed(140.0), 200.0)
+    } else {
+        cover_placeholder(Length::Fixed(140.0), 200.0, &title)
+    };
+
+    center(
+        column![
+            container(cover)
+                .width(Length::Fixed(140.0))
+                .height(Length::Fixed(200.0))
+                .style(app_theme::book_cover),
+            text(title)
+                .size(16)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            text(state.i18n.text("opening-document"))
+                .size(13)
+                .color(app_theme::TEXT_MUTED),
+        ]
+        .spacing(14)
+        .align_x(iced::Alignment::Center)
+        .width(Length::Fill)
+        .max_width(320),
+    )
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 fn reader_surface(state: &State, compact: bool) -> Element<'_, Message> {
@@ -5748,7 +5801,7 @@ fn render_book_cover<'a>(
     cover_placeholder(width, height, &book.title)
 }
 
-fn cover_placeholder(width: Length, height: f32, title: &str) -> Element<'_, Message> {
+fn cover_placeholder(width: Length, height: f32, title: &str) -> Element<'static, Message> {
     let label = text(title.chars().take(20).collect::<String>())
         .size(14)
         .color(iced::Color::WHITE);
@@ -9563,14 +9616,22 @@ mod tests {
     #[test]
     fn document_open_notice_is_delayed_and_scoped_to_the_latest_request() {
         let (mut state, _) = boot();
+        state.library_books = vec![test_book(42)];
         let first = open_document(&mut state, PathBuf::from("first.epub"), None);
         let first_generation = state.document_open_generation;
 
         assert_eq!(first.units(), 2);
         assert!(state.document_opening);
         assert!(!state.document_open_notice_visible);
+        assert_eq!(
+            state
+                .document_open_preview
+                .as_ref()
+                .map(|preview| preview.path.as_path()),
+            Some(Path::new("first.epub"))
+        );
 
-        let _ = open_document(&mut state, PathBuf::from("second.epub"), None);
+        let _ = open_document(&mut state, PathBuf::from("second.epub"), Some(42));
         let second_generation = state.document_open_generation;
         let _ = update(
             &mut state,
@@ -9583,18 +9644,34 @@ mod tests {
             Message::ShowDocumentOpenNotice(second_generation),
         );
         assert!(state.document_open_notice_visible);
+        assert_eq!(
+            state
+                .document_open_preview
+                .as_ref()
+                .map(|preview| preview.path.as_path()),
+            Some(Path::new("second.epub"))
+        );
+        assert_eq!(
+            state
+                .document_open_preview
+                .as_ref()
+                .and_then(|preview| preview.book_id),
+            Some(42)
+        );
+        drop(document_opening_view(&state));
 
         let _ = update(
             &mut state,
             Message::DocumentOpened {
                 generation: second_generation,
                 path: PathBuf::from("second.epub"),
-                book_id: None,
+                book_id: Some(42),
                 result: Err(AppError::UnsupportedFormat("epub".to_string())),
             },
         );
         assert!(!state.document_opening);
         assert!(!state.document_open_notice_visible);
+        assert!(state.document_open_preview.is_none());
     }
 
     #[test]
