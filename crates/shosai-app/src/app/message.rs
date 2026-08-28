@@ -77,10 +77,6 @@ pub enum Message {
     ShowSettings,
     RefreshLibrary,
     LoadMoreLibrary,
-    LibraryIndexLoaded {
-        generation: u64,
-        ids: Vec<i64>,
-    },
     LibraryLoaded {
         generation: u64,
         offset: usize,

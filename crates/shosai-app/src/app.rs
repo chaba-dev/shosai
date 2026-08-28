@@ -322,7 +322,6 @@ struct LibraryMovePlan {
 
 const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
-const LIBRARY_REFRESH_MIN_DURATION: std::time::Duration = std::time::Duration::from_millis(300);
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
@@ -720,7 +719,6 @@ pub struct State {
     library_loading: bool,
     library_activity_progress: f32,
     library_generation: u64,
-    library_book_ids: Arc<Vec<i64>>,
     library_offset: usize,
     book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
@@ -854,7 +852,6 @@ pub fn boot() -> (State, Task<Message>) {
         library_loading: true,
         library_activity_progress: 0.0,
         library_generation: 0,
-        library_book_ids: Arc::new(Vec::new()),
         library_offset: 0,
         book_menu: None,
         pending_remove_book: None,
@@ -1007,25 +1004,24 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
     };
     let offset = if append { state.library_offset } else { 0 };
     let generation = state.library_generation;
-    let next_offset = (offset + LIBRARY_PAGE_SIZE as usize).min(state.library_book_ids.len());
-    let ids = Arc::clone(&state.library_book_ids);
+    let search = state.library_search.clone();
+    let filter = state.library_filter;
     state.library_loading = true;
 
     Task::perform(
         async move {
-            let books = library
-                .books_by_ids(&ids[offset..next_offset])
+            library
+                .page(Some(&search), filter, LIBRARY_PAGE_SIZE, offset as u32)
                 .await
-                .unwrap_or_default();
-            BookPage {
-                books,
-                has_more: next_offset < ids.len(),
-            }
+                .unwrap_or(BookPage {
+                    books: Vec::new(),
+                    has_more: false,
+                })
         },
         move |page| Message::LibraryLoaded {
             generation,
             offset,
-            next_offset,
+            next_offset: offset + page.books.len(),
             page,
         },
     )
@@ -1033,36 +1029,18 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
 
 fn reset_library(state: &mut State) -> Task<Message> {
     state.library_generation = state.library_generation.wrapping_add(1);
-    state.library_book_ids = Arc::new(Vec::new());
     state.library_offset = 0;
     state.library_has_more = false;
     state.book_menu = None;
     state.pending_remove_book = None;
     state.library_error = None;
-    let Some(library) = state.library.clone() else {
+    if state.library.is_none() {
         state.library_loading = false;
         return Task::none();
-    };
-    let generation = state.library_generation;
-    let search = state.library_search.clone();
-    let filter = state.library_filter;
+    }
     state.library_loading = true;
     state.library_activity_progress = 0.0;
-
-    Task::perform(
-        async move {
-            let started = std::time::Instant::now();
-            let ids = library
-                .matching_ids(Some(&search), filter)
-                .await
-                .unwrap_or_default();
-            if let Some(remaining) = LIBRARY_REFRESH_MIN_DURATION.checked_sub(started.elapsed()) {
-                tokio::time::sleep(remaining).await;
-            }
-            ids
-        },
-        move |ids| Message::LibraryIndexLoaded { generation, ids },
-    )
+    load_library_page(state, false)
 }
 
 fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
@@ -8387,7 +8365,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_library_index_clears_books_from_the_previous_filter() {
+    fn empty_first_library_page_clears_books_from_the_previous_filter() {
         let (mut state, _) = boot();
         state.library_generation = 2;
         state.library_books.push(test_book(1));
@@ -8395,14 +8373,20 @@ mod tests {
 
         let _ = update(
             &mut state,
-            Message::LibraryIndexLoaded {
+            Message::LibraryLoaded {
                 generation: 2,
-                ids: Vec::new(),
+                offset: 0,
+                next_offset: 0,
+                page: BookPage {
+                    books: Vec::new(),
+                    has_more: false,
+                },
             },
         );
 
         assert!(state.library_books.is_empty());
         assert!(!state.library_loading);
+        assert!(!state.library_has_more);
     }
 
     #[test]
@@ -8414,7 +8398,6 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.library_generation = 1;
         state.library_books.push(test_book(1));
-        state.library_book_ids = Arc::new(vec![1, 2]);
         state.library_offset = 1;
         state.library_loading = true;
 

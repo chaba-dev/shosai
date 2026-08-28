@@ -588,21 +588,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::LibraryIndexLoaded { generation, ids } => {
-            if generation != state.library_generation {
-                return Task::none();
-            }
-            state.library_book_ids = Arc::new(ids);
-            state.library_offset = 0;
-            state.library_has_more = !state.library_book_ids.is_empty();
-            if state.library_has_more {
-                return load_library_page(state, false);
-            }
-            state.library_books.clear();
-            state.library_loading = false;
-            state.library_activity_progress = 1.0;
-        }
-
         Message::LibraryLoaded {
             generation,
             offset,
@@ -618,7 +603,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.library_books = page.books;
             }
             state.library_offset = next_offset;
-            state.library_has_more = next_offset < state.library_book_ids.len();
+            state.library_has_more = page.has_more;
             state.library_loading = false;
             if offset == 0 {
                 state.library_activity_progress = 1.0;
