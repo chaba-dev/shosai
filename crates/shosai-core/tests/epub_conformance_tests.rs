@@ -33,7 +33,6 @@ const OPEN_FIXTURE_IDS: &[&str] = &[
     "mathml",
     "bidi",
     "links",
-    "malformed-markup",
     "canonical-paths",
     "remote-content",
     "conformance",
@@ -41,6 +40,7 @@ const OPEN_FIXTURE_IDS: &[&str] = &[
 
 const REJECTION_FIXTURES: &[(&str, &str)] = &[
     ("resource-limits", "huge.svg"),
+    ("malformed-markup", "failed to parse EPUB chapter XHTML"),
     ("missing-spine-resource", "failed to read chapter"),
     ("duplicate-entries", "duplicate EPUB archive entry"),
 ];
@@ -297,8 +297,15 @@ fn cascade_and_table_fixtures_expose_semantic_oracles() {
     assert_eq!(body.rows[2].cells[0].column_span, 2);
     assert!(matches!(
         body.rows[1].cells[0].children.last(),
-        Some(shosai_core::epub::render::ContentNode::Image { src, alt })
-            if src == "OEBPS/Images/pixel.png" && alt == "Q2 chart"
+        Some(shosai_core::epub::render::ContentNode::Image {
+            src,
+            alt,
+            intrinsic_size: Some(size),
+            ..
+        }) if src == "OEBPS/Images/pixel.png"
+            && alt == "Q2 chart"
+            && size.width == 1
+            && size.height == 1
     ));
     let search_text = table_doc.presentation().chapter(0).unwrap().search_text();
     assert!(search_text.contains("Quarter\tValue"));
@@ -528,17 +535,13 @@ fn epub3_manifest_declares_content_properties() {
 
 #[test]
 fn hostile_and_failure_fixtures_are_isolated_and_actionable() {
-    let malformed = open("malformed-markup");
-    assert!(Document::parse(&malformed.chapter(0).unwrap().content).is_err());
-    let readable = chapter_document(&malformed, 1);
+    let malformed = EpubDoc::open(fixture_path("malformed-markup"))
+        .expect_err("malformed chapter markup must fail instead of becoming empty");
     assert!(
-        by_id(&readable, "readable-sibling")
-            .descendants()
-            .filter_map(|node| node.text())
-            .any(|text| text.contains("Readable sibling"))
+        malformed
+            .to_string()
+            .contains("failed to parse EPUB chapter XHTML at OEBPS/Text/chapter-1.xhtml")
     );
-    assert!(malformed.resource("OEBPS/Styles/malformed.css").is_some());
-    assert!(by_id(&readable, "deep-nesting").descendants().count() >= 16);
 
     let canonical = open("canonical-paths");
     let chapter = chapter_document(&canonical, 0);

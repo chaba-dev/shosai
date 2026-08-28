@@ -19,7 +19,7 @@ epub-wry-spike = ["dep:gtk", "dep:winit", "dep:wry", "dep:x11-dl"]
 shosai-core.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
-iced = { version = "0.14", features = ["advanced", "image", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "image", "svg", "tokio"] }
 rfd = "0.15"
 tokio = { version = "1", features = ["fs", "macros", "rt", "sync", "time"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }

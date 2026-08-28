@@ -25,6 +25,8 @@ pub struct EpubLimits {
     pub max_xml_bytes: u64,
     /// Maximum element nesting depth in an XML document.
     pub max_xml_depth: usize,
+    /// Maximum presentation nodes admitted from an XML document.
+    pub max_xml_nodes: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
     /// Maximum number of reading-order items admitted from the OPF spine.
@@ -55,6 +57,10 @@ pub struct EpubLimits {
     pub min_css_computed_font_size_px: f32,
     /// Maximum computed CSS font size admitted into native presentation.
     pub max_css_computed_font_size_px: f32,
+    /// Maximum absolute computed CSS length admitted into native presentation.
+    pub max_css_computed_length_px: f32,
+    /// Maximum absolute CSS percentage ratio admitted into native presentation (`1.0` is 100%).
+    pub max_css_computed_percentage_ratio: f32,
     /// Maximum encoded size of an individual font resource.
     pub max_font_bytes: u64,
     /// Maximum font faces admitted for one EPUB.
@@ -92,6 +98,7 @@ impl Default for EpubLimits {
             max_total_uncompressed_bytes: 512 * MIB,
             max_xml_bytes: 8 * MIB,
             max_xml_depth: 128,
+            max_xml_nodes: 250_000,
             max_xml_text_bytes: 4 * MIB,
             max_spine_items: 10_000,
             max_css_resource_bytes: 8 * MIB,
@@ -101,12 +108,14 @@ impl Default for EpubLimits {
             max_css_rules_per_document: 50_000,
             max_css_selectors_per_document: 100_000,
             max_css_selector_components_per_document: 1_000_000,
-            max_css_processing_steps_per_document: 10_000_000,
+            max_css_processing_steps_per_document: 25_000_000,
             max_css_font_families_per_declaration: 32,
             max_css_font_family_name_bytes: 256,
             max_css_font_family_bytes_per_declaration: 2_048,
             min_css_computed_font_size_px: 1.0,
             max_css_computed_font_size_px: 512.0,
+            max_css_computed_length_px: 16_384.0,
+            max_css_computed_percentage_ratio: 100.0,
             max_font_bytes: 16 * MIB,
             max_font_faces_per_book: 64,
             max_font_face_descriptors_per_book: 256,
@@ -122,7 +131,7 @@ impl Default for EpubLimits {
     }
 }
 
-pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> Result<()> {
+pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> Result<u64> {
     if xml.len() as u64 > limits.max_xml_bytes {
         anyhow::bail!(
             "EPUB XML entry exceeds byte limit: {path} ({} > {})",
@@ -136,9 +145,13 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
     reader.config_mut().allow_unmatched_ends = true;
     let mut elements = Vec::<Vec<u8>>::new();
     let mut text_bytes = 0_u64;
+    let mut nodes = 0_usize;
     loop {
         match reader.read_event() {
             Ok(Event::Start(element)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 let depth = elements
                     .len()
                     .checked_add(1)
@@ -152,6 +165,9 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                 elements.push(element.name().as_ref().to_vec());
             }
             Ok(Event::Empty(_)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 let empty_depth = elements
                     .len()
                     .checked_add(1)
@@ -172,16 +188,27 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                 }
             }
             Ok(Event::Text(text)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 text_bytes = text_bytes
                     .checked_add(text.len() as u64)
                     .context("EPUB XML text byte count overflowed")?;
             }
             Ok(Event::CData(text)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
                 text_bytes = text_bytes
                     .checked_add(text.len() as u64)
                     .context("EPUB XML text byte count overflowed")?;
             }
             Ok(Event::Eof) => break,
+            Ok(Event::Comment(_) | Event::PI(_) | Event::DocType(_)) => {
+                nodes = nodes
+                    .checked_add(1)
+                    .context("EPUB XML node count overflowed")?;
+            }
             Ok(_) => {}
             // Structural mismatches remain available for renderer fallback through the tolerant
             // reader configuration. Lexically malformed XML is rejected because its unparsed
@@ -197,9 +224,15 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                 limits.max_xml_text_bytes
             );
         }
+        if nodes > limits.max_xml_nodes {
+            anyhow::bail!(
+                "EPUB XML entry exceeds node limit: {path} ({nodes} > {})",
+                limits.max_xml_nodes
+            );
+        }
     }
 
-    Ok(())
+    Ok(text_bytes)
 }
 
 pub(crate) fn validate_resource(
@@ -227,6 +260,7 @@ pub(crate) fn validate_resource(
     }
 
     let svg = media_type_essence == "image/svg+xml" || has_svg_signature(bytes);
+    let mut xml_text = None;
     if is_xml(&media_type_essence) || svg {
         if bytes.len() as u64 > limits.max_xml_bytes {
             anyhow::bail!(
@@ -238,9 +272,11 @@ pub(crate) fn validate_resource(
         let text = std::str::from_utf8(bytes)
             .with_context(|| format!("EPUB XML resource is not UTF-8: {path}"))?;
         validate_xml_shape(text, path, limits)?;
+        xml_text = Some(text);
     }
 
     if svg {
+        validate_svg_image_references(xml_text.expect("SVG was inspected as XML"), path)?;
         let (width, height) = svg_dimensions(bytes)
             .with_context(|| format!("EPUB SVG dimensions could not be bounded: {path}"))?;
         validate_image_dimensions(path, width, height, limits)?;
@@ -259,6 +295,26 @@ pub(crate) fn validate_resource(
         }
     }
 
+    Ok(())
+}
+
+fn validate_svg_image_references(xml: &str, path: &str) -> Result<()> {
+    let document = roxmltree::Document::parse(xml)
+        .with_context(|| format!("failed to inspect EPUB SVG resource: {path}"))?;
+    for element in document.descendants().filter(roxmltree::Node::is_element) {
+        if !matches!(element.tag_name().name(), "image" | "feImage") {
+            continue;
+        }
+        for href in element
+            .attributes()
+            .filter(|attribute| attribute.name() == "href")
+        {
+            let reference = href.value();
+            if !reference.starts_with('#') || reference.len() == 1 {
+                anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -334,7 +390,9 @@ fn validate_image_dimensions(
     Ok(())
 }
 
-fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+/// Intrinsic SVG viewport dimensions produced by the same bounded metadata
+/// inspection used during resource admission.
+pub(crate) fn svg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     let xml = std::str::from_utf8(bytes).ok()?;
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();
@@ -477,6 +535,23 @@ mod tests {
             .expect_err("empty child must count as a nested element");
 
         assert!(error.to_string().contains("depth limit"));
+    }
+
+    #[test]
+    fn xml_elements_and_text_share_the_node_budget() {
+        let limits = EpubLimits {
+            max_xml_nodes: 3,
+            ..EpubLimits::default()
+        };
+
+        let error = validate_xml_shape(
+            "<table><tr><td>one</td><td>two</td></tr></table>",
+            "chapter.xhtml",
+            &limits,
+        )
+        .expect_err("dense tables must stop before DOM and layout allocation");
+
+        assert!(error.to_string().contains("node limit"));
     }
 
     #[test]
@@ -674,5 +749,39 @@ mod tests {
                 "unexpected SVG dimension error: {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn svg_rejects_local_file_and_data_uri_images() {
+        for (element, reference) in [
+            ("image", "file:///etc/passwd"),
+            ("image", "data:image/png;base64,iVBORw0KGgo="),
+            ("feImage", "../../private.png"),
+            ("feImage", "data:image/png;base64,iVBORw0KGgo="),
+        ] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><{element} href="{reference}"/></svg>"#
+            );
+            let error = validate_resource(
+                "Images/untrusted.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &EpubLimits::default(),
+            )
+            .expect_err("external SVG image references must not be admitted");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsafe external image reference")
+            );
+        }
+
+        validate_resource(
+            "Images/internal.svg",
+            "image/svg+xml",
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image href="#paint"/></svg>"##,
+            &EpubLimits::default(),
+        )
+        .expect("internal fragment image references remain safe");
     }
 }

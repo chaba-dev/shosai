@@ -13,6 +13,7 @@ use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, 
 use lightningcss::properties::font::{
     AbsoluteFontWeight, FamilyName, FontFamily, FontSize, FontStyle, FontWeight, GenericFontFamily,
 };
+use lightningcss::properties::size::{MaxSize as CssMaxSize, Size as CssSize};
 use lightningcss::properties::text::{Direction as CssDirection, TextAlign, WhiteSpace};
 use lightningcss::rules::{CssRule, font_face::FontFaceProperty};
 use lightningcss::selector::{Combinator, Component, Selector};
@@ -55,6 +56,12 @@ pub(crate) enum DisplayRole {
     TableCaption,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ComputedWidth {
+    Percent(f32),
+    Px(f32),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComputedStyle {
     pub(crate) display: DisplayRole,
@@ -67,7 +74,14 @@ pub(crate) struct ComputedStyle {
     pub(crate) direction: Direction,
     pub(crate) preserve_whitespace: bool,
     pub(crate) margin_left_px: f32,
+    pub(crate) margin_top_px: Option<f32>,
+    pub(crate) margin_bottom_px: Option<f32>,
     pub(crate) text_indent_px: f32,
+    pub(crate) width: Option<ComputedWidth>,
+    pub(crate) width_specified: bool,
+    pub(crate) height: Option<ComputedWidth>,
+    pub(crate) height_specified: bool,
+    pub(crate) max_width: Option<ComputedWidth>,
 }
 
 #[derive(Debug)]
@@ -198,7 +212,19 @@ struct SpecifiedStyle {
     direction: Slot<Direction>,
     preserve_whitespace: Slot<bool>,
     margin_left: Slot<RelativeLength>,
+    margin_top: Slot<RelativeLength>,
+    margin_bottom: Slot<RelativeLength>,
     text_indent: Slot<RelativeLength>,
+    width: Slot<SpecifiedWidth>,
+    height: Slot<SpecifiedWidth>,
+    max_width: Slot<SpecifiedWidth>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SpecifiedWidth {
+    Auto,
+    Percent(f32),
+    Length(RelativeLength),
 }
 
 struct ProcessingBudget {
@@ -235,6 +261,13 @@ pub(crate) fn compute_parsed_document_styles(
             .is_finite()
     {
         anyhow::bail!("EPUB computed font size limits are invalid");
+    }
+    if !limits.max_css_computed_length_px.is_finite()
+        || limits.max_css_computed_length_px <= 0.0
+        || !limits.max_css_computed_percentage_ratio.is_finite()
+        || limits.max_css_computed_percentage_ratio <= 0.0
+    {
+        anyhow::bail!("EPUB computed geometry limits are invalid");
     }
     let sheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -296,13 +329,21 @@ fn walk_element(
     processing_budget: &mut ProcessingBudget,
     limits: &EpubLimits,
 ) -> Result<()> {
-    let style = compute_element_style(
+    let mut style = compute_element_style(
         element,
         parent,
         root_font_size.unwrap_or(INITIAL_FONT_SIZE_PX),
         rules,
         processing_budget,
     )?;
+    if element.tag_name().name() == "img" {
+        if !style.width_specified {
+            style.width = image_dimension_hint(element.attribute("width"));
+        }
+        if !style.height_specified {
+            style.height = image_dimension_hint(element.attribute("height"));
+        }
+    }
     if !style.font_size_px.is_finite()
         || style.font_size_px < limits.min_css_computed_font_size_px
         || style.font_size_px > limits.max_css_computed_font_size_px
@@ -313,6 +354,34 @@ fn walk_element(
             limits.min_css_computed_font_size_px,
             limits.max_css_computed_font_size_px
         );
+    }
+    let lengths = [
+        Some(style.margin_left_px),
+        style.margin_top_px,
+        style.margin_bottom_px,
+        Some(style.text_indent_px),
+    ];
+    if lengths
+        .into_iter()
+        .flatten()
+        .any(|value| !value.is_finite() || value.abs() > limits.max_css_computed_length_px)
+    {
+        anyhow::bail!(
+            "EPUB document computed CSS length is outside limits (max {}px)",
+            limits.max_css_computed_length_px
+        );
+    }
+    for dimension in [style.width, style.height, style.max_width]
+        .into_iter()
+        .flatten()
+    {
+        let (value, maximum) = match dimension {
+            ComputedWidth::Px(value) => (value, limits.max_css_computed_length_px),
+            ComputedWidth::Percent(value) => (value, limits.max_css_computed_percentage_ratio),
+        };
+        if !value.is_finite() || value.abs() > maximum {
+            anyhow::bail!("EPUB document computed CSS dimension is outside limits");
+        }
     }
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
     node_styles.insert(element.id(), style.clone());
@@ -334,6 +403,24 @@ fn walk_element(
     Ok(())
 }
 
+fn image_dimension_hint(value: Option<&str>) -> Option<ComputedWidth> {
+    let value = value?.trim();
+    if let Some(percent) = value.strip_suffix('%') {
+        return percent
+            .parse::<f32>()
+            .ok()
+            .filter(|value| *value >= 0.0)
+            .map(|value| ComputedWidth::Percent(value / 100.0));
+    }
+    value
+        .strip_suffix("px")
+        .unwrap_or(value)
+        .parse::<f32>()
+        .ok()
+        .filter(|value| *value >= 0.0)
+        .map(ComputedWidth::Px)
+}
+
 fn compute_element_style(
     element: Node<'_, '_>,
     parent: Option<&ComputedStyle>,
@@ -352,12 +439,26 @@ fn compute_element_style(
         direction: Direction::Ltr,
         preserve_whitespace: false,
         margin_left_px: 0.0,
+        margin_top_px: None,
+        margin_bottom_px: None,
         text_indent_px: 0.0,
+        width: None,
+        width_specified: false,
+        height: None,
+        height_specified: false,
+        max_width: None,
     });
     let tag = element.tag_name().name();
     let mut style = inherited.clone();
     style.display = ua_display(tag);
     style.margin_left_px = 0.0;
+    style.margin_top_px = None;
+    style.margin_bottom_px = None;
+    style.width = None;
+    style.width_specified = false;
+    style.height = None;
+    style.height_specified = false;
+    style.max_width = None;
     apply_ua_text_defaults(tag, &mut style);
     if let Some(direction) = element.attribute("dir") {
         if direction.eq_ignore_ascii_case("rtl") {
@@ -434,8 +535,43 @@ fn compute_element_style(
     if let Some(value) = specified.margin_left.value() {
         style.margin_left_px = value.resolve(style.font_size_px, root_font_size);
     }
+    if let Some(value) = specified.margin_top.value() {
+        style.margin_top_px = Some(value.resolve(style.font_size_px, root_font_size).max(0.0));
+    }
+    if let Some(value) = specified.margin_bottom.value() {
+        style.margin_bottom_px = Some(value.resolve(style.font_size_px, root_font_size).max(0.0));
+    }
     if let Some(value) = specified.text_indent.value() {
         style.text_indent_px = value.resolve(style.font_size_px, root_font_size);
+    }
+    if let Some(value) = specified.width.value() {
+        style.width_specified = true;
+        style.width = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
+    }
+    if let Some(value) = specified.height.value() {
+        style.height_specified = true;
+        style.height = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
+    }
+    if let Some(value) = specified.max_width.value() {
+        style.max_width = match value {
+            SpecifiedWidth::Auto => None,
+            SpecifiedWidth::Percent(value) => Some(ComputedWidth::Percent(value)),
+            SpecifiedWidth::Length(value) => Some(ComputedWidth::Px(
+                value.resolve(style.font_size_px, root_font_size).max(0.0),
+            )),
+        };
     }
     Ok(style)
 }
@@ -563,7 +699,7 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             }
         }
         Property::FontSize(FontSize::Length(value)) => {
-            if let Some(value) = relative_length(value) {
+            if let Some(value) = font_size_length(value) {
                 specified.font_size.offer(priority, value);
             }
         }
@@ -604,10 +740,63 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
                 specified.margin_left.offer(priority, value);
             }
         }
+        Property::MarginTop(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            if let Some(value) = margin_length(value) {
+                specified.margin_top.offer(priority, value);
+            }
+        }
+        Property::MarginTop(LengthPercentageOrAuto::Auto) => {
+            specified
+                .margin_top
+                .offer(priority, RelativeLength::Px(0.0));
+        }
+        Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            if let Some(value) = margin_length(value) {
+                specified.margin_bottom.offer(priority, value);
+            }
+        }
+        Property::MarginBottom(LengthPercentageOrAuto::Auto) => {
+            specified
+                .margin_bottom
+                .offer(priority, RelativeLength::Px(0.0));
+        }
+        Property::Margin(margin) => {
+            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.left
+                && let Some(value) = margin_length(value)
+            {
+                specified.margin_left.offer(priority, value);
+            }
+            if let Some(value) = vertical_margin(&margin.top) {
+                specified.margin_top.offer(priority, value);
+            }
+            if let Some(value) = vertical_margin(&margin.bottom) {
+                specified.margin_bottom.offer(priority, value);
+            }
+        }
         Property::TextIndent(indent) => {
             if let Some(value) = margin_length(&indent.value) {
                 specified.text_indent.offer(priority, value);
             }
+        }
+        Property::Width(CssSize::LengthPercentage(value)) => {
+            if let Some(value) = specified_width(value) {
+                specified.width.offer(priority, value);
+            }
+        }
+        Property::Width(CssSize::Auto) => specified.width.offer(priority, SpecifiedWidth::Auto),
+        Property::Height(CssSize::LengthPercentage(value)) => {
+            if let Some(value) = specified_width(value) {
+                specified.height.offer(priority, value);
+            }
+        }
+        Property::Height(CssSize::Auto) => specified.height.offer(priority, SpecifiedWidth::Auto),
+        Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => {
+            if let Some(value) = specified_width(value) {
+                specified.max_width.offer(priority, value);
+            }
+        }
+        Property::MaxWidth(CssMaxSize::None) => {
+            specified.max_width.offer(priority, SpecifiedWidth::Auto)
         }
         _ => {}
     }
@@ -895,7 +1084,7 @@ fn unsupported_rule_name(rule: &CssRule<'_>) -> &'static str {
 fn property_supported(property: &Property<'_>) -> bool {
     match property {
         Property::Display(display) => css_display(display).is_some(),
-        Property::FontSize(FontSize::Length(value)) => relative_length(value).is_some(),
+        Property::FontSize(FontSize::Length(value)) => font_size_length(value).is_some(),
         Property::FontWeight(FontWeight::Absolute(_)) => true,
         Property::FontStyle(_)
         | Property::FontFamily(_)
@@ -905,7 +1094,27 @@ fn property_supported(property: &Property<'_>) -> bool {
         Property::MarginLeft(LengthPercentageOrAuto::LengthPercentage(value)) => {
             margin_length(value).is_some()
         }
+        Property::MarginTop(LengthPercentageOrAuto::LengthPercentage(value))
+        | Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
+            margin_length(value).is_some()
+        }
+        Property::MarginTop(LengthPercentageOrAuto::Auto)
+        | Property::MarginBottom(LengthPercentageOrAuto::Auto) => true,
+        Property::Margin(margin) => {
+            matches!(
+                &margin.left,
+                LengthPercentageOrAuto::LengthPercentage(value) if margin_length(value).is_some()
+            ) || [&margin.top, &margin.bottom]
+                .into_iter()
+                .any(|value| vertical_margin(value).is_some())
+        }
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
+        Property::Width(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::Width(CssSize::Auto) => true,
+        Property::Height(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::Height(CssSize::Auto) => true,
+        Property::MaxWidth(CssMaxSize::LengthPercentage(value)) => specified_width(value).is_some(),
+        Property::MaxWidth(CssMaxSize::None) => true,
         _ => false,
     }
 }
@@ -1260,10 +1469,49 @@ fn relative_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeL
     }
 }
 
+fn font_size_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
+    let value = relative_length(value)?;
+    match value {
+        RelativeLength::Em(value)
+        | RelativeLength::Rem(value)
+        | RelativeLength::Px(value)
+        | RelativeLength::Percent(value)
+            if value < 0.0 =>
+        {
+            None
+        }
+        value => Some(value),
+    }
+}
+
 fn margin_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLength> {
     match value {
         DimensionPercentage::Percentage(_) => None,
         _ => relative_length(value),
+    }
+}
+
+fn vertical_margin(value: &LengthPercentageOrAuto) -> Option<RelativeLength> {
+    match value {
+        LengthPercentageOrAuto::LengthPercentage(value) => margin_length(value),
+        LengthPercentageOrAuto::Auto => Some(RelativeLength::Px(0.0)),
+    }
+}
+
+fn specified_width(value: &DimensionPercentage<LengthValue>) -> Option<SpecifiedWidth> {
+    match value {
+        DimensionPercentage::Percentage(value) if value.0 >= 0.0 => {
+            Some(SpecifiedWidth::Percent(value.0))
+        }
+        DimensionPercentage::Dimension(_) => relative_length(value)
+            .filter(|value| match value {
+                RelativeLength::Em(value)
+                | RelativeLength::Rem(value)
+                | RelativeLength::Px(value)
+                | RelativeLength::Percent(value) => *value >= 0.0,
+            })
+            .map(SpecifiedWidth::Length),
+        _ => None,
     }
 }
 
@@ -1561,6 +1809,116 @@ mod tests {
                 .to_string()
                 .contains("computed font size is outside limits")
         );
+    }
+
+    #[test]
+    fn invalid_negative_font_size_does_not_hide_document_content() {
+        let report = compute_document_styles(
+            r#"<html><body><p id="target" style="font-size: -1">Target</p></body></html>"#,
+            "",
+        )
+        .unwrap();
+
+        assert_eq!(report.element_styles["target"].font_size_px, 16.0);
+    }
+
+    #[test]
+    fn vertical_block_margins_are_computed_without_inheriting() {
+        let report = compute_document_styles(
+            r#"<html><body><div id="parent"><p id="child">Child</p><p id="target">Target</p></div></body></html>"#,
+            "#parent, #target { margin: 1em 0 2em; } #target { margin-top: auto; margin-bottom: auto; }",
+        )
+        .unwrap();
+
+        let parent = &report.element_styles["parent"];
+        assert_eq!(parent.margin_top_px, Some(16.0));
+        assert_eq!(parent.margin_bottom_px, Some(32.0));
+        let child = &report.element_styles["child"];
+        assert_eq!(child.margin_top_px, None);
+        assert_eq!(child.margin_bottom_px, None);
+        let target = &report.element_styles["target"];
+        assert_eq!(target.margin_top_px, Some(0.0));
+        assert_eq!(target.margin_bottom_px, Some(0.0));
+    }
+
+    #[test]
+    fn width_hints_are_computed_without_inheriting() {
+        let report = compute_document_styles(
+            r#"<html><body><table><tr><td id="percent"><span id="child">A</span></td><td id="fixed">B</td></tr></table><img id="bounded"/></body></html>"#,
+            "#percent { width: 15.6%; } #fixed { width: 72pt; } #bounded { max-width: 95%; }",
+        )
+        .unwrap();
+
+        assert_eq!(
+            report.element_styles["percent"].width,
+            Some(ComputedWidth::Percent(0.156))
+        );
+        assert_eq!(
+            report.element_styles["fixed"].width,
+            Some(ComputedWidth::Px(96.0))
+        );
+        assert_eq!(report.element_styles["child"].width, None);
+        assert_eq!(
+            report.element_styles["bounded"].max_width,
+            Some(ComputedWidth::Percent(0.95))
+        );
+        assert_eq!(report.element_styles["child"].max_width, None);
+    }
+
+    #[test]
+    fn extreme_computed_geometry_stops_before_native_presentation() {
+        let document =
+            roxmltree::Document::parse(r#"<html><body><p id="target">Target</p></body></html>"#)
+                .unwrap();
+        for css in [
+            "#target { margin-top: 3e38px; }",
+            "#target { margin-left: -3e38em; }",
+            "#target { text-indent: 20000px; }",
+            "#target { width: 20000px; }",
+            "#target { height: 2000000%; }",
+            "#target { max-width: 20000px; }",
+        ] {
+            let error = compute_parsed_document_styles(&document, css, &EpubLimits::default())
+                .expect_err("extreme CSS geometry must be rejected before widget construction");
+            assert!(
+                error.to_string().contains("outside limits"),
+                "unexpected error for {css}: {error:#}"
+            );
+        }
+
+        let error = compute_parsed_document_styles(
+            &document,
+            "",
+            &EpubLimits {
+                max_css_computed_length_px: f32::INFINITY,
+                ..EpubLimits::default()
+            },
+        )
+        .expect_err("non-finite geometry limits must be rejected");
+        assert!(error.to_string().contains("geometry limits are invalid"));
+
+        for attribute in [
+            r#"width="100000000000000000000""#,
+            r#"height="100000000000000000000""#,
+            r#"width="2000000%""#,
+        ] {
+            let xhtml = format!(r#"<html><body><img id="target" {attribute}/></body></html>"#);
+            let document = roxmltree::Document::parse(&xhtml).unwrap();
+            let error = compute_parsed_document_styles(&document, "", &EpubLimits::default())
+                .expect_err("extreme XHTML image hints must share CSS geometry admission");
+            assert!(error.to_string().contains("outside limits"));
+        }
+    }
+
+    #[test]
+    fn auto_width_and_none_max_width_reset_earlier_cascade_values() {
+        let report = compute_document_styles(
+            r#"<html><body><img id="image"/></body></html>"#,
+            "img { width: 300px; max-width: 50%; } #image { width: auto; max-width: none; }",
+        )
+        .unwrap();
+        assert_eq!(report.element_styles["image"].width, None);
+        assert_eq!(report.element_styles["image"].max_width, None);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! the GUI layer can map to native widgets. A bounded native CSS cascade maps
 //! supported computed styles onto block and inline presentation values.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,6 +43,38 @@ pub struct NodeStyle {
     pub font_size_multiplier: Option<f32>,
     /// Left margin in em.
     pub margin_left_em: Option<f32>,
+    /// Authored margin before this block in em.
+    pub block_before_em: Option<f32>,
+    /// Authored margin after this block in em.
+    pub block_after_em: Option<f32>,
+    /// Authored width retained for native replaced-element and table layout.
+    pub width: Option<NodeWidth>,
+    /// Authored height retained for replaced-element layout.
+    pub height: Option<NodeWidth>,
+    /// Authored maximum width retained for native replaced-element layout.
+    pub max_width: Option<NodeWidth>,
+    /// Pagination truncated the first nested child boundary of this fragment.
+    pub fragment_before: bool,
+    /// Pagination truncated the last nested child boundary of this fragment.
+    pub fragment_after: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NodeWidth {
+    Percent(f32),
+    Pixels(f32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageKind {
+    Raster,
+    Svg,
 }
 
 /// Semantic row-group role retained from an EPUB table.
@@ -101,6 +133,12 @@ pub enum ContentNode {
         children: Vec<ContentNode>,
         style: NodeStyle,
     },
+    /// An ordered figure container retained when it cannot be represented as
+    /// one image with a trailing caption.
+    Figure {
+        children: Vec<ContentNode>,
+        style: NodeStyle,
+    },
     /// A semantic EPUB table. Layout is owned by the native app layer.
     Table {
         caption: Vec<TextSpan>,
@@ -126,6 +164,15 @@ pub enum ContentNode {
         /// Path to the image within the EPUB archive.
         src: String,
         alt: String,
+        style: NodeStyle,
+        /// Figure caption retained with the image so pagination can keep them together.
+        caption: Vec<TextSpan>,
+        caption_style: Option<NodeStyle>,
+        /// Intrinsic raster dimensions populated from the admitted EPUB resource.
+        intrinsic_size: Option<ImageSize>,
+        /// Resource representation established while processing the bounded,
+        /// already-admitted resource.
+        kind: Option<ImageKind>,
     },
     /// A code block (`<pre>`, `<code>` block-level, or `<pre><code>`).
     CodeBlock {
@@ -138,6 +185,36 @@ pub enum ContentNode {
     InlineCode(String),
     /// A horizontal rule / thematic break.
     HorizontalRule,
+}
+
+impl ContentNode {
+    /// Native block style retained for node kinds that support authored CSS.
+    pub fn style(&self) -> Option<&NodeStyle> {
+        match self {
+            Self::Heading { style, .. }
+            | Self::BlockQuote { style, .. }
+            | Self::Figure { style, .. }
+            | Self::Table { style, .. }
+            | Self::Math { style, .. }
+            | Self::Image { style, .. } => Some(style),
+            Self::Paragraph(_, style) => Some(style),
+            _ => None,
+        }
+    }
+
+    /// Mutable native block style for pagination-owned fragment geometry.
+    pub fn style_mut(&mut self) -> Option<&mut NodeStyle> {
+        match self {
+            Self::Heading { style, .. }
+            | Self::BlockQuote { style, .. }
+            | Self::Figure { style, .. }
+            | Self::Table { style, .. }
+            | Self::Math { style, .. }
+            | Self::Image { style, .. } => Some(style),
+            Self::Paragraph(_, style) => Some(style),
+            _ => None,
+        }
+    }
 }
 
 /// Parse chapter XHTML into a list of content nodes.
@@ -219,15 +296,17 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     fonts: Option<&super::font::EpubFontBook>,
     limits: &EpubLimits,
 ) -> Result<ParsedChapterContent> {
-    let doc = match roxmltree::Document::parse(xhtml) {
-        Ok(d) => d,
-        Err(_) => {
-            return Ok(ParsedChapterContent {
-                nodes: Vec::new(),
-                anchor_offsets: HashMap::new(),
-            });
-        }
-    };
+    // XML parsers do not load the external XHTML DTD (and must not do so for
+    // EPUB content). Resolve the fixed, local HTML entity table instead.
+    let normalized_xhtml = bounded_chapter_xhtml(xhtml, chapter_path.unwrap_or("chapter"), limits)?;
+    let parsing_options = xhtml_parsing_options(limits);
+    let doc = roxmltree::Document::parse_with_options(&normalized_xhtml, parsing_options)
+        .with_context(|| {
+            format!(
+                "failed to parse EPUB chapter XHTML{}",
+                chapter_path.map_or(String::new(), |path| format!(" at {path}"))
+            )
+        })?;
 
     let css = styles.document_css_with_owner(&doc, base_path, chapter_path, limits)?;
     let mut computed_styles =
@@ -252,6 +331,396 @@ fn parse_chapter_xhtml_with_owner_and_limits(
     let mut parsed = parse_block_children(body, base_path, &computed_styles);
     record_element_anchors(&body, 0, &mut parsed.anchor_offsets);
     Ok(parsed)
+}
+
+pub(super) fn xhtml_parsing_options<'a>(limits: &EpubLimits) -> roxmltree::ParsingOptions<'a> {
+    roxmltree::ParsingOptions {
+        allow_dtd: true,
+        nodes_limit: u32::try_from(limits.max_xml_nodes).unwrap_or(u32::MAX),
+        ..Default::default()
+    }
+}
+
+pub(super) fn bounded_chapter_xhtml<'a>(
+    xhtml: &'a str,
+    path: &str,
+    limits: &EpubLimits,
+) -> Result<std::borrow::Cow<'a, str>> {
+    let raw_text_bytes = super::limits::validate_xml_shape(xhtml, path, limits)?;
+    validate_entity_expansion_budget(
+        xhtml,
+        path,
+        limits.max_xml_text_bytes.saturating_sub(raw_text_bytes),
+    )?;
+    Ok(resolve_xhtml_named_entities(xhtml))
+}
+
+fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Result<()> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut entities = HashMap::new();
+    if let Some((doctype_start, doctype_end)) = actual_doctype_range(xhtml) {
+        let doctype = &xhtml[doctype_start..doctype_end];
+        for start in entity_declaration_starts(doctype) {
+            let mut tail = doctype[start + 8..].trim_start();
+            if tail.starts_with('%') {
+                tail = tail[1..].trim_start();
+            }
+            let name_len = xml_name_len(tail);
+            if name_len == 0 {
+                continue;
+            }
+            let name = &tail[..name_len];
+            tail = tail[name_len..].trim_start();
+            let Some(quote) = tail
+                .as_bytes()
+                .first()
+                .copied()
+                .filter(|c| matches!(c, b'\'' | b'"'))
+            else {
+                continue; // External declarations are never resolved.
+            };
+            if let Some(close) = tail[1..].find(char::from(quote)) {
+                entities.entry(name).or_insert(&tail[1..close + 1]);
+            }
+        }
+    }
+
+    fn expanded_len<'a>(
+        name: &'a str,
+        entities: &HashMap<&'a str, &'a str>,
+        visiting: &mut HashSet<&'a str>,
+        limit: u64,
+        depth: u8,
+    ) -> Result<u64> {
+        if depth >= 10 {
+            anyhow::bail!("EPUB XHTML entity nesting exceeds parser limit");
+        }
+        let Some(value) = entities.get(name) else {
+            return Ok(0);
+        };
+        if !visiting.insert(name) {
+            anyhow::bail!("recursive EPUB XHTML entity declaration");
+        }
+        let mut total = value.len() as u64;
+        for reference in entity_references(value) {
+            total = total
+                .checked_add(expanded_len(
+                    reference,
+                    entities,
+                    visiting,
+                    limit,
+                    depth + 1,
+                )?)
+                .context("EPUB XHTML entity expansion byte count overflowed")?;
+            if total > limit {
+                break;
+            }
+        }
+        visiting.remove(name);
+        Ok(total)
+    }
+
+    let mut expanded = 0_u64;
+    for reference in document_entity_references(xhtml) {
+        expanded = expanded
+            .checked_add(expanded_len(
+                reference,
+                &entities,
+                &mut HashSet::new(),
+                limit,
+                0,
+            )?)
+            .context("EPUB XHTML entity expansion byte count overflowed")?;
+        if expanded > limit {
+            anyhow::bail!(
+                "EPUB XML entry exceeds expanded text limit: {path} ({expanded} > {limit})"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn entity_references(text: &str) -> impl Iterator<Item = &str> {
+    text.split('&').skip(1).filter_map(|tail| {
+        let end = tail.find(';')?;
+        let name = &tail[..end];
+        (!name.starts_with('#') && !name.is_empty()).then_some(name)
+    })
+}
+
+fn document_entity_references(xhtml: &str) -> Vec<&str> {
+    let mut references = Vec::new();
+    let mut position = 0;
+    while position < xhtml.len() {
+        let tail = &xhtml[position..];
+        let skipped = if tail.starts_with("<!DOCTYPE") {
+            doctype_end(tail)
+        } else if tail.starts_with("<!--") {
+            tail.find("-->").map(|end| end + 3)
+        } else if tail.starts_with("<![CDATA[") {
+            tail.find("]]>").map(|end| end + 3)
+        } else if tail.starts_with("<?") {
+            tail.find("?>").map(|end| end + 2)
+        } else {
+            None
+        };
+        if let Some(length) = skipped {
+            position += length;
+        } else if tail.starts_with('&') {
+            if let Some(end) = tail.find(';') {
+                let name = &tail[1..end];
+                if !name.starts_with('#') && !name.is_empty() {
+                    references.push(name);
+                }
+                position += end + 1;
+            } else {
+                break;
+            }
+        } else {
+            position += tail.chars().next().unwrap().len_utf8();
+        }
+    }
+    references
+}
+
+pub(super) fn resolve_xhtml_named_entities(xhtml: &str) -> std::borrow::Cow<'_, str> {
+    use std::collections::HashSet;
+
+    let mut declared = HashSet::new();
+    if let Some((start, end)) = actual_doctype_range(xhtml) {
+        let declarations = &xhtml[start..end];
+        for start in entity_declaration_starts(declarations) {
+            let tail = &declarations[start + 8..];
+            let tail = tail.trim_start();
+            if tail.starts_with('%') {
+                continue;
+            }
+            let name_len = xml_name_len(tail);
+            if name_len > 0 {
+                declared.insert(&tail[..name_len]);
+            }
+        }
+    }
+
+    let mut output = String::new();
+    let mut position = 0;
+    let mut changed = false;
+    while position < xhtml.len() {
+        let remainder = &xhtml[position..];
+        if remainder.starts_with("<!--")
+            || remainder.starts_with("<![CDATA[")
+            || remainder.starts_with("<?")
+            || remainder.starts_with("<!DOCTYPE")
+        {
+            let end = if remainder.starts_with("<!--") {
+                remainder.find("-->").map(|end| end + 3)
+            } else if remainder.starts_with("<![CDATA[") {
+                remainder.find("]]>").map(|end| end + 3)
+            } else if remainder.starts_with("<?") {
+                remainder.find("?>").map(|end| end + 2)
+            } else {
+                doctype_end(remainder)
+            }
+            .unwrap_or(remainder.len());
+            output.push_str(&remainder[..end]);
+            position += end;
+            continue;
+        }
+        if !remainder.starts_with('&') {
+            let length = remainder
+                .chars()
+                .next()
+                .expect("nonempty remainder")
+                .len_utf8();
+            output.push_str(&remainder[..length]);
+            position += length;
+            continue;
+        }
+        let Some(end) = remainder.find(';') else {
+            output.push_str(remainder);
+            break;
+        };
+        let entity = &remainder[1..end];
+        // Keep XML's built-ins encoded: inserting their literal values can
+        // make otherwise valid XML malformed. Numeric and document-defined
+        // entities are likewise left to roxmltree.
+        let replacement = (!matches!(entity, "amp" | "apos" | "gt" | "lt" | "quot")
+            && !declared.contains(entity))
+        .then(|| quick_xml::escape::resolve_html5_entity(entity))
+        .flatten();
+        if let Some(replacement) = replacement {
+            output.push_str(&quick_xml::escape::escape(replacement));
+            changed = true;
+        } else {
+            output.push_str(&remainder[..=end]);
+        }
+        position += end + 1;
+    }
+    if changed {
+        std::borrow::Cow::Owned(output)
+    } else {
+        std::borrow::Cow::Borrowed(xhtml)
+    }
+}
+
+/// Finds actual entity declarations while ignoring declaration-like bytes in
+/// DTD comments and quoted literals. The scan is bounded to the supplied
+/// doctype slice and deliberately treats parameter and general declarations
+/// alike, matching the entity-shadowing behavior above.
+fn entity_declaration_starts(doctype: &str) -> Vec<usize> {
+    let bytes = doctype.as_bytes();
+    let mut starts = Vec::new();
+    let mut index = 0;
+    let mut quote = None;
+    let mut comment = false;
+    let mut processing_instruction = false;
+    while index < bytes.len() {
+        if processing_instruction {
+            if bytes[index..].starts_with(b"?>") {
+                processing_instruction = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if comment {
+            if bytes[index..].starts_with(b"-->") {
+                comment = false;
+                index += 3;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if bytes[index] == delimiter {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<!--") {
+            comment = true;
+            index += 4;
+        } else if bytes[index..].starts_with(b"<?") {
+            processing_instruction = true;
+            index += 2;
+        } else if matches!(bytes[index], b'\'' | b'"') {
+            quote = Some(bytes[index]);
+            index += 1;
+        } else if bytes[index..].starts_with(b"<!ENTITY") {
+            starts.push(index);
+            index += 8;
+        } else {
+            index += 1;
+        }
+    }
+    starts
+}
+
+fn xml_name_len(text: &str) -> usize {
+    fn is_start(character: char) -> bool {
+        matches!(character, ':' | '_' | 'A'..='Z' | 'a'..='z')
+            || matches!(character as u32,
+                0xC0..=0xD6 | 0xD8..=0xF6 | 0xF8..=0x2FF | 0x370..=0x37D
+                | 0x37F..=0x1FFF | 0x200C..=0x200D | 0x2070..=0x218F
+                | 0x2C00..=0x2FEF | 0x3001..=0xD7FF | 0xF900..=0xFDCF
+                | 0xFDF0..=0xFFFD | 0x10000..=0xEFFFF)
+    }
+    fn is_continue(character: char) -> bool {
+        is_start(character)
+            || matches!(character, '-' | '.' | '0'..='9' | '\u{B7}')
+            || matches!(character as u32, 0x0300..=0x036F | 0x203F..=0x2040)
+    }
+
+    let mut end = 0;
+    for (index, character) in text.char_indices() {
+        if (index == 0 && !is_start(character)) || (index > 0 && !is_continue(character)) {
+            break;
+        }
+        end = index + character.len_utf8();
+    }
+    end
+}
+
+fn actual_doctype_range(document: &str) -> Option<(usize, usize)> {
+    let mut position = 0;
+    while position < document.len() {
+        let tail = &document[position..];
+        if tail.starts_with("<!--") {
+            position += tail.find("-->")? + 3;
+            continue;
+        } else if tail.starts_with("<?") {
+            position += tail.find("?>")? + 2;
+            continue;
+        } else if tail.starts_with("<![CDATA[") {
+            position += tail.find("]]>")? + 3;
+            continue;
+        }
+        if tail.starts_with("<!DOCTYPE") {
+            return Some((position, position + doctype_end(tail).unwrap_or(tail.len())));
+        } else {
+            position += tail.chars().next()?.len_utf8();
+        }
+    }
+    None
+}
+
+fn doctype_end(doctype: &str) -> Option<usize> {
+    let bytes = doctype.as_bytes();
+    let mut quote = None;
+    let mut comment = false;
+    let mut processing_instruction = false;
+    let mut subset_depth = 0_u32;
+    let mut index = 0;
+    while index < bytes.len() {
+        if processing_instruction {
+            if bytes[index..].starts_with(b"?>") {
+                processing_instruction = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if comment {
+            if bytes[index..].starts_with(b"-->") {
+                comment = false;
+                index += 3;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if let Some(delimiter) = quote {
+            if bytes[index] == delimiter {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<!--") {
+            comment = true;
+            index += 4;
+            continue;
+        }
+        if bytes[index..].starts_with(b"<?") {
+            processing_instruction = true;
+            index += 2;
+            continue;
+        }
+        match bytes[index] {
+            b'\'' | b'"' => quote = Some(bytes[index]),
+            b'[' => subset_depth = subset_depth.saturating_add(1),
+            b']' => subset_depth = subset_depth.saturating_sub(1),
+            b'>' if subset_depth == 0 => return Some(index + 1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
 }
 
 /// Parse block-level children of an element.
@@ -469,7 +938,15 @@ fn parse_block_children(
                 if let Some(src) = child.attribute("src") {
                     let alt = child.attribute("alt").unwrap_or("").to_string();
                     if let Some(src) = resolve_relative(base_path, src) {
-                        nodes.push(ContentNode::Image { src, alt });
+                        nodes.push(ContentNode::Image {
+                            src,
+                            alt,
+                            style: node_style,
+                            caption: Vec::new(),
+                            caption_style: None,
+                            intrinsic_size: None,
+                            kind: None,
+                        });
                     } else if !alt.is_empty() {
                         nodes.push(ContentNode::Paragraph(
                             vec![text_span_for_node(&child, alt, None, styles, 16.0)],
@@ -483,11 +960,37 @@ fn parse_block_children(
                 nodes.push(ContentNode::HorizontalRule);
             }
 
-            "div" | "section" | "article" | "main" | "aside" | "header" | "footer" | "figure"
-            | "figcaption" => {
+            "figure" => {
+                if let Some((figure, anchors)) =
+                    parse_figure(&child, base_path, styles, &node_style)
+                {
+                    nested_anchors = anchors;
+                    nodes.push(figure);
+                } else {
+                    let inner = parse_block_children(child, base_path, styles);
+                    nested_anchors = inner.anchor_offsets;
+                    nodes.extend(collapse_figure(inner.nodes, node_style));
+                }
+            }
+
+            "div" | "section" | "article" | "main" | "aside" | "header" | "footer" => {
                 let inner = parse_block_children(child, base_path, styles);
                 nested_anchors = inner.anchor_offsets;
                 nodes.extend(inner.nodes);
+            }
+
+            "figcaption" => {
+                let mut spans = Vec::new();
+                collect_caption_runs(
+                    &child,
+                    styles,
+                    css_style.font_size_px,
+                    &mut spans,
+                    &mut nested_anchors,
+                );
+                if !spans.is_empty() {
+                    nodes.push(ContentNode::Paragraph(spans, node_style));
+                }
             }
 
             _ => {
@@ -512,6 +1015,166 @@ fn parse_block_children(
     ParsedChapterContent {
         nodes,
         anchor_offsets,
+    }
+}
+
+fn parse_figure(
+    figure: &roxmltree::Node<'_, '_>,
+    base_path: &str,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    figure_style: &NodeStyle,
+) -> Option<(ContentNode, HashMap<String, usize>)> {
+    let visible = |node: roxmltree::Node<'_, '_>| {
+        styles
+            .get(node)
+            .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+    };
+    let images = figure
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "img" && visible(*node))
+        .collect::<Vec<_>>();
+    if images.len() != 1 {
+        return None;
+    }
+    let image = images[0];
+    let src = resolve_relative(base_path, image.attribute("src")?)?;
+    let alt = image.attribute("alt").unwrap_or("").to_owned();
+    let mut style = css_to_node_style(styles.get(image)?, "img");
+    apply_figure_container_style(&mut style, figure_style);
+    let captions = figure
+        .children()
+        .filter(|node| {
+            node.is_element() && node.tag_name().name() == "figcaption" && visible(*node)
+        })
+        .collect::<Vec<_>>();
+    let caption_node = captions.last().copied().filter(|node| {
+        figure
+            .children()
+            .rfind(|child| child.is_element() && visible(*child))
+            == Some(*node)
+            && image.range().start < node.range().start
+    })?;
+    let belongs_to_selected_content = |node: roxmltree::Node<'_, '_>| {
+        node == image
+            || node == caption_node
+            || image.descendants().any(|descendant| descendant == node)
+            || caption_node
+                .descendants()
+                .any(|descendant| descendant == node)
+            || node
+                .descendants()
+                .any(|descendant| descendant == image || descendant == caption_node)
+    };
+    if figure.descendants().skip(1).any(|node| {
+        if node.is_text() {
+            return node.text().is_some_and(|text| !text.trim().is_empty())
+                && !caption_node
+                    .descendants()
+                    .any(|descendant| descendant == node);
+        }
+        node.is_element() && visible(node) && !belongs_to_selected_content(node)
+    }) {
+        return None;
+    }
+    let mut caption_anchors = HashMap::new();
+    let (caption, caption_style) = {
+        let css = styles
+            .get(caption_node)
+            .expect("caption has computed style");
+        let mut spans = Vec::new();
+        collect_caption_runs(
+            &caption_node,
+            styles,
+            css.font_size_px,
+            &mut spans,
+            &mut caption_anchors,
+        );
+        (spans, Some(css_to_node_style(css, "figcaption")))
+    };
+    let mut anchors = HashMap::new();
+    for ancestor in image
+        .ancestors()
+        .skip(1)
+        .take_while(|node| *node != *figure)
+    {
+        record_element_anchors(&ancestor, 0, &mut anchors);
+    }
+    record_element_anchors(&image, 0, &mut anchors);
+    let caption_offset = alt.chars().count() + usize::from(!caption.is_empty());
+    record_element_anchors(&caption_node, caption_offset, &mut anchors);
+    for (name, offset) in caption_anchors {
+        record_anchor_name(&name, caption_offset + offset, &mut anchors);
+    }
+    Some((
+        ContentNode::Image {
+            src,
+            alt,
+            style,
+            caption,
+            caption_style,
+            intrinsic_size: None,
+            kind: None,
+        },
+        anchors,
+    ))
+}
+
+fn collapse_figure(mut nodes: Vec<ContentNode>, figure_style: NodeStyle) -> Vec<ContentNode> {
+    if nodes.is_empty() {
+        return nodes;
+    }
+    if let [ContentNode::Image { style, .. }] = nodes.as_mut_slice() {
+        apply_figure_container_style(style, &figure_style);
+        return nodes;
+    }
+    if nodes.len() != 2 || !matches!(nodes.first(), Some(ContentNode::Image { .. })) {
+        return vec![ContentNode::Figure {
+            children: nodes,
+            style: figure_style,
+        }];
+    }
+    let (caption, caption_style) = match nodes.pop().expect("figure has two nodes") {
+        ContentNode::Heading { spans, style, .. } | ContentNode::Paragraph(spans, style) => {
+            (spans, style)
+        }
+        other => {
+            nodes.push(other);
+            return vec![ContentNode::Figure {
+                children: nodes,
+                style: figure_style,
+            }];
+        }
+    };
+    let Some(ContentNode::Image {
+        style,
+        caption: image_caption,
+        caption_style: image_caption_style,
+        ..
+    }) = nodes.first_mut()
+    else {
+        unreachable!("checked image node");
+    };
+    apply_figure_container_style(style, &figure_style);
+    *image_caption = caption;
+    *image_caption_style = Some(caption_style);
+    nodes
+}
+
+fn apply_figure_container_style(style: &mut NodeStyle, figure_style: &NodeStyle) {
+    if figure_style.block_before_em.is_some() {
+        style.block_before_em = figure_style.block_before_em;
+    }
+    if figure_style.block_after_em.is_some() {
+        style.block_after_em = figure_style.block_after_em;
+    }
+    if figure_style.margin_left_em.is_some() {
+        style.margin_left_em = figure_style.margin_left_em;
+    }
+    if figure_style.width.is_some() {
+        style.width = figure_style.width;
+    }
+    if figure_style.max_width.is_some() {
+        style.max_width = figure_style.max_width;
     }
 }
 
@@ -955,9 +1618,20 @@ fn collect_table_cell_inline(
             return;
         };
         flush_table_cell_spans(spans, children, block_style);
+        let image_style = css_to_node_style(
+            styles
+                .get(*node)
+                .expect("computed style must exist for image"),
+            "img",
+        );
         children.push(ContentNode::Image {
             src,
             alt: alt.to_owned(),
+            style: image_style,
+            caption: Vec::new(),
+            caption_style: None,
+            intrinsic_size: None,
+            kind: None,
         });
         return;
     }
@@ -1051,6 +1725,8 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
     };
     let font_size_multiplier = css.font_size_px / (16.0 * semantic_scale);
     let margin_left_em = css.margin_left_px / 16.0;
+    let block_before_em = css.margin_top_px.map(|spacing| spacing / 16.0);
+    let block_after_em = css.margin_bottom_px.map(|spacing| spacing / 16.0);
     let text_indent_em = css.text_indent_px / 16.0;
     NodeStyle {
         text_align: Some(match css.alignment {
@@ -1084,6 +1760,22 @@ fn css_to_node_style(css: &super::computed_style::ComputedStyle, tag: &str) -> N
         } else {
             None
         },
+        block_before_em,
+        block_after_em,
+        width: css.width.map(|width| match width {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
+        height: css.height.map(|height| match height {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
+        max_width: css.max_width.map(|width| match width {
+            super::computed_style::ComputedWidth::Percent(value) => NodeWidth::Percent(value),
+            super::computed_style::ComputedWidth::Px(value) => NodeWidth::Pixels(value),
+        }),
+        fragment_before: false,
+        fragment_after: false,
     }
 }
 
@@ -1185,6 +1877,94 @@ fn collect_inline_content(
     // Merge adjacent spans with the same formatting.
     merge_spans(&mut spans);
     InlineContent { spans, anchors }
+}
+
+fn collect_caption_runs(
+    caption: &roxmltree::Node,
+    styles: &super::computed_style::ComputedDocumentStyles,
+    base_font_size: f32,
+    spans: &mut Vec<TextSpan>,
+    anchors: &mut HashMap<String, usize>,
+) {
+    let mut run_spans = Vec::new();
+    let mut run_anchors = HashMap::new();
+    let mut raw_offset = 0;
+    for child in caption.children() {
+        let is_block = child.is_element()
+            && styles.get(child).is_some_and(|style| {
+                !matches!(
+                    style.display,
+                    super::computed_style::DisplayRole::Inline
+                        | super::computed_style::DisplayRole::None
+                )
+            });
+        if is_block {
+            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            raw_offset = 0;
+        }
+        if child.is_text() {
+            let text = child.text().unwrap_or("");
+            raw_offset += text.chars().count();
+            run_spans.push(text_span_for_node(
+                caption,
+                text.to_owned(),
+                None,
+                styles,
+                base_font_size,
+            ));
+        } else if child.is_element()
+            && styles
+                .get(child)
+                .is_some_and(|style| style.display != super::computed_style::DisplayRole::None)
+        {
+            record_element_anchors(&child, raw_offset, &mut run_anchors);
+            collect_inline_spans_recursive(
+                &child,
+                base_font_size,
+                child
+                    .tag_name()
+                    .name()
+                    .eq("a")
+                    .then(|| child.attribute("href"))
+                    .flatten(),
+                styles,
+                &mut run_spans,
+                &mut run_anchors,
+                &mut raw_offset,
+            );
+        }
+        if is_block {
+            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            raw_offset = 0;
+        }
+    }
+    append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+}
+
+fn append_caption_run(
+    output: &mut Vec<TextSpan>,
+    output_anchors: &mut HashMap<String, usize>,
+    run: &mut Vec<TextSpan>,
+    run_anchors: &mut HashMap<String, usize>,
+) {
+    collapse_inline_whitespace_with_anchors(run, run_anchors);
+    merge_spans(run);
+    if run.is_empty() {
+        run_anchors.clear();
+        return;
+    }
+    let mut offset: usize = output.iter().map(|span| span.text.chars().count()).sum();
+    if !output.is_empty() {
+        let mut separator = run[0].clone();
+        separator.text = "\n".to_owned();
+        separator.math = None;
+        output.push(separator);
+        offset += 1;
+    }
+    for (name, anchor_offset) in run_anchors.drain() {
+        record_anchor_name(&name, offset + anchor_offset, output_anchors);
+    }
+    output.append(run);
 }
 
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
@@ -1589,7 +2369,7 @@ mod tests {
         let nodes = parse_chapter_xhtml(
             r##"<html><body><table>
                 <caption>Build <em>matrix</em></caption>
-                <thead><tr><th id="platform" scope="col">Platform</th><th scope="col">Status</th></tr></thead>
+                <thead><tr><th id="platform" scope="col" style="width: 15.6%">Platform</th><th scope="col">Status</th></tr></thead>
                 <tbody>
                     <tr><th id="linux" scope="row" rowspan="2">Linux</th><td headers="platform linux"><a href="#pass">Pass</a></td></tr>
                     <tr><td colspan="2">Diagram <img src="../images/table.png" alt="table diagram"/></td></tr>
@@ -1630,6 +2410,7 @@ mod tests {
         assert!(platform.header);
         assert_eq!(platform.id.as_deref(), Some("platform"));
         assert_eq!(platform.scope.as_deref(), Some("col"));
+        assert_eq!(platform.style.width, Some(NodeWidth::Percent(0.156)));
         let linux = &row_groups[1].rows[0].cells[0];
         assert_eq!(linux.row_span, 2);
         let pass = &row_groups[1].rows[0].cells[1];
@@ -1641,7 +2422,7 @@ mod tests {
         let nested = &row_groups[1].rows[1].cells[0];
         assert_eq!(nested.column_span, 2);
         assert!(
-            matches!(nested.children.last(), Some(ContentNode::Image { src, alt }) if
+            matches!(nested.children.last(), Some(ContentNode::Image { src, alt, .. }) if
             src == "OPS/images/table.png" && alt == "table diagram")
         );
 
@@ -1726,6 +2507,167 @@ mod tests {
             !nodes
                 .iter()
                 .any(|node| matches!(node, ContentNode::Image { .. }))
+        );
+    }
+
+    #[test]
+    fn xhtml_doctype_does_not_hide_epub_chapter_content() {
+        let nodes = parse_chapter_xhtml(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Introduction</h1><p>Visible chapter text.</p></body></html>"#,
+            "",
+            &Default::default(),
+        );
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Introduction\nVisible chapter text.\n"
+        );
+    }
+
+    #[test]
+    fn xhtml_public_doctype_resolves_standard_named_entities_locally() {
+        let xhtml = r#"<?xml version="1.0"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml"><body><p>one&nbsp;two &copy; three</p></body></html>"#;
+        let nodes =
+            parse_chapter_xhtml_with_limits(xhtml, "", &Default::default(), &EpubLimits::default())
+                .expect("standard XHTML entities should resolve without fetching the public DTD");
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "one\u{a0}two © three\n"
+        );
+    }
+
+    #[test]
+    fn named_entity_normalization_skips_cdata_and_honors_internal_shadowing() {
+        let cdata = r#"<html><body><p><![CDATA[&copy;]]> &copy;</p></body></html>"#;
+        let nodes =
+            parse_chapter_xhtml_with_limits(cdata, "", &Default::default(), &EpubLimits::default())
+                .expect("CDATA should remain lexical data");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "&copy; ©\n");
+
+        let shadowed = r#"<!DOCTYPE html [<!ENTITY copy "locally declared">]><html><body><p title="&copy;">&copy;</p></body></html>"#;
+        let nodes = parse_chapter_xhtml_with_limits(
+            shadowed,
+            "",
+            &Default::default(),
+            &EpubLimits::default(),
+        )
+        .expect("document entity declarations should take precedence");
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "locally declared\n"
+        );
+    }
+
+    #[test]
+    fn dtd_entity_expansion_is_bounded_before_parsing() {
+        let amplified = r#"<!DOCTYPE html [
+          <!ENTITY a "12345678"><!ENTITY b "&a;&a;&a;&a;">
+          <!ENTITY c "&b;&b;&b;&b;">
+        ]><html><body>&c;&c;&c;&c;</body></html>"#;
+        let mut limits = EpubLimits {
+            max_xml_text_bytes: 128,
+            ..Default::default()
+        };
+        let error = parse_chapter_xhtml_with_limits(amplified, "", &Default::default(), &limits)
+            .expect_err("amplified entity text must be rejected before roxmltree expands it");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let valid =
+            r#"<!DOCTYPE html [<!ENTITY word "bounded">]><html><body><p>&word;</p></body></html>"#;
+        limits.max_xml_text_bytes = 32;
+        let nodes = parse_chapter_xhtml_with_limits(valid, "", &Default::default(), &limits)
+            .expect("below-limit DTD text should remain supported");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "bounded\n");
+
+        let declarations = (0..32)
+            .map(|index| {
+                if index == 0 {
+                    "<!ENTITY e0 \"x\">".to_owned()
+                } else {
+                    format!("<!ENTITY e{index} \"&e{};\">", index - 1)
+                }
+            })
+            .collect::<String>();
+        let deep = format!("<!DOCTYPE html [{declarations}]><html><body>&e31;</body></html>");
+        let error = parse_chapter_xhtml_with_limits(&deep, "", &Default::default(), &limits)
+            .expect_err("deep entity chains must be rejected without recursive stack growth");
+        assert!(error.to_string().contains("entity nesting"));
+
+        let parameter = "<!DOCTYPE html [<!ENTITY % bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(parameter, "", &Default::default(), &limits)
+            .expect_err("parameter declarations expanded by the parser must count toward limits");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let duplicate = "<!DOCTYPE html [<!ENTITY bomb \"boundedbounded\"><!ENTITY bomb \"x\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(duplicate, "", &Default::default(), &limits)
+            .expect_err("the parser's first duplicate declaration must determine expansion cost");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_declaration = "<!DOCTYPE html [<?fake <!ENTITY bomb \"x\"> ?><!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error =
+            parse_chapter_xhtml_with_limits(fake_declaration, "", &Default::default(), &limits)
+                .expect_err("declaration-like processing-instruction data must remain opaque");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_end = "<!DOCTYPE html [<?fake ]> ?><!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(fake_end, "", &Default::default(), &limits)
+            .expect_err("doctype delimiters in processing-instruction data must remain opaque");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let fake_doctype = "<!-- <!DOCTYPE html [<!ENTITY bomb \"x\">]> --><!DOCTYPE html [<!ENTITY bomb \"boundedbounded\">]><html><body>&bomb;&bomb;&bomb;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(fake_doctype, "", &Default::default(), &limits)
+            .expect_err("doctype text inside comments must not shadow the real declaration");
+        assert!(error.to_string().contains("expanded text limit"));
+
+        let parameter_shadow = "<!DOCTYPE html [<!ENTITY % bomb \"x\"><!ENTITY bomb \"bounded\">]><html><body>&bomb;</body></html>";
+        let nodes = parse_chapter_xhtml_with_limits(
+            parameter_shadow,
+            "",
+            &Default::default(),
+            &EpubLimits::default(),
+        )
+        .expect("parameter/general duplicate semantics should match parser admission");
+        assert_eq!(crate::search::extract_text_from_nodes(&nodes), "x\n");
+
+        let unicode_name = "<!DOCTYPE html [<!ENTITY é \"boundedbounded\"><!ENTITY y \"&é;&é;&é;\">]><html><body>&y;</body></html>";
+        let error = parse_chapter_xhtml_with_limits(unicode_name, "", &Default::default(), &limits)
+            .expect_err("Unicode XML entity names must count toward expansion limits");
+        assert!(error.to_string().contains("expanded text limit"));
+    }
+
+    #[test]
+    fn entity_declaration_scan_ignores_comments_and_quoted_values() {
+        let xhtml = r#"<!DOCTYPE html [
+          <!-- <!ENTITY copy "fake comment declaration"> -->
+          <!ENTITY marker "<!ENTITY trade 'fake quoted declaration'>">
+          <!ENTITY % reg "fake parameter declaration">
+          <!-- ]> must not end the doctype -->
+          <!ENTITY nbsp "actual declaration">
+        ]><html><body>&copy; &trade; &reg; &nbsp;</body></html>"#;
+        let normalized = resolve_xhtml_named_entities(xhtml);
+
+        assert!(normalized.contains("<body>© ™ ® &nbsp;</body>"));
+    }
+
+    #[test]
+    fn malformed_chapter_returns_a_contextual_parse_error() {
+        let error = parse_chapter_xhtml_with_limits(
+            "<html><body><p>broken</body></html>",
+            "OPS",
+            &Default::default(),
+            &EpubLimits::default(),
+        )
+        .expect_err("malformed XHTML must not become an empty chapter");
+
+        assert!(
+            error
+                .to_string()
+                .contains("failed to parse EPUB chapter XHTML")
         );
     }
 
@@ -2050,17 +2992,20 @@ mod tests {
         </body></html>"#;
         let styles = super::super::style::EpubStyles::parse([(
             "style.css",
-            ".toc { margin-left: 16px; } .entry { margin-left: 32px; text-indent: -32px; }",
+            ".toc { margin-left: 16px; margin-top: 24px; margin-bottom: 32px; } .entry { margin-left: 32px; margin-bottom: 0; text-indent: -32px; }",
         )]);
         let nodes = parse_chapter_xhtml(xhtml, "", &styles);
 
         match &nodes[0] {
             ContentNode::BlockQuote { children, style } => {
                 assert_eq!(style.margin_left_em, Some(1.0));
+                assert_eq!(style.block_before_em, Some(1.5));
+                assert_eq!(style.block_after_em, Some(2.0));
                 assert!(matches!(
                     &children[0],
                     ContentNode::Paragraph(_, paragraph_style)
                         if paragraph_style.margin_left_em == Some(0.0)
+                            && paragraph_style.block_after_em == Some(0.0)
                 ));
             }
             other => panic!("expected BlockQuote, got {other:?}"),
@@ -2073,12 +3018,238 @@ mod tests {
         let nodes = parse_chapter_xhtml(xhtml, "OEBPS", &Default::default());
         assert_eq!(nodes.len(), 1);
         match &nodes[0] {
-            ContentNode::Image { src, alt } => {
+            ContentNode::Image { src, alt, .. } => {
                 assert_eq!(src, "OEBPS/images/fig1.png");
                 assert_eq!(alt, "Figure 1");
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn xhtml_image_dimensions_are_low_specificity_hints() {
+        let xhtml = r#"<html><head><style>#css { width: 90px; height: 25%; } #auto { width: auto; height: auto; }</style></head><body><img id="hint" src="a.png" width="40" height="20"/><img id="css" src="b.png" width="40" height="20"/><img id="auto" src="c.png" width="40" height="20"/></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+        let styles = nodes
+            .iter()
+            .map(|node| node.style().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(styles[0].width, Some(NodeWidth::Pixels(40.0)));
+        assert_eq!(styles[0].height, Some(NodeWidth::Pixels(20.0)));
+        assert_eq!(styles[1].width, Some(NodeWidth::Pixels(90.0)));
+        assert_eq!(styles[1].height, Some(NodeWidth::Percent(0.25)));
+        assert_eq!(styles[2].width, None);
+        assert_eq!(styles[2].height, None);
+    }
+
+    #[test]
+    fn semantic_caption_preserves_direct_text_and_inline_style_in_order() {
+        let xhtml = r#"<html><body><figure><img src="figure.png" alt="Diagram"/><figcaption>Figure <em id="number">1</em>: Architecture</figcaption></figure></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "", &Default::default());
+        let ContentNode::Image { caption, .. } = &nodes[0] else {
+            panic!("expected semantic image");
+        };
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Figure 1: Architecture"
+        );
+        assert!(caption.iter().any(|span| span.text == "1" && span.italic));
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nFigure 1: Architecture\n"
+        );
+    }
+
+    #[test]
+    fn collapsed_figure_records_only_selected_image_ancestor_anchors() {
+        let xhtml = r#"<html><body><figure><a id="image-wrapper"><img src="figure.png" alt="Diagram"/></a><figcaption>Caption</figcaption></figure><div id="unrelated">After</div></body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("figure should collapse");
+
+        assert!(matches!(
+            parsed.nodes.first(),
+            Some(ContentNode::Image { .. })
+        ));
+        assert_eq!(parsed.anchor_offsets.get("image-wrapper"), Some(&0));
+        assert_ne!(parsed.anchor_offsets.get("unrelated"), Some(&0));
+    }
+
+    #[test]
+    fn semantic_caption_collects_mixed_inline_and_block_runs_in_source_order() {
+        let xhtml = r#"<html><body><figure><img src="figure.png" alt="Diagram"/><figcaption>Lead <strong id="bold">bold</strong><p id="block">Block <em id="italic">italic</em></p><span id="tail">tail</span></figcaption></figure></body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("mixed caption should parse");
+        let ContentNode::Image { caption, .. } = &parsed.nodes[0] else {
+            panic!("expected semantic image");
+        };
+
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Lead bold\nBlock italic\ntail"
+        );
+        assert!(caption.iter().any(|span| span.text == "bold" && span.bold));
+        assert!(
+            caption
+                .iter()
+                .any(|span| span.text == "italic" && span.italic)
+        );
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&parsed.nodes),
+            "Diagram\nLead bold\nBlock italic\ntail\n"
+        );
+        assert_eq!(parsed.anchor_offsets.get("bold"), Some(&13));
+        assert_eq!(parsed.anchor_offsets.get("block"), Some(&18));
+        assert_eq!(parsed.anchor_offsets.get("italic"), Some(&24));
+        assert_eq!(parsed.anchor_offsets.get("tail"), Some(&31));
+    }
+
+    #[test]
+    fn figure_retains_its_caption_with_the_image() {
+        let xhtml = r#"<html><body><figure><div><img src="images/fig1.png" alt="Diagram"/><h6>Figure 1. Architecture</h6></div></figure><p>Following text</p></body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OEBPS", &Default::default());
+
+        assert_eq!(nodes.len(), 2);
+        let ContentNode::Image { caption, .. } = &nodes[0] else {
+            panic!("expected retained figure image");
+        };
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "Figure 1. Architecture"
+        );
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nFigure 1. Architecture\nFollowing text\n"
+        );
+    }
+
+    #[test]
+    fn figure_preserves_caption_before_image_as_ordered_content() {
+        let xhtml = r#"<html><head><style>figcaption { text-align: right; font-size: 20px; }</style></head><body>
+          <p>Before</p><figure id="figure"><figcaption id="caption"><p>First <em>paragraph</em>.</p><p>Second paragraph.</p></figcaption><img id="image" src="figure.png" alt="Diagram"/></figure><p id="after">After</p>
+        </body></html>"#;
+        let styles = super::super::style::EpubStyles::default();
+        let limits = EpubLimits::default();
+        let fonts = super::super::font::EpubFontBook::new(&[], &styles, &HashMap::new(), &limits)
+            .expect("empty font book should be valid");
+        let parsed = parse_chapter_content_at_path_with_limits(
+            xhtml,
+            "OPS/chapter.xhtml",
+            &styles,
+            &fonts,
+            &limits,
+        )
+        .expect("figure should parse");
+        assert!(matches!(parsed.nodes[0], ContentNode::Paragraph(..)));
+        let ContentNode::Figure { children, .. } = &parsed.nodes[1] else {
+            panic!("caption-first figure should retain its ordered container");
+        };
+        assert_eq!(children.len(), 2);
+        let ContentNode::Paragraph(first_caption, style) = &children[0] else {
+            unreachable!();
+        };
+        assert!(matches!(children[1], ContentNode::Image { .. }));
+        assert!(matches!(parsed.nodes[2], ContentNode::Paragraph(..)));
+        assert!(
+            first_caption
+                .iter()
+                .any(|span| span.text == "paragraph" && span.italic)
+        );
+        assert_eq!(
+            first_caption
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "First paragraph.\nSecond paragraph."
+        );
+        assert_eq!(style.font_size_multiplier, Some(1.25));
+        assert_eq!(
+            style.text_align,
+            Some(super::super::style::TextAlignment::Right)
+        );
+        let search = crate::search::extract_text_from_nodes(&parsed.nodes);
+        assert_eq!(
+            search,
+            "Before\nFirst paragraph.\nSecond paragraph.\nDiagram\nAfter\n"
+        );
+        assert_eq!(parsed.anchor_offsets.get("figure"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("caption"), Some(&7));
+        assert_eq!(parsed.anchor_offsets.get("image"), Some(&42));
+        assert_eq!(parsed.anchor_offsets.get("after"), Some(&50));
+    }
+
+    #[test]
+    fn figure_collapse_preserves_extra_content_and_captionless_geometry() {
+        let xhtml = r#"<html><head><style>figure { width: 50%; max-width: 320px; margin: 2em 0 3em 1em; }</style></head><body>
+          <figure><img src="figure.png" alt="Diagram"/><figcaption>Caption</figcaption><p>Credit</p></figure>
+          <figure><img src="standalone.png" alt="Standalone"/></figure>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OPS", &Default::default());
+
+        assert_eq!(
+            crate::search::extract_text_from_nodes(&nodes),
+            "Diagram\nCaption\nCredit\nStandalone\n"
+        );
+        let ContentNode::Figure { children, style } = &nodes[0] else {
+            panic!("figure with extra content should retain its container");
+        };
+        assert_eq!(children.len(), 3);
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.5)));
+        assert_eq!(style.max_width, Some(NodeWidth::Pixels(320.0)));
+        assert_eq!(style.margin_left_em, Some(1.0));
+        assert_eq!(style.block_before_em, Some(2.0));
+        assert_eq!(style.block_after_em, Some(3.0));
+        let ContentNode::Image { style, .. } = nodes.last().unwrap() else {
+            panic!("captionless figure should retain its image");
+        };
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.5)));
+        assert_eq!(style.max_width, Some(NodeWidth::Pixels(320.0)));
+        assert_eq!(style.margin_left_em, Some(1.0));
+        assert_eq!(style.block_before_em, Some(2.0));
+        assert_eq!(style.block_after_em, Some(3.0));
+    }
+
+    #[test]
+    fn two_child_non_caption_figure_preserves_container_style() {
+        let xhtml = r#"<html><head><style>figure { width: 60%; margin-left: 2em; }</style></head><body>
+          <figure><img src="figure.png" alt="Diagram"/><ul><li>Legend</li></ul></figure>
+        </body></html>"#;
+        let nodes = parse_chapter_xhtml(xhtml, "OPS", &Default::default());
+
+        let ContentNode::Figure { children, style } = &nodes[0] else {
+            panic!("two-child non-caption figure should retain its container");
+        };
+        assert_eq!(children.len(), 2);
+        assert_eq!(style.width, Some(NodeWidth::Percent(0.6)));
+        assert_eq!(style.margin_left_em, Some(2.0));
     }
 
     #[test]
