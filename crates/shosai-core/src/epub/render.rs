@@ -1050,8 +1050,7 @@ fn parse_figure(
     let caption_node = captions.last().copied().filter(|node| {
         figure
             .children()
-            .filter(|child| child.is_element() && visible(*child))
-            .next_back()
+            .rfind(|child| child.is_element() && visible(*child))
             == Some(*node)
             && image.range().start < node.range().start
     })?;
@@ -2570,8 +2569,10 @@ mod tests {
           <!ENTITY a "12345678"><!ENTITY b "&a;&a;&a;&a;">
           <!ENTITY c "&b;&b;&b;&b;">
         ]><html><body>&c;&c;&c;&c;</body></html>"#;
-        let mut limits = EpubLimits::default();
-        limits.max_xml_text_bytes = 128;
+        let mut limits = EpubLimits {
+            max_xml_text_bytes: 128,
+            ..Default::default()
+        };
         let error = parse_chapter_xhtml_with_limits(amplified, "", &Default::default(), &limits)
             .expect_err("amplified entity text must be rejected before roxmltree expands it");
         assert!(error.to_string().contains("expanded text limit"));

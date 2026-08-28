@@ -317,14 +317,16 @@ pub(crate) fn epub_image_layout(
         Some(shosai_core::epub::render::NodeWidth::Pixels(value)) => value,
         None => available_width,
     };
-    let requested_width = requested_width
-        .is_finite()
-        .then_some(requested_width)
-        .unwrap_or(intrinsic_width);
-    let maximum_width = maximum_width
-        .is_finite()
-        .then_some(maximum_width)
-        .unwrap_or(available_width);
+    let requested_width = if requested_width.is_finite() {
+        requested_width
+    } else {
+        intrinsic_width
+    };
+    let maximum_width = if maximum_width.is_finite() {
+        maximum_width
+    } else {
+        available_width
+    };
     let mut width = requested_width.clamp(1.0, maximum_width.min(available_width).max(1.0));
     // Two authored dimensions intentionally define the replaced-element rectangle;
     // otherwise retain the admitted resource's aspect ratio.
@@ -336,12 +338,12 @@ pub(crate) fn epub_image_layout(
     .filter(|height| height.is_finite() && *height > 0.0)
     .unwrap_or(intrinsic_height * width / intrinsic_width.max(1.0))
     .max(1.0);
-    if let Some(available_height) = maximum_height {
-        if height > available_height {
-            let scale = available_height / height;
-            width *= scale;
-            height = available_height;
-        }
+    if let Some(available_height) = maximum_height
+        && height > available_height
+    {
+        let scale = available_height / height;
+        width *= scale;
+        height = available_height;
     }
     let caption_size = font_size
         * caption_style
@@ -4980,8 +4982,14 @@ mod tests {
         let plain = paragraph(None, None);
         let authored = paragraph(Some(2.0), Some(3.0));
 
-        assert_eq!(epub_node_list_spacing(&[plain.clone()], 16.0, 8.0), 8.0);
-        assert_eq!(epub_node_list_spacing(&[authored.clone()], 16.0, 8.0), 80.0);
+        assert_eq!(
+            epub_node_list_spacing(std::slice::from_ref(&plain), 16.0, 8.0),
+            8.0
+        );
+        assert_eq!(
+            epub_node_list_spacing(std::slice::from_ref(&authored), 16.0, 8.0),
+            80.0
+        );
 
         let plain_quote = ContentNode::BlockQuote {
             children: vec![plain.clone()],
