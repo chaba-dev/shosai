@@ -1822,19 +1822,30 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             images,
         } => {
             if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
+                state.epub_image_decode_active = false;
                 for (path, decoded) in images {
                     state.epub_images_pending.remove(&path);
-                    if let Some(decoded) = decoded {
-                        state.epub_image_handles.insert(path, decoded.into_handle());
+                    if state.epub_images_desired.remove(&path) {
+                        if let Some(decoded) = decoded {
+                            state.epub_image_handles.insert(path, decoded.into_handle());
+                        } else {
+                            state.epub_images_failed.insert(path);
+                        }
                     }
                 }
+                return load_epub_images_task(state);
             } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                 && generation == tab.epub_image_generation
             {
+                tab.epub_image_decode_active = false;
                 for (path, decoded) in images {
                     tab.epub_images_pending.remove(&path);
-                    if let Some(decoded) = decoded {
-                        tab.epub_image_handles.insert(path, decoded.into_handle());
+                    if tab.epub_images_desired.remove(&path) {
+                        if let Some(decoded) = decoded {
+                            tab.epub_image_handles.insert(path, decoded.into_handle());
+                        } else {
+                            tab.epub_images_failed.insert(path);
+                        }
                     }
                 }
             }

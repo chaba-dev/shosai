@@ -624,6 +624,9 @@ struct ReaderTab {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
+    epub_images_desired: HashSet<String>,
+    epub_images_failed: HashSet<String>,
+    epub_image_decode_active: bool,
     epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
@@ -720,6 +723,9 @@ pub struct State {
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
+    epub_images_desired: HashSet<String>,
+    epub_images_failed: HashSet<String>,
+    epub_image_decode_active: bool,
     epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
@@ -862,6 +868,9 @@ pub fn boot() -> (State, Task<Message>) {
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
+        epub_images_desired: HashSet::new(),
+        epub_images_failed: HashSet::new(),
+        epub_image_decode_active: false,
         epub_image_generation: 0,
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
@@ -1189,6 +1198,9 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         page_cache: state.page_cache.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_images_pending: state.epub_images_pending.clone(),
+        epub_images_desired: state.epub_images_desired.clone(),
+        epub_images_failed: state.epub_images_failed.clone(),
+        epub_image_decode_active: state.epub_image_decode_active,
         epub_image_generation: state.epub_image_generation,
         epub_pages: state.epub_pages.clone(),
         epub_layout_key: state.epub_layout_key,
@@ -1238,6 +1250,9 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.page_cache = tab.page_cache;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_images_pending = tab.epub_images_pending;
+    state.epub_images_desired = tab.epub_images_desired;
+    state.epub_images_failed = tab.epub_images_failed;
+    state.epub_image_decode_active = tab.epub_image_decode_active;
     state.epub_image_generation = tab.epub_image_generation;
     state.epub_pages = tab.epub_pages;
     state.epub_layout_key = tab.epub_layout_key;
@@ -1354,7 +1369,8 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     } else {
         Task::none()
     };
-    Task::batch([content_task, search_task, bookmarks_task])
+    let image_task = load_epub_images_task(state);
+    Task::batch([content_task, image_task, search_task, bookmarks_task])
 }
 
 fn close_tab(state: &mut State, index: usize) -> Task<Message> {
@@ -1378,6 +1394,9 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_facing_page_handle = None;
         state.epub_image_handles.clear();
         state.epub_images_pending.clear();
+        state.epub_images_desired.clear();
+        state.epub_images_failed.clear();
+        state.epub_image_decode_active = false;
         state.epub_pages = Arc::new(Vec::new());
         state.epub_layout_key = None;
         state.epub_page = 0;
@@ -1678,6 +1697,9 @@ fn install_document(
     state.epub_image_generation = state.epub_image_generation.wrapping_add(1);
     state.epub_image_handles.clear();
     state.epub_images_pending.clear();
+    state.epub_images_desired.clear();
+    state.epub_images_failed.clear();
+    state.epub_image_decode_active = false;
     state.epub_pages = Arc::new(Vec::new());
     state.epub_layout_key = None;
     state.epub_page = 0;
@@ -1993,21 +2015,35 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
 
     let first = state.current_page.saturating_sub(1);
     let last = state.current_page.saturating_add(1).min(chapters.len() - 1);
-    let paths = epub_image_paths(
+    let nearby = epub_image_paths(
         chapters[first..=last]
             .iter()
             .flat_map(|chapter| chapter.nodes()),
-    )
-    .into_iter()
-    .filter(|path| {
-        !state.epub_image_handles.contains_key(path) && !state.epub_images_pending.contains(path)
-    })
-    .collect::<Vec<_>>();
+    );
+    state
+        .epub_image_handles
+        .retain(|path, _| nearby.contains(path));
+    state.epub_images_desired = nearby
+        .into_iter()
+        .filter(|path| {
+            !state.epub_image_handles.contains_key(path) && !state.epub_images_failed.contains(path)
+        })
+        .collect();
+    if state.epub_image_decode_active {
+        return Task::none();
+    }
+
+    let paths = state
+        .epub_images_desired
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
     if paths.is_empty() {
         return Task::none();
     }
 
-    state.epub_images_pending.extend(paths.iter().cloned());
+    state.epub_images_pending = paths.iter().cloned().collect();
+    state.epub_image_decode_active = true;
     let document = Arc::clone(document);
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.epub_image_generation;
@@ -9874,6 +9910,55 @@ mod tests {
     }
 
     #[test]
+    fn epub_image_scrubbing_keeps_one_batch_and_prioritizes_the_latest_chapter() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(5)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let _ = load_epub_images_task(&mut state);
+        let obsolete = state
+            .epub_images_pending
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        state.current_page = 4;
+        assert_eq!(load_epub_images_task(&mut state).units(), 0);
+        assert!(state.epub_image_decode_active);
+        assert_eq!(state.epub_images_desired.len(), 2);
+
+        let next = update(
+            &mut state,
+            Message::EpubImagesDecoded {
+                tab_id: 1,
+                generation: 0,
+                images: obsolete
+                    .into_iter()
+                    .map(|path| {
+                        (
+                            path,
+                            Some(DecodedEpubImage::Raster {
+                                width: 1,
+                                height: 1,
+                                pixels: vec![1, 2, 3, 255],
+                            }),
+                        )
+                    })
+                    .collect(),
+            },
+        );
+
+        assert_eq!(next.units(), 1);
+        assert!(state.epub_image_handles.is_empty());
+        assert!(state.epub_image_decode_active);
+        assert_eq!(state.epub_images_pending.len(), 2);
+        assert!(
+            state
+                .epub_images_pending
+                .iter()
+                .all(|path| { path.ends_with("image-3.png") || path.ends_with("image-4.png") })
+        );
+    }
+
+    #[test]
     fn reader_tabs_share_paginated_layout_storage() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -10139,10 +10224,6 @@ mod tests {
             },
         ]);
         state.epub_layout_key = Some(epub_layout_key(&state));
-        state.epub_image_handles.insert(
-            "cached.png".to_string(),
-            EpubImageHandle::Raster(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
-        );
         state.bookmarks.push(Bookmark {
             id: 1,
             file_path: "book.epub".to_string(),
@@ -10160,7 +10241,6 @@ mod tests {
         let pages = Arc::clone(&state.epub_pages);
         let layout_key = state.epub_layout_key;
         let render_generation = state.render_generation;
-        let cached_image = state.epub_image_handles["cached.png"].raster_id();
         let presentation = match &state.document {
             Some(OpenDocument::Epub(document)) => document.presentation() as *const _,
             _ => panic!("expected EPUB document"),
@@ -10172,10 +10252,6 @@ mod tests {
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
         assert_eq!(state.epub_layout_key, layout_key);
         assert_eq!(state.render_generation, render_generation);
-        assert_eq!(
-            state.epub_image_handles["cached.png"].raster_id(),
-            cached_image
-        );
         let current_presentation = match &state.document {
             Some(OpenDocument::Epub(document)) => document.presentation() as *const _,
             _ => panic!("expected EPUB document"),
@@ -10221,17 +10297,12 @@ mod tests {
             },
         ]);
         state.epub_layout_key = Some(epub_layout_key(&state));
-        state.epub_image_handles.insert(
-            "cached.png".to_string(),
-            EpubImageHandle::Raster(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 0])),
-        );
 
         let pages = Arc::clone(&state.epub_pages);
         let layout_key = state.epub_layout_key;
         let render_generation = state.render_generation;
         let search_document_generation = state.search_document_generation;
         let search_query_generation = state.search_query_generation;
-        let cached_image = state.epub_image_handles["cached.png"].raster_id();
         let (presentation, fonts, native_text_id) = match &state.document {
             Some(OpenDocument::Epub(document)) => (
                 document.presentation() as *const _,
@@ -10257,11 +10328,6 @@ mod tests {
         assert_eq!(state.render_generation, render_generation);
         assert_eq!(state.search_document_generation, search_document_generation);
         assert_eq!(state.search_query_generation, search_query_generation);
-        assert_eq!(state.epub_image_handles.len(), 1);
-        assert_eq!(
-            state.epub_image_handles["cached.png"].raster_id(),
-            cached_image
-        );
         let (current_presentation, current_fonts, current_native_text_id) = match &state.document {
             Some(OpenDocument::Epub(document)) => (
                 document.presentation() as *const _,
