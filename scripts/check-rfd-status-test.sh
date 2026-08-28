@@ -15,8 +15,12 @@ reset_fixtures() {
 }
 
 run_success() {
+	local expected="${1:-}"
 	if ! NO_COLOR=1 RFD_DIR="${rfd_root}" bash "${checker}" >"${output}" 2>&1; then
 		cat "${output}" >&2; printf 'expected RFD checker to pass\n' >&2; exit 1
+	fi
+	if [[ -n "${expected}" ]] && ! grep -Fq "${expected}" "${output}"; then
+		cat "${output}" >&2; printf 'RFD checker output did not include: %s\n' "${expected}" >&2; exit 1
 	fi
 }
 
@@ -72,8 +76,19 @@ EOF
 	esac
 }
 
-reset_fixtures; write_valid_rfd discussion https://example.com/pull/1; run_success
-reset_fixtures; write_valid_rfd prediscussion "" md; run_success
+reset_fixtures; write_valid_rfd discussion https://example.com/pull/1
+cat >>"${rfd_root}/0001/IMPLEMENTATION.org" <<'EOF'
+- [X] Finished task.
+  - [x] Finished nested task.
+EOF
+run_success "0001  discussion       2/3"
+
+reset_fixtures; write_valid_rfd prediscussion "" md
+cat >>"${rfd_root}/0001/IMPLEMENTATION.md" <<'EOF'
+- [x] Finished task.
++ [X] Another finished task.
+EOF
+run_success "0001  prediscussion    2/3"
 
 reset_fixtures; write_valid_rfd prediscussion ""
 rm "${rfd_root}/0001/IMPLEMENTATION.org"
