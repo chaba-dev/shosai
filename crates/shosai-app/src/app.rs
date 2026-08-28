@@ -3757,7 +3757,7 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
     let page_count = pages.len();
     let layout_scale = paginated_raster_scale(state, &pages);
     let mut spread = row![].spacing(PAGE_GUTTER).padding(20);
-    for page in pages {
+    for (visible_index, page) in pages.into_iter().enumerate() {
         let rendered = rendered_for(page);
         let rendered_width = rendered.map_or(0.0, |(rendered, _)| {
             raster_logical_size(state, page, rendered, layout_scale).width
@@ -3787,7 +3787,7 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
             ZoomMode::FitPage => container(content)
                 .width(Length::FillPortion(1))
                 .height(Length::Fill)
-                .center_x(Length::Fill)
+                .align_x(paginated_spread_alignment(visible_index, page_count))
                 .center_y(Length::Fill),
             ZoomMode::Manual(_) | ZoomMode::FitWidth => {
                 let slot_width = raster_page_slot_width(state, page_count, rendered_width);
@@ -3814,6 +3814,14 @@ fn pdf_page_view(state: &State) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill)
             .into(),
+    }
+}
+
+fn paginated_spread_alignment(visible_index: usize, page_count: usize) -> iced::Alignment {
+    match (visible_index, page_count) {
+        (_, 1) => iced::Alignment::Center,
+        (0, _) => iced::Alignment::End,
+        _ => iced::Alignment::Start,
     }
 }
 
@@ -6247,6 +6255,13 @@ mod tests {
         assert_eq!(pages.len(), 2);
         assert!(width <= available.width + 0.01);
         assert!(height <= available.height + 0.01);
+    }
+
+    #[test]
+    fn fit_page_spread_aligns_pages_at_the_inner_gutter() {
+        assert_eq!(paginated_spread_alignment(0, 2), iced::Alignment::End);
+        assert_eq!(paginated_spread_alignment(1, 2), iced::Alignment::Start);
+        assert_eq!(paginated_spread_alignment(0, 1), iced::Alignment::Center);
     }
 
     #[test]
