@@ -704,8 +704,8 @@ pub(crate) struct PageCacheKey {
 
 #[derive(Debug, Clone)]
 struct DocumentOpenPreview {
-    path: PathBuf,
-    book_id: Option<i64>,
+    title: String,
+    cover: Option<RasterImageHandle>,
 }
 
 #[derive(Debug)]
@@ -1461,9 +1461,19 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     let generation = state.document_open_generation;
     state.document_opening = true;
     state.document_open_notice_visible = false;
+    let book =
+        book_id.and_then(|book_id| state.library_books.iter().find(|book| book.id == book_id));
     state.document_open_preview = Some(DocumentOpenPreview {
-        path: path.clone(),
-        book_id,
+        title: book.map_or_else(
+            || {
+                path.file_stem()
+                    .and_then(|title| title.to_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| state.i18n.text("opening-document"))
+            },
+            |book| book.title.clone(),
+        ),
+        cover: book_id.and_then(|book_id| state.library_cover_handles.get(&book_id).cloned()),
     });
     state.open_error = None;
     state.missing_book_id = None;
@@ -3318,23 +3328,19 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
 
 fn document_opening_view(state: &State) -> Element<'_, Message> {
     let preview = state.document_open_preview.as_ref();
-    let book = preview
-        .and_then(|preview| preview.book_id)
-        .and_then(|book_id| state.library_books.iter().find(|book| book.id == book_id));
-    let title = book
-        .map(|book| book.title.clone())
-        .or_else(|| {
-            preview
-                .and_then(|preview| preview.path.file_stem())
-                .and_then(|title| title.to_str())
-                .map(str::to_owned)
-        })
+    let title = preview
+        .map(|preview| preview.title.clone())
         .unwrap_or_else(|| state.i18n.text("opening-document"));
-    let cover = if let Some(book) = book {
-        render_book_cover(state, book, Length::Fixed(140.0), 200.0)
-    } else {
-        cover_placeholder(Length::Fixed(140.0), 200.0, &title)
-    };
+    let cover: Element<'_, Message> =
+        if let Some(handle) = preview.and_then(|preview| preview.cover.as_ref()) {
+            image(handle.0.clone())
+                .width(Length::Fixed(140.0))
+                .height(Length::Fixed(200.0))
+                .content_fit(iced::ContentFit::Contain)
+                .into()
+        } else {
+            cover_placeholder(Length::Fixed(140.0), 200.0, &title)
+        };
 
     center(
         column![
@@ -9616,6 +9622,10 @@ mod tests {
     fn document_open_notice_is_delayed_and_scoped_to_the_latest_request() {
         let (mut state, _) = boot();
         state.library_books = vec![test_book(42)];
+        state.library_cover_handles.insert(
+            42,
+            RasterImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255])),
+        );
         let first = open_document(&mut state, PathBuf::from("first.epub"), None);
         let first_generation = state.document_open_generation;
 
@@ -9627,8 +9637,8 @@ mod tests {
             state
                 .document_open_preview
                 .as_ref()
-                .map(|preview| preview.path.as_path()),
-            Some(Path::new("first.epub"))
+                .map(|preview| preview.title.as_str()),
+            Some("first")
         );
 
         let _ = open_document(&mut state, PathBuf::from("second.epub"), Some(42));
@@ -9649,16 +9659,18 @@ mod tests {
             state
                 .document_open_preview
                 .as_ref()
-                .map(|preview| preview.path.as_path()),
-            Some(Path::new("second.epub"))
+                .map(|preview| preview.title.as_str()),
+            Some("Book 42")
         );
-        assert_eq!(
+        assert!(
             state
                 .document_open_preview
                 .as_ref()
-                .and_then(|preview| preview.book_id),
-            Some(42)
+                .and_then(|preview| preview.cover.as_ref())
+                .is_some()
         );
+        state.library_books.clear();
+        state.library_cover_handles.clear();
         drop(document_opening_view(&state));
 
         let _ = update(
