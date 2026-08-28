@@ -679,6 +679,7 @@ fn render_content_node<'a>(
                 style,
                 font_size,
                 available_width,
+                table_width,
                 table_content_width,
             );
             let table = container(container(table).width(Length::Fixed(table_content_width)))

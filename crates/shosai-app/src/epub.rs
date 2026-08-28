@@ -1385,8 +1385,10 @@ fn paginate_epub_table(
         let content_width = epub_table_content_width(style, table_width, page_width, font_size);
         caption_fragment_style.width =
             Some(shosai_core::epub::render::NodeWidth::Pixels(content_width));
-        caption_fragment_style.margin_left_em =
-            Some(epub_table_margin_left(style, font_size, page_width, content_width) / font_size);
+        caption_fragment_style.margin_left_em = Some(
+            epub_table_margin_left(style, font_size, page_width, table_width, content_width)
+                / font_size,
+        );
         let caption_pages = paginate_epub_chapter_with_budget(
             &[ContentNode::Paragraph(
                 caption.clone(),
@@ -1517,7 +1519,8 @@ fn paginate_epub_table(
             prefix_style.block_after_em = Some(0.0);
             prefix_style.width = Some(shosai_core::epub::render::NodeWidth::Pixels(content_width));
             prefix_style.margin_left_em = Some(
-                epub_table_margin_left(style, font_size, page_width, content_width) / font_size,
+                epub_table_margin_left(style, font_size, page_width, table_width, content_width)
+                    / font_size,
             );
             let prefix = ContentNode::Paragraph(caption_prefix.clone(), prefix_style);
             let prefix_pages = paginate_epub_chapter_with_budget(
@@ -1856,7 +1859,8 @@ pub(crate) fn epub_table_content_width(
             )
             .max(1.0)
     } else {
-        table_width.max(1.0)
+        let margin = style.margin_left_em.unwrap_or(0.0).max(0.0) * font_size;
+        (table_width - margin.min((table_width - 1.0).max(0.0))).max(1.0)
     }
 }
 
@@ -1864,13 +1868,14 @@ pub(crate) fn epub_table_margin_left(
     style: &shosai_core::epub::render::NodeStyle,
     font_size: f32,
     available_width: f32,
+    table_width: f32,
     content_width: f32,
 ) -> f32 {
     let margin = style.margin_left_em.unwrap_or(0.0).max(0.0) * font_size;
     if style.width.is_some() {
         margin.min((available_width - content_width).max(0.0))
     } else {
-        margin
+        margin.min((table_width - content_width).max(0.0))
     }
 }
 
@@ -5213,7 +5218,7 @@ mod tests {
 
     #[test]
     fn ordered_figure_width_and_margin_share_one_content_box() {
-        let style = shosai_core::epub::render::NodeStyle {
+        let mut style = shosai_core::epub::render::NodeStyle {
             width: Some(shosai_core::epub::render::NodeWidth::Percent(0.5)),
             max_width: Some(shosai_core::epub::render::NodeWidth::Pixels(320.0)),
             margin_left_em: Some(1.0),
@@ -5225,9 +5230,23 @@ mod tests {
             epub_table_content_width(&style, 320.0, 1_000.0, 16.0),
             320.0
         );
-        let table_margin = epub_table_margin_left(&style, 16.0, 1_000.0, 320.0);
+        let table_margin = epub_table_margin_left(&style, 16.0, 1_000.0, 320.0, 320.0);
         assert_eq!(table_margin, 16.0);
         assert_eq!(320.0 + table_margin, 336.0);
+
+        style.width = None;
+        style.max_width = None;
+        style.margin_left_em = Some(2.0);
+        let content_width = epub_table_content_width(&style, 360.0, 360.0, 16.0);
+        let margin = epub_table_margin_left(&style, 16.0, 360.0, 360.0, content_width);
+        assert_eq!((content_width, margin), (328.0, 32.0));
+        assert_eq!(content_width + margin, 360.0);
+
+        style.margin_left_em = Some(100.0);
+        let content_width = epub_table_content_width(&style, 360.0, 360.0, 16.0);
+        let margin = epub_table_margin_left(&style, 16.0, 360.0, 360.0, content_width);
+        assert_eq!((content_width, margin), (1.0, 359.0));
+        assert_eq!(content_width + margin, 360.0);
     }
 
     #[test]
