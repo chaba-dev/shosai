@@ -1370,30 +1370,74 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Bookmarks
         Message::ToggleBookmark => {
-            if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
+            if let (Some(tab_id), Some(path), Some(store)) =
+                (state.active_tab_id, &state.file_path, &state.bookmark_store)
+            {
+                let path = path.clone();
+                let task_path = path.clone();
+                let store = store.clone();
+                let book_id = state.book_id;
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
-                let result = if let Some(book_id) = state.book_id {
-                    store.toggle_for_book_at(book_id, path, page, location_offset, None)
-                } else {
-                    store.toggle_at(path, page, location_offset, None)
-                };
-                match result {
-                    Ok(Some(bookmark)) => {
-                        state.bookmarks.push(bookmark);
-                        state.current_page_bookmarked = true;
-                    }
-                    Ok(None) => {
-                        state.bookmarks.retain(|bookmark| {
-                            bookmark.page != page
-                                || bookmark.location_offset != location_offset
-                                || bookmark.note.is_some()
-                        });
-                        state.current_page_bookmarked = false;
-                    }
-                    Err(e) => eprintln!("warning: failed to toggle bookmark: {e}"),
+                return Task::perform(
+                    async move {
+                        let result = if let Some(book_id) = book_id {
+                            store
+                                .toggle_for_book_at_async(
+                                    book_id,
+                                    &task_path,
+                                    page,
+                                    location_offset,
+                                    None,
+                                )
+                                .await
+                        } else {
+                            store
+                                .toggle_at_async(&task_path, page, location_offset, None)
+                                .await
+                        };
+                        result.map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkToggled {
+                        tab_id,
+                        file_path: path,
+                        book_id,
+                        page,
+                        location_offset,
+                        result,
+                    },
+                );
+            }
+        }
+
+        Message::BookmarkToggled {
+            tab_id,
+            file_path,
+            book_id,
+            page,
+            location_offset,
+            result,
+        } => {
+            if state.active_tab_id != Some(tab_id)
+                || state.file_path.as_ref() != Some(&file_path)
+                || state.book_id != book_id
+            {
+                return Task::none();
+            }
+            match result {
+                Ok(Some(bookmark)) => {
+                    state.bookmarks.push(bookmark);
+                    state.current_page_bookmarked = true;
                 }
-                return refresh_bookmarks(state);
+                Ok(None) => {
+                    state.bookmarks.retain(|bookmark| {
+                        bookmark.page != page
+                            || bookmark.location_offset != location_offset
+                            || bookmark.note.is_some()
+                    });
+                    state.current_page_bookmarked = false;
+                }
+                Err(error) => eprintln!("warning: failed to toggle bookmark: {error}"),
             }
         }
 
@@ -1438,20 +1482,39 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SaveNote => {
-            if let (Some(id), Some(store)) = (state.editing_note_id, &state.bookmark_store) {
+            if let (Some(tab_id), Some(path), Some(id), Some(store)) = (
+                state.active_tab_id,
+                &state.file_path,
+                state.editing_note_id,
+                &state.bookmark_store,
+            ) {
                 let note = if state.editing_note_text.is_empty() {
                     None
                 } else {
-                    Some(state.editing_note_text.as_str())
+                    Some(state.editing_note_text.clone())
                 };
-                let rt = tokio::runtime::Handle::current();
-                if let Err(e) = rt.block_on(store.update_note_async(id, note)) {
-                    eprintln!("warning: failed to save note: {e}");
-                }
+                let store = store.clone();
+                let file_path = path.clone();
+                let book_id = state.book_id;
+                state.editing_note_id = None;
+                state.editing_note_text = String::new();
+                return Task::perform(
+                    async move {
+                        store
+                            .update_note_async(id, note.as_deref())
+                            .await
+                            .map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkMutationFinished {
+                        tab_id,
+                        file_path,
+                        book_id,
+                        result,
+                    },
+                );
             }
             state.editing_note_id = None;
             state.editing_note_text = String::new();
-            return refresh_bookmarks(state);
         }
 
         Message::CancelEditNote => {
@@ -1460,13 +1523,45 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::DeleteBookmark(id) => {
-            if let Some(store) = &state.bookmark_store {
-                let rt = tokio::runtime::Handle::current();
-                if let Err(e) = rt.block_on(store.remove_async(id)) {
-                    eprintln!("warning: failed to delete bookmark: {e}");
-                }
+            if let (Some(tab_id), Some(path), Some(store)) =
+                (state.active_tab_id, &state.file_path, &state.bookmark_store)
+            {
+                let store = store.clone();
+                let file_path = path.clone();
+                let book_id = state.book_id;
+                return Task::perform(
+                    async move {
+                        store
+                            .remove_async(id)
+                            .await
+                            .map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkMutationFinished {
+                        tab_id,
+                        file_path,
+                        book_id,
+                        result,
+                    },
+                );
             }
-            return refresh_bookmarks(state);
+        }
+
+        Message::BookmarkMutationFinished {
+            tab_id,
+            file_path,
+            book_id,
+            result,
+        } => {
+            if let Err(error) = result {
+                eprintln!("warning: failed to update bookmark: {error}");
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id)
+                && state.file_path.as_ref() == Some(&file_path)
+                && state.book_id == book_id
+            {
+                return refresh_bookmarks(state);
+            }
         }
 
         Message::ExportBookmarks => {

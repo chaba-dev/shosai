@@ -170,6 +170,14 @@ pub enum Message {
 
     // Bookmarks
     ToggleBookmark,
+    BookmarkToggled {
+        tab_id: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        page: usize,
+        location_offset: Option<usize>,
+        result: Result<Option<Bookmark>, String>,
+    },
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
@@ -183,6 +191,12 @@ pub enum Message {
     SaveNote,
     CancelEditNote,
     DeleteBookmark(i64),
+    BookmarkMutationFinished {
+        tab_id: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        result: Result<(), String>,
+    },
     ExportBookmarks,
 
     // In-document search

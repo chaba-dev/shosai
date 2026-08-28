@@ -10345,9 +10345,17 @@ mod tests {
         state.bookmark_store = Some(BookmarkStore::new(store.pool().clone()));
         state.i18n.set_preference(LanguagePreference::Japanese);
 
-        tokio::task::block_in_place(|| {
-            let _ = update(&mut state, Message::ToggleBookmark);
-        });
+        use iced::futures::StreamExt;
+
+        let task = update(&mut state, Message::ToggleBookmark);
+        assert!(state.bookmarks.is_empty());
+        let mut messages = iced_runtime::task::into_stream(task).expect("bookmark task");
+        let iced_runtime::Action::Output(message) =
+            messages.next().await.expect("bookmark completion")
+        else {
+            panic!("bookmark task should produce a message");
+        };
+        let _ = update(&mut state, message);
 
         assert_eq!(state.bookmarks.len(), 1);
         assert!(state.bookmarks[0].title.is_none());
