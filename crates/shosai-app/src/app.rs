@@ -395,9 +395,32 @@ struct ContinuousMeasuredItem {
     end: usize,
 }
 
-struct ContinuousItemOperation {
+#[derive(Debug)]
+struct ContinuousMeasurementIndex {
+    tab_id: u64,
+    activation: u64,
     items: Vec<ContinuousMeasuredItem>,
     item_indexes: HashMap<WidgetId, usize>,
+}
+
+impl ContinuousMeasurementIndex {
+    fn new(tab_id: u64, activation: u64, items: Vec<ContinuousMeasuredItem>) -> Self {
+        let item_indexes = items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.clone(), index))
+            .collect();
+        Self {
+            tab_id,
+            activation,
+            items,
+            item_indexes,
+        }
+    }
+}
+
+struct ContinuousItemOperation {
+    index: Arc<ContinuousMeasurementIndex>,
     scroll_id: WidgetId,
     item_bounds: Vec<Option<iced::Rectangle>>,
     content_top: Option<f32>,
@@ -409,16 +432,10 @@ struct ContinuousItemOperation {
 }
 
 impl ContinuousItemOperation {
-    fn resolve(items: Vec<ContinuousMeasuredItem>, scroll_id: WidgetId, offset: f32) -> Self {
-        let item_count = items.len();
-        let item_indexes = items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| (item.id.clone(), index))
-            .collect();
+    fn resolve(index: Arc<ContinuousMeasurementIndex>, scroll_id: WidgetId, offset: f32) -> Self {
+        let item_count = index.items.len();
         Self {
-            items,
-            item_indexes,
+            index,
             scroll_id,
             item_bounds: vec![None; item_count],
             content_top: None,
@@ -431,20 +448,14 @@ impl ContinuousItemOperation {
     }
 
     fn locate(
-        items: Vec<ContinuousMeasuredItem>,
+        index: Arc<ContinuousMeasurementIndex>,
         scroll_id: WidgetId,
         target: (usize, usize),
         current_tail_extent: f32,
     ) -> Self {
-        let item_count = items.len();
-        let item_indexes = items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| (item.id.clone(), index))
-            .collect();
+        let item_count = index.items.len();
         Self {
-            items,
-            item_indexes,
+            index,
             scroll_id,
             item_bounds: vec![None; item_count],
             content_top: None,
@@ -466,7 +477,7 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
     }
 
     fn container(&mut self, id: Option<&WidgetId>, bounds: iced::Rectangle) {
-        if let Some(index) = id.and_then(|id| self.item_indexes.get(id)).copied() {
+        if let Some(index) = id.and_then(|id| self.index.item_indexes.get(id)).copied() {
             self.item_bounds[index] = Some(bounds);
         }
     }
@@ -492,7 +503,8 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
         };
         if let Some((target_page, target_offset)) = self.target {
             let measured = || {
-                self.items
+                self.index
+                    .items
                     .iter()
                     .zip(&self.item_bounds)
                     .filter_map(|(item, bounds)| bounds.map(|bounds| (item, bounds)))
@@ -529,7 +541,8 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
         };
         let viewport_y = content_top + offset;
         let measured = || {
-            self.items
+            self.index
+                .items
                 .iter()
                 .zip(&self.item_bounds)
                 .filter_map(|(item, bounds)| bounds.map(|bounds| (item, bounds)))
@@ -717,6 +730,7 @@ pub struct State {
     continuous_visible: BTreeSet<usize>,
     continuous_tail_extent: f32,
     continuous_activation: u64,
+    continuous_measurement_index: Option<Arc<ContinuousMeasurementIndex>>,
     next_continuous_request_id: u64,
     page_input: String,
     error: Option<AppError>,
@@ -858,6 +872,7 @@ pub fn boot() -> (State, Task<Message>) {
         continuous_visible: BTreeSet::new(),
         continuous_tail_extent: 0.0,
         continuous_activation: 0,
+        continuous_measurement_index: None,
         next_continuous_request_id: 1,
         page_input: String::new(),
         error: None,
@@ -1303,6 +1318,7 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     let tab = state.tabs[index].clone();
     restore_reader_tab(state, tab);
     state.continuous_activation = state.continuous_activation.wrapping_add(1);
+    state.continuous_measurement_index = None;
     state.active_tab = Some(index);
     state.screen = Screen::Reader;
     let search_task = if state.show_search_bar && !state.search_query.is_empty() {
@@ -2273,7 +2289,27 @@ fn continuous_measured_items(
         .collect()
 }
 
-fn scroll_to_current_page(state: &State) -> Task<Message> {
+fn continuous_measurement_index(
+    state: &mut State,
+    tab_id: u64,
+    activation: u64,
+) -> Arc<ContinuousMeasurementIndex> {
+    if let Some(index) = &state.continuous_measurement_index
+        && index.tab_id == tab_id
+        && index.activation == activation
+    {
+        return Arc::clone(index);
+    }
+    let index = Arc::new(ContinuousMeasurementIndex::new(
+        tab_id,
+        activation,
+        continuous_measured_items(state, tab_id, activation),
+    ));
+    state.continuous_measurement_index = Some(Arc::clone(&index));
+    index
+}
+
+fn scroll_to_current_page(state: &mut State) -> Task<Message> {
     if state.reading_mode != ReadingMode::Continuous {
         return Task::none();
     }
@@ -2281,8 +2317,9 @@ fn scroll_to_current_page(state: &State) -> Task<Message> {
         return Task::none();
     };
     let activation = state.continuous_activation;
+    let index = continuous_measurement_index(state, tab_id, activation);
     iced::advanced::widget::operate(ContinuousItemOperation::locate(
-        continuous_measured_items(state, tab_id, activation),
+        index,
         continuous_scroll_id(tab_id, activation),
         (state.current_page, state.epub_offset),
         state.continuous_tail_extent,
@@ -2430,6 +2467,7 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
 fn invalidate_continuous_layout(state: &mut State) {
     state.continuous_tail_extent = 0.0;
     state.continuous_activation = state.continuous_activation.wrapping_add(1);
+    state.continuous_measurement_index = None;
     state.continuous_visible.clear();
 }
 
@@ -6141,8 +6179,9 @@ mod tests {
                 end: 0,
             })
             .collect::<Vec<_>>();
+        let index = Arc::new(ContinuousMeasurementIndex::new(1, 0, items));
         let mut operation =
-            ContinuousItemOperation::resolve(items.clone(), continuous_scroll_id(1, 0), 500.0);
+            ContinuousItemOperation::resolve(Arc::clone(&index), continuous_scroll_id(1, 0), 500.0);
         operation.content_top = Some(100.0);
         operation.item_bounds = vec![
             Some(iced::Rectangle::new(
@@ -6165,7 +6204,7 @@ mod tests {
         ));
 
         let mut navigation =
-            ContinuousItemOperation::locate(items, continuous_scroll_id(1, 0), (1, 0), 0.0);
+            ContinuousItemOperation::locate(index, continuous_scroll_id(1, 0), (1, 0), 0.0);
         navigation.content_top = operation.content_top;
         navigation.item_bounds = operation.item_bounds;
         navigation.content_height = Some(1000.0);
@@ -6189,8 +6228,9 @@ mod tests {
             Point::new(0.0, 100.0),
             Size::new(100.0, 1000.0),
         ));
+        let index = Arc::new(ContinuousMeasurementIndex::new(1, 0, items));
         let mut resolve =
-            ContinuousItemOperation::resolve(items.clone(), continuous_scroll_id(1, 0), 500.0);
+            ContinuousItemOperation::resolve(Arc::clone(&index), continuous_scroll_id(1, 0), 500.0);
         resolve.content_top = Some(100.0);
         resolve.item_bounds = vec![bounds];
         assert!(matches!(
@@ -6199,7 +6239,7 @@ mod tests {
         ));
 
         let mut locate =
-            ContinuousItemOperation::locate(items, continuous_scroll_id(1, 0), (0, 75), 0.0);
+            ContinuousItemOperation::locate(index, continuous_scroll_id(1, 0), (0, 75), 0.0);
         locate.content_top = Some(100.0);
         locate.content_height = Some(1100.0);
         locate.viewport_height = Some(200.0);
@@ -6208,6 +6248,24 @@ mod tests {
             locate.finish(),
             operation::Outcome::Some((0, 75, offset, _)) if offset == 750.0
         ));
+    }
+
+    #[test]
+    fn continuous_measurement_index_is_reused_until_layout_invalidation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let first = continuous_measurement_index(&mut state, 1, 0);
+        let second = continuous_measurement_index(&mut state, 1, 0);
+
+        assert!(Arc::ptr_eq(&first, &second));
+        invalidate_continuous_layout(&mut state);
+        let activation = state.continuous_activation;
+        let rebuilt = continuous_measurement_index(&mut state, 1, activation);
+        assert!(!Arc::ptr_eq(&first, &rebuilt));
     }
 
     #[test]

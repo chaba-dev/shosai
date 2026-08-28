@@ -412,8 +412,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && state.continuous_activation == activation
             {
                 let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+                let index = continuous_measurement_index(state, tab_id, activation);
                 return iced::advanced::widget::operate(ContinuousItemOperation::resolve(
-                    continuous_measured_items(state, tab_id, activation),
+                    index,
                     continuous_scroll_id(tab_id, activation),
                     offset,
                 ))
