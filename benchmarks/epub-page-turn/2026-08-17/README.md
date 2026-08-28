@@ -31,7 +31,8 @@ stabilization, discards five operation warmups, then records 50 samples.
 The generated books contain 16 chapters so one run can select stable
 within-chapter and chapter-boundary pairs. Generated archives are byte-stable.
 The runner fails if a run reports an error, never produces pages, omits one of
-the 16 summaries, or records a different sample count.
+the 16 summaries, records a different sample count, or exceeds an operation's
+p50 or p95 budget below.
 
 ## Initial budgets
 
