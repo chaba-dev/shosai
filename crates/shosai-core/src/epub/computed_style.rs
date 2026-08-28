@@ -745,10 +745,20 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
                 specified.margin_top.offer(priority, value);
             }
         }
+        Property::MarginTop(LengthPercentageOrAuto::Auto) => {
+            specified
+                .margin_top
+                .offer(priority, RelativeLength::Px(0.0));
+        }
         Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
             if let Some(value) = margin_length(value) {
                 specified.margin_bottom.offer(priority, value);
             }
+        }
+        Property::MarginBottom(LengthPercentageOrAuto::Auto) => {
+            specified
+                .margin_bottom
+                .offer(priority, RelativeLength::Px(0.0));
         }
         Property::Margin(margin) => {
             if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.left
@@ -756,14 +766,10 @@ fn apply_property(property: &Property<'_>, priority: Priority, specified: &mut S
             {
                 specified.margin_left.offer(priority, value);
             }
-            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.top
-                && let Some(value) = margin_length(value)
-            {
+            if let Some(value) = vertical_margin(&margin.top) {
                 specified.margin_top.offer(priority, value);
             }
-            if let LengthPercentageOrAuto::LengthPercentage(value) = &margin.bottom
-                && let Some(value) = margin_length(value)
-            {
+            if let Some(value) = vertical_margin(&margin.bottom) {
                 specified.margin_bottom.offer(priority, value);
             }
         }
@@ -1092,15 +1098,15 @@ fn property_supported(property: &Property<'_>) -> bool {
         | Property::MarginBottom(LengthPercentageOrAuto::LengthPercentage(value)) => {
             margin_length(value).is_some()
         }
+        Property::MarginTop(LengthPercentageOrAuto::Auto)
+        | Property::MarginBottom(LengthPercentageOrAuto::Auto) => true,
         Property::Margin(margin) => {
-            [&margin.left, &margin.top, &margin.bottom]
+            matches!(
+                &margin.left,
+                LengthPercentageOrAuto::LengthPercentage(value) if margin_length(value).is_some()
+            ) || [&margin.top, &margin.bottom]
                 .into_iter()
-                .any(|value| {
-                    let LengthPercentageOrAuto::LengthPercentage(value) = value else {
-                        return false;
-                    };
-                    margin_length(value).is_some()
-                })
+                .any(|value| vertical_margin(value).is_some())
         }
         Property::TextIndent(indent) => margin_length(&indent.value).is_some(),
         Property::Width(CssSize::LengthPercentage(value)) => specified_width(value).is_some(),
@@ -1485,6 +1491,13 @@ fn margin_length(value: &DimensionPercentage<LengthValue>) -> Option<RelativeLen
     }
 }
 
+fn vertical_margin(value: &LengthPercentageOrAuto) -> Option<RelativeLength> {
+    match value {
+        LengthPercentageOrAuto::LengthPercentage(value) => margin_length(value),
+        LengthPercentageOrAuto::Auto => Some(RelativeLength::Px(0.0)),
+    }
+}
+
 fn specified_width(value: &DimensionPercentage<LengthValue>) -> Option<SpecifiedWidth> {
     match value {
         DimensionPercentage::Percentage(value) if value.0 >= 0.0 => {
@@ -1812,8 +1825,8 @@ mod tests {
     #[test]
     fn vertical_block_margins_are_computed_without_inheriting() {
         let report = compute_document_styles(
-            r#"<html><body><div id="parent"><p id="child">Target</p></div></body></html>"#,
-            "#parent { margin: 1em 0 2em; }",
+            r#"<html><body><div id="parent"><p id="child">Child</p><p id="target">Target</p></div></body></html>"#,
+            "#parent, #target { margin: 1em 0 2em; } #target { margin-top: auto; margin-bottom: auto; }",
         )
         .unwrap();
 
@@ -1823,6 +1836,9 @@ mod tests {
         let child = &report.element_styles["child"];
         assert_eq!(child.margin_top_px, None);
         assert_eq!(child.margin_bottom_px, None);
+        let target = &report.element_styles["target"];
+        assert_eq!(target.margin_top_px, Some(0.0));
+        assert_eq!(target.margin_bottom_px, Some(0.0));
     }
 
     #[test]
