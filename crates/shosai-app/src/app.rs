@@ -628,6 +628,7 @@ struct ReadingStateSave {
 #[derive(Debug)]
 enum ReadingStateWriterMessage {
     Save(ReadingStateSave),
+    Progress { book_id: i64, progress: f64 },
     Language(LanguagePreference),
     Preference(&'static str, String),
     Flush(oneshot::Sender<()>),
@@ -2726,15 +2727,17 @@ fn save_reading_state(state: &State) {
     }
 
     // Also update library progress so the library sort/order stays current.
-    // Use a background task to avoid blocking the UI thread on DB writes.
-    if let (Some(lib), Some(book_id)) = (state.library.clone(), state.book_id)
+    if let (Some(saves), Some(book_id)) = (&state.reading_state_saves, state.book_id)
         && state.total_pages > 0
     {
         let progress = (state.current_page + 1) as f64 / state.total_pages as f64;
         let progress = progress.clamp(0.0, 1.0);
-        tokio::task::spawn(async move {
-            let _ = lib.update_progress(book_id, progress).await;
-        });
+        if saves
+            .send(ReadingStateWriterMessage::Progress { book_id, progress })
+            .is_err()
+        {
+            eprintln!("warning: reading state writer stopped unexpectedly");
+        }
     }
 }
 
@@ -2752,15 +2755,23 @@ fn start_reading_state_writer(
     store: ReadingStateStore,
 ) -> mpsc::UnboundedSender<ReadingStateWriterMessage> {
     let (sender, mut receiver) = mpsc::unbounded_channel::<ReadingStateWriterMessage>();
+    let library = Library::new(store.pool().clone(), store.managed_books_dir());
     tokio::spawn(async move {
         while let Some(first) = receiver.recv().await {
             let mut pending = HashMap::new();
+            let mut progress = HashMap::new();
             let mut language = None;
             let mut preferences = HashMap::new();
             let mut flushes = Vec::new();
             match first {
                 ReadingStateWriterMessage::Save(save) => {
                     pending.insert((save.book_id, save.path), save.reading);
+                }
+                ReadingStateWriterMessage::Progress {
+                    book_id,
+                    progress: value,
+                } => {
+                    progress.insert(book_id, value);
                 }
                 ReadingStateWriterMessage::Language(preference) => language = Some(preference),
                 ReadingStateWriterMessage::Preference(key, value) => {
@@ -2772,6 +2783,12 @@ fn start_reading_state_writer(
                 match message {
                     ReadingStateWriterMessage::Save(save) => {
                         pending.insert((save.book_id, save.path), save.reading);
+                    }
+                    ReadingStateWriterMessage::Progress {
+                        book_id,
+                        progress: value,
+                    } => {
+                        progress.insert(book_id, value);
                     }
                     ReadingStateWriterMessage::Language(preference) => {
                         language = Some(preference);
@@ -2791,6 +2808,11 @@ fn start_reading_state_writer(
                 };
                 if let Err(error) = result {
                     eprintln!("warning: failed to save reading state: {error}");
+                }
+            }
+            for (book_id, progress) in progress {
+                if let Err(error) = library.update_progress(book_id, progress).await {
+                    eprintln!("warning: failed to save library progress: {error}");
                 }
             }
             if let Some(preference) = language
@@ -9958,9 +9980,17 @@ mod tests {
     async fn reading_state_writer_coalesces_queued_positions() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("book.epub");
+        std::fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../shosai-core/tests/fixtures/sample.epub"),
+            &path,
+        )
+        .unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
             .await
             .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let book = library.import_file(&path).await.unwrap();
         let saves = start_reading_state_writer(store.clone());
 
         for page in 1..=3 {
@@ -9976,6 +10006,14 @@ mod tests {
                 }))
                 .unwrap();
         }
+        for progress in [0.25, 0.5, 0.75] {
+            saves
+                .send(ReadingStateWriterMessage::Progress {
+                    book_id: book.id,
+                    progress,
+                })
+                .unwrap();
+        }
 
         let (flushed, wait_for_flush) = oneshot::channel();
         saves
@@ -9989,6 +10027,7 @@ mod tests {
             .expect("flush should persist the latest queued position");
         assert_eq!(saved.page, 3);
         assert_eq!(saved.location_offset, Some(30));
+        assert_eq!(library.get(book.id).await.unwrap().unwrap().progress, 0.75);
     }
 
     #[tokio::test]
