@@ -8863,6 +8863,48 @@ mod tests {
     }
 
     #[test]
+    fn initial_epub_pagination_cannot_replace_a_completed_layout() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let layout_key = epub_layout_key(&state);
+        let complete_pages = Arc::new(vec![
+            EpubPage {
+                chapter: 0,
+                title: None,
+                nodes: Vec::new(),
+            },
+            EpubPage {
+                chapter: 1,
+                title: None,
+                nodes: Vec::new(),
+            },
+        ]);
+        state.epub_pages = Arc::clone(&complete_pages);
+        state.epub_layout_key = Some(layout_key);
+        let generation = state.render_generation;
+
+        let _ = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation,
+                layout_key,
+                complete: false,
+                pages: Arc::new(vec![EpubPage {
+                    chapter: 0,
+                    title: None,
+                    nodes: Vec::new(),
+                }]),
+            },
+        );
+
+        assert!(Arc::ptr_eq(&state.epub_pages, &complete_pages));
+    }
+
+    #[test]
     fn epub_pagination_completes_for_an_inactive_tab() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -9187,6 +9229,53 @@ mod tests {
         assert!(task.units() > 0);
         assert!(state.epub_pages.is_empty());
         assert!(state.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn epub_refresh_paginates_the_current_chapter_before_the_whole_document() {
+        use iced::futures::StreamExt;
+
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.current_page = 1;
+
+        let task = refresh_content(&mut state);
+        let mut messages = iced_runtime::task::into_stream(task).expect("pagination task");
+        let iced_runtime::Action::Output(initial) =
+            messages.next().await.expect("initial pagination message")
+        else {
+            panic!("initial pagination should produce a message");
+        };
+        let iced_runtime::Action::Output(complete) =
+            messages.next().await.expect("complete pagination message")
+        else {
+            panic!("complete pagination should produce a message");
+        };
+
+        let Message::EpubPaginated {
+            complete: false,
+            pages: initial_pages,
+            ..
+        } = initial
+        else {
+            panic!("first message should contain initial EPUB pages");
+        };
+        assert!(!initial_pages.is_empty());
+        assert!(initial_pages.iter().all(|page| page.chapter == 1));
+
+        let Message::EpubPaginated {
+            complete: true,
+            pages: complete_pages,
+            ..
+        } = complete
+        else {
+            panic!("second message should contain the complete EPUB layout");
+        };
+        assert!(complete_pages.iter().any(|page| page.chapter == 0));
+        assert!(complete_pages.iter().any(|page| page.chapter == 1));
     }
 
     #[test]
