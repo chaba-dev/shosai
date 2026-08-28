@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use iced::widget::{column, container, image, rich_text, row, scrollable, sensor, span, svg, text};
 use iced::{Element, Font, Length};
@@ -9,11 +9,12 @@ use shosai_core::epub::{
 };
 
 use super::{
-    BOOKMARKS_PANEL_WIDTH, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE, EPUB_TABLE_CELL_PADDING,
-    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubImageHandle, Message, OpenDocument,
-    PAGE_GUTTER, SearchHighlight, State, continuous_epub_node_id, continuous_epub_title_id,
-    continuous_item_id, continuous_scroll_id, epub_page_size, epub_uses_spread, epub_visible_pages,
-    search_highlight_models_for_page, uses_compact_reader_layout,
+    BOOKMARKS_PANEL_WIDTH, DecodedEpubImage, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE,
+    EPUB_TABLE_CELL_PADDING, EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubImageHandle,
+    Message, OpenDocument, PAGE_GUTTER, SearchHighlight, State, continuous_epub_node_id,
+    continuous_epub_title_id, continuous_item_id, continuous_scroll_id, epub_page_size,
+    epub_uses_spread, epub_visible_pages, search_highlight_models_for_page,
+    uses_compact_reader_layout,
 };
 use crate::epub::{
     content_node_text_len, content_starts_with_heading, spans_font_scale, spans_text_len,
@@ -149,43 +150,17 @@ fn continuous_epub_content_width(window_width: f32, show_bookmarks_panel: bool) 
     ((window_width - panel_width).min(800.0) - 40.0).max(120.0)
 }
 
-pub(super) fn cache_epub_image_handles<'a, F>(
-    handles: &mut HashMap<String, EpubImageHandle>,
+fn collect_epub_image_paths<'a>(
+    paths: &mut HashSet<String>,
     nodes: impl IntoIterator<Item = &'a ContentNode>,
-    resource_bytes: &F,
-) where
-    F: Fn(&str) -> Option<&'a [u8]>,
-{
+) {
     for node in nodes {
         match node {
-            ContentNode::Image { src, kind, .. } => {
-                if handles.contains_key(src) {
-                    continue;
-                }
-                let Some(data) = resource_bytes(src) else {
-                    continue;
-                };
-                let handle = match kind {
-                    Some(shosai_core::epub::render::ImageKind::Svg) => {
-                        EpubImageHandle::Svg(svg::Handle::from_memory(data.to_vec()))
-                    }
-                    _ => {
-                        let Ok(decoded) = ::image::load_from_memory(data) else {
-                            continue;
-                        };
-                        let rgba = decoded.to_rgba8();
-                        let (width, height) = rgba.dimensions();
-                        EpubImageHandle::Raster(image::Handle::from_rgba(
-                            width,
-                            height,
-                            rgba.into_raw(),
-                        ))
-                    }
-                };
-                handles.insert(src.clone(), handle);
+            ContentNode::Image { src, .. } => {
+                paths.insert(src.clone());
             }
             ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
-                cache_epub_image_handles(handles, children, resource_bytes);
+                collect_epub_image_paths(paths, children);
             }
             ContentNode::Table { row_groups, .. } => {
                 for cell in row_groups
@@ -193,11 +168,71 @@ pub(super) fn cache_epub_image_handles<'a, F>(
                     .flat_map(|group| &group.rows)
                     .flat_map(|row| &row.cells)
                 {
-                    cache_epub_image_handles(handles, &cell.children, resource_bytes);
+                    collect_epub_image_paths(paths, &cell.children);
                 }
             }
             _ => {}
         }
+    }
+}
+
+pub(super) fn epub_image_paths<'a>(
+    nodes: impl IntoIterator<Item = &'a ContentNode>,
+) -> HashSet<String> {
+    let mut paths = HashSet::new();
+    collect_epub_image_paths(&mut paths, nodes);
+    paths
+}
+
+pub(super) fn decode_epub_images(
+    document: &EpubDoc,
+    paths: impl IntoIterator<Item = String>,
+) -> Vec<(String, Option<DecodedEpubImage>)> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let image = document.resource(&path).and_then(|resource| {
+                if resource.media_type() == "image/svg+xml" {
+                    return Some(DecodedEpubImage::Svg(resource.bytes().to_vec()));
+                }
+                let rgba = ::image::load_from_memory(resource.bytes()).ok()?.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                Some(DecodedEpubImage::Raster {
+                    width,
+                    height,
+                    pixels: rgba.into_raw(),
+                })
+            });
+            (path, image)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn cache_epub_image_handles<'a, F>(
+    handles: &mut HashMap<String, EpubImageHandle>,
+    nodes: impl IntoIterator<Item = &'a ContentNode>,
+    resource_bytes: &F,
+) where
+    F: Fn(&str) -> Option<&'a [u8]>,
+{
+    for path in epub_image_paths(nodes) {
+        if handles.contains_key(&path) {
+            continue;
+        }
+        let Some(data) = resource_bytes(&path) else {
+            continue;
+        };
+        let handle = if data.starts_with(b"<svg") {
+            EpubImageHandle::Svg(svg::Handle::from_memory(data.to_vec()))
+        } else {
+            let Ok(rgba) = ::image::load_from_memory(data).map(|decoded| decoded.to_rgba8()) else {
+                continue;
+            };
+            let (width, height) = rgba.dimensions();
+            EpubImageHandle::Raster(image::Handle::from_rgba(width, height, rgba.into_raw()))
+        };
+        handles.insert(path, handle);
     }
 }
 

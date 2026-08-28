@@ -447,7 +447,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.page_input = (page + 1).to_string();
                 save_reading_state(state);
                 update_bookmark_status(state);
-                return reconcile_continuous_rasters(state);
+                return Task::batch([
+                    reconcile_continuous_rasters(state),
+                    load_epub_images_task(state),
+                ]);
             }
         }
 
@@ -1793,6 +1796,30 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 .min(tab.epub_pages.len() - 1);
                         tab.page_input = (tab.epub_page + 1).to_string();
                         tab.error = None;
+                    }
+                }
+            }
+        }
+
+        Message::EpubImagesDecoded {
+            tab_id,
+            generation,
+            images,
+        } => {
+            if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
+                for (path, decoded) in images {
+                    state.epub_images_pending.remove(&path);
+                    if let Some(decoded) = decoded {
+                        state.epub_image_handles.insert(path, decoded.into_handle());
+                    }
+                }
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                && generation == tab.epub_image_generation
+            {
+                for (path, decoded) in images {
+                    tab.epub_images_pending.remove(&path);
+                    if let Some(decoded) = decoded {
+                        tab.epub_image_handles.insert(path, decoded.into_handle());
                     }
                 }
             }

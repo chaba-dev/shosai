@@ -179,7 +179,7 @@ pub(super) fn turn_epub_page(state: &mut State, forward: bool) -> Task<Message> 
     state.epub_page = page;
     sync_epub_location(state);
     save_reading_state(state);
-    Task::none()
+    super::load_epub_images_task(state)
 }
 
 pub(super) fn can_turn_epub_page(state: &State, forward: bool) -> bool {

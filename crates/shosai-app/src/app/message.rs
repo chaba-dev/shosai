@@ -11,7 +11,8 @@ use shosai_core::library::{
 use shosai_core::search::SearchMatch;
 
 use super::{
-    ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey, RasterImageHandle,
+    ContinuousRequest, DecodedEpubImage, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey,
+    RasterImageHandle,
 };
 
 #[derive(Debug, Clone)]
@@ -230,6 +231,11 @@ pub enum Message {
         layout_key: EpubLayoutKey,
         complete: bool,
         pages: Arc<Vec<EpubPage>>,
+    },
+    EpubImagesDecoded {
+        tab_id: u64,
+        generation: u64,
+        images: Vec<(String, Option<DecodedEpubImage>)>,
     },
     PageRendered {
         tab_id: u64,

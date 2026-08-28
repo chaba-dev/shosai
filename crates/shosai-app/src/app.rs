@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -45,7 +45,9 @@ mod perf;
 
 pub use dispatch::update;
 use epub_navigation::*;
-use epub_view::{cache_epub_image_handles, continuous_epub_content_view, epub_chapter_view};
+use epub_view::{
+    continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_paths,
+};
 pub use message::Message;
 
 fn text<'a>(value: impl iced::widget::text::IntoFragment<'a>) -> iced::widget::Text<'a> {
@@ -197,6 +199,29 @@ impl std::fmt::Debug for RasterImageHandle {
 enum EpubImageHandle {
     Raster(image::Handle),
     Svg(iced::widget::svg::Handle),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DecodedEpubImage {
+    Raster {
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    Svg(Vec<u8>),
+}
+
+impl DecodedEpubImage {
+    fn into_handle(self) -> EpubImageHandle {
+        match self {
+            Self::Raster {
+                width,
+                height,
+                pixels,
+            } => EpubImageHandle::Raster(image::Handle::from_rgba(width, height, pixels)),
+            Self::Svg(data) => EpubImageHandle::Svg(iced::widget::svg::Handle::from_memory(data)),
+        }
+    }
 }
 
 impl std::fmt::Debug for EpubImageHandle {
@@ -572,6 +597,8 @@ struct ReaderTab {
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
+    epub_images_pending: HashSet<String>,
+    epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
@@ -666,6 +693,8 @@ pub struct State {
     page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
+    epub_images_pending: HashSet<String>,
+    epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
@@ -805,6 +834,8 @@ pub fn boot() -> (State, Task<Message>) {
         page_cache: VecDeque::new(),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
+        epub_images_pending: HashSet::new(),
+        epub_image_generation: 0,
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
         epub_page: 0,
@@ -1121,6 +1152,8 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
+        epub_images_pending: state.epub_images_pending.clone(),
+        epub_image_generation: state.epub_image_generation,
         epub_pages: state.epub_pages.clone(),
         epub_layout_key: state.epub_layout_key,
         epub_page: state.epub_page,
@@ -1168,6 +1201,8 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
     state.epub_image_handles = tab.epub_image_handles;
+    state.epub_images_pending = tab.epub_images_pending;
+    state.epub_image_generation = tab.epub_image_generation;
     state.epub_pages = tab.epub_pages;
     state.epub_layout_key = tab.epub_layout_key;
     state.epub_page = tab.epub_page;
@@ -1305,6 +1340,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_facing_page = None;
         state.rendered_facing_page_handle = None;
         state.epub_image_handles.clear();
+        state.epub_images_pending.clear();
         state.epub_pages = Arc::new(Vec::new());
         state.epub_layout_key = None;
         state.epub_page = 0;
@@ -1602,7 +1638,9 @@ fn install_document(
     state.rendered_facing_page = None;
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
+    state.epub_image_generation = state.epub_image_generation.wrapping_add(1);
     state.epub_image_handles.clear();
+    state.epub_images_pending.clear();
     state.epub_pages = Arc::new(Vec::new());
     state.epub_layout_key = None;
     state.epub_page = 0;
@@ -1769,22 +1807,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     scroll_to_current_page(state),
                 ]);
             }
-            Some(OpenDocument::Epub(doc)) => {
+            Some(OpenDocument::Epub(_)) => {
                 state.rendered_page = None;
                 state.rendered_page_index = None;
                 state.rendered_page_handle = None;
                 state.rendered_facing_page = None;
                 state.rendered_facing_page_handle = None;
-                cache_epub_image_handles(
-                    &mut state.epub_image_handles,
-                    doc.presentation()
-                        .chapters()
-                        .iter()
-                        .flat_map(|chapter| chapter.nodes()),
-                    &|path| doc.resource(path).map(|resource| resource.bytes()),
-                );
                 state.error = None;
-                return scroll_to_current_page(state);
+                return Task::batch([load_epub_images_task(state), scroll_to_current_page(state)]);
             }
             Some(OpenDocument::Cbz(_)) => {
                 state.rendered_page = None;
@@ -1837,28 +1867,18 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             return Task::batch(tasks);
         }
         Some(OpenDocument::Epub(doc)) => {
+            let doc = Arc::clone(doc);
             let layout_key = epub_layout_key(state);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
-            cache_epub_image_handles(
-                &mut state.epub_image_handles,
-                doc.presentation()
-                    .chapters()
-                    .iter()
-                    .flat_map(|chapter| chapter.nodes()),
-                &|path| doc.resource(path).map(|resource| resource.bytes()),
-            );
             state.error = None;
-            return paginate_epub_task(
-                tab_id,
-                generation,
-                Arc::clone(doc),
-                layout_key,
-                state.current_page,
-            );
+            return Task::batch([
+                paginate_epub_task(tab_id, generation, doc, layout_key, state.current_page),
+                load_epub_images_task(state),
+            ]);
         }
         Some(OpenDocument::Cbz(doc)) => {
             let doc = Arc::clone(doc);
@@ -1889,6 +1909,49 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     }
 
     Task::none()
+}
+
+pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
+    let Some(OpenDocument::Epub(document)) = &state.document else {
+        return Task::none();
+    };
+    let chapters = document.presentation().chapters();
+    if chapters.is_empty() {
+        return Task::none();
+    }
+
+    let first = state.current_page.saturating_sub(1);
+    let last = state.current_page.saturating_add(1).min(chapters.len() - 1);
+    let paths = epub_image_paths(
+        chapters[first..=last]
+            .iter()
+            .flat_map(|chapter| chapter.nodes()),
+    )
+    .into_iter()
+    .filter(|path| {
+        !state.epub_image_handles.contains_key(path) && !state.epub_images_pending.contains(path)
+    })
+    .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Task::none();
+    }
+
+    state.epub_images_pending.extend(paths.iter().cloned());
+    let document = Arc::clone(document);
+    let tab_id = state.active_tab_id.unwrap_or(0);
+    let generation = state.epub_image_generation;
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || decode_epub_images(&document, paths))
+                .await
+                .unwrap_or_default()
+        },
+        move |images| Message::EpubImagesDecoded {
+            tab_id,
+            generation,
+            images,
+        },
+    )
 }
 
 fn epub_uses_spread(state: &State) -> bool {
@@ -5728,6 +5791,56 @@ mod tests {
         archive.finish().unwrap().into_inner()
     }
 
+    fn epub_with_image_chapters(chapter_count: usize) -> Vec<u8> {
+        let mut image_bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(::image::RgbaImage::from_pixel(
+            1,
+            1,
+            ::image::Rgba([1, 2, 3, 255]),
+        ))
+        .write_to(
+            &mut Cursor::new(&mut image_bytes),
+            ::image::ImageFormat::Png,
+        )
+        .unwrap();
+
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        archive.start_file("mimetype", options).unwrap();
+        archive.write_all(b"application/epub+zip").unwrap();
+        archive
+            .start_file("META-INF/container.xml", options)
+            .unwrap();
+        archive.write_all(br#"<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#).unwrap();
+
+        for chapter in 0..chapter_count {
+            archive
+                .start_file(format!("OPS/chapter-{chapter}.xhtml"), options)
+                .unwrap();
+            write!(
+                archive,
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><img src=\"image-{chapter}.png\"/></body></html>"
+            )
+            .unwrap();
+            archive
+                .start_file(format!("OPS/image-{chapter}.png"), options)
+                .unwrap();
+            archive.write_all(&image_bytes).unwrap();
+        }
+
+        archive.start_file("OPS/content.opf", options).unwrap();
+        write!(archive, r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Images</dc:title></metadata><manifest>"#).unwrap();
+        for chapter in 0..chapter_count {
+            write!(archive, r#"<item id="chapter-{chapter}" href="chapter-{chapter}.xhtml" media-type="application/xhtml+xml"/><item id="image-{chapter}" href="image-{chapter}.png" media-type="image/png"/>"#).unwrap();
+        }
+        archive.write_all(b"</manifest><spine>").unwrap();
+        for chapter in 0..chapter_count {
+            write!(archive, r#"<itemref idref="chapter-{chapter}"/>"#).unwrap();
+        }
+        archive.write_all(b"</spine></package>").unwrap();
+        archive.finish().unwrap().into_inner()
+    }
+
     #[test]
     fn boot_defers_storage_initialization() {
         let (state, task) = boot();
@@ -9481,16 +9594,19 @@ mod tests {
 
         let task = refresh_content(&mut state);
         let mut messages = iced_runtime::task::into_stream(task).expect("pagination task");
-        let iced_runtime::Action::Output(initial) =
-            messages.next().await.expect("initial pagination message")
-        else {
-            panic!("initial pagination should produce a message");
-        };
-        let iced_runtime::Action::Output(complete) =
-            messages.next().await.expect("complete pagination message")
-        else {
-            panic!("complete pagination should produce a message");
-        };
+        let mut pagination = Vec::new();
+        while pagination.len() < 2 {
+            let iced_runtime::Action::Output(message) =
+                messages.next().await.expect("pagination message")
+            else {
+                continue;
+            };
+            if matches!(message, Message::EpubPaginated { .. }) {
+                pagination.push(message);
+            }
+        }
+        let complete = pagination.pop().unwrap();
+        let initial = pagination.pop().unwrap();
 
         let Message::EpubPaginated {
             complete: false,
@@ -9513,6 +9629,62 @@ mod tests {
         };
         assert!(complete_pages.iter().any(|page| page.chapter == 0));
         assert!(complete_pages.iter().any(|page| page.chapter == 1));
+    }
+
+    #[test]
+    fn epub_image_loading_is_off_thread_and_bounded_to_nearby_chapters() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(5)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.current_page = 2;
+
+        let task = load_epub_images_task(&mut state);
+
+        assert_eq!(task.units(), 1);
+        assert!(state.epub_image_handles.is_empty());
+        assert_eq!(state.epub_images_pending.len(), 3);
+        for chapter in [1, 2, 3] {
+            assert!(
+                state
+                    .epub_images_pending
+                    .iter()
+                    .any(|path| path.ends_with(&format!("image-{chapter}.png")))
+            );
+        }
+        assert!(
+            state
+                .epub_images_pending
+                .iter()
+                .all(|path| !path.ends_with("image-0.png") && !path.ends_with("image-4.png"))
+        );
+    }
+
+    #[test]
+    fn epub_image_completion_is_scoped_to_the_document_not_relayout() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let _ = load_epub_images_task(&mut state);
+        let path = state.epub_images_pending.iter().next().unwrap().clone();
+        let generation = state.epub_image_generation;
+        state.render_generation = state.render_generation.wrapping_add(1);
+
+        let _ = update(
+            &mut state,
+            Message::EpubImagesDecoded {
+                tab_id: 1,
+                generation,
+                images: vec![(
+                    path.clone(),
+                    Some(DecodedEpubImage::Raster {
+                        width: 1,
+                        height: 1,
+                        pixels: vec![1, 2, 3, 255],
+                    }),
+                )],
+            },
+        );
+
+        assert!(!state.epub_images_pending.contains(&path));
+        assert!(state.epub_image_handles.contains_key(&path));
     }
 
     #[test]
@@ -9810,7 +9982,7 @@ mod tests {
 
         let task = turn_epub_page(&mut state, true);
 
-        assert_eq!(task.units(), 0);
+        assert!(task.units() > 0);
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
         assert_eq!(state.epub_layout_key, layout_key);
         assert_eq!(state.render_generation, render_generation);
@@ -9885,7 +10057,7 @@ mod tests {
 
         for turn in 0..64 {
             let forward = turn % 2 == 0;
-            assert_eq!(turn_epub_page(&mut state, forward).units(), 0);
+            let _ = turn_epub_page(&mut state, forward);
             assert_eq!(state.current_page, usize::from(forward));
             assert!(matches!(
                 queued_saves.try_recv(),
