@@ -138,6 +138,7 @@ add-first-books = ＋ Add your first books
 continue-reading = Continue reading
 search-results = Search results
 loading-more = Loading more…
+opening-document = Opening document…
 unknown-author = Unknown author
 not-started = Not started
 percent = { $percentage }%

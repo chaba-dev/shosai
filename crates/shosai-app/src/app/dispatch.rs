@@ -249,6 +249,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::FileSelected(None) => {}
 
+        Message::DocumentOpened {
+            generation,
+            path,
+            book_id,
+            result,
+        } => {
+            if generation != state.document_open_generation {
+                return Task::none();
+            }
+            state.document_opening = false;
+            match result {
+                Ok(document) => return finish_open_document(state, path, book_id, document),
+                Err(error) => {
+                    let performance_task = perf::fail(state, &error.diagnostic());
+                    state.open_error = Some(error);
+                    return performance_task;
+                }
+            }
+        }
+
         Message::NextPage => {
             if uses_paginated_epub_layout(state) {
                 return turn_epub_page(state, true);

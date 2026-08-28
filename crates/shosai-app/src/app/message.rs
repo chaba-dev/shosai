@@ -21,6 +21,12 @@ pub enum Message {
     // File
     OpenFile,
     FileSelected(Option<PathBuf>),
+    DocumentOpened {
+        generation: u64,
+        path: PathBuf,
+        book_id: Option<i64>,
+        result: Result<super::OpenDocument, super::AppError>,
+    },
 
     // Navigation
     NextPage,
