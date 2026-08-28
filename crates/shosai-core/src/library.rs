@@ -1956,21 +1956,15 @@ fn extract_epub_metadata(
     path: &Path,
     title_path: &Path,
 ) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
-    let doc = EpubDoc::open(path)?;
-    let meta = &doc.content().metadata;
+    let inspection = EpubDoc::inspect(path)?;
+    let meta = inspection.metadata();
     let title = meta
         .title
         .clone()
         .unwrap_or_else(|| filename_title(title_path));
     let author = meta.author.clone();
 
-    // Extract cover image from manifest.
-    let cover = meta
-        .cover_image_id
-        .as_ref()
-        .and_then(|id| doc.content().manifest.get(id))
-        .and_then(|item| doc.resource(&item.href))
-        .and_then(|resource| resize_cover_image(resource.bytes()));
+    let cover = inspection.cover().and_then(resize_cover_image);
 
     Ok((title, author, cover))
 }

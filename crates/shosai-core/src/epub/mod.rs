@@ -29,7 +29,7 @@ pub use native_text::{
     EPUB_TEXT_MAX_SCALARS, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextHit,
     EpubTextLayout, EpubTextLine, EpubTextRect, EpubTextRequest, EpubTextRun,
 };
-pub use parser::EpubDoc;
+pub use parser::{EpubDoc, EpubInspection};
 pub use presentation::{EpubChapterPresentation, EpubPresentation};
 pub use resource::{CanonicalEpubPath, EpubReference};
 pub use types::*;

@@ -18,6 +18,11 @@ use crate::document::DocumentMetadata;
 
 const MAX_ARCHIVE_ENTRIES: usize = u16::MAX as usize;
 
+#[cfg(test)]
+thread_local! {
+    static PRESENTATION_CONSTRUCTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A parsed EPUB document.
 ///
 /// Raw source content is read-only so it cannot diverge from the cached
@@ -36,7 +41,38 @@ pub struct EpubDoc {
     chapter_index: HashMap<CanonicalEpubPath, usize>,
 }
 
+/// Metadata and the referenced cover admitted without constructing reading content.
+#[derive(Debug)]
+pub struct EpubInspection {
+    metadata: EpubMetadata,
+    cover: Option<Vec<u8>>,
+}
+
+impl EpubInspection {
+    pub fn metadata(&self) -> &EpubMetadata {
+        &self.metadata
+    }
+
+    pub fn cover(&self) -> Option<&[u8]> {
+        self.cover.as_deref()
+    }
+}
+
 impl EpubDoc {
+    /// Inspect package metadata and its referenced cover without loading reading content.
+    pub fn inspect(path: impl AsRef<Path>) -> Result<EpubInspection> {
+        Self::inspect_with_limits(path, EpubLimits::default())
+    }
+
+    /// Inspect package metadata and its referenced cover with explicit admission limits.
+    pub fn inspect_with_limits(
+        path: impl AsRef<Path>,
+        limits: EpubLimits,
+    ) -> Result<EpubInspection> {
+        let data = read_epub_file(path.as_ref(), &limits)?;
+        inspect_bytes(data, limits)
+    }
+
     /// Open an EPUB file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limits(path, EpubLimits::default())
@@ -44,22 +80,7 @@ impl EpubDoc {
 
     /// Open an EPUB file with explicit resource admission limits.
     pub fn open_with_limits(path: impl AsRef<Path>, limits: EpubLimits) -> Result<Self> {
-        let path = path.as_ref();
-        let file =
-            File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-        let declared_bytes = file
-            .metadata()
-            .with_context(|| format!("failed to inspect {}", path.display()))?
-            .len();
-        validate_input_size(declared_bytes, &limits)?;
-        let capacity = usize::try_from(declared_bytes)
-            .unwrap_or(usize::MAX)
-            .min(usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX));
-        let mut data = Vec::with_capacity(capacity);
-        file.take(limits.max_input_bytes.saturating_add(1))
-            .read_to_end(&mut data)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        validate_input_size(data.len() as u64, &limits)?;
+        let data = read_epub_file(path.as_ref(), &limits)?;
         Self::from_bytes_with_limits(data, limits)
     }
 
@@ -84,29 +105,13 @@ impl EpubDoc {
         include_non_spine_content: bool,
         limits: EpubLimits,
     ) -> Result<Self> {
-        validate_input_size(data.len() as u64, &limits)?;
-        let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
-        let mut validation_archive = ZipArchive::new(Cursor::new(data.as_slice()))
-            .context("EPUB archive is corrupt: failed to open ZIP archive")?;
-        validate_archive_entries(&mut validation_archive, declared_entries, &limits, &data)?;
-        drop(validation_archive);
-        let cursor = Cursor::new(data);
-        let mut archive = ZipArchive::new(cursor)
-            .context("EPUB archive is corrupt: failed to reopen ZIP archive")?;
+        let mut archive = validated_archive(data, &limits)?;
 
         // 1. Parse container.xml to find the OPF path.
-        let opf_path = parse_container(&mut archive, &limits)?;
-
-        // The OPF directory is used as a base for resolving relative paths.
-        let opf_dir = opf_path
-            .rsplit_once('/')
-            .map_or_else(String::new, |(directory, _)| directory.to_string());
-
-        // 2. Parse the OPF file.
-        let opf_xml = read_archive_entry(&mut archive, &opf_path, &limits)
-            .with_context(|| format!("failed to read OPF file: {opf_path}"))?;
-        let (metadata, manifest, spine_ids) = parse_opf(&opf_xml, &opf_dir)?;
+        let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits)?;
         validate_spine_size(&spine_ids, &limits)?;
+
+        // The OPF directory has already been applied to manifest paths by parse_package.
 
         // 3. Try to parse the TOC (NCX or nav document).
         let toc = parse_toc(&mut archive, &manifest, &limits)?;
@@ -150,6 +155,8 @@ impl EpubDoc {
         )?;
 
         let fonts = super::font::EpubFontBook::new(&chapters, &styles, &resources, &limits)?;
+        #[cfg(test)]
+        PRESENTATION_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
         let presentation =
             EpubPresentation::parse(&chapters, &styles, &fonts, &resources, &limits)?;
 
@@ -277,6 +284,80 @@ impl EpubDoc {
 // ---------------------------------------------------------------------------
 // Internal parsing functions
 // ---------------------------------------------------------------------------
+
+fn read_epub_file(path: &Path, limits: &EpubLimits) -> Result<Vec<u8>> {
+    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let declared_bytes = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .len();
+    validate_input_size(declared_bytes, limits)?;
+    let capacity = usize::try_from(declared_bytes)
+        .unwrap_or(usize::MAX)
+        .min(usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX));
+    let mut data = Vec::with_capacity(capacity);
+    file.take(limits.max_input_bytes.saturating_add(1))
+        .read_to_end(&mut data)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    validate_input_size(data.len() as u64, limits)?;
+    Ok(data)
+}
+
+fn validated_archive(data: Vec<u8>, limits: &EpubLimits) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
+    validate_input_size(data.len() as u64, limits)?;
+    let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
+    let mut validation_archive = ZipArchive::new(Cursor::new(data.as_slice()))
+        .context("EPUB archive is corrupt: failed to open ZIP archive")?;
+    validate_archive_entries(&mut validation_archive, declared_entries, limits, &data)?;
+    drop(validation_archive);
+    ZipArchive::new(Cursor::new(data))
+        .context("EPUB archive is corrupt: failed to reopen ZIP archive")
+}
+
+fn parse_package(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    limits: &EpubLimits,
+) -> Result<(EpubMetadata, HashMap<String, ManifestItem>, Vec<String>)> {
+    let opf_path = parse_container(archive, limits)?;
+    let opf_dir = opf_path
+        .rsplit_once('/')
+        .map_or_else(String::new, |(directory, _)| directory.to_string());
+    let opf_xml = read_archive_entry(archive, &opf_path, limits)
+        .with_context(|| format!("failed to read OPF file: {opf_path}"))?;
+    parse_opf(&opf_xml, &opf_dir)
+}
+
+fn inspect_bytes(data: Vec<u8>, limits: EpubLimits) -> Result<EpubInspection> {
+    let mut archive = validated_archive(data, &limits)?;
+    let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits)?;
+    validate_spine_size(&spine_ids, &limits)?;
+    let cover = if let Some(item) = metadata
+        .cover_image_id
+        .as_ref()
+        .and_then(|id| manifest.get(id))
+    {
+        let declared_size = match archive.by_name(&item.href) {
+            Ok(file) => file.size(),
+            Err(_) => {
+                return Ok(EpubInspection {
+                    metadata,
+                    cover: None,
+                });
+            }
+        };
+        validate_declared_resource_size(&item.href, &item.media_type, declared_size, &limits)?;
+        let data = read_archive_bytes_bounded(
+            &mut archive,
+            &item.href,
+            resource_read_limit(&item.media_type, &limits),
+        )?;
+        validate_resource(&item.href, &item.media_type, &data, &limits)?;
+        Some(data)
+    } else {
+        None
+    };
+    Ok(EpubInspection { metadata, cover })
+}
 
 /// Read a file from the ZIP archive as a UTF-8 string.
 fn read_archive_entry(
@@ -978,6 +1059,7 @@ fn resolve_manifest_path(opf_dir: &str, href: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use std::io::{Cursor, Write};
+    use std::path::Path;
 
     use zip::CompressionMethod;
     use zip::ZipWriter;
@@ -988,6 +1070,7 @@ mod tests {
     use super::declared_archive_entry_count;
     use super::parse_opf;
     use super::validate_spine_size;
+    use super::{PRESENTATION_CONSTRUCTIONS, inspect_bytes};
 
     fn archive_with_entries(names: &[&str]) -> Vec<u8> {
         let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
@@ -1008,6 +1091,52 @@ mod tests {
             archive.write_all(bytes).unwrap();
         }
         archive.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn inspection_matches_full_metadata_and_cover_without_presentation() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let full = EpubDoc::open(&path).unwrap();
+        PRESENTATION_CONSTRUCTIONS.with(|count| count.set(0));
+
+        let inspection = EpubDoc::inspect(path).unwrap();
+
+        assert_eq!(inspection.metadata().title, full.content().metadata.title);
+        assert_eq!(inspection.metadata().author, full.content().metadata.author);
+        let expected_cover = full
+            .content()
+            .metadata
+            .cover_image_id
+            .as_ref()
+            .and_then(|id| full.content().manifest.get(id))
+            .and_then(|item| full.resource(&item.href))
+            .map(|resource| resource.bytes());
+        assert_eq!(inspection.cover(), expected_cover);
+        PRESENTATION_CONSTRUCTIONS.with(|count| assert_eq!(count.get(), 0));
+    }
+
+    #[test]
+    fn inspection_retains_archive_and_cover_admission_limits() {
+        let corrupt = b"not a ZIP archive".to_vec();
+        assert!(inspect_bytes(corrupt, EpubLimits::default()).is_err());
+
+        let bytes =
+            std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"))
+                .unwrap();
+        let limits = EpubLimits {
+            max_input_bytes: bytes.len() as u64 - 1,
+            ..EpubLimits::default()
+        };
+        let error = inspect_bytes(bytes, limits).unwrap_err();
+        assert!(error.to_string().contains("archive byte limit"));
+
+        let oversized_cover = archive_with_payloads(&[
+            ("META-INF/container.xml", br#"<container><rootfile full-path="book.opf"/></container>"#),
+            ("book.opf", br#"<package><metadata><meta name="cover" content="cover"/></metadata><manifest><item id="cover" href="cover.png" media-type="image/png"/></manifest><spine/></package>"#),
+            ("cover.png", b"not-an-image"),
+        ]);
+        let error = inspect_bytes(oversized_cover, EpubLimits::default()).unwrap_err();
+        assert!(error.to_string().contains("could not inspect dimensions"));
     }
 
     fn linked_chapter_epub() -> Vec<u8> {
