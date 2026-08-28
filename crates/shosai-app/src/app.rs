@@ -1465,7 +1465,6 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         path: path.clone(),
         book_id,
     });
-    state.screen = Screen::Reader;
     state.open_error = None;
     state.missing_book_id = None;
     let task_path = path.clone();
@@ -9623,6 +9622,7 @@ mod tests {
         assert_eq!(first.units(), 2);
         assert!(state.document_opening);
         assert!(!state.document_open_notice_visible);
+        assert_eq!(state.screen, Screen::Library);
         assert_eq!(
             state
                 .document_open_preview
@@ -9644,6 +9644,7 @@ mod tests {
             Message::ShowDocumentOpenNotice(second_generation),
         );
         assert!(state.document_open_notice_visible);
+        assert_eq!(state.screen, Screen::Reader);
         assert_eq!(
             state
                 .document_open_preview

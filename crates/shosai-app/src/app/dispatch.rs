@@ -282,6 +282,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Ok(document) => return finish_open_document(state, path, book_id, document),
                 Err(error) => {
                     let performance_task = perf::fail(state, &error.diagnostic());
+                    state.screen = Screen::Reader;
                     state.open_error = Some(error);
                     return performance_task;
                 }
@@ -292,6 +293,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if generation == state.document_open_generation && state.document_opening =>
         {
             state.document_open_notice_visible = true;
+            state.screen = Screen::Reader;
         }
 
         Message::ShowDocumentOpenNotice(_) => {}
@@ -974,8 +976,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.book_menu = None;
             state.pending_remove_book = None;
             let path = PathBuf::from(file_path);
-            state.screen = Screen::Reader;
             if !path.exists() {
+                state.screen = Screen::Reader;
                 state.open_error = Some(AppError::MissingBook);
                 state.missing_book_id = Some(book_id);
                 return Task::none();
