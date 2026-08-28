@@ -61,9 +61,11 @@ fn test_render_page_scaled() {
 #[test]
 fn test_page_size() {
     let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
+    assert_eq!(doc.cached_page_size(0), None);
     let (w, h) = doc.page_size(0).unwrap();
     assert!((w - 100.0).abs() < 1.0);
     assert!((h - 150.0).abs() < 1.0);
+    assert_eq!(doc.cached_page_size(0), Some((100.0, 150.0)));
 }
 
 #[test]

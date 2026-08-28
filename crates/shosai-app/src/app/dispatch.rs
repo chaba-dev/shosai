@@ -1839,6 +1839,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::CbzDimensionsLoaded {
+            tab_id,
+            generation,
+            result,
+        } => {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+                match result {
+                    Ok(()) => return refresh_content(state),
+                    Err(error) => state.error = Some(AppError::Render(error)),
+                }
+            }
+        }
+
         Message::PageRendered {
             tab_id,
             generation,

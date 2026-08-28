@@ -1891,6 +1891,13 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         Some(OpenDocument::Cbz(doc)) => {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
+            if pages
+                .iter()
+                .any(|page| doc.cached_page_size(*page).is_none())
+            {
+                state.error = None;
+                return load_cbz_dimensions_task(tab_id, generation, doc, pages);
+            }
             let scale = paginated_raster_scale(state, &pages);
             state.error = None;
             let mut tasks = Vec::new();
@@ -1917,6 +1924,33 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     }
 
     Task::none()
+}
+
+fn load_cbz_dimensions_task(
+    tab_id: u64,
+    generation: u64,
+    document: Arc<CbzDoc>,
+    pages: Vec<usize>,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                for page in pages {
+                    document
+                        .page_size(page)
+                        .map_err(|error| error.to_string())?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|error| Err(error.to_string()))
+        },
+        move |result| Message::CbzDimensionsLoaded {
+            tab_id,
+            generation,
+            result,
+        },
+    )
 }
 
 pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
@@ -2495,7 +2529,7 @@ fn paginated_raster_pages_at(state: &State, page: usize) -> Vec<usize> {
 fn raster_page_size(state: &State, page: usize) -> Option<(f32, f32)> {
     match &state.document {
         Some(OpenDocument::Pdf(document)) => document.page_size(page).ok(),
-        Some(OpenDocument::Cbz(document)) => document.page_size(page).ok(),
+        Some(OpenDocument::Cbz(document)) => document.cached_page_size(page),
         _ => None,
     }
 }
@@ -3861,7 +3895,7 @@ fn continuous_content_view(state: &State) -> Element<'_, Message> {
                 } else {
                     let page_height = match &state.document {
                         Some(OpenDocument::Pdf(doc)) => doc.page_size(index).ok(),
-                        Some(OpenDocument::Cbz(doc)) => doc.page_size(index).ok(),
+                        Some(OpenDocument::Cbz(doc)) => doc.cached_page_size(index),
                         _ => None,
                     }
                     .map(|(_, height)| height * state.zoom.scale())
@@ -6361,6 +6395,59 @@ mod tests {
     }
 
     #[test]
+    fn continuous_cbz_view_does_not_read_uncached_archive_entries() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = document.page_count();
+        state.continuous_pages = vec![None; state.total_pages];
+
+        drop(continuous_content_view(&state));
+
+        assert_eq!(document.cached_page_size(0), None);
+        assert_eq!(document.cached_page_size(1), None);
+        assert_eq!(document.cached_page_size(2), None);
+    }
+
+    #[test]
+    fn paginated_cbz_loads_dimensions_before_scheduling_a_render() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.total_pages = document.page_count();
+
+        let dimensions = refresh_content(&mut state);
+
+        assert_eq!(dimensions.units(), 1);
+        assert_eq!(document.cached_page_size(0), None);
+        assert!(state.rendered_page.is_none());
+
+        document.page_size(0).unwrap();
+        let generation = state.render_generation;
+        let render = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: 1,
+                generation,
+                result: Ok(()),
+            },
+        );
+
+        assert!(render.units() > 0);
+    }
+
+    #[test]
     fn display_scale_change_invalidates_pdf_rasters_and_schedules_a_rerender() {
         let pdf = PdfDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
@@ -6490,6 +6577,9 @@ mod tests {
         )
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
+        for page in 0..2 {
+            cbz.page_size(page).unwrap();
+        }
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
@@ -6527,6 +6617,9 @@ mod tests {
         )
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
+        for page in 0..2 {
+            cbz.page_size(page).unwrap();
+        }
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
@@ -6564,6 +6657,9 @@ mod tests {
         )
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
+        for page in 0..2 {
+            cbz.page_size(page).unwrap();
+        }
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
@@ -6582,6 +6678,7 @@ mod tests {
         )
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
+        cbz.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
@@ -10345,6 +10442,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         let key = PageCacheKey {
             page: 0,

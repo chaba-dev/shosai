@@ -241,6 +241,11 @@ pub enum Message {
         generation: u64,
         images: Vec<(String, Option<DecodedEpubImage>)>,
     },
+    CbzDimensionsLoaded {
+        tab_id: u64,
+        generation: u64,
+        result: Result<(), String>,
+    },
     PageRendered {
         tab_id: u64,
         generation: u64,

@@ -271,6 +271,20 @@ impl CbzDoc {
         Ok((width as f32, height as f32))
     }
 
+    /// Return dimensions already discovered by a prior size query or render.
+    ///
+    /// Unlike [`Self::page_size`], this never reads or decompresses archive data.
+    pub fn cached_page_size(&self, index: usize) -> Option<(f32, f32)> {
+        let (width, height) = self
+            .dimensions
+            .lock()
+            .expect("dimension cache poisoned")
+            .get(index)
+            .copied()
+            .flatten()?;
+        Some((width as f32, height as f32))
+    }
+
     pub fn metadata(&self) -> DocumentMetadata {
         DocumentMetadata {
             title: self.title.clone(),
