@@ -286,19 +286,27 @@ pub(super) fn epub_chapter_view(state: &State) -> Element<'_, Message> {
                 ..iced::Padding::ZERO
             }));
         }
-        page = page.push(iced::widget::Space::new().height(Length::Fill));
-        page = page.push(
-            text(format!("{}", page_index + 1))
-                .size(EPUB_PAGE_NUMBER_SIZE)
-                .color(iced::Color {
-                    a: 0.55,
-                    ..text_color
-                }),
-        );
-        let page_content = container(page)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .max_width(text_width);
+        let page_number = text(format!("{}", page_index + 1))
+            .size(EPUB_PAGE_NUMBER_SIZE)
+            .color(iced::Color {
+                a: 0.55,
+                ..text_color
+            });
+        let page_content = container(
+            iced::widget::Stack::new()
+                .push(container(page).width(Length::Fill).height(Length::Fill))
+                .push(
+                    container(page_number)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_bottom(Length::Fill),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .max_width(text_width);
         let content_alignment = if epub_uses_spread(state) {
             if visible_index == 0 {
                 iced::Alignment::End
