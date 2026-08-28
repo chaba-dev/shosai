@@ -93,6 +93,10 @@ pub enum Message {
         offset: usize,
         next_offset: usize,
         page: BookPage,
+    },
+    LibraryCoversLoaded {
+        generation: u64,
+        offset: usize,
         cover_handles: HashMap<i64, RasterImageHandle>,
     },
     OpenAddBooks,

@@ -632,24 +632,38 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             generation,
             offset,
             next_offset,
-            page,
-            cover_handles,
+            mut page,
         } => {
             if generation != state.library_generation || offset != state.library_offset {
                 return Task::none();
             }
+            let covers = page
+                .books
+                .iter_mut()
+                .filter_map(|book| book.cover.take().map(|cover| (book.id, cover)))
+                .collect();
             if offset > 0 {
                 state.library_books.extend(page.books);
-                state.library_cover_handles.extend(cover_handles);
             } else {
                 state.library_books = page.books;
-                state.library_cover_handles = cover_handles;
+                state.library_cover_handles.clear();
             }
             state.library_offset = next_offset;
             state.library_has_more = page.has_more;
             state.library_loading = false;
             if offset == 0 {
                 state.library_activity_progress = 1.0;
+            }
+            return decode_library_covers_task(generation, offset, covers);
+        }
+
+        Message::LibraryCoversLoaded {
+            generation,
+            offset,
+            cover_handles,
+        } => {
+            if generation == state.library_generation && offset < state.library_offset {
+                state.library_cover_handles.extend(cover_handles);
             }
         }
 

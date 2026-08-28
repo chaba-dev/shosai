@@ -1052,39 +1052,47 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
 
     Task::perform(
         async move {
-            let page = library
+            library
                 .page(Some(&search), filter, LIBRARY_PAGE_SIZE, offset as u32)
                 .await
                 .unwrap_or(BookPage {
                     books: Vec::new(),
                     has_more: false,
-                });
-            tokio::task::spawn_blocking(move || {
-                let covers = page
-                    .books
-                    .iter()
-                    .filter_map(|book| {
-                        decode_library_cover(book.cover.as_deref()).map(|cover| (book.id, cover))
-                    })
-                    .collect();
-                (page, covers)
-            })
-            .await
-            .unwrap_or_else(|_| {
-                (
-                    BookPage {
-                        books: Vec::new(),
-                        has_more: false,
-                    },
-                    HashMap::new(),
-                )
-            })
+                })
         },
-        move |(page, cover_handles)| Message::LibraryLoaded {
+        move |page| Message::LibraryLoaded {
             generation,
             offset,
             next_offset: offset + page.books.len(),
             page,
+        },
+    )
+}
+
+fn decode_library_covers_task(
+    generation: u64,
+    offset: usize,
+    covers: Vec<(i64, Vec<u8>)>,
+) -> Task<Message> {
+    if covers.is_empty() {
+        return Task::none();
+    }
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                covers
+                    .into_iter()
+                    .filter_map(|(id, data)| {
+                        decode_library_cover(Some(&data)).map(|cover| (id, cover))
+                    })
+                    .collect()
+            })
+            .await
+            .unwrap_or_default()
+        },
+        move |cover_handles| Message::LibraryCoversLoaded {
+            generation,
+            offset,
             cover_handles,
         },
     )
@@ -7513,7 +7521,6 @@ mod tests {
                     books: vec![test_book(1)],
                     has_more: false,
                 },
-                cover_handles: HashMap::new(),
             },
         );
 
@@ -8514,23 +8521,37 @@ mod tests {
     }
 
     #[test]
-    fn library_covers_are_decoded_once_and_installed_with_the_page() {
+    fn library_metadata_is_installed_before_cover_decoding_finishes() {
         let (mut state, _) = boot();
         let generation = state.library_generation;
-        let cover = decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
-            .expect("application icon should decode as a cover");
-        let cover_id = cover.0.id();
+        let mut book = test_book(1);
+        book.cover = Some(include_bytes!("../../../assets/shosai-icon.png").to_vec());
 
-        let _ = update(
+        let cover_task = update(
             &mut state,
             Message::LibraryLoaded {
                 generation,
                 offset: 0,
                 next_offset: 1,
                 page: BookPage {
-                    books: vec![test_book(1)],
+                    books: vec![book],
                     has_more: false,
                 },
+            },
+        );
+
+        assert_eq!(cover_task.units(), 1);
+        assert_eq!(state.library_books.len(), 1);
+        assert!(state.library_cover_handles.is_empty());
+
+        let cover = decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
+            .expect("application icon should decode as a cover");
+        let cover_id = cover.0.id();
+        let _ = update(
+            &mut state,
+            Message::LibraryCoversLoaded {
+                generation,
+                offset: 0,
                 cover_handles: HashMap::from([(1, cover)]),
             },
         );
@@ -8593,7 +8614,6 @@ mod tests {
                     books: vec![test_book(1)],
                     has_more: false,
                 },
-                cover_handles: HashMap::new(),
             },
         );
 
@@ -8673,7 +8693,6 @@ mod tests {
                     books: Vec::new(),
                     has_more: false,
                 },
-                cover_handles: HashMap::new(),
             },
         );
 
@@ -8704,7 +8723,6 @@ mod tests {
                     books: vec![test_book(2)],
                     has_more: false,
                 },
-                cover_handles: HashMap::new(),
             },
         );
 
