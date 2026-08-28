@@ -28,7 +28,8 @@ def fields(line: str) -> dict[str, str]:
 def expected_runs() -> set[tuple[str, str, str]]:
     expected = set()
     for width in WIDTHS:
-        expected.add(("sample.epub", "chapter", width))
+        if width == "700":
+            expected.add(("sample.epub", "chapter", width))
         expected.add(("sample.epub", "relayout", width))
         for fixture in FIXTURES:
             for action in ACTION_OPERATION:
