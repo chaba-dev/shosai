@@ -397,6 +397,7 @@ struct ContinuousMeasuredItem {
 
 struct ContinuousItemOperation {
     items: Vec<ContinuousMeasuredItem>,
+    item_indexes: HashMap<WidgetId, usize>,
     scroll_id: WidgetId,
     item_bounds: Vec<Option<iced::Rectangle>>,
     content_top: Option<f32>,
@@ -410,8 +411,14 @@ struct ContinuousItemOperation {
 impl ContinuousItemOperation {
     fn resolve(items: Vec<ContinuousMeasuredItem>, scroll_id: WidgetId, offset: f32) -> Self {
         let item_count = items.len();
+        let item_indexes = items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.clone(), index))
+            .collect();
         Self {
             items,
+            item_indexes,
             scroll_id,
             item_bounds: vec![None; item_count],
             content_top: None,
@@ -430,8 +437,14 @@ impl ContinuousItemOperation {
         current_tail_extent: f32,
     ) -> Self {
         let item_count = items.len();
+        let item_indexes = items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (item.id.clone(), index))
+            .collect();
         Self {
             items,
+            item_indexes,
             scroll_id,
             item_bounds: vec![None; item_count],
             content_top: None,
@@ -453,7 +466,7 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
     }
 
     fn container(&mut self, id: Option<&WidgetId>, bounds: iced::Rectangle) {
-        if let Some(index) = id.and_then(|id| self.items.iter().position(|item| item.id == *id)) {
+        if let Some(index) = id.and_then(|id| self.item_indexes.get(id)).copied() {
             self.item_bounds[index] = Some(bounds);
         }
     }
