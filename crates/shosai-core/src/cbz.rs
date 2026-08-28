@@ -1,127 +1,264 @@
 //! CBZ (Comic Book Zip) format support.
 //!
-//! A CBZ file is a ZIP archive containing image files (JPEG, PNG, GIF, WebP).
-//! Pages are determined by sorting image entries in natural filename order.
+//! Pages are indexed cheaply and decoded only when requested.
 
 use std::io::{Cursor, Read};
 use std::path::Path;
+use std::sync::Mutex;
 
 use anyhow::{Context, Result};
 use zip::ZipArchive;
 
 use crate::document::{DocumentMetadata, RenderedPage};
 
-/// Image extensions we recognize as comic pages.
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
+const MIB: u64 = 1024 * 1024;
 
-/// A parsed CBZ document.
+/// Resource limits applied while opening and reading a CBZ.
+#[derive(Clone, Copy, Debug)]
+pub struct CbzLimits {
+    pub max_archive_bytes: u64,
+    pub max_entries: usize,
+    pub max_entry_bytes: u64,
+    pub max_total_uncompressed_bytes: u64,
+    pub max_compression_ratio: u64,
+    pub max_image_width: u32,
+    pub max_image_height: u32,
+    pub max_image_pixels: u64,
+    pub max_decoded_rgba_bytes: u64,
+}
+
+impl Default for CbzLimits {
+    fn default() -> Self {
+        Self {
+            max_archive_bytes: 512 * 1024 * 1024,
+            max_entries: 10_000,
+            max_entry_bytes: 128 * 1024 * 1024,
+            max_total_uncompressed_bytes: 2 * 1024 * 1024 * 1024,
+            max_compression_ratio: 1_000,
+            max_image_width: 16_384,
+            max_image_height: 16_384,
+            max_image_pixels: 40_000_000,
+            max_decoded_rgba_bytes: 160 * MIB,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CbzDoc {
-    /// Sorted list of image entry paths within the archive.
     page_paths: Vec<String>,
-    /// Raw ZIP data, kept for rendering pages on demand.
     data: Vec<u8>,
-    /// Title derived from the filename.
     title: Option<String>,
+    limits: CbzLimits,
+    dimensions: Mutex<Vec<Option<(u32, u32)>>>,
 }
 
 impl CbzDoc {
-    /// Open a CBZ file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_limits(path, CbzLimits::default())
+    }
+
+    pub fn open_with_limits(path: impl AsRef<Path>, limits: CbzLimits) -> Result<Self> {
         let path = path.as_ref();
+        let metadata = std::fs::metadata(path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if metadata.len() > limits.max_archive_bytes {
+            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+        }
         let data =
             std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
-
-        Self::from_bytes_with_title(data, title)
+        Self::from_bytes_with_title(data, title, limits)
     }
 
-    /// Open a CBZ from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
-        Self::from_bytes_with_title(data, None)
+        Self::from_bytes_with_limits(data, CbzLimits::default())
     }
 
-    fn from_bytes_with_title(data: Vec<u8>, title: Option<String>) -> Result<Self> {
-        let cursor = Cursor::new(&data);
-        let mut archive = ZipArchive::new(cursor).context("failed to open CBZ as ZIP archive")?;
+    pub fn from_bytes_with_limits(data: Vec<u8>, limits: CbzLimits) -> Result<Self> {
+        Self::from_bytes_with_title(data, None, limits)
+    }
 
-        let mut page_paths: Vec<String> = (0..archive.len())
-            .filter_map(|i| {
-                let file = archive.by_index(i).ok()?;
-                let name = file.name().to_string();
+    fn from_bytes_with_title(
+        data: Vec<u8>,
+        title: Option<String>,
+        limits: CbzLimits,
+    ) -> Result<Self> {
+        if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
+            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+        }
+        let mut archive =
+            ZipArchive::new(Cursor::new(&data)).context("failed to open CBZ as ZIP archive")?;
+        if archive.len() > limits.max_entries {
+            anyhow::bail!("CBZ archive exceeds entry count limit");
+        }
 
-                // Skip directories and hidden files.
-                if name.ends_with('/') || name.contains("/__MACOSX") || name.contains("/.") {
-                    return None;
-                }
-
-                // Check extension.
-                let ext = name.rsplit('.').next()?.to_lowercase();
-                if IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-                    Some(name)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // Natural sort order for correct page numbering (page2 before page10).
+        let mut total = 0_u64;
+        let mut page_paths = Vec::new();
+        for i in 0..archive.len() {
+            let file = archive.by_index(i).context("failed to inspect CBZ entry")?;
+            let size = file.size();
+            if size > limits.max_entry_bytes {
+                anyhow::bail!("CBZ entry exceeds uncompressed byte limit: {}", file.name());
+            }
+            total = total
+                .checked_add(size)
+                .context("CBZ declared size overflow")?;
+            if total > limits.max_total_uncompressed_bytes {
+                anyhow::bail!("CBZ archive exceeds aggregate uncompressed byte limit");
+            }
+            let compressed = file.compressed_size();
+            if size > 0
+                && (compressed == 0
+                    || size > compressed.saturating_mul(limits.max_compression_ratio))
+            {
+                anyhow::bail!("CBZ entry exceeds compression ratio limit: {}", file.name());
+            }
+            let name = file.name();
+            if name.ends_with('/') || name.contains("/__MACOSX") || name.contains("/.") {
+                continue;
+            }
+            if name.rsplit('.').next().is_some_and(|ext| {
+                IMAGE_EXTENSIONS
+                    .iter()
+                    .any(|known| ext.eq_ignore_ascii_case(known))
+            }) {
+                page_paths.push(name.to_owned());
+            }
+        }
         page_paths.sort_by(|a, b| natord::compare(a, b));
-
         if page_paths.is_empty() {
             anyhow::bail!("CBZ archive contains no image files");
         }
-
+        let dimensions = Mutex::new(vec![None; page_paths.len()]);
         Ok(Self {
             page_paths,
             data,
             title,
+            limits,
+            dimensions,
         })
     }
 
-    /// Number of pages.
     pub fn page_count(&self) -> usize {
         self.page_paths.len()
     }
 
-    /// Render a page by index, decoding the image to RGBA.
-    ///
-    /// `scale` multiplies the native image dimensions.
-    pub fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
-        if index >= self.page_paths.len() {
-            anyhow::bail!(
-                "page index {index} out of range (total: {})",
-                self.page_paths.len()
-            );
-        }
-
-        let path = &self.page_paths[index];
-        let cursor = Cursor::new(&self.data);
-        let mut archive = ZipArchive::new(cursor).context("failed to reopen CBZ archive")?;
-
+    fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
+        let path = self
+            .page_paths
+            .get(index)
+            .context("page index out of range")?;
+        let mut archive =
+            ZipArchive::new(Cursor::new(&self.data)).context("failed to reopen CBZ archive")?;
         let mut file = archive
             .by_name(path)
             .with_context(|| format!("image not found in archive: {path}"))?;
-
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)
+        let declared = file.size();
+        if declared > self.limits.max_entry_bytes
+            || declared > self.limits.max_total_uncompressed_bytes
+        {
+            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+        }
+        let capacity = usize::try_from(declared.min(self.limits.max_entry_bytes)).unwrap_or(0);
+        let mut bytes = Vec::with_capacity(capacity);
+        file.by_ref()
+            .take(self.limits.max_entry_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)
             .with_context(|| format!("failed to read image: {path}"))?;
+        let streamed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if streamed > self.limits.max_entry_bytes
+            || streamed > self.limits.max_total_uncompressed_bytes
+        {
+            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+        }
+        if streamed != declared {
+            anyhow::bail!("CBZ entry declared {declared} bytes but streamed {streamed}: {path}");
+        }
+        Ok(bytes)
+    }
 
-        let img = image::load_from_memory(&buf)
+    fn dimensions(&self, index: usize) -> Result<(u32, u32)> {
+        self.page_paths
+            .get(index)
+            .context("page index out of range")?;
+        if let Some(dimensions) = self.cached_dimensions(index) {
+            return Ok(dimensions);
+        }
+        let bytes = self.image_bytes(index)?;
+        self.inspect_dimensions(index, &bytes)
+    }
+
+    fn cached_dimensions(&self, index: usize) -> Option<(u32, u32)> {
+        self.dimensions.lock().expect("dimension cache poisoned")[index]
+    }
+
+    fn inspect_dimensions(&self, index: usize, bytes: &[u8]) -> Result<(u32, u32)> {
+        let path = self
+            .page_paths
+            .get(index)
+            .context("page index out of range")?;
+        let reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .with_context(|| format!("failed to identify image: {path}"))?;
+        let (width, height) = reader
+            .into_dimensions()
+            .with_context(|| format!("failed to inspect image dimensions: {path}"))?;
+        self.validate_dimensions(width, height)?;
+        self.dimensions.lock().expect("dimension cache poisoned")[index] = Some((width, height));
+        Ok((width, height))
+    }
+
+    fn validate_dimensions(&self, width: u32, height: u32) -> Result<()> {
+        let pixels = u64::from(width)
+            .checked_mul(u64::from(height))
+            .context("image dimensions overflow")?;
+        let rgba = pixels
+            .checked_mul(4)
+            .context("decoded image size overflow")?;
+        if width > self.limits.max_image_width
+            || height > self.limits.max_image_height
+            || pixels > self.limits.max_image_pixels
+            || rgba > self.limits.max_decoded_rgba_bytes
+        {
+            anyhow::bail!("CBZ image exceeds decoded image limits");
+        }
+        Ok(())
+    }
+
+    pub fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
+        if !scale.is_finite() || scale <= 0.0 {
+            anyhow::bail!("page scale must be finite and positive");
+        }
+        let path = self
+            .page_paths
+            .get(index)
+            .context("page index out of range")?;
+        let bytes = self.image_bytes(index)?;
+        let (width, height) = self
+            .cached_dimensions(index)
+            .map(Ok)
+            .unwrap_or_else(|| self.inspect_dimensions(index, &bytes))?;
+        let scaled_width = (width as f64 * f64::from(scale)).floor();
+        let scaled_height = (height as f64 * f64::from(scale)).floor();
+        if scaled_width > f64::from(u32::MAX) || scaled_height > f64::from(u32::MAX) {
+            anyhow::bail!("scaled image dimensions overflow");
+        }
+        let new_width = scaled_width as u32;
+        let new_height = scaled_height as u32;
+        if new_width == 0 || new_height == 0 {
+            anyhow::bail!("scaled image dimensions must be positive");
+        }
+        self.validate_dimensions(new_width, new_height)?;
+        let img = image::load_from_memory(&bytes)
             .with_context(|| format!("failed to decode image: {path}"))?;
-
         let img = if (scale - 1.0).abs() > f32::EPSILON {
-            let new_w = (img.width() as f32 * scale) as u32;
-            let new_h = (img.height() as f32 * scale) as u32;
-            img.resize(new_w, new_h, image::imageops::FilterType::Lanczos3)
+            img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
         } else {
             img
         };
-
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
-
         Ok(RenderedPage {
             width,
             height,
@@ -129,29 +266,11 @@ impl CbzDoc {
         })
     }
 
-    /// Get the dimensions of a page without full rendering.
     pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
-        if index >= self.page_paths.len() {
-            anyhow::bail!(
-                "page index {index} out of range (total: {})",
-                self.page_paths.len()
-            );
-        }
-
-        let path = &self.page_paths[index];
-        let cursor = Cursor::new(&self.data);
-        let mut archive = ZipArchive::new(cursor)?;
-        let mut file = archive.by_name(path)?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        let img = image::load_from_memory(&buf)
-            .with_context(|| format!("failed to decode image: {path}"))?;
-
-        Ok((img.width() as f32, img.height() as f32))
+        let (width, height) = self.dimensions(index)?;
+        Ok((width as f32, height as f32))
     }
 
-    /// Get document metadata.
     pub fn metadata(&self) -> DocumentMetadata {
         DocumentMetadata {
             title: self.title.clone(),
@@ -161,28 +280,18 @@ impl CbzDoc {
         }
     }
 
-    /// Get the raw image bytes for a page (for cover extraction).
     pub fn page_image_bytes(&self, index: usize) -> Result<Vec<u8>> {
-        if index >= self.page_paths.len() {
-            anyhow::bail!("page index {index} out of range");
+        let bytes = self.image_bytes(index)?;
+        if self.cached_dimensions(index).is_none() {
+            self.inspect_dimensions(index, &bytes)?;
         }
-
-        let path = &self.page_paths[index];
-        let cursor = Cursor::new(&self.data);
-        let mut archive = ZipArchive::new(cursor)?;
-        let mut file = archive.by_name(path)?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-        Ok(buf)
+        Ok(bytes)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Tests use a sample CBZ fixture that must be created by the test harness.
-    // See tests/cbz_tests.rs for integration tests.
 
     #[test]
     fn test_image_extensions() {
