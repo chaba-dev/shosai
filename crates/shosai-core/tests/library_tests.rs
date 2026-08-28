@@ -125,6 +125,25 @@ async fn test_library_pages_are_bounded_and_combine_filters() {
 }
 
 #[tokio::test]
+async fn library_order_queries_have_covering_sort_indexes() {
+    let (_lib, store, _dir) = temp_library().await;
+    let indexes: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_index_list('books')")
+        .fetch_all(store.pool())
+        .await
+        .unwrap();
+
+    assert!(
+        indexes.iter().any(|name| name == "books_library_order_idx"),
+        "missing unfiltered library order index: {indexes:?}"
+    );
+    assert!(
+        indexes
+            .iter()
+            .any(|name| name == "books_format_library_order_idx")
+    );
+}
+
+#[tokio::test]
 async fn test_library_id_snapshot_stays_stable_when_sort_order_changes() {
     let (lib, _, _dir) = temp_library().await;
     let pdf = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();

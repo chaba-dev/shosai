@@ -241,7 +241,7 @@ impl ReadingStateStore {
         crate::library::backfill_missing_fingerprints(&self.pool).await
     }
 
-    /// Run database migrations from the `migrations/` directory.
+    /// Run schema and query-index migrations from the `migrations/` directory.
     async fn migrate(&self) -> Result<()> {
         sqlx::migrate!("./migrations")
             .run(&self.pool)
