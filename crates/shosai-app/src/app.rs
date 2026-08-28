@@ -8309,6 +8309,28 @@ mod tests {
     }
 
     #[test]
+    fn initial_library_load_completes_the_activity_bar() {
+        let (mut state, _) = boot();
+        state.library_activity_progress = 0.75;
+        let generation = state.library_generation;
+
+        let _ = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation,
+                offset: 0,
+                next_offset: 1,
+                page: BookPage {
+                    books: vec![test_book(1)],
+                    has_more: false,
+                },
+            },
+        );
+
+        assert_eq!(state.library_activity_progress, 1.0);
+    }
+
+    #[test]
     fn discovery_activity_is_monotonic_and_reaches_completion() {
         let snapshots = [
             ImportDiscoveryProgressSnapshot {

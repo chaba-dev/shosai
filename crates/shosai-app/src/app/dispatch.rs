@@ -600,6 +600,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.library_books.clear();
             state.library_loading = false;
+            state.library_activity_progress = 1.0;
         }
 
         Message::LibraryLoaded {
@@ -619,6 +620,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.library_offset = next_offset;
             state.library_has_more = next_offset < state.library_book_ids.len();
             state.library_loading = false;
+            if offset == 0 {
+                state.library_activity_progress = 1.0;
+            }
         }
 
         Message::OpenAddBooks => {
