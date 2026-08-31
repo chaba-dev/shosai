@@ -7,6 +7,7 @@
 //! Uses sqlx with SQLite so the same database can be extended for library
 //! management in future phases.
 
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
@@ -189,8 +190,26 @@ impl ReadingStateStore {
         Self::open_at_async(&path).await
     }
 
+    /// Open the default store without waiting for legacy book fingerprints to be backfilled.
+    pub async fn open_async_deferred_backfill() -> Result<Self> {
+        let path = db_file_path()?;
+        if is_development_profile() {
+            prepare_development_data_directory(path.parent().context("database has no parent")?)?;
+        }
+        Self::open_at_async_deferred_backfill(&path).await
+    }
+
     /// Async: open at a specific database path.
     pub async fn open_at_async(db_path: &Path) -> Result<Self> {
+        Self::open_at_inner(db_path, true).await
+    }
+
+    /// Open a specific store without waiting for legacy book fingerprints.
+    pub async fn open_at_async_deferred_backfill(db_path: &Path) -> Result<Self> {
+        Self::open_at_inner(db_path, false).await
+    }
+
+    async fn open_at_inner(db_path: &Path, backfill_fingerprints: bool) -> Result<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create data dir {}", parent.display()))?;
@@ -211,11 +230,18 @@ impl ReadingStateStore {
             db_path: db_path.to_path_buf(),
         };
         store.migrate().await?;
-        crate::library::backfill_missing_fingerprints(&store.pool).await?;
+        if backfill_fingerprints {
+            store.backfill_missing_fingerprints().await?;
+        }
         Ok(store)
     }
 
-    /// Run database migrations from the `migrations/` directory.
+    /// Fill legacy library fingerprints after the store is available to the UI.
+    pub async fn backfill_missing_fingerprints(&self) -> Result<()> {
+        crate::library::backfill_missing_fingerprints(&self.pool).await
+    }
+
+    /// Run schema and query-index migrations from the `migrations/` directory.
     async fn migrate(&self) -> Result<()> {
         sqlx::migrate!("./migrations")
             .run(&self.pool)
@@ -343,6 +369,17 @@ impl ReadingStateStore {
             .ok()
             .flatten()
             .map(|row| row.get::<String, _>("value"))
+    }
+
+    /// Get all stored preferences in one query.
+    pub async fn get_prefs_async(&self) -> HashMap<String, String> {
+        sqlx::query("SELECT key, value FROM preferences")
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| (row.get::<String, _>("key"), row.get::<String, _>("value")))
+            .collect()
     }
 
     /// Set a stored preference value.

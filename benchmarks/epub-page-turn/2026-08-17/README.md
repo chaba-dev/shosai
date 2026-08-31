@@ -31,7 +31,8 @@ stabilization, discards five operation warmups, then records 50 samples.
 The generated books contain 16 chapters so one run can select stable
 within-chapter and chapter-boundary pairs. Generated archives are byte-stable.
 The runner fails if a run reports an error, never produces pages, omits one of
-the 16 summaries, or records a different sample count.
+the 15 summaries, records a different sample count, or exceeds an operation's
+p50 or p95 budget below.
 
 ## Initial budgets
 
@@ -57,7 +58,6 @@ All values are milliseconds.
 |---|---|---|---:|---:|
 | `sample.epub` | Single | Chapter transition | 0.581 | 1.618 |
 | `sample.epub` | Single | Relayout | 0.432 | 0.662 |
-| `sample.epub` | Spread | Chapter transition | 0.684 | 1.699 |
 | `sample.epub` | Spread | Relayout | 0.366 | 0.598 |
 | Generated large text | Single | Warm page turn | 1.603 | 2.906 |
 | Generated large text | Single | Chapter transition | 1.370 | 3.465 |
@@ -72,8 +72,9 @@ All values are milliseconds.
 | Generated large image | Spread | Chapter transition | 0.846 | 2.204 |
 | Generated large image | Spread | Relayout | 1.223 | 2.010 |
 
-The small checked-in fixture has no within-chapter warm pair, so that cell is
-intentionally omitted. Large-text relayout is the dominant native cost but
-remains within the initial budget. These numbers are a renderer-comparison
-baseline, not a universal guarantee. Repeat the same protocol on released
-platforms and under representative power and display conditions.
+The small checked-in fixture has no within-chapter warm pair, and its two
+chapters can share one spread, so those cells are intentionally omitted.
+Large-text relayout is the dominant native cost but remains within the initial
+budget. These numbers are a renderer-comparison baseline, not a universal
+guarantee. Repeat the same protocol on released platforms and under
+representative power and display conditions.

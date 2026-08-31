@@ -100,8 +100,8 @@ read_rfd() {
     ' "${source}"
 }
 
-printf "%s%-4s  %-13s  %-35s  %s%s\n" "${color_bold}" "RFD" "State" "Title" "Labels" "${color_reset}"
-printf "%s%-4s  %-13s  %-35s  %s%s\n" "${color_dim}" "----" "-------------" "-----------------------------------" "--------------------" "${color_reset}"
+printf "%s%-4s  %-13s  %5s  %-35s  %s%s\n" "${color_bold}" "RFD" "State" "Tasks" "Title" "Labels" "${color_reset}"
+printf "%s%-4s  %-13s  %5s  %-35s  %s%s\n" "${color_dim}" "----" "-------------" "-----" "-----------------------------------" "--------------------" "${color_reset}"
 
 failures=0
 found=0
@@ -126,6 +126,7 @@ for entry in "${entries[@]}"; do
 
 	number="$(printf '%s\n' "${entry_name}" | sed 's/^0*//')"
 	[[ -n "${number}" ]] || number="0"
+	task_summary="-"
 	implementations=()
 	[[ -f "${entry}/IMPLEMENTATION.org" ]] && implementations+=("${entry}/IMPLEMENTATION.org")
 	[[ -f "${entry}/IMPLEMENTATION.md" ]] && implementations+=("${entry}/IMPLEMENTATION.md")
@@ -139,6 +140,16 @@ for entry in "${entries[@]}"; do
 	else
 		implementation="${implementations[0]}"
 		implementation_name="$(basename "${implementation}")"
+		read -r implementation_total implementation_completed < <(
+			awk '
+			  /^[[:space:]]*[-+*][[:space:]]+\[[ xX]\][[:space:]]/ {
+			    total++
+			    if ($0 ~ /^[[:space:]]*[-+*][[:space:]]+\[[xX]\][[:space:]]/) completed++
+			  }
+			  END { printf "%d %d\n", total, completed }
+			' "${implementation}"
+		)
+		task_summary="${implementation_completed}/${implementation_total}"
 		case "${implementation_name}" in
 		IMPLEMENTATION.org)
 			expected_heading="#+TITLE: RFD ${entry_name} implementation checklist"; backlink="[[file:README.adoc][" ;;
@@ -173,7 +184,7 @@ for entry in "${entries[@]}"; do
 	failures=$((failures + parser_errors))
 	state_field="$(printf '%-13s' "${state:-\(missing\)}")"
 	state_text="$(colorize_state "${state}" "${state_field}")"
-	printf "%-4s  %s  %-35s  %s\n" "${entry_name}" "${state_text}" "${title:-\(missing title\)}" "${labels:-\(missing labels\)}"
+	printf "%-4s  %s  %5s  %-35s  %s\n" "${entry_name}" "${state_text}" "${task_summary}" "${title:-\(missing title\)}" "${labels:-\(missing labels\)}"
 done
 
 if [[ "${found}" -eq 0 ]]; then

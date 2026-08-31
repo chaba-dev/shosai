@@ -65,6 +65,26 @@ class EpubPerfToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "reported an error"):
             validator.validate(self.complete_log() + "\nperf-error fixture=sample.epub", 50)
 
+    def test_validator_rejects_a_latency_budget_regression(self):
+        content = self.complete_log().replace(
+            "operation=warm-page-turn fixture=large-image.epub samples=50 p50_ms=1 p95_ms=2",
+            "operation=warm-page-turn fixture=large-image.epub samples=50 p50_ms=1 p95_ms=17",
+            1,
+        )
+        with self.assertRaisesRegex(
+            ValueError, "p95_ms=17ms budget=16.7ms"
+        ):
+            validator.validate(content, 50)
+
+    def test_validator_rejects_missing_or_non_finite_latency(self):
+        missing = self.complete_log().replace(" p95_ms=2", "", 1)
+        with self.assertRaisesRegex(ValueError, "invalid p95_ms"):
+            validator.validate(missing, 50)
+
+        non_finite = self.complete_log().replace("p50_ms=1", "p50_ms=nan", 1)
+        with self.assertRaisesRegex(ValueError, "invalid p50_ms"):
+            validator.validate(non_finite, 50)
+
 
 if __name__ == "__main__":
     unittest.main()

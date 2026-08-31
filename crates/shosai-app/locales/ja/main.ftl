@@ -138,6 +138,7 @@ add-first-books = ＋ 最初の本を追加
 continue-reading = 読書を続ける
 search-results = 検索結果
 loading-more = さらに読み込み中…
+opening-document = ドキュメントを開いています…
 unknown-author = 著者不明
 not-started = 未読
 percent = { $percentage }%

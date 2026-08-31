@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,15 +10,26 @@ use shosai_core::library::{
 };
 use shosai_core::search::SearchMatch;
 
-use super::{ContinuousRequest, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey};
+use super::{
+    ContinuousRequest, DecodedEpubImage, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey,
+    RasterImageHandle,
+};
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Initialized(Result<InitializedState, String>),
+    FingerprintBackfillFinished(Result<(), String>),
 
     // File
     OpenFile,
     FileSelected(Option<PathBuf>),
+    DocumentOpened {
+        generation: u64,
+        path: PathBuf,
+        book_id: Option<i64>,
+        result: Result<super::OpenDocument, super::AppError>,
+    },
+    ShowDocumentOpenNotice(u64),
 
     // Navigation
     NextPage,
@@ -77,15 +89,16 @@ pub enum Message {
     ShowSettings,
     RefreshLibrary,
     LoadMoreLibrary,
-    LibraryIndexLoaded {
-        generation: u64,
-        ids: Vec<i64>,
-    },
     LibraryLoaded {
         generation: u64,
         offset: usize,
         next_offset: usize,
         page: BookPage,
+    },
+    LibraryCoversLoaded {
+        generation: u64,
+        offset: usize,
+        cover_handles: HashMap<i64, RasterImageHandle>,
     },
     OpenAddBooks,
     CancelAddBooks,
@@ -135,6 +148,7 @@ pub enum Message {
         result: Result<(), String>,
     },
     LibrarySearchChanged(String),
+    LibrarySearchDebounced(u64),
     LibraryFilterChanged(Option<shosai_core::library::BookFormat>),
     LibraryActivityTick,
     SelectLanguage(crate::i18n::LanguagePreference),
@@ -163,6 +177,14 @@ pub enum Message {
 
     // Bookmarks
     ToggleBookmark,
+    BookmarkToggled {
+        tab_id: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        page: usize,
+        location_offset: Option<usize>,
+        result: Result<Option<Bookmark>, String>,
+    },
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
@@ -176,11 +198,22 @@ pub enum Message {
     SaveNote,
     CancelEditNote,
     DeleteBookmark(i64),
+    BookmarkMutationFinished {
+        tab_id: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        result: Result<(), String>,
+    },
     ExportBookmarks,
 
     // In-document search
     ToggleSearchBar,
     SearchQueryChanged(String),
+    SearchQueryDebounced {
+        tab_id: u64,
+        document_generation: u64,
+        query_generation: u64,
+    },
     SearchTextExtracted {
         tab_id: u64,
         document_generation: u64,
@@ -201,7 +234,18 @@ pub enum Message {
         tab_id: u64,
         generation: u64,
         layout_key: EpubLayoutKey,
+        complete: bool,
         pages: Arc<Vec<EpubPage>>,
+    },
+    EpubImagesDecoded {
+        tab_id: u64,
+        generation: u64,
+        images: Vec<(String, Option<DecodedEpubImage>)>,
+    },
+    CbzDimensionsLoaded {
+        tab_id: u64,
+        generation: u64,
+        result: Result<(), String>,
     },
     PageRendered {
         tab_id: u64,

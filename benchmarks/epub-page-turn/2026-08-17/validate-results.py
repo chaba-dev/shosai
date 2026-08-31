@@ -2,6 +2,7 @@
 """Validate that the 2026-08-17 EPUB performance matrix completed."""
 
 import argparse
+import math
 from pathlib import Path
 import shlex
 
@@ -13,6 +14,11 @@ ACTION_OPERATION = {
     "chapter": "chapter-transition",
     "relayout": "relayout",
 }
+OPERATION_BUDGETS_MS = {
+    "warm-page-turn": {"p50_ms": 8.0, "p95_ms": 16.7},
+    "chapter-transition": {"p50_ms": 16.7, "p95_ms": 33.3},
+    "relayout": {"p50_ms": 50.0, "p95_ms": 100.0},
+}
 
 
 def fields(line: str) -> dict[str, str]:
@@ -22,7 +28,8 @@ def fields(line: str) -> dict[str, str]:
 def expected_runs() -> set[tuple[str, str, str]]:
     expected = set()
     for width in WIDTHS:
-        expected.add(("sample.epub", "chapter", width))
+        if width == "700":
+            expected.add(("sample.epub", "chapter", width))
         expected.add(("sample.epub", "relayout", width))
         for fixture in FIXTURES:
             for action in ACTION_OPERATION:
@@ -77,6 +84,21 @@ def validate(content: str, requested_samples: int) -> None:
             raise ValueError(f"summary does not match run {key}: {summary}")
         if summary.get("samples") != expected_samples:
             raise ValueError(f"summary sample count does not match for {key}: {summary}")
+        budgets = OPERATION_BUDGETS_MS[expected_operation]
+        for metric, budget in budgets.items():
+            try:
+                value = float(summary.get(metric, ""))
+            except ValueError as error:
+                raise ValueError(
+                    f"summary has invalid {metric} for {key}: {summary.get(metric)!r}"
+                ) from error
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"summary has invalid {metric} for {key}: {value}")
+            if value > budget:
+                raise ValueError(
+                    f"performance budget exceeded for {key}: "
+                    f"{metric}={value:g}ms budget={budget:g}ms"
+                )
 
     expected = expected_runs()
     if actual != expected:

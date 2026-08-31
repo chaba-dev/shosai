@@ -181,6 +181,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } = initialized;
             state.i18n.set_preference(language_preference);
             let pool = store.pool().clone();
+            let backfill_store = store.clone();
+            let backfill_task = Task::perform(
+                async move {
+                    backfill_store
+                        .backfill_missing_fingerprints()
+                        .await
+                        .map_err(|error| format!("{error:#}"))
+                },
+                Message::FingerprintBackfillFinished,
+            );
             state.library = Some(Library::new(pool.clone(), managed_books_dir));
             state.bookmark_store = Some(BookmarkStore::new(pool));
             state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
@@ -203,10 +213,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Some(pending) = state.pending_open.take() {
                 return Task::batch([
                     geometry_task,
+                    backfill_task,
                     Task::done(Message::FileSelected(Some(pending))),
                 ]);
             }
-            return Task::batch([geometry_task, reset_library(state)]);
+            return Task::batch([geometry_task, backfill_task, reset_library(state)]);
         }
 
         Message::Initialized(Err(error)) => {
@@ -218,6 +229,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::done(Message::FileSelected(Some(pending)));
             }
         }
+
+        Message::FingerprintBackfillFinished(Err(error)) => {
+            eprintln!("warning: failed to backfill legacy book fingerprints: {error}");
+        }
+
+        Message::FingerprintBackfillFinished(Ok(())) => {}
 
         Message::OpenFile => {
             let ebooks = state.i18n.text("ebooks");
@@ -248,6 +265,38 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FileSelected(None) => {}
+
+        Message::DocumentOpened {
+            generation,
+            path,
+            book_id,
+            result,
+        } => {
+            if generation != state.document_open_generation {
+                return Task::none();
+            }
+            state.document_opening = false;
+            state.document_open_notice_visible = false;
+            state.document_open_preview = None;
+            match result {
+                Ok(document) => return finish_open_document(state, path, book_id, document),
+                Err(error) => {
+                    let performance_task = perf::fail(state, &error.diagnostic());
+                    state.screen = Screen::Reader;
+                    state.open_error = Some(error);
+                    return performance_task;
+                }
+            }
+        }
+
+        Message::ShowDocumentOpenNotice(generation)
+            if generation == state.document_open_generation && state.document_opening =>
+        {
+            state.document_open_notice_visible = true;
+            state.screen = Screen::Reader;
+        }
+
+        Message::ShowDocumentOpenNotice(_) => {}
 
         Message::NextPage => {
             if uses_paginated_epub_layout(state) {
@@ -375,8 +424,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && state.continuous_activation == activation
             {
                 let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+                let index = continuous_measurement_index(state, tab_id, activation);
                 return iced::advanced::widget::operate(ContinuousItemOperation::resolve(
-                    continuous_measured_items(state, tab_id, activation),
+                    index,
                     continuous_scroll_id(tab_id, activation),
                     offset,
                 ))
@@ -410,7 +460,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.page_input = (page + 1).to_string();
                 save_reading_state(state);
                 update_bookmark_status(state);
-                return reconcile_continuous_rasters(state);
+                return Task::batch([
+                    reconcile_continuous_rasters(state),
+                    load_epub_images_task(state),
+                ]);
             }
         }
 
@@ -588,37 +641,43 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::LibraryIndexLoaded { generation, ids } => {
-            if generation != state.library_generation {
-                return Task::none();
-            }
-            state.library_book_ids = Arc::new(ids);
-            state.library_offset = 0;
-            state.library_has_more = !state.library_book_ids.is_empty();
-            if state.library_has_more {
-                return load_library_page(state, false);
-            }
-            state.library_books.clear();
-            state.library_loading = false;
-        }
-
         Message::LibraryLoaded {
             generation,
             offset,
             next_offset,
-            page,
+            mut page,
         } => {
             if generation != state.library_generation || offset != state.library_offset {
                 return Task::none();
             }
+            let covers = page
+                .books
+                .iter_mut()
+                .filter_map(|book| book.cover.take().map(|cover| (book.id, cover)))
+                .collect();
             if offset > 0 {
                 state.library_books.extend(page.books);
             } else {
                 state.library_books = page.books;
+                state.library_cover_handles.clear();
             }
             state.library_offset = next_offset;
-            state.library_has_more = next_offset < state.library_book_ids.len();
+            state.library_has_more = page.has_more;
             state.library_loading = false;
+            if offset == 0 {
+                state.library_activity_progress = 1.0;
+            }
+            return decode_library_covers_task(generation, offset, covers);
+        }
+
+        Message::LibraryCoversLoaded {
+            generation,
+            offset,
+            cover_handles,
+        } => {
+            if generation == state.library_generation && offset < state.library_offset {
+                state.library_cover_handles.extend(cover_handles);
+            }
         }
 
         Message::OpenAddBooks => {
@@ -917,8 +976,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.book_menu = None;
             state.pending_remove_book = None;
             let path = PathBuf::from(file_path);
-            state.screen = Screen::Reader;
             if !path.exists() {
+                state.screen = Screen::Reader;
                 state.open_error = Some(AppError::MissingBook);
                 state.missing_book_id = Some(book_id);
                 return Task::none();
@@ -1022,6 +1081,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(()) => {
                     state.library_books.retain(|book| book.id != id);
+                    state.library_cover_handles.remove(&id);
                     let mut detached_paths = BTreeSet::new();
                     let mut detached_saves = Vec::new();
                     if state.book_id == Some(id) {
@@ -1093,7 +1153,29 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::LibrarySearchChanged(query) => {
             state.library_search = query;
-            return reset_library(state);
+            state.library_generation = state.library_generation.wrapping_add(1);
+            let generation = state.library_generation;
+            state.library_loading = false;
+            return Task::perform(
+                async move {
+                    tokio::time::sleep(SEARCH_DEBOUNCE).await;
+                    generation
+                },
+                Message::LibrarySearchDebounced,
+            );
+        }
+
+        Message::LibrarySearchDebounced(generation) => {
+            if generation != state.library_generation {
+                return Task::none();
+            }
+            state.library_offset = 0;
+            state.library_has_more = false;
+            state.book_menu = None;
+            state.pending_remove_book = None;
+            state.library_error = None;
+            state.library_activity_progress = 0.0;
+            return load_library_page(state, false);
         }
 
         Message::LibraryFilterChanged(filter) => {
@@ -1335,30 +1417,74 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Bookmarks
         Message::ToggleBookmark => {
-            if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
+            if let (Some(tab_id), Some(path), Some(store)) =
+                (state.active_tab_id, &state.file_path, &state.bookmark_store)
+            {
+                let path = path.clone();
+                let task_path = path.clone();
+                let store = store.clone();
+                let book_id = state.book_id;
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
-                let result = if let Some(book_id) = state.book_id {
-                    store.toggle_for_book_at(book_id, path, page, location_offset, None)
-                } else {
-                    store.toggle_at(path, page, location_offset, None)
-                };
-                match result {
-                    Ok(Some(bookmark)) => {
-                        state.bookmarks.push(bookmark);
-                        state.current_page_bookmarked = true;
-                    }
-                    Ok(None) => {
-                        state.bookmarks.retain(|bookmark| {
-                            bookmark.page != page
-                                || bookmark.location_offset != location_offset
-                                || bookmark.note.is_some()
-                        });
-                        state.current_page_bookmarked = false;
-                    }
-                    Err(e) => eprintln!("warning: failed to toggle bookmark: {e}"),
+                return Task::perform(
+                    async move {
+                        let result = if let Some(book_id) = book_id {
+                            store
+                                .toggle_for_book_at_async(
+                                    book_id,
+                                    &task_path,
+                                    page,
+                                    location_offset,
+                                    None,
+                                )
+                                .await
+                        } else {
+                            store
+                                .toggle_at_async(&task_path, page, location_offset, None)
+                                .await
+                        };
+                        result.map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkToggled {
+                        tab_id,
+                        file_path: path,
+                        book_id,
+                        page,
+                        location_offset,
+                        result,
+                    },
+                );
+            }
+        }
+
+        Message::BookmarkToggled {
+            tab_id,
+            file_path,
+            book_id,
+            page,
+            location_offset,
+            result,
+        } => {
+            if state.active_tab_id != Some(tab_id)
+                || state.file_path.as_ref() != Some(&file_path)
+                || state.book_id != book_id
+            {
+                return Task::none();
+            }
+            match result {
+                Ok(Some(bookmark)) => {
+                    state.bookmarks.push(bookmark);
+                    state.current_page_bookmarked = true;
                 }
-                return refresh_bookmarks(state);
+                Ok(None) => {
+                    state.bookmarks.retain(|bookmark| {
+                        bookmark.page != page
+                            || bookmark.location_offset != location_offset
+                            || bookmark.note.is_some()
+                    });
+                    state.current_page_bookmarked = false;
+                }
+                Err(error) => eprintln!("warning: failed to toggle bookmark: {error}"),
             }
         }
 
@@ -1403,20 +1529,39 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SaveNote => {
-            if let (Some(id), Some(store)) = (state.editing_note_id, &state.bookmark_store) {
+            if let (Some(tab_id), Some(path), Some(id), Some(store)) = (
+                state.active_tab_id,
+                &state.file_path,
+                state.editing_note_id,
+                &state.bookmark_store,
+            ) {
                 let note = if state.editing_note_text.is_empty() {
                     None
                 } else {
-                    Some(state.editing_note_text.as_str())
+                    Some(state.editing_note_text.clone())
                 };
-                let rt = tokio::runtime::Handle::current();
-                if let Err(e) = rt.block_on(store.update_note_async(id, note)) {
-                    eprintln!("warning: failed to save note: {e}");
-                }
+                let store = store.clone();
+                let file_path = path.clone();
+                let book_id = state.book_id;
+                state.editing_note_id = None;
+                state.editing_note_text = String::new();
+                return Task::perform(
+                    async move {
+                        store
+                            .update_note_async(id, note.as_deref())
+                            .await
+                            .map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkMutationFinished {
+                        tab_id,
+                        file_path,
+                        book_id,
+                        result,
+                    },
+                );
             }
             state.editing_note_id = None;
             state.editing_note_text = String::new();
-            return refresh_bookmarks(state);
         }
 
         Message::CancelEditNote => {
@@ -1425,13 +1570,45 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::DeleteBookmark(id) => {
-            if let Some(store) = &state.bookmark_store {
-                let rt = tokio::runtime::Handle::current();
-                if let Err(e) = rt.block_on(store.remove_async(id)) {
-                    eprintln!("warning: failed to delete bookmark: {e}");
-                }
+            if let (Some(tab_id), Some(path), Some(store)) =
+                (state.active_tab_id, &state.file_path, &state.bookmark_store)
+            {
+                let store = store.clone();
+                let file_path = path.clone();
+                let book_id = state.book_id;
+                return Task::perform(
+                    async move {
+                        store
+                            .remove_async(id)
+                            .await
+                            .map_err(|error| format!("{error:#}"))
+                    },
+                    move |result| Message::BookmarkMutationFinished {
+                        tab_id,
+                        file_path,
+                        book_id,
+                        result,
+                    },
+                );
             }
-            return refresh_bookmarks(state);
+        }
+
+        Message::BookmarkMutationFinished {
+            tab_id,
+            file_path,
+            book_id,
+            result,
+        } => {
+            if let Err(error) = result {
+                eprintln!("warning: failed to update bookmark: {error}");
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id)
+                && state.file_path.as_ref() == Some(&file_path)
+                && state.book_id == book_id
+            {
+                return refresh_bookmarks(state);
+            }
         }
 
         Message::ExportBookmarks => {
@@ -1492,9 +1669,41 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_current = 0;
             let render_task = refresh_pdf_search_highlights_if_changed(state, &previous_highlights);
             if !state.search_query.is_empty() {
-                return Task::batch([render_task, perform_search(state)]);
+                let Some(tab_id) = state.active_tab_id else {
+                    return render_task;
+                };
+                let document_generation = state.search_document_generation;
+                let query_generation = state.search_query_generation;
+                let debounce = Task::perform(
+                    async move {
+                        tokio::time::sleep(SEARCH_DEBOUNCE).await;
+                        (tab_id, document_generation, query_generation)
+                    },
+                    |(tab_id, document_generation, query_generation)| {
+                        Message::SearchQueryDebounced {
+                            tab_id,
+                            document_generation,
+                            query_generation,
+                        }
+                    },
+                );
+                return Task::batch([render_task, debounce]);
             }
             return render_task;
+        }
+
+        Message::SearchQueryDebounced {
+            tab_id,
+            document_generation,
+            query_generation,
+        } => {
+            if state.active_tab_id == Some(tab_id)
+                && state.search_document_generation == document_generation
+                && state.search_query_generation == query_generation
+                && !state.search_query.is_empty()
+            {
+                return perform_search(state);
+            }
         }
 
         Message::SearchTextExtracted {
@@ -1572,12 +1781,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             tab_id,
             generation,
             layout_key,
+            complete,
             pages,
         } => {
             if state.active_tab_id == Some(tab_id)
                 && generation == state.render_generation
                 && layout_key == epub_layout_key(state)
             {
+                if !complete && state.epub_layout_key == Some(layout_key) {
+                    return Task::none();
+                }
                 state.epub_pages = pages;
                 state.epub_layout_key = Some(layout_key);
                 if state.epub_pages.is_empty() {
@@ -1596,6 +1809,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     && layout_key == epub_layout_key_for_tab(state, &state.tabs[index]);
                 if accepts_layout {
                     let tab = &mut state.tabs[index];
+                    if !complete && tab.epub_layout_key == Some(layout_key) {
+                        return Task::none();
+                    }
                     tab.epub_pages = pages;
                     tab.epub_layout_key = Some(layout_key);
                     if tab.epub_pages.is_empty() {
@@ -1608,6 +1824,54 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         tab.page_input = (tab.epub_page + 1).to_string();
                         tab.error = None;
                     }
+                }
+            }
+        }
+
+        Message::EpubImagesDecoded {
+            tab_id,
+            generation,
+            images,
+        } => {
+            if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
+                state.epub_image_decode_active = false;
+                for (path, decoded) in images {
+                    state.epub_images_pending.remove(&path);
+                    if state.epub_images_desired.remove(&path) {
+                        if let Some(decoded) = decoded {
+                            state.epub_image_handles.insert(path, decoded.into_handle());
+                        } else {
+                            state.epub_images_failed.insert(path);
+                        }
+                    }
+                }
+                return load_epub_images_task(state);
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                && generation == tab.epub_image_generation
+            {
+                tab.epub_image_decode_active = false;
+                for (path, decoded) in images {
+                    tab.epub_images_pending.remove(&path);
+                    if tab.epub_images_desired.remove(&path) {
+                        if let Some(decoded) = decoded {
+                            tab.epub_image_handles.insert(path, decoded.into_handle());
+                        } else {
+                            tab.epub_images_failed.insert(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        Message::CbzDimensionsLoaded {
+            tab_id,
+            generation,
+            result,
+        } => {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+                match result {
+                    Ok(()) => return refresh_content(state),
+                    Err(error) => state.error = Some(AppError::Render(error)),
                 }
             }
         }
