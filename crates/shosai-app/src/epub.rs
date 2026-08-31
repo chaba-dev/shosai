@@ -1969,6 +1969,7 @@ pub(crate) fn epub_table_cell_placements(
 
 /// Measures the complete logical table once. Pagination and painting provide
 /// the same intrinsic-cell measurer and consume these row and cell rectangles.
+#[cfg(test)]
 pub(crate) fn epub_table_geometry(
     row_groups: &[TableRowGroup],
     column_widths: &[f32],
@@ -2077,6 +2078,7 @@ pub(crate) fn epub_table_geometry_from_placements(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn epub_table_geometry_bounded(
     row_groups: &[TableRowGroup],
     column_widths: &[f32],
@@ -2177,6 +2179,7 @@ pub(crate) fn epub_bounded_node_height(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn epub_table_column_widths(row_groups: &[TableRowGroup], table_width: f32) -> Vec<f32> {
     let placements = epub_table_cell_placements(row_groups);
     epub_table_column_widths_from_placements(row_groups, table_width, &placements)
