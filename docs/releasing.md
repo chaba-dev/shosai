@@ -5,7 +5,7 @@ Shosai releases are prepared from Conventional Commit titles and reviewed throug
 ## Release flow
 
 1. Each pull request title must use an allowed Conventional Commit type. The repository must use squash merges with the pull request title as the resulting commit subject.
-2. A push to `main` updates `release/next`. Git-cliff calculates the next semantic version, updates the workspace version and lockfile, regenerates `CHANGELOG.md`, and creates or refreshes the release pull request.
+2. A push to `main` updates `release/next`. The workflow merges the new `main` revision into the existing release branch, then appends a release commit instead of rewriting branch history. If the branch was deleted after an earlier pull request, the workflow recovers its last pull-request head before appending. Git-cliff calculates the next semantic version, updates the workspace version and lockfile, regenerates `CHANGELOG.md`, and creates or refreshes the release pull request.
 3. The exact `release/next` commit is dry-run through the full three-platform package matrix with publishing disabled. The release PR receives a `Release build dry run` commit status, so it cannot be mistaken for a releasable revision while packages are pending or failing. Ordinary feature pull requests do not run this release matrix.
 4. Merging that pull request into the default branch validates that its `chore(release): vX.Y.Z` title matches the workspace version and creates the tag on the merge commit.
 5. Release jobs repeat the same builds, bundle PDFium, and attach installable packages and checksums to the GitHub release. A manually pushed `vX.Y.Z` tag runs the same publisher after validating the tag against the workspace version.
@@ -49,7 +49,7 @@ The workflows rely on these GitHub settings:
 - Require release pull requests to be up to date before merging, or use a merge queue, so the reviewed changelog covers every commit in the tagged merge.
 - Install the private `chaba2-bot` GitHub App on this repository with `Contents: write`, `Pull requests: write`, and `Commit statuses: write` repository permissions.
 - Create the `RELEASE` Actions environment, store the App ID in its `RELEASE_APP_ID` variable, and store the PEM private key in its `RELEASE_APP_SECRET` secret.
-- Allow `chaba2-bot` to update the `release/next` branch with force-with-lease.
+- Allow `chaba2-bot` to push updates to the `release/next` branch.
 
 Only mutation jobs enter the `RELEASE` environment and receive its credentials. Release package builds, including dry runs, remain credential-free. Mutation jobs exchange the credentials for short-lived, repository-scoped `chaba2-bot` installation tokens: release commits and branch pushes, release pull-request creation and updates, dry-run statuses, tags, and GitHub releases. The built-in `GITHUB_TOKEN` is read-only. App-authored branch and tag events are not suppressed by GitHub's recursive-workflow protection, so the normal PR checks and tag workflow can run.
 
