@@ -260,6 +260,18 @@ async fn test_preferences_persist_across_opens() {
 }
 
 #[tokio::test]
+async fn all_preferences_are_loaded_together() {
+    let (store, _dir) = temp_store().await;
+    store.set_pref_async("first", "one").await.unwrap();
+    store.set_pref_async("second", "2").await.unwrap();
+
+    let preferences = store.get_prefs_async().await;
+
+    assert_eq!(preferences.get("first").map(String::as_str), Some("one"));
+    assert_eq!(preferences.get("second").map(String::as_str), Some("2"));
+}
+
+#[tokio::test]
 async fn test_multiple_preferences_are_saved_atomically() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
@@ -306,7 +318,7 @@ async fn test_migrations_are_idempotent() {
 }
 
 #[tokio::test]
-async fn migrating_a_v5_database_fingerprints_reachable_legacy_books() {
+async fn legacy_fingerprints_can_be_backfilled_after_migration() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
     let reachable = dir.path().join("reachable.epub");
@@ -335,7 +347,16 @@ async fn migrating_a_v5_database_fingerprints_reachable_legacy_books() {
     }
     pool.close().await;
 
-    let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+    let store = ReadingStateStore::open_at_async_deferred_backfill(&db_path)
+        .await
+        .unwrap();
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE content_hash IS NULL")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(pending, 2);
+
+    store.backfill_missing_fingerprints().await.unwrap();
     let rows: Vec<(String, Option<String>, Option<i64>)> =
         sqlx::query_as("SELECT file_path, content_hash, file_size FROM books ORDER BY id")
             .fetch_all(store.pool())

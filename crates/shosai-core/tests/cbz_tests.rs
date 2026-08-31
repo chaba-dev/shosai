@@ -1,4 +1,4 @@
-use shosai_core::cbz::CbzDoc;
+use shosai_core::cbz::{CbzDoc, CbzLimits};
 use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -61,9 +61,11 @@ fn test_render_page_scaled() {
 #[test]
 fn test_page_size() {
     let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
+    assert_eq!(doc.cached_page_size(0), None);
     let (w, h) = doc.page_size(0).unwrap();
     assert!((w - 100.0).abs() < 1.0);
     assert!((h - 150.0).abs() < 1.0);
+    assert_eq!(doc.cached_page_size(0), Some((100.0, 150.0)));
 }
 
 #[test]
@@ -105,4 +107,71 @@ fn test_skips_non_image_files() {
 #[test]
 fn test_open_nonexistent() {
     assert!(CbzDoc::open("/nonexistent/file.cbz").is_err());
+}
+
+#[test]
+fn rejects_oversized_archive_and_entry() {
+    let data = std::fs::read(fixture_path("sample.cbz")).unwrap();
+    let limits = CbzLimits {
+        max_archive_bytes: data.len() as u64 - 1,
+        ..CbzLimits::default()
+    };
+    assert!(CbzDoc::from_bytes_with_limits(data.clone(), limits).is_err());
+
+    let limits = CbzLimits {
+        max_entry_bytes: 16,
+        ..CbzLimits::default()
+    };
+    assert!(CbzDoc::from_bytes_with_limits(data, limits).is_err());
+}
+
+#[test]
+fn rejects_oversized_image_before_decode() {
+    let data = std::fs::read(fixture_path("sample.cbz")).unwrap();
+    let limits = CbzLimits {
+        max_image_pixels: 100,
+        ..CbzLimits::default()
+    };
+    let doc = CbzDoc::from_bytes_with_limits(data, limits).unwrap();
+    assert!(
+        doc.page_size(0)
+            .unwrap_err()
+            .to_string()
+            .contains("decoded image limits")
+    );
+    assert!(doc.render_page(0, 1.0).is_err());
+    assert!(doc.page_image_bytes(0).is_err());
+}
+
+#[test]
+fn rejects_invalid_and_pathologically_small_render_scales() {
+    let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
+    assert!(doc.render_page(0, f32::NAN).is_err());
+    assert!(doc.render_page(0, 0.0).is_err());
+    assert!(doc.render_page(0, 0.000_001).is_err());
+}
+
+#[test]
+fn rejects_entry_count_and_aggregate_size() {
+    let data = std::fs::read(fixture_path("sample.cbz")).unwrap();
+    let limits = CbzLimits {
+        max_entries: 1,
+        ..CbzLimits::default()
+    };
+    assert!(CbzDoc::from_bytes_with_limits(data.clone(), limits).is_err());
+    let limits = CbzLimits {
+        max_total_uncompressed_bytes: 16,
+        ..CbzLimits::default()
+    };
+    assert!(CbzDoc::from_bytes_with_limits(data, limits).is_err());
+}
+
+#[test]
+fn rejects_excessive_compression_ratio() {
+    let data = std::fs::read(fixture_path("sample.cbz")).unwrap();
+    let limits = CbzLimits {
+        max_compression_ratio: 0,
+        ..CbzLimits::default()
+    };
+    assert!(CbzDoc::from_bytes_with_limits(data, limits).is_err());
 }
