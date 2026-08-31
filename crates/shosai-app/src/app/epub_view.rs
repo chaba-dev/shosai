@@ -565,8 +565,12 @@ fn render_content_node<'a>(
                 available_width,
                 font_size,
             );
-            let column_widths =
-                crate::epub::epub_table_column_widths(row_groups, table_content_width);
+            let placements = crate::epub::epub_table_cell_placements(row_groups);
+            let column_widths = crate::epub::epub_table_column_widths_from_placements(
+                row_groups,
+                table_content_width,
+                &placements,
+            );
             let table_height = available_height.unwrap_or(f32::MAX);
             let caption_height = crate::epub::epub_table_caption_height(
                 fonts,
@@ -580,8 +584,9 @@ fn render_content_node<'a>(
                 * usize::from(!caption.is_empty() && !row_groups.is_empty()) as f32;
             let table_content_height = (table_height - caption_height - caption_gap).max(1.0);
             let table_lines_per_page = (table_height / (font_size * 1.2)).max(1.0) as usize;
-            let geometry = crate::epub::epub_table_geometry_bounded(
+            let geometry = crate::epub::epub_table_geometry_bounded_from_placements(
                 row_groups,
+                &placements,
                 &column_widths,
                 table_lines_per_page,
                 font_size,
