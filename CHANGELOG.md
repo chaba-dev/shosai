@@ -54,6 +54,7 @@ All notable changes to this project will be documented in this file.
 
 - Render raster pages asynchronously (#10)
 - Optimize library loading and page rendering (#11)
+- *(app)* Improve responsiveness across the app (#71)
 
 ### 🧪 Testing
 
