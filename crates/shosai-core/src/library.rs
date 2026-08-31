@@ -1971,9 +1971,13 @@ fn extract_pdf_metadata(
     let title = meta.title.unwrap_or_else(|| filename_title(title_path));
     let author = meta.author;
 
-    // Render first page as cover thumbnail.
+    // Render page zero directly at thumbnail size instead of materializing a reader-sized page.
+    let (page_width, page_height) = doc.page_size(0)?;
+    let scale = ((COVER_MAX_WIDTH - 1) as f32 / page_width)
+        .min((COVER_MAX_HEIGHT - 1) as f32 / page_height)
+        .min(1.0);
     let cover = doc
-        .render_page(0, 0.5) // half-scale for thumbnail
+        .render_page(0, scale)
         .ok()
         .and_then(|page| encode_cover_png(page.width, page.height, &page.pixels));
 
@@ -2199,6 +2203,17 @@ mod tests {
         let snapshot = progress.snapshot();
         assert_eq!(snapshot.hashed_files, 1);
         assert_eq!(snapshot.completed_files, 1);
+    }
+
+    #[test]
+    fn pdf_cover_is_rendered_within_thumbnail_bounds() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.pdf");
+
+        let (_, _, cover) = extract_pdf_metadata(&path, &path).unwrap();
+        let cover = image::load_from_memory(&cover.unwrap()).unwrap();
+
+        assert!(cover.width() <= COVER_MAX_WIDTH);
+        assert!(cover.height() <= COVER_MAX_HEIGHT);
     }
 
     #[test]
