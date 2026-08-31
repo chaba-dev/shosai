@@ -13,6 +13,11 @@ use super::EpubLimits;
 const MAX_CHAPTER_ANCHORS: usize = 4_096;
 const MAX_ANCHOR_NAME_BYTES: usize = 1_024;
 
+#[cfg(test)]
+thread_local! {
+    static CAPTION_OFFSET_CHAR_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A styled span of inline text or bounded MathML replacement geometry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextSpan {
@@ -1917,6 +1922,7 @@ fn collect_caption_runs(
     let mut run_spans = Vec::new();
     let mut run_anchors = HashMap::new();
     let mut raw_offset = 0;
+    let mut output_offset = 0;
     for child in caption.children() {
         let is_block = child.is_element()
             && styles.get(child).is_some_and(|style| {
@@ -1927,7 +1933,13 @@ fn collect_caption_runs(
                 )
             });
         if is_block {
-            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            append_caption_run(
+                spans,
+                anchors,
+                &mut output_offset,
+                &mut run_spans,
+                &mut run_anchors,
+            );
             raw_offset = 0;
         }
         if child.is_text() {
@@ -1962,16 +1974,29 @@ fn collect_caption_runs(
             );
         }
         if is_block {
-            append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+            append_caption_run(
+                spans,
+                anchors,
+                &mut output_offset,
+                &mut run_spans,
+                &mut run_anchors,
+            );
             raw_offset = 0;
         }
     }
-    append_caption_run(spans, anchors, &mut run_spans, &mut run_anchors);
+    append_caption_run(
+        spans,
+        anchors,
+        &mut output_offset,
+        &mut run_spans,
+        &mut run_anchors,
+    );
 }
 
 fn append_caption_run(
     output: &mut Vec<TextSpan>,
     output_anchors: &mut HashMap<String, usize>,
+    output_offset: &mut usize,
     run: &mut Vec<TextSpan>,
     run_anchors: &mut HashMap<String, usize>,
 ) {
@@ -1981,7 +2006,13 @@ fn append_caption_run(
         run_anchors.clear();
         return;
     }
-    let mut offset: usize = output.iter().map(|span| span.text.chars().count()).sum();
+    let run_len = run
+        .iter()
+        .map(|span| span.text.chars().count())
+        .sum::<usize>();
+    #[cfg(test)]
+    CAPTION_OFFSET_CHAR_VISITS.with(|visits| visits.set(visits.get() + run_len));
+    let mut offset = *output_offset;
     if !output.is_empty() {
         let mut separator = run[0].clone();
         separator.text = "\n".to_owned();
@@ -1993,6 +2024,7 @@ fn append_caption_run(
         record_anchor_name(&name, offset + anchor_offset, output_anchors);
     }
     output.append(run);
+    *output_offset = offset + run_len;
 }
 
 fn collapse_inline_whitespace(spans: &mut Vec<TextSpan>) {
@@ -3187,6 +3219,35 @@ mod tests {
         assert_eq!(
             crate::search::extract_text_from_nodes(&nodes),
             "Diagram\nFigure 1. Architecture\nFollowing text\n"
+        );
+    }
+
+    #[test]
+    fn block_rich_caption_offset_work_is_linear() {
+        const BLOCK_COUNT: usize = 10_000;
+
+        let mut xhtml = String::from(
+            r#"<html><body><figure><img src="figure.png" alt="Diagram"/><figcaption>"#,
+        );
+        for _ in 0..BLOCK_COUNT {
+            xhtml.push_str("<p>x</p>");
+        }
+        xhtml.push_str("</figcaption></figure></body></html>");
+
+        CAPTION_OFFSET_CHAR_VISITS.with(|visits| visits.set(0));
+        let nodes = parse_chapter_xhtml(&xhtml, "", &Default::default());
+        let visits = CAPTION_OFFSET_CHAR_VISITS.with(std::cell::Cell::get);
+
+        let ContentNode::Image { caption, .. } = &nodes[0] else {
+            panic!("expected semantic image");
+        };
+        assert_eq!(visits, BLOCK_COUNT);
+        assert_eq!(
+            caption
+                .iter()
+                .map(|span| span.text.chars().count())
+                .sum::<usize>(),
+            BLOCK_COUNT * 2 - 1
         );
     }
 
