@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-08-28
+## [0.1.0] - 2026-08-31
 
 ### 🚀 Features
 
@@ -86,6 +86,7 @@ All notable changes to this project will be documented in this file.
 - Prepare Amp orbs for desktop and private networking work (#6)
 - Automate release flow (#8)
 - Change gh runners to github hosted ones (#18)
+- Update release PRs with append-only commits (#72)
 
 ### 🛡️ Security
 
