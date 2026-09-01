@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-08-31
+## [0.1.0] - 2026-09-01
 
 ### 🚀 Features
 
@@ -40,6 +40,7 @@ All notable changes to this project will be documented in this file.
 - *(macos)* Enforce portable release packages (#62)
 - *(epub)* Preserve actionable resource errors (#63)
 - *(epub)* Restore publisher rendering and book titles (#70)
+- *(app)* Fade completed library activity (#73)
 
 ### 🚜 Refactor
 
