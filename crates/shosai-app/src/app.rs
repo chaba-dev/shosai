@@ -353,6 +353,7 @@ const SEARCH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(20
 const DOCUMENT_OPEN_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
+const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
@@ -792,10 +793,12 @@ pub struct State {
     library_books: Vec<Book>,
     library_cover_handles: HashMap<i64, RasterImageHandle>,
     library_search: String,
+    library_search_pending: bool,
     library_filter: Option<shosai_core::library::BookFormat>,
     library_has_more: bool,
     library_loading: bool,
     library_activity_progress: f32,
+    library_activity_opacity: f32,
     library_generation: u64,
     library_offset: usize,
     book_menu: Option<i64>,
@@ -936,10 +939,12 @@ pub fn boot() -> (State, Task<Message>) {
         library_books: Vec::new(),
         library_cover_handles: HashMap::new(),
         library_search: String::new(),
+        library_search_pending: false,
         library_filter: None,
         library_has_more: false,
         library_loading: true,
         library_activity_progress: 0.0,
+        library_activity_opacity: 1.0,
         library_generation: 0,
         library_offset: 0,
         book_menu: None,
@@ -1161,6 +1166,7 @@ fn decode_library_cover(data: Option<&[u8]>) -> Option<RasterImageHandle> {
 
 fn reset_library(state: &mut State) -> Task<Message> {
     state.library_generation = state.library_generation.wrapping_add(1);
+    state.library_search_pending = false;
     state.library_offset = 0;
     state.library_has_more = false;
     state.book_menu = None;
@@ -1172,6 +1178,7 @@ fn reset_library(state: &mut State) -> Task<Message> {
     }
     state.library_loading = true;
     state.library_activity_progress = 0.0;
+    state.library_activity_opacity = 1.0;
     load_library_page(state, false)
 }
 
@@ -1183,7 +1190,8 @@ fn library_load_sensor_key(state: &State) -> Option<(u64, usize)> {
 
 fn library_activity_active(state: &State) -> bool {
     state.screen == Screen::Library
-        && (state.add_books_discovering
+        && (state.library_search_pending
+            || state.add_books_discovering
             || state.adding_books
             || (state.library_loading && state.library_offset == 0))
 }
@@ -4342,8 +4350,16 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         .into()
     };
 
+    let activity_opacity = state.library_activity_opacity;
     let activity: Element<'_, Message> =
-        widgets::reading_progress(f64::from(state.library_activity_progress)).into();
+        widgets::reading_progress(f64::from(state.library_activity_progress))
+            .style(move |theme| {
+                let mut style = app_theme::progress(theme);
+                style.background = style.background.scale_alpha(activity_opacity);
+                style.bar = style.bar.scale_alpha(activity_opacity);
+                style
+            })
+            .into();
     let header = column![
         container(content).padding([16, 20]).width(Length::Fill),
         activity,
@@ -5936,7 +5952,7 @@ pub fn subscription(state: &State) -> Subscription<Message> {
         keyboard::listen().map(Message::KeyPressed),
         window::events().map(|(id, event)| Message::WindowEvent(id, event)),
         perf::subscription(state),
-        if library_activity_active(state) {
+        if library_activity_active(state) || state.library_activity_opacity > 0.0 {
             iced::time::every(LIBRARY_ACTIVITY_TICK).map(|_| Message::LibraryActivityTick)
         } else {
             Subscription::none()
@@ -8035,6 +8051,7 @@ mod tests {
         drop(add_books_modal(&state));
 
         state.add_book_behavior = AddBookBehavior::Copy;
+        state.library_activity_opacity = 0.0;
         let paths = vec![PathBuf::from("one.epub"), PathBuf::from("two.pdf")];
         let generation = state.add_books_generation;
         let discover = update(
@@ -8047,6 +8064,7 @@ mod tests {
             Some(AddBooksSource::Files(ref paths)) if paths.len() == 2
         ));
         assert!(state.add_books_discovering);
+        assert_eq!(state.library_activity_opacity, 1.0);
         assert!(state.add_books_progress.is_some());
         assert!(state.staged_imports.is_empty());
         drop(add_books_modal(&state));
@@ -8225,10 +8243,12 @@ mod tests {
                 },
             })
             .collect();
+        state.library_activity_opacity = 0.0;
 
         let task = update(&mut state, Message::AddSelectedBooks);
 
         assert_eq!(task.units(), MANAGED_IMPORT_PREPARATION_CONCURRENCY);
+        assert_eq!(state.library_activity_opacity, 1.0);
         assert_eq!(state.book_import_preparing, 4);
         assert_eq!(state.pending_book_imports.len(), 2);
         assert!(state.prepared_book_imports.is_empty());
@@ -8748,6 +8768,7 @@ mod tests {
         ));
         state.library_books.push(test_book(1));
         state.library_loading = false;
+        state.library_activity_opacity = 0.0;
         let generation = state.library_generation;
 
         let task = update(
@@ -8757,6 +8778,7 @@ mod tests {
 
         assert!(task.units() > 0);
         assert!(state.library_loading);
+        assert_eq!(state.library_activity_opacity, 1.0);
         assert_eq!(state.library_generation, generation.wrapping_add(1));
         assert_eq!(state.library_books.len(), 1);
     }
@@ -8773,6 +8795,7 @@ mod tests {
             store.managed_books_dir(),
         ));
         state.library_loading = false;
+        state.library_activity_opacity = 0.0;
 
         let debounce = update(
             &mut state,
@@ -8782,12 +8805,25 @@ mod tests {
 
         assert!(debounce.units() > 0);
         assert!(!state.library_loading);
+        assert_eq!(state.library_activity_opacity, 1.0);
+        let _ = update(&mut state, Message::LibraryActivityTick);
+        assert_eq!(state.library_activity_opacity, 1.0);
+        state.library_activity_progress = 0.25;
+        let _ = update(
+            &mut state,
+            Message::LibrarySearchChanged("machine learning".to_string()),
+        );
+        let latest_generation = state.library_generation;
+        assert_eq!(state.library_activity_progress, 0.25);
         assert_eq!(
-            update(&mut state, Message::LibrarySearchDebounced(generation - 1)).units(),
+            update(&mut state, Message::LibrarySearchDebounced(generation)).units(),
             0
         );
 
-        let query = update(&mut state, Message::LibrarySearchDebounced(generation));
+        let query = update(
+            &mut state,
+            Message::LibrarySearchDebounced(latest_generation),
+        );
         assert!(query.units() > 0);
         assert!(state.library_loading);
     }
@@ -8868,6 +8904,34 @@ mod tests {
         let _ = update(&mut state, Message::LibraryActivityTick);
 
         assert_eq!(state.library_activity_progress, 1.0);
+    }
+
+    #[test]
+    fn completed_library_activity_fades_out() {
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.library_activity_progress = 1.0;
+
+        for _ in 0..18 {
+            let _ = update(&mut state, Message::LibraryActivityTick);
+        }
+
+        assert_eq!(state.library_activity_progress, 1.0);
+        assert!(state.library_activity_opacity > 0.0);
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+
+        assert_eq!(state.library_activity_opacity, 0.0);
+    }
+
+    #[test]
+    fn active_library_work_restores_activity_bar_visibility() {
+        let (mut state, _) = boot();
+        state.library_activity_opacity = 0.0;
+
+        let _ = update(&mut state, Message::LibraryActivityTick);
+
+        assert_eq!(state.library_activity_opacity, 1.0);
     }
 
     #[test]
