@@ -766,6 +766,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_books_source = Some(AddBooksSource::Files(paths.clone()));
             state.add_books_discovering = true;
             state.library_activity_progress = 0.0;
+            state.library_activity_opacity = 1.0;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
@@ -794,6 +795,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_books_source = Some(AddBooksSource::Folder(path.clone()));
             state.add_books_discovering = true;
             state.library_activity_progress = 0.0;
+            state.library_activity_opacity = 1.0;
             state.staged_imports.clear();
             state.import_discovery_failures.clear();
             let cancellation = ImportCancellation::default();
@@ -951,6 +953,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.book_import_total = state.pending_book_imports.len();
             state.book_import_report = ImportReport::default();
             state.library_activity_progress = 0.0;
+            state.library_activity_opacity = 1.0;
             state.library_error = None;
             return continue_book_import(state);
         }
@@ -1156,6 +1159,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.library_generation = state.library_generation.wrapping_add(1);
             let generation = state.library_generation;
             state.library_loading = false;
+            if !state.library_search_pending {
+                state.library_activity_progress = 0.0;
+            }
+            state.library_search_pending = true;
+            state.library_activity_opacity = 1.0;
             return Task::perform(
                 async move {
                     tokio::time::sleep(SEARCH_DEBOUNCE).await;
@@ -1169,12 +1177,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if generation != state.library_generation {
                 return Task::none();
             }
+            state.library_search_pending = false;
             state.library_offset = 0;
             state.library_has_more = false;
             state.book_menu = None;
             state.pending_remove_book = None;
             state.library_error = None;
-            state.library_activity_progress = 0.0;
             return load_library_page(state, false);
         }
 
@@ -1185,6 +1193,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibraryActivityTick => {
+            if library_activity_active(state) {
+                state.library_activity_opacity = 1.0;
+            } else {
+                state.library_activity_opacity =
+                    (state.library_activity_opacity - LIBRARY_ACTIVITY_FADE_STEP).max(0.0);
+            }
             if state.add_books_discovering {
                 if let Some(progress) = &state.add_books_progress {
                     let progress = progress.snapshot();
