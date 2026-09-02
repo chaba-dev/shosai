@@ -343,3 +343,7 @@ ordered.  Phase 0 closes contracts and selection feasibility, phase 1 adds the
 shared domain and store, phases 2 and 3 deliver PDF and EPUB vertical slices,
 and phase 4 integrates and gates the first release.  Native PDF interoperability
 and EPUB CFI are independent post-MVP phases 5 and 6.
+
+The link:PHASE-0.adoc[Phase 0 contracts and evidence] freeze the interaction,
+anchor, normalization, identity, lifecycle, and resource-budget boundaries that
+must be versioned before the first durable annotation migration.

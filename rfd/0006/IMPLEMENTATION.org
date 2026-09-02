@@ -35,20 +35,23 @@ Complete this phase before committing the first database migration.
 
 ** Contracts and spikes
 
-- [ ] Define the shared interaction contract for pointer, keyboard, touch-ready
+- [X] Define the shared interaction contract for pointer, keyboard, touch-ready
   endpoint behavior, action-surface placement, cancellation, and navigation.
-- [ ] Define a versioned anchor and Unicode normalization contract with test
+- [X] Define a versioned anchor and Unicode normalization contract with test
   vectors before committing the first database migration.
-- [ ] Align portable record identity, modification, deletion, and tombstone
+- [X] Align portable record identity, modification, deletion, and tombstone
   fields with RFD 3 without making synchronization part of the read path.
-- [ ] Prototype an Iced selectable PDF page widget that converts page-widget
+- [X] Prototype an Iced selectable PDF page widget that converts page-widget
   coordinates to PDF user space and emits stable character endpoints.
-- [ ] Prototype hit testing for ordinary Iced EPUB rich text and custom native
+- [X] Prototype hit testing for ordinary Iced EPUB rich text and custom native
   embedded-font text using the exact layout that paints each block.
-- [ ] Prove reader-level EPUB selection across adjacent inline spans, block
+- [X] Prove reader-level EPUB selection across adjacent inline spans, block
   widgets, and visual page fragments within one spine item.
-- [ ] Measure drag latency and retained geometry on representative large EPUB
+- [X] Measure drag latency and retained geometry on representative large EPUB
   chapters and dense PDF pages; set explicit cache and payload limits.
+
+The versioned contracts, golden vectors, executable spikes, measurement command,
+and resulting limits are recorded in [[file:PHASE-0.adoc][the Phase 0 evidence]].
 
 * Phase 1 — Annotation core and persistence
 
