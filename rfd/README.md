@@ -11,6 +11,7 @@ authoritative merely because it exists; its `state` says how it should be read.
 | [3: Cloud synchronization](0003/README.adoc) | Portable identity, offline-first records, conflict handling, transport, and privacy |
 | [4: Mobile support](0004/README.adoc) | Iced desktop, Flutter mobile, shared Rust boundaries, lifecycle, and packaging |
 | [5: Distribution and packaging](0005/README.adoc) | AppImage, Flatpak, Windows, macOS signing, and shared release assets |
+| [6: Cross-format text highlighting](0006/README.adoc) | Shared selection UX, EPUB/PDF anchors, persistence, and recovery |
 
 ## Source format
 
