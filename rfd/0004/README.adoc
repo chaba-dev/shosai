@@ -1,157 +1,186 @@
 :authors: Shōsai contributors <https://github.com/chaba-dev/shosai>
 :state: prediscussion
 :discussion:
-:labels: mobile, flutter, iced, architecture, accessibility, packaging
+:labels: cross-platform, flutter, mobile, desktop, web, architecture, accessibility, packaging
 
-= RFD 4 Mobile support
+= RFD 4 Cross-platform Flutter frontend
 
 == Goal
 
-Determine whether Shōsai should ship a mobile companion or a full mobile reader,
-then build the smallest validated product without coupling shared reading data
-to the desktop UI or local filesystem layout.
+Use one maintained presentation codebase for desktop, phone, and tablet while
+retaining Shōsai's Rust document and application core. Preserve a credible web
+path without claiming that native Rust dependencies already run in a browser.
 
 == Proposal
 
-Keep the existing Iced application as Shōsai's desktop frontend and build a
-separate Flutter frontend for phones and tablets. Both frontends consume a
-platform-neutral Rust core; they do not share widgets, navigation state, or
-platform integration code.
+Replace the unreleased Iced frontend with Flutter across Linux, macOS, Windows,
+Android, and iOS. The existing Iced application remains an executable reference
+during migration, not a second product frontend that must reach feature parity.
+Delete it after the Flutter acceptance gate covers its required behavior.
 
 [cols="1,1,2",options="header"]
 |===
 |Platform |Frontend |Direction
 
-|Linux
-|Iced
-|Existing desktop application
-
-|macOS
-|Iced
-|Existing desktop application
-
-|Windows
-|Iced
-|Existing desktop application and CI target
+|Linux, macOS, Windows
+|Flutter desktop
+|Production desktop frontend after parity
 
 |Android phones and tablets
-|Flutter
-|New mobile frontend
+|Flutter mobile
+|Production target after physical-device validation
 
 |iPhone and iPad
-|Flutter
-|New mobile frontend
+|Flutter mobile
+|Production target after physical-device validation
+
+|Web
+|Flutter Web
+|Feasibility target requiring WASM or service adapters
 |===
 
-Android and iOS are both product targets, but their first production releases
-need not be simultaneous. The feasibility gate selects the first release
-platform from physical-device evidence, toolchain access, and product demand.
+The application has not been released. Internal Rust APIs, Dart bridge APIs, and
+the development SQLite schema may change without compatibility wrappers or
+dual-read periods. Once a release or synchronization wire format exists, its
+declared compatibility contract applies normally.
 
 == Rationale
 
-Iced 0.14 has touch events and mobile-capable lower-level dependencies, but it
-does not officially support Android or iOS. It provides no supported mobile
-application bootstrap, lifecycle contract, packaging workflow, soft-keyboard
-integration, accessibility validation, or platform-service layer. Shipping Iced
-on mobile would make Shōsai responsible for maintaining those framework-level
-integrations.
+Iced's desktop implementation proves important product behavior, but Iced does
+not officially support Android or iOS. Owning mobile bootstrap, lifecycle,
+packaging, software keyboards, accessibility, and platform services would turn
+Shōsai into a mobile GUI framework maintainer.
 
-Flutter officially supports Android and iOS and supplies the mobile lifecycle,
-gesture system, adaptive UI primitives, accessibility integration, platform
-plugins, and store packaging workflows needed by a reader. Using Flutter only
-for mobile does not add GTK to Android or iOS; Flutter's GTK host applies only to
-a Flutter Linux desktop target, which this proposal does not introduce.
+Flutter contributes more than wrappers around native APIs. It provides one
+widget, navigation, input, accessibility, localization, state-restoration, and
+testing model across form factors; adaptive layouts; touch, mouse, keyboard,
+and stylus input; hot reload; golden and integration tests; and a mature plugin
+ecosystem. Those capabilities can be reused by every format reader and by sync,
+annotation, notification, and settings experiences.
 
-Replacing the working desktop frontend is unnecessary for mobile support. Iced
-desktop behavior, custom widgets, tests, and packages remain in
-`crates/shosai-app`.
+Keeping Iced on desktop and Flutter on mobile would preserve working code in the
+short term but permanently duplicate reader interaction, accessibility, and UI
+testing. Before release, replacing that duplication is cheaper than maintaining
+two frontends indefinitely.
 
 == Architecture
 
-The Flutter frontend owns phone and tablet navigation, adaptive layouts, touch
-gestures, software-keyboard behavior, accessibility, safe areas, orientation,
-mobile lifecycle, memory pressure, document-provider access, secure storage,
-signing, and store packaging. No Flutter dependency enters the Iced application,
-and no Iced type enters the mobile frontend or shared public API.
+=== Rust application core
 
-The Rust core owns document admission and parsing, resource limits, stable
-locations, library metadata, reading progress, bookmarks, notes, search, stable
-content identity, SQLite migrations, and synchronization. Format and rendering
-operations are shared only after their dependencies pass the mobile feasibility
-gate. Code moves out of `shosai-app` only when it forms a coherent,
-renderer-neutral responsibility needed by both frontends.
+The Rust core owns document admission and parsing, resource limits, format
+capabilities, stable locations, pagination and renderer-neutral layout where
+portable, library operations, reader sessions, reading progress, bookmarks,
+annotations, search, caching policy, stable content identity, SQLite storage,
+and synchronization. Move code from `shosai-app` only when it is a coherent
+platform-neutral responsibility; do not move widgets or event-loop state merely
+to reduce the old crate's size.
 
-Flutter calls Rust through a Dart FFI-compatible bridge. The spike selects
-direct C ABI bindings or a maintained generator after testing both mobile build
-pipelines. The bridge exposes coarse typed operations, opaque handles, owned
-data, explicit release, bounded buffers, and cancellable asynchronous work. It
-does not pass framework types, Rust references, unwinding, or per-glyph and
-per-frame calls across FFI.
+Core APIs expose coarse commands, owned data transfer objects, opaque stable
+handles, typed errors, bounded buffers, cancellation, and explicit resource
+release. They do not expose Iced or Flutter types, borrowed Rust references,
+framework messages, viewport pixels as durable locations, or per-glyph calls
+across the bridge.
 
-PDF rendering initially reuses the Rust PDFium integration and transfers bounded
-page or tile buffers. EPUB parsing, resource admission, computed styles, stable
-offsets, embedded-font handling, and MathML remain shared where portable. The
-device spike must decide whether Flutter consumes a renderer-neutral scene built
-in Rust or lays out the shared semantic EPUB model. It must not create a second
-parser or resource-security policy.
+=== Flutter frontend and platform adapters
 
-Canonical desktop paths, Android content URIs, and iOS security-scoped URLs are
-device-local locators, never portable book identities. Flutter supplies the
-platform application-data location and file capability; Rust does not infer a
-desktop config directory on mobile.
+Flutter owns application navigation, responsive phone/tablet/desktop layouts,
+reader gestures and shortcuts, overlays, accessibility semantics, localization,
+safe areas, orientation, lifecycle, memory-pressure handling, file and document
+providers, secure storage, deep links, notification delivery, signing, and
+packaging. Platform plugins are replaceable adapters, not domain dependencies.
 
-== Feasibility gate
+Native targets call Rust through a generated or hand-written Dart FFI bridge
+selected by a measured spike. PDF rendering initially reuses Rust PDFium and
+transfers bounded page or tile buffers. EPUB parsing, resource admission,
+computed styles, stable offsets, embedded fonts, and MathML remain Rust-owned.
+The spike decides whether Flutter paints a renderer-neutral Rust scene or lays
+out a shared semantic model; it must not create another parser or resource
+security policy.
 
-This proposal does not claim that the current Rust core already builds or
-performs correctly on mobile. Before production mobile work begins, one Flutter
-vertical slice must run on physical Android and iOS devices and prove:
+Canonical paths, Android content URIs, iOS security-scoped URLs, and browser file
+handles are device-local locators, never portable book identities. Flutter
+supplies storage locations and file capabilities rather than asking Rust to
+infer a desktop config directory.
 
-* a packaged Dart/Rust call into one shared-core API;
-* SQLite creation, migration, restart, and process-death recovery;
-* document selection and persisted or recoverable access;
-* representative PDF rendering through packaged PDFium;
-* representative EPUB text, image, link, and embedded-font presentation;
-* bounded scrolling, navigation, search, software keyboard, and rotation;
-* suspend/resume, cancellation, memory pressure, and renderer recovery;
-* baseline screen-reader semantics and dynamic text;
-* reproducible debug and signed release builds with measured startup, memory,
-  binary size, and rendering latency.
+=== Web boundary
 
-Failure on one operating system may narrow the first release, but success on the
-other does not count as transferred evidence.
+Flutter Web does not make native Dart FFI, SQLx SQLite, PDFium loading, or direct
+filesystem access browser-compatible. A web target must use the same conceptual
+application API through either:
+
+* a WASM build of the portable Rust subset plus browser storage, file, and PDF
+  adapters; or
+* a remote service implementing the application boundary.
+
+The native release is not blocked on web. No core contract may unnecessarily
+require a native path, thread, dynamic library, or SQLite connection when a
+portable value or injected capability is sufficient.
+
+=== Notifications
+
+The core may emit a typed notification intent containing an event kind, opaque
+record IDs, timing policy, and privacy-safe fallback text. Flutter adapters own
+permission prompts, local scheduling, Android channels, Apple/Google push
+registration, badges, actions, and deep-link routing. Reading reminders are the
+first candidate and require no server. Remote push is added only for a concrete
+server-originated event; push delivery is not part of the synchronization
+protocol and never becomes required for convergence.
+
+Lock-screen content defaults to generic text. Titles, note contents, reading
+history, endpoint details, and credentials are excluded unless a user explicitly
+chooses a more descriptive privacy setting.
+
+== Feasibility and migration gate
+
+Use RFD 6 highlighting as the first demanding cross-format Flutter vertical
+slice after its renderer-neutral annotation model and store exist. The latest
+Iced Phase 0 spike already proves PDF and EPUB selection endpoints; reproducing
+the complete feature in Iced before migration would create disposable UI work.
+The Flutter slice must prove:
+
+* packaged Dart/Rust calls and deterministic resource release;
+* SQLite create, reset/migrate, restart, and process-death recovery;
+* PDF and EPUB opening, bounded rendering, selection hit testing, highlight
+  overlays, persistence, and relayout;
+* mouse, keyboard, and touch selection with one logical interaction contract;
+* responsive desktop, phone, and tablet layouts;
+* screen-reader semantics, focus order, text scaling, and non-color indication;
+* cancellation, suspend/resume, rotation, memory pressure, and renderer recovery;
+* reproducible debug and release builds with measured startup, memory, binary
+  size, bridge latency, rendering latency, and drag latency.
+
+Run the slice on desktop and physical Android and iOS devices. One mobile target
+may ship first, but evidence does not transfer between operating systems. Web
+feasibility separately proves the chosen WASM or service boundary and does not
+delay native migration.
+
+After the gate, migrate the library shell and remaining reader behavior in
+vertical slices. Keep Iced runnable for behavioral comparison, but add no new
+production-only Iced feature unless it is needed to settle a core contract.
 
 == Alternatives
 
-Using Iced everywhere maximizes UI source sharing but requires Shōsai to own
-unsupported Android and iOS platform layers. Rewriting desktop and mobile in
-Flutter discards working desktop implementation and evidence and would add a GTK
-host dependency to a Flutter Linux build. Separate SwiftUI and Android-native
-frontends provide the strongest platform fidelity but add two UI languages and
-integration surfaces; reconsider them if the Flutter spike fails. Waiting for
-official Iced mobile support has no upstream schedule on which releases can be
-based.
+Using Iced everywhere maximizes Rust UI sharing but requires unsupported mobile
+platform ownership. Keeping Iced desktop plus Flutter mobile avoids an immediate
+desktop rewrite but creates two long-lived interaction and accessibility stacks.
+Separate SwiftUI and Android-native frontends maximize platform fidelity but add
+two UI languages and still need another desktop frontend. Reconsider separate
+native frontends only if the Flutter gate fails a required criterion.
 
-== Boundaries
+== Dependencies and consequences
 
-Gate implementation on physical-device evidence and an explicit companion versus
-reader decision. Reuse a platform-neutral core only after portable identity,
-storage, and synchronization boundaries exist.
-
-Mobile integration owns lifecycle, touch navigation, accessibility, secure
-storage, file-provider grants, background work, signing, and store packaging.
-Desktop dialogs, paths, window behavior, keyboard shortcuts, and PDFium loading
-are not treated as portable abstractions. A full reader additionally requires
-each native format dependency to pass device performance and packaging gates.
-
-The first mobile release does not rewrite the desktop UI, host a cloud service,
-support DRM or store billing, or transfer book files in the background. Visual
-parity is not required where mobile and desktop interactions should differ.
+RFD 1's parser, resource-security, stable-location, and bounded-layout decisions
+remain valid; its Iced implementation becomes migration evidence rather than the
+future presentation boundary. RFD 2 format capabilities must drive one Flutter
+reader shell. RFD 3 supplies portable identity and sync semantics independently
+of notification delivery. RFD 5 must package Flutter hosts and the Rust native
+library instead of assuming the current Cargo binary layout. RFD 6 supplies the
+first cross-format interaction and persistence slice.
 
 == Implementation
 
-The feasibility gate, architecture decisions, alternative product milestones,
-and platform acceptance criteria are tracked in
-link:IMPLEMENTATION.org[RFD 4 implementation checklist].
+The dependency-ordered spike, extraction, migration, web, and packaging work is
+tracked in link:IMPLEMENTATION.org[RFD 4 implementation checklist].
 
 == References
 
@@ -161,3 +190,5 @@ link:IMPLEMENTATION.org[RFD 4 implementation checklist].
 * https://dart.dev/interop/c-interop[Dart C interoperability]
 * link:../0001/README.adoc[RFD 1: Enhanced EPUB rendering]
 * link:../0003/README.adoc[RFD 3: Cloud synchronization]
+* link:../0005/README.adoc[RFD 5: Distribution and packaging]
+* link:../0006/README.adoc[RFD 6: Cross-format text highlighting]

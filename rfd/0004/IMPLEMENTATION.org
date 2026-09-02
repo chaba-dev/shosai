@@ -1,347 +1,212 @@
 #+TITLE: RFD 0004 implementation checklist
 #+STARTUP: showall
 
-Implements [[file:README.adoc][RFD 4: Mobile support]].
+Implements [[file:README.adoc][RFD 4: Cross-platform Flutter frontend]].
 
 * Purpose
 
-Determine whether Shōsai should ship a mobile companion or a full mobile reader,
-then build the smallest viable product without coupling shared reading data to a
-desktop UI or local filesystem layout.  This is a gated plan, not a claim that
-the current desktop application already runs on mobile.
-
-** Goals
-
-- Make an evidence-based product and platform decision before implementation.
-- Reuse format, identity, storage, and sync logic through a platform-neutral core.
-- Deliver mobile-appropriate navigation, lifecycle handling, accessibility,
-  secure storage, and packaging for the selected platform scope.
-- Preserve desktop behavior while removing only the core assumptions that block
-  portable identity and storage.
-
-** Constraints and non-goals
-
-- The existing frontend is a desktop Iced application concentrated in
-  ~crates/shosai-app/src/app.rs~.  Its ~rfd~ dialogs, filesystem paths, window
-  behavior, keyboard shortcuts, and PDFium loading must be treated as desktop
-  integrations, not mobile-ready abstractions.
-- Current library, reading state, and bookmarks use canonical local file paths as
-  identity.  Mobile work cannot synchronize or relocate those records safely
-  until portable identity exists.
-- A companion (catalog/progress/bookmark) app and a full PDF/EPUB/CBZ reader are
-  different products.  Scope must not silently expand from one to the other.
-- Rewriting the desktop UI, hosting a cloud service, DRM support, store billing,
-  and background transfer of full book files are non-goals for the first release.
-- Do not promise both Android and iOS simultaneously.  Select a first platform
-  after feasibility evidence and account for store/toolchain access.
-
-* Repository Baseline and Dependencies
-
-- ~crates/shosai-core/src/library.rs~, ~reading_state.rs~, and ~bookmarks.rs~ own
-  useful domain and SQLite APIs, but records are tied to canonical paths.
-- SQLite schema lives in ~crates/shosai-core/migrations/~; migrations 001–005
-  contain library, preferences, bookmarks, and EPUB locations.
-- Format code is under ~crates/shosai-core/src/pdf.rs~, ~cbz.rs~, and ~epub/~.
-  Each dependency must be compiled and exercised on the target; being in
-  ~shosai-core~ does not by itself make it portable.
-- ~crates/shosai-app/src/main.rs~ launches Iced and ~app.rs~ contains desktop UI,
-  storage setup, settings, tests, and ~rfd~ open/import dialogs.
-
-** Dependency on cloud sync and portable storage
-
-- A companion app requires the stable content/book IDs, sync-ready records,
-  tombstones, deterministic merge, transport, and credential model described in
-  [[file:../0003/README.adoc][RFD 3: Cloud synchronization]] through its usable
-  end-to-end sync milestone.
-- A full reader may prototype local opening before remote sync is complete, but
-  release still requires portable IDs so imported mobile content can associate
-  with desktop records.
-- Mobile databases need a platform-provided application-data location and safe
-  lifecycle-aware access.  A content URI, security-scoped URL, or sandbox token
-  is a local locator, never the portable book ID.
-- If book-file transfer is later required, create a separate encrypted content
-  transfer plan; metadata sync must not accidentally become file sync.
-
-* Gate 0 — Product and Platform Feasibility
-
-No production mobile frontend starts until this gate records a decision.
-
-** Product questions and prototypes
-
-- [ ] Define target users and top workflows for two explicit candidates:
-  - *Companion*: browse synced library metadata, inspect/update progress, manage
-    bookmarks/notes, and trigger sync; no local document rendering.
-  - *Full reader*: import/open permitted local documents and read PDF, EPUB, and
-    CBZ with resumable position and bookmarks.
-- [ ] Validate demand and minimum offline behavior for each candidate.
-- [ ] Produce interaction sketches for touch navigation, bookmark editing,
-  import/open, sync errors, and compact/rotated screens.
-- [ ] Select one candidate and one first platform with measurable rationale.
-
-** Flutter and platform viability spike
-
-- [ ] Build the Flutter vertical slice proposed by RFD 4 on physical Android and
-  iOS devices.  Verify startup, touch/gesture events, text input, accessibility,
-  suspend/resume, orientation, safe areas, high-DPI scaling, memory pressure,
-  and renderer recovery.
-- [ ] Have the spike read/write SQLite in the app sandbox, resume after process
-  death, and call one shared-core API through the packaged Dart/Rust bridge.
-- [ ] For a full reader, separately prove PDFium binary build/loading and page
-  render, EPUB text/image rendering, and CBZ image decoding under memory pressure.
-- [ ] Verify platform document pickers and persisted access grants; do not use
-  ~rfd~ as the mobile design.
-- [ ] Verify TLS/networking, secure credential storage, background execution
-  limits, cross-compilation, signing, and install packaging.
-- [ ] Confirm or revise RFD 4 from measured accessibility, lifecycle,
-  maintenance, binary-size, rendering, and testability evidence.
-
-*Gate acceptance*: a reproducible physical-device spike and published RFD choose
-companion or full reader, first platform, frontend technology, and supported
-formats.  If Flutter fails required criteria, retain the shared Rust core and
-choose native mobile frontends or stop; do not patch around the gate by asserting
-desktop readiness.
-
-* Architecture Decisions Required
-
-** Product/platform ADR
-
-Record companion versus full reader, Android versus iOS first, minimum OS,
-tablet/phone scope, offline contract, and explicit deferred features.
-
-** Frontend boundary
-
-Confirm the Iced desktop and Flutter mobile split in RFD 4 from Gate 0 evidence.
-Define the core boundary as commands/data/errors rather than Iced messages,
-Flutter widgets, or platform locators.  Select a Dart FFI-compatible bridge and
-specify ownership, thread affinity, error mapping, async progress, cancellation,
-and buffer release.  No Rust panic or borrowed reference crosses FFI, and the
-bridge must not require per-widget, per-glyph, or per-frame calls.
-
-** Portable identity and locator ADR
-
-Adopt the cloud-sync identity decision.  Model local files as platform locators
-with permission state and potentially expiring access.  Specify reauthorization,
-changed content, duplicate imports, and unavailable files.
-
-** Storage and lifecycle ADR
-
-Decide database location, connection ownership, migration timing, backup flags,
-encryption requirements, suspend/process-death behavior, and version downgrade.
-Database work must not require a running desktop window or a ~Path~ for every
-synced record.
-
-** Document-rendering ADR (full reader only)
-
-Decide supported formats per platform based on measured binary size, native
-dependencies, memory, rendering latency, licensing, and store policy.  Define
-cache limits and cancellation; PDFium desktop success is not mobile evidence.
-For EPUB, choose between a shared renderer-neutral Rust layout/scene and Flutter
-layout of the shared semantic model.  Preserve search offsets, links, bookmarks,
-pagination, themes, resource limits, and readable fallback behavior without a
-second parser or resource-security policy.
-
-* Staged Milestones
-
-** TODO M0 — Complete feasibility gate
-
-- [ ] Finish product, physical-device, tooling, and framework spikes above.
-- [ ] Record ADRs and a go/no-go decision with measured startup, memory, page
-  render, binary-size, and accessibility results where applicable.
-- [ ] Define release acceptance and supported-device test matrix.
-
-*Exit*: scope and technology are approved, or the effort stops without a
-production-code fork.
-
-** TODO M1 — Portable shared-core boundaries
-
-- [ ] Complete stable book/content identity and ID-based reading/bookmark APIs
-  required from RFD 3.
-- [ ] Separate domain operations from desktop path discovery, ~rfd~, Iced state,
-  and window/config-directory lookup.
-- [ ] Introduce injected storage location, clock/device identity, credential
-  access, and transport interfaces only where the selected product needs them.
-- [ ] Add the selected Dart/Rust bridge with typed ownership, cancellation,
-  buffer-lifetime, panic-containment, and error-contract tests.
-- [ ] Represent mobile locators and permission failures without serializing them
-  as sync identity.
-- [ ] Compile and test the selected subset of ~shosai-core~ for the target triple;
-  feature-gate unsupported rendering dependencies rather than pretending they
-  work.
-
-*Exit*: shared domain tests run on desktop and target CI, and no shared API needs
-an Iced type, ~rfd~, or canonical desktop path as a record key.
-
-** TODO M2 — Mobile storage and sync foundation
-
-- [ ] Open/migrate SQLite in the platform application-data directory and test
-  first install, upgrade from fixtures, interrupted migration, and low storage.
-- [ ] Integrate the approved secure credential provider and sync transport.
-- [ ] Handle foreground/background transitions, cancellation, retries, offline
-  operation, and process death without partial apply.
-- [ ] Provide observable sync state and explicit unlink/reset behavior.
-- [ ] Test a real mobile installation against a desktop installation for import
-  association, progress, bookmark edits, and tombstones.
-
-*Exit*: companion data converges with desktop under the cloud plan's conflict
-semantics and survives lifecycle termination without corruption.
-
-** TODO M3A — Companion frontend (if selected)
-
-- [ ] Build library metadata, reading progress, bookmark/note, settings, and sync
-  status screens with loading, empty, offline, and error states.
-- [ ] Implement touch targets, screen-reader labels/order, dynamic text, reduced
-  motion where relevant, rotation, safe areas, and keyboard input where present.
-- [ ] Minimize cached metadata and provide sign-out/unlink/data deletion flows.
-
-*Exit*: all companion acceptance criteria pass; document rendering and local file
-import remain explicitly absent.
-
-** TODO M3B — Full reader frontend (if selected)
-
-- [ ] Integrate platform document picker and persisted permission/bookmark APIs.
-- [ ] Implement only Gate 0-approved formats with touch navigation, zoom/scroll,
-  resume, bookmarks, lifecycle-safe rendering cancellation, and bounded caches.
-- [ ] Reconcile local imports with stable content IDs and synced logical books.
-- [ ] Test large/malformed documents, memory warnings, permission revocation,
-  rotation, backgrounding during render, and missing files on physical devices.
-
-*Exit*: approved formats meet measured performance and reliability budgets; an
-unsupported format is clearly reported rather than partially opened.
-
-** TODO M4 — Platform packaging and release hardening
-
-- [ ] Add platform project, icons, manifests/entitlements, privacy declarations,
-  network security settings, signing, and reproducible release instructions.
-- [ ] Automate target build/tests without weakening desktop CI.
-- [ ] Run physical-device and OS-version matrix, accessibility audit, migration
-  tests, security review, and store preflight/review checks.
-- [ ] Document data export/deletion, support diagnostics with redaction, backup/
-  restore behavior, and known limitations.
-- [ ] Roll out narrowly with crash-free/session and support criteria that do not
-  require collecting reading history or note contents.
-
-*Exit*: signed artifacts install through the intended channel and all selected
-product acceptance criteria pass.
-
-* Shared Core Versus Frontend and Packaging
-
-** Shared core responsibilities
-
-- Stable content/book and record IDs; library, progress, bookmark, tombstone, and
-  deterministic merge models.
-- Versioned SQLite migrations and transactional repositories.
-- Transport-independent sync orchestration and payload validation.
-- Format parsing/rendering only for dependencies proven on the selected target.
-- Pure tests and compatibility fixtures shared with desktop.
-
-** Mobile frontend/platform responsibilities
-
-- Flutter application lifecycle, navigation, adaptive phone/tablet layouts,
-  gestures, accessibility, safe areas, and platform error presentation.
-- Document picker/security-scoped access/content URI grants and local locators.
-- Secure credential APIs, networking/background scheduling adapters, and OS
-  privacy controls.
-- Renderer surface integration, memory-warning response, signing, entitlements,
-  store metadata, and packaging.
-
-The desktop ~shosai-app~ remains a desktop frontend.  Share behavior by moving
-well-defined domain operations into core, not by importing ~app.rs~ into mobile.
-
-* Likely Files and Modules
-
-- Extend ~crates/shosai-core/src/library.rs~, ~reading_state.rs~,
-  ~bookmarks.rs~, and ~lib.rs~ for portable APIs.
-- Reuse/add the identity and ~sync/~ modules and migrations planned by
-  [[file:../0003/README.adoc][RFD 3]].
-- Audit ~crates/shosai-core/src/pdf.rs~, ~cbz.rs~, ~epub/~, and their dependencies
-  under target-specific builds and tests.
-- Update ~crates/shosai-app/src/app.rs~ only to consume shared abstractions and
-  preserve desktop behavior; keep ~rfd~ in the desktop integration.
-- Add a Flutter mobile project and Rust bridge only after Gate 0 passes; its name,
-  generator, and layout remain outputs of the measured frontend boundary.
-- Add target build/package definitions in workspace and CI files only in M4.
-
-* Migration and Compatibility Strategy
-
-- Follow cloud sync's additive migration and dual-read/write period.  Never edit
-  released migrations 001–005 or fork a mobile-only logical schema.
-- Keep schema/protocol fixtures that prove desktop and mobile versions can sync
-  across the declared compatibility window.
-- Run migrations before exposing UI, in a cancellable/recoverable startup flow;
-  retain enough information to diagnose failure without logging private data.
-- Store platform locators in device-local tables/columns and exclude them from
-  sync payloads.  Reauthorization changes a locator, not the stable book ID.
-- A newer incompatible database or wire version must fail safely without writes.
-  Publish minimum compatible desktop/mobile versions before rollout.
-- Uninstall, sign-out, unlink, remote deletion, and OS backup/restore have distinct
-  documented effects on local files, SQLite records, credentials, and tombstones.
-
-* Verification and Acceptance Criteria
-
-** Common
-
-- Gate 0 evidence exists for physical devices; chosen scope, platform, frontend,
-  and formats are explicit.
-- Existing desktop library/open/import/reading/bookmark tests continue to pass.
-- Shared core builds for selected target(s), has no Iced/~rfd~ types in its public
-  domain API, and uses stable IDs rather than paths for synchronized records.
-- Desktop and mobile converge for progress, EPUB offsets, bookmarks/notes, and
-  deletes after offline concurrent changes and duplicated/out-of-order delivery.
-- Upgrade, process death, revoked file access, no network, low storage, invalid
-  payload, and invalid credentials leave the database usable and errors actionable.
-- Accessibility audit covers screen reader, text scaling, contrast, touch target
-  size, focus order, and orientation on the supported device matrix.
-- Credentials are in approved secure storage and logs/crash diagnostics contain
-  no secrets, note text, or raw reading history.
-
-** Companion-specific
-
-- Users can view synced library metadata and progress, edit bookmarks/notes, see
-  sync state, work offline, and intentionally unlink/delete local app data.
-- No UI or documentation implies that document files can be opened locally.
-
-** Full-reader-specific
-
-- Platform picker access survives restart where the OS permits and revoked access
-  has a recovery flow.
-- Every promised format opens representative, large, and malformed fixtures
-  within documented startup, memory, and interaction budgets on physical devices.
-- Position and bookmark restore remain correct after rotation, suspension, process
-  death, file move/reselection, and content replacement.
-- Packaging includes and legally documents required native libraries such as
-  PDFium for every selected architecture.
-
-* Security and Privacy Risks
-
-| Risk | Required mitigation |
-|------|---------------------|
-| Mobile device loss exposes notes/history | OS data protection, minimal cache, optional app lock decision |
-| Tokens leak through app storage/logs | Platform secure storage, redaction, rotation and revoke flow |
-| Untrusted EPUB/PDF/CBZ consumes resources | Input validation, decompression/size limits, bounded caches, fuzzing |
-| Malicious document exploits native renderer | Track PDFium fixes, sandbox where available, prompt patch policy |
-| Persisted file grants exceed need | Least-privilege picker grants, visible revoke/remove flow |
-| Background sync surprises users | Opt-in, OS-compliant scheduling, network/battery controls and status |
-| Store/OS backups copy sensitive database | Decide backup exclusion/encryption and document restore semantics |
-| Cross-language/native boundary is unsafe | Narrow typed API, ownership rules, fuzz/error tests, no unwinding across FFI |
-
-* Open Questions
-
-- Is the validated product a companion, a full reader, or should mobile stop after
-  the feasibility gate?
-- Which first platform and minimum OS have available signing hardware/accounts
-  and sufficient user demand?
-- Does the Flutter vertical slice meet touch, accessibility, lifecycle,
-  rendering, and packaging requirements on both mobile operating systems?
-- Does EPUB mobile presentation consume a shared Rust scene or a shared semantic
-  model laid out by Flutter?
-- Which Dart/Rust binding approach passes both platform build and maintenance
-  criteria?
-- Which formats pass physical-device performance and binary-size budgets?
-- Must the first mobile release transfer book files, or will users import them
-  independently and associate by content ID?
-- How should iOS security-scoped bookmarks or Android content URIs be refreshed,
-  backed up, and represented in device-local storage?
-- Is local database encryption or an app lock required by the threat model?
-- What background-sync freshness can be promised under platform restrictions?
-- How are desktop/mobile protocol rollouts coordinated when store review delays
-  one client version?
+Replace the unreleased Iced presentation layer with one Flutter frontend for
+desktop, phone, and tablet while retaining a platform-neutral Rust application
+core.  Keep web viable through an explicit WASM or service adapter rather than
+assuming native FFI works in a browser.
+
+* Current baseline
+
+- ~crates/shosai-app~ is an Iced desktop application that directly constructs
+  core stores and documents and also owns reader sessions, EPUB pagination,
+  caches, import orchestration, and platform integration.
+- ~crates/shosai-core~ owns parsing, PDF/CBZ rendering, EPUB presentation,
+  search, library persistence, reading state, and bookmarks, but its public API
+  is not yet designed as a Dart bridge or browser boundary.
+- RFD 6 Phase 0 has proved cross-format selection endpoints and bounded retained
+  geometry with real Iced/PDFium/cosmic-text paths.  This evidence is sufficient
+  to stop extending the Iced proof and use highlighting as the Flutter slice.
+- The application is unreleased.  Development databases and internal APIs may
+  be reset or replaced rather than carrying temporary compatibility machinery.
+
+* Delivery rules
+
+- Preserve behavior while extracting core responsibilities, then change the
+  frontend.  Do not simultaneously redesign a domain contract and its Flutter
+  presentation without executable core tests.
+- Keep Iced runnable as a reference until Flutter satisfies the parity gate, but
+  do not build complete new production features in both frontends.
+- Move policy and domain behavior into core; leave widgets, gestures, navigation,
+  lifecycle, and platform capabilities in Flutter adapters.
+- Every native dependency must pass build, packaging, lifecycle, memory, and
+  license gates on each claimed target.  Desktop success is not mobile evidence.
+- Do not delay native delivery on web, push notifications, cloud sync, or all
+  operating systems shipping simultaneously.
+
+* M0 — Freeze the boundary and migration slice
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Approve RFD 4's single-frontend direction and record the initial supported
+  desktop and mobile target matrix.
+- [ ] Use RFD 6 highlighting as the first cross-format Flutter vertical slice;
+  treat its completed Iced Phase 0 as contract evidence, not production UI.
+- [ ] Inventory every responsibility in ~shosai-app~ and classify it as core,
+  Flutter presentation, platform adapter, temporary Iced reference, or obsolete.
+- [ ] Choose the EPUB boundary: a Rust layout/scene consumed by Flutter or a
+  semantic model laid out by Flutter.  Measure bridge volume, fidelity, selection,
+  accessibility, relayout, and implementation duplication before deciding.
+- [ ] Select a Dart/Rust bridge after proving Android, iOS, macOS, Windows, and
+  Linux build integration, owned buffers, cancellation, error mapping, panic
+  containment, and deterministic handle release.
+- [ ] Record startup, memory, binary-size, render, selection-drag, and bridge
+  latency budgets plus the accessibility acceptance matrix.
+
+*Exit*: the core/frontend ownership table, bridge, EPUB rendering decision,
+first target matrix, and highlighting slice are explicit enough to implement
+without maintaining two production feature paths.
+
+* M1 — Extract the Rust application core
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Move EPUB pagination and renderer-neutral geometry out of
+  ~crates/shosai-app~, replacing ~iced::Size~ and widget types at the boundary.
+- [ ] Extract reader-session policy: open/close, restore location, preferences,
+  relayout anchors, and document replacement.
+- [ ] Extract bounded rendered-page/resource caches, prefetch policy, and
+  coalesced reading-state persistence without exposing Iced handles or tasks.
+- [ ] Centralize format capabilities, import/open orchestration, and typed
+  progress while leaving file pickers and UI progress presentation outside core.
+- [ ] Implement RFD 6's renderer-independent annotation domain, anchors,
+  normalization, resolution states, and store before Flutter persistence work.
+- [ ] Accept injected application-data locations and device-local file locators;
+  stop requiring canonical desktop paths as portable record identity.
+- [ ] Expose coarse async operations, owned DTOs, stable opaque handles, bounded
+  byte buffers, typed errors, cancellation, and release through the bridge API.
+- [ ] Feature-gate or adapt native-only dependencies so unsupported targets fail
+  at build/configuration boundaries rather than through runtime surprises.
+
+*Exit*: core tests exercise the application behavior without an Iced event loop;
+no bridge-facing type contains Iced, Flutter, borrowed Rust, or durable viewport
+coordinates.
+
+* M2 — Flutter highlighting feasibility slice
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Create the Flutter application and native Rust library integration with
+  reproducible debug and release commands.
+- [ ] Open one representative PDF and EPUB, render visible content, and release
+  document and buffer handles deterministically.
+- [ ] Reproduce RFD 6's shared idle/selecting/selected/committing interaction for
+  mouse, keyboard, and touch using the same logical endpoint and anchor contract.
+- [ ] Draw temporary and saved overlays without rerendering PDF pages during drag
+  or changing EPUB pagination geometry.
+- [ ] Persist, reopen, navigate to, recolor, annotate, and delete one highlight
+  in each format through the Rust annotation store.
+- [ ] Verify PDF zoom/DPI and EPUB viewport/font/theme relayout preserve anchors;
+  surface exact, recovered, ambiguous, and orphaned states.
+- [ ] Implement responsive reader compositions for desktop, phone, and tablet,
+  including rotation, safe areas, text scaling, visible focus, screen-reader
+  semantics, and non-color highlight indication.
+- [ ] Exercise suspend/resume, process death, cancellation, memory pressure,
+  renderer recovery, missing files, and revoked file capabilities.
+- [ ] Measure the M0 budgets on Linux, macOS, Windows, and physical Android/iOS
+  hardware available for the first release decision.
+
+*Exit*: highlighting works end to end in both formats on desktop and at least one
+physical mobile platform, and failures on any unvalidated target are recorded
+rather than inferred away.
+
+* M3 — Migrate the application vertically
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Build the responsive library, import/open, recent activity, empty/loading,
+  and error states against the shared core API.
+- [ ] Complete PDF, EPUB, and CBZ readers with search, bookmarks, annotations,
+  progress, themes, zoom, continuous/paginated modes, tabs or equivalent document
+  navigation, keyboard shortcuts, and touch interactions.
+- [ ] Integrate platform file/document providers and persist only the minimum
+  permitted device-local locator capability.
+- [ ] Add settings, localization, restoration, diagnostics redaction, and data
+  deletion/export behavior.
+- [ ] Add golden tests for controlled renderer/font configurations and semantic
+  widget/integration tests for responsive states and accessibility.
+- [ ] Compare required behavior against the Iced reference and delete each old
+  implementation only after its replacement passes targeted tests.
+
+*Exit*: Flutter satisfies the agreed desktop feature and regression matrix; the
+Iced binary is no longer needed to operate or test the product.
+
+* M4 — Platform services and notifications
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Integrate secure credential storage, connectivity, deep links, sharing,
+  background scheduling, and other platform capabilities only as required by a
+  product feature.
+- [ ] Define privacy-safe typed notification intents in core and keep permission,
+  scheduling, channels, badges, actions, and routing in Flutter adapters.
+- [ ] Implement opt-in local reading reminders before remote push.
+- [ ] Add push only after a concrete server-originated event exists; keep APNs,
+  FCM, and web-push registration outside the sync protocol and make convergence
+  independent of delivery.
+- [ ] Test denied/revoked permission, timezone and daylight-saving changes,
+  duplicate delivery, stale deep links, sign-out, and lock-screen privacy.
+
+* M5 — Packaging and release
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Update RFD 5 targets to package Flutter hosts, the Rust native library,
+  PDFium, assets, notices, and platform manifests as one validated artifact.
+- [ ] Add Android and iOS signing, entitlements, privacy declarations, store
+  metadata, and physical-device release smoke tests independently.
+- [ ] Preserve independently releasable Linux, macOS, Windows, Android, and iOS
+  jobs; one deferred target must not suppress validated artifacts.
+- [ ] Remove ~crates/shosai-app~ and its Iced-only dependencies after parity,
+  packaging, and recovery gates pass.
+
+* M6 — Web feasibility, independent
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Classify core modules by WASM portability and identify native filesystem,
+  SQLite, PDFium, dynamic-library, threading, and font dependencies.
+- [ ] Compare a local WASM/browser-storage design with a remote application
+  service using opening, EPUB, PDF, search, and one annotation as the slice.
+- [ ] Validate browser file capabilities, IndexedDB/OPFS or service persistence,
+  PDF adapter fidelity, service-worker lifecycle, accessibility, memory, and
+  offline behavior.
+- [ ] Record a separate go/no-go decision.  Do not weaken native core ownership
+  or security boundaries merely to advertise a web target.
+
+* Verification and acceptance
+
+- Core behavior and bridge contracts have deterministic Rust tests independent
+  of Flutter and Iced.
+- Flutter integration tests cover representative desktop, phone, and tablet
+  states plus mouse, keyboard, touch, lifecycle, and restoration.
+- Every claimed format and platform passes malformed/oversized fixtures, bounded
+  memory behavior, native dependency loading, and package launch/open smoke tests.
+- Accessibility validation covers screen readers, text scaling, contrast, touch
+  targets, focus order, keyboard-only use, orientation, and non-color state.
+- Paths and platform capabilities remain device-local; stable IDs and logical
+  anchors survive relayout and synchronization boundaries.
+- Credentials, note text, selected quotes, and reading history do not enter logs,
+  crash diagnostics, notification payloads, or lock screens by default.
+
+* Open questions
+
+- Which bridge passes every native build and lifecycle gate with the smallest
+  generated API and maintenance surface?
+- Does Flutter paint a Rust EPUB scene or lay out a shared semantic model?
+- Which Android/iOS platform ships first after physical-device evidence?
+- Which native dependencies require platform adapters or replacement?
+- Does web use local WASM/browser storage, a remote service, or remain deferred?
+- Which notification use cases justify interruption, and which are better shown
+  as in-app sync or activity state?

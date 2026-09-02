@@ -274,13 +274,17 @@ RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 - [ ] Conflict resolution for concurrent reading on multiple devices
 - [ ] Start with local storage, architecture should support sync later
 
-** TODO Mobile support
-RFD: [[file:../rfd/0004/README.adoc][RFD 4: Mobile support]]
+** TODO Cross-platform Flutter frontend
+RFD: [[file:../rfd/0004/README.adoc][RFD 4: Cross-platform Flutter frontend]]
 
-- [ ] Prove the Flutter mobile and Rust-core boundary on physical Android and iOS
-  devices
-- [ ] Select companion versus full reader and the first release platform
-- [ ] Sync reading progress across desktop and mobile
+- [ ] Move coherent application policy, EPUB pagination, reader sessions, and
+  renderer-neutral geometry from the Iced app into the Rust core
+- [ ] Implement RFD 6's annotation core, then use cross-format highlighting as
+  the first Flutter desktop/mobile vertical slice
+- [ ] Prove the Flutter/Rust boundary on desktop and physical Android/iOS devices
+- [ ] Migrate PDF, EPUB, and CBZ readers plus the library shell before retiring
+  the Iced reference frontend
+- [ ] Evaluate Flutter Web separately through WASM or service adapters
 
 ** TODO Distribution & packaging
 RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]

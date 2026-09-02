@@ -6,10 +6,10 @@ authoritative merely because it exists; its `state` says how it should be read.
 
 | RFD | Topic |
 |---|---|
-| [1: Enhanced EPUB rendering](0001/README.adoc) | Native rendering decision, EPUB fidelity, resource policy, and reader integration |
+| [1: Enhanced EPUB rendering](0001/README.adoc) | Native EPUB engine decision, fidelity, resource policy, and reader integration |
 | [2: Additional ebook formats](0002/README.adoc) | Format extensibility, plain text/Markdown, DjVu, FB2, MOBI/AZW3, and CBR |
 | [3: Cloud synchronization](0003/README.adoc) | Portable identity, offline-first records, conflict handling, transport, and privacy |
-| [4: Mobile support](0004/README.adoc) | Iced desktop, Flutter mobile, shared Rust boundaries, lifecycle, and packaging |
+| [4: Cross-platform Flutter frontend](0004/README.adoc) | One Flutter UI, shared Rust boundaries, mobile/desktop/web feasibility, notifications, and migration |
 | [5: Distribution and packaging](0005/README.adoc) | AppImage, Flatpak, Windows, macOS signing, and shared release assets |
 | [6: Cross-format text highlighting](0006/README.adoc) | Shared selection UX, EPUB/PDF anchors, persistence, and recovery |
 
