@@ -37,15 +37,18 @@ assuming native FFI works in a browser.
   license gates on each claimed target.  Desktop success is not mobile evidence.
 - Do not delay native delivery on web, push notifications, cloud sync, or all
   operating systems shipping simultaneously.
+- Set a phase ~STATUS~ to ~IN-PROGRESS~ when its first task begins and ~DONE~
+  only after every task and its ~Exit~ gate are satisfied.  Later phases may
+  start early only where the dependency notes in the RFD permit overlap.
 
 * M0 — Freeze the boundary and migration slice
 :PROPERTIES:
-:STATUS: TODO
+:STATUS: IN-PROGRESS
 :END:
 
 - [ ] Approve RFD 4's single-frontend direction and record the initial supported
   desktop and mobile target matrix.
-- [ ] Use RFD 6 highlighting as the first cross-format Flutter vertical slice;
+- [X] Use RFD 6 highlighting as the first cross-format Flutter vertical slice;
   treat its completed Iced Phase 0 as contract evidence, not production UI.
 - [ ] Inventory every responsibility in ~shosai-app~ and classify it as core,
   Flutter presentation, platform adapter, temporary Iced reference, or obsolete.
@@ -64,7 +67,7 @@ without maintaining two production feature paths.
 
 * M1 — Extract the Rust application core
 :PROPERTIES:
-:STATUS: TODO
+:STATUS: IN-PROGRESS
 :END:
 
 - [ ] Move EPUB pagination and renderer-neutral geometry out of
@@ -75,7 +78,7 @@ without maintaining two production feature paths.
   coalesced reading-state persistence without exposing Iced handles or tasks.
 - [ ] Centralize format capabilities, import/open orchestration, and typed
   progress while leaving file pickers and UI progress presentation outside core.
-- [ ] Implement RFD 6's renderer-independent annotation domain, anchors,
+- [X] Implement RFD 6's renderer-independent annotation domain, anchors,
   normalization, resolution states, and store before Flutter persistence work.
 - [ ] Accept injected application-data locations and device-local file locators;
   stop requiring canonical desktop paths as portable record identity.

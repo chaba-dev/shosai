@@ -158,6 +158,66 @@ After the gate, migrate the library shell and remaining reader behavior in
 vertical slices. Keep Iced runnable for behavioral comparison, but add no new
 production-only Iced feature unless it is needed to settle a core contract.
 
+== Migration phases and tracking
+
+Migration is tracked as dependency-ordered milestones rather than as one
+frontend rewrite. Each milestone has an explicit exit gate in
+link:IMPLEMENTATION.org[the implementation checklist]. A phase is complete only
+when its exit gate is satisfied; checking individual tasks records progress but
+does not waive the gate.
+
+[cols="1,2,3",options="header"]
+|===
+|Phase |Outcome |Gate
+
+|M0 — Boundary and slice
+|Freeze core/frontend ownership, the bridge decision process, target matrix,
+budgets, and highlighting as the first vertical slice.
+|The boundary can be implemented without creating two production feature paths.
+
+|M1 — Rust application core
+|Extract renderer-neutral sessions, layout, caches, orchestration, persistence,
+and coarse bridge contracts from the Iced application.
+|Core behavior is independently tested and bridge-facing types contain no UI
+framework or durable viewport state.
+
+|M2 — Highlighting feasibility
+|Build the smallest packaged Flutter/Rust application that opens EPUB and PDF
+and completes selection, persistence, relayout, and accessibility end to end.
+|The measured slice passes on desktop and at least one physical mobile platform;
+otherwise reconsider the bridge, rendering boundary, or Flutter decision.
+
+|M3 — Vertical product migration
+|Replace the library shell and complete PDF, EPUB, and CBZ reader behavior in
+reviewable vertical slices.
+|Flutter passes the required desktop parity and regression matrix, making Iced
+unnecessary for normal operation and testing.
+
+|M4 — Platform services
+|Add only product-required secure storage, deep links, sharing, background work,
+local notifications, and eventually justified push notifications.
+|Permission, lifecycle, privacy, duplicate-delivery, and stale-routing failures
+are tested independently of synchronization correctness.
+
+|M5 — Packaging and release
+|Package, sign, and smoke-test each Flutter host with the Rust library, PDFium,
+assets, manifests, and notices.
+|Every claimed platform has an independently releasable artifact; then remove
+the Iced application and its exclusive dependencies.
+
+|M6 — Web feasibility
+|Evaluate a browser-compatible core subset and adapters against a remote-service
+boundary using opening, reading, search, and annotations.
+|Record a separate web go/no-go decision without blocking or weakening native
+delivery.
+|===
+
+M0 and M1 may overlap where an extraction is needed to measure a boundary. M2
+is the Flutter go/no-go gate and precedes broad UI migration. M3 precedes final
+Iced removal. M4 is demand-driven and need not block M3. M5 follows proven
+product parity for each platform. M6 is intentionally independent and may run
+in parallel once the portable application boundary is stable.
+
 == Alternatives
 
 Using Iced everywhere maximizes Rust UI sharing but requires unsupported mobile
