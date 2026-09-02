@@ -80,14 +80,16 @@ exactly one of ~exact~, ~recovered~, ~ambiguous~, or ~orphaned~.
 
 === Quote normalization profile ~shosai-quote-v1~
 
-In order: normalize CRLF and CR to LF, discard U+00AD SOFT HYPHEN, normalize to
-Unicode NFC, map every non-empty run of Unicode White_Space code points to one
-U+0020 SPACE, and trim leading/trailing collapsed space from each exact/prefix/
-suffix field.  Preserve case, punctuation, compatibility distinctions, and
-visible hyphens.  Prefix and suffix are nearest-context-first slices of at most
-32 Unicode scalar values and move inward to a Unicode extended-grapheme-cluster
-boundary rather than splitting a cluster.  Original text is never reconstructed
-from normalized text.
+Version 1 pins Unicode 17.0.0 data for NFC, the White_Space property, and
+extended grapheme clusters.  In order: normalize CRLF and CR to LF, discard
+U+00AD SOFT HYPHEN, normalize to Unicode NFC, map every non-empty run of Unicode
+17 White_Space code points to one U+0020 SPACE, and trim leading/trailing
+collapsed space from each exact/prefix/suffix field.  Preserve case,
+punctuation, compatibility distinctions, and visible hyphens.  Normalize before
+bounding context.  Prefix retains the nearest trailing 32 Unicode scalar values
+in document order; suffix retains the nearest leading 32.  Move the retained
+edge inward rather than splitting an extended grapheme cluster.  Original text
+is never reconstructed from normalized text.
 
 [cols="2,2,2"]
 |===
@@ -98,9 +100,17 @@ from normalized text.
 |Soft hyphen |~co\u00adoperate~ |~cooperate~
 |Preserved distinctions |~Case—A-B! ﬁ~ |~Case—A-B! ﬁ~
 |No case folding |~Résumé~ / ~résumé~ |Two unequal values
-|Context bound |33 ASCII ~x~ values |32 ASCII ~x~ values nearest the quote
+|Prefix direction |~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~ |~456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~
+|Suffix direction |~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~ |~0123456789ABCDEFGHIJKLMNOPQRSTUV~
 |Grapheme-safe context |31 ~x~ values followed by ~e\u0301~ |31 ~x~ values plus ~é~
+|Prefix split EGC |~👩‍🔬~ followed by 31 ~x~ values |31 ~x~ values
+|Suffix split EGC |31 ~x~ values followed by ~👩‍🔬~ |31 ~x~ values
 |===
+
+These vectors are executable in
+~quote_v1_golden_vectors_pin_normalization_and_context_direction~.  The
+normalization and segmentation dependency versions remain pinned for every
+record written with profile ~shosai-quote-v1~.
 
 Offset conversions are explicit.  EPUB version 1 offsets and quote limits count
 Unicode scalar values; PDF offsets count PDFium characters from the pinned
@@ -126,19 +136,24 @@ to avoid either RFD choosing the other's wire protocol.
 == Selection spikes and budgets
 
 The executable proofs are in ~crates/shosai-app/src/selection_spike.rs~ and the
-native embedded-font geometry retained by
-~crates/shosai-core/src/epub/native_text.rs~.  They establish:
+owned PDF snapshot in ~crates/shosai-core/src/pdf.rs~.  They establish:
 
-* an image-widget point maps to a rendered PDF bitmap point, after which the
-  existing PDFium crop/rotation-aware conversion maps it to PDF user space;
-* pointer hit testing uses an owned row/endpoint snapshot and therefore cannot
-  acquire PDFium's global lock during drag;
-* Iced's painting paragraph returns character offsets across adjacent rich-text
-  spans, while the custom native layout now retains the exact shaped cluster
-  rectangles and scalar ranges that it paints;
-* a reader endpoint is only ~(spine occurrence, chapter scalar)~, so selection
-  crosses block widgets and visual page fragments in either direction while a
-  different spine occurrence is rejected.
+* a real Iced ~Widget~ draws an actual cropped/rotated PDF raster, maps its
+  content rectangle including letterboxing into that raster's dimensions, and
+  emits the independently verified PDFium character and page coordinates from
+  its pointer-event path without acquiring PDFium's global lock;
+* the underlying buffer of Iced's painting paragraph supplies line-local UTF-8
+  byte cursors.  The adapter explicitly rebases line bytes and converts them to
+  grapheme-safe chapter Unicode-scalar endpoints across non-ASCII, multiline,
+  adjacent rich-text spans;
+* the embedded-font spike derives bidi-aware half-grapheme endpoint zones and
+  rasterizes visible pixels from the same prepared cosmic-text buffer.
+  Ligature, combining-mark, emoji-ZWJ, and right-to-left cases emit only logical
+  grapheme boundaries;
+* a real two-block fixture is paginated into multiple visual page fragments,
+  hit through each fragment's Iced paragraph, and rebased through
+  ~PageNode::text_offset~.  Forward and reverse selections produce one chapter
+  range while a different spine occurrence is rejected.
 
 The Phase 0 ceiling is 65,536 selectable endpoints per EPUB layout request or
 PDF page snapshot, 16,384 ordered rectangles in one persisted annotation, and
@@ -147,22 +162,24 @@ selection is limited to 65,536 Unicode scalar values; normalized prefix and
 suffix remain 32 each.  Exceeding an extraction ceiling disables selection for
 that surface with an actionable message; it never silently truncates an anchor.
 
-The hot-path target is at most 1 ms per endpoint hit on reference development
-hardware, leaving most of a 16.7 ms frame for event dispatch and painting.  Run
-the deterministic upper-bound probe with:
+Endpoint and retained-byte ceilings are deterministic unit assertions against
+the actual proposed selectable-text surfaces.  PDF snapshots enforce per-page
+limits while extracting, and a format-independent document admission budget
+rejects additional EPUB or PDF geometry before exceeding 8 MiB.  PDF selection
+also rejects decoded rasters above 16,384 pixels on either axis or 40 million
+pixels before invoking PDFium rendering.  Wall-clock latency is not a portable
+unit-test assertion.  Measure the actual surfaces manually with:
 
 ----
-cargo test -p shosai-app retained_geometry_and_hot_path_fit_phase_zero_limits -- --nocapture
+cargo test -p shosai-app measure_actual_selection_hot_path -- --ignored --nocapture
 ----
 
-The command constructs 65,536 endpoints in 256 rows, accounts for vector
-payload capacity, performs 10,000 distributed hits, reports elapsed time and
-retained bytes, and fails if either the 1 ms/hit or 8 MiB bound is exceeded.
-This models a dense PDF page and a maximal admitted EPUB native-text request;
-Phase 2 must additionally measure PDFium extraction and Phase 3 must measure
-relayout because neither operation is permitted on the drag hot path.
-
-On 2026-09-02, the x86-64 Linux development profile completed 10,000 distributed
-hits in 973 µs (0.0973 µs/hit) and retained 1,583,104 bytes.  This is a synthetic
-upper-bound geometry measurement, not a claim about extraction or full-frame
-latency.
+The command samples first through last endpoint uniformly, sorts individual hit
+durations, and reports p50, p95, and maximum latency without imposing a flaky CI
+threshold.  On 2026-09-02, the x86-64 Linux development profile measured 59,502
+actual shaped EPUB endpoint zones using 1,546,240 retained bytes (p50 150 ns,
+p95 231 ns, maximum 3.386 µs) and 19,200 dense-PDF endpoint zones using 988,160
+retained bytes (p50 81 ns, p95 121 ns, maximum 711 ns), each over 10,000
+uniformly distributed hits.  Phase 2 must additionally measure PDFium extraction
+and Phase 3 must measure relayout on every supported platform because neither
+operation is permitted on the drag hot path.
