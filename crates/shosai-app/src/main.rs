@@ -2,6 +2,8 @@ mod app;
 mod epub;
 mod i18n;
 mod pdf;
+#[cfg(test)]
+mod selection_spike;
 mod theme;
 mod typography;
 mod widgets;

@@ -5202,6 +5202,8 @@ dependencies = [
  "tokio",
  "ttf-parser",
  "unic-langid",
+ "unicode-normalization",
+ "unicode-segmentation",
  "winit",
  "wry",
  "x11-dl",
