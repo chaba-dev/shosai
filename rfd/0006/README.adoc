@@ -1,0 +1,345 @@
+:authors: Darwin D Wu <darwin67@users.noreply.github.com>
+:state: ideation
+:discussion:
+:labels: annotations, epub, pdf, reader, accessibility
+
+= RFD 6 Cross-format text highlighting
+
+== Goal
+
+Provide the same text-selection and highlighting experience for reflowable EPUB
+and fixed-page PDF documents while preserving anchors across EPUB relayout, PDF
+zoom, application restart, and eventual synchronization.
+
+The interaction should feel format-independent: a reader selects visible text,
+previews the range, creates a colored highlight, optionally attaches a note,
+and can later navigate to, edit, or delete it.  The implementation may use
+format-specific hit testing and anchors where the source formats require it.
+
+== Context
+
+Shōsai already extracts searchable text and paints transient search ranges for
+both formats.  PDFium exposes page character indexes, character bounds,
+point-to-character hit testing, and page-space text rectangles.  The EPUB
+presentation exposes chapter-global Unicode-scalar offsets, and the native text
+layout retains logical scalar ranges for shaped glyphs, but its custom widget
+only hit-tests links.  Most EPUB text uses Iced rich text, whose stock widget
+does not expose selection even though the underlying paragraph renderer can hit
+test text.
+
+Existing bookmarks are point locations with optional notes.  They do not model
+text ranges, selector recovery, modification timestamps, portable record
+identity, or deletion tombstones.  Library records now retain a content hash,
+but their integer IDs and file paths are local identities.  RFD 3 separately
+requires portable identities before synchronization.
+
+The EPUB presentation is derived from admitted XHTML into semantic content
+nodes and a canonical chapter search stream.  It currently does not retain a
+complete source-DOM path for every selectable text boundary, so it cannot
+produce or resolve EPUB Canonical Fragment Identifier ranges without extending
+the parser and presentation model.
+
+== Proposal
+
+=== One interaction model, format-specific selection adapters
+
+Introduce a shared reader selection state machine with idle, selecting,
+selected, and committing states.  Pointer press, drag, release, cancellation,
+and selection actions have the same behavior in EPUB and PDF readers.  A shared
+selection action surface provides highlight colors, note creation, copy where
+permitted, and cancellation.
+
+Each renderer supplies a selection adapter that maps visible geometry to a
+logical range and returns display geometry for that range:
+
+* EPUB maps each selectable shaped cluster or Iced paragraph hit to a logical
+  chapter scalar boundary.  A reader-level coordinator combines hits from the
+  block widgets that make up one spine item, including across visual pagination
+  fragments.
+* PDF maps image-widget coordinates through the current page layout into PDF
+  user space, then uses PDFium text data to resolve character boundaries and
+  ordered page-space rectangles.
+
+The first release uses each format's natural document boundary.  An EPUB
+selection may cross inline spans, block widgets, and visual page fragments
+within one spine item, but not cross into another spine item.  A PDF selection
+remains within one PDF page.  Cross-spine and cross-page selection is deferred;
+it would require drag autoscroll across virtualized content and a multi-resource
+anchor model.  The pointer behavior and selection actions remain the same at
+either boundary.
+
+Selection is always defined in logical text order.  Visual geometry must not be
+used to infer ordering for bidirectional or vertical text.  User operations
+must not split a grapheme cluster even when an underlying format locator counts
+another unit.
+
+=== Overlay highlights rather than baked interaction state
+
+Temporary selection and saved highlights are drawn as overlays owned by
+selectable reader widgets.  This avoids asynchronous page rerenders during a
+drag, allows handles and action surfaces to update independently, and keeps
+selection geometry separate from raster cache identity.  Existing search
+highlight painting can initially remain in the render path, but overlap and
+visual priority must follow one documented policy.
+
+Saved highlights use a translucent fill selected from the stable names yellow,
+green, blue, pink, and purple.  Themes map those names to accessible rendered
+colors; records do not persist theme-specific RGB values.  Active selection
+uses a selection tint and handles, the current search result uses a
+high-contrast outline, other search results use a subtle underline, and links
+retain their normal foreground treatment and interaction.  When saved ranges
+overlap, the most recently modified highlight supplies the fill and edge markers
+indicate the other colors; hover or keyboard focus exposes every annotation at
+that location.  Arbitrary user-defined colors are deferred.
+
+PDF text and geometry for visible pages is extracted asynchronously into a
+bounded owned cache.  Pointer movement must not reopen the PDF or acquire the
+global PDFium lock.  EPUB widgets reuse the layout used to draw their text;
+selection must not perform a second layout with different wrapping or shaping.
+
+=== Layered durable anchors
+
+Persist a bundle of selectors rather than treating any one offset or rectangle
+as universally stable.  The common record includes the original selected text,
+a versioned normalized quote and immediate prefix/suffix context when storage
+is permitted, the document content identity, and a versioned format anchor.
+
+An EPUB anchor contains:
+
+* the spine occurrence and canonical resource path;
+* a chapter-global scalar start and end as an exact-version fast path;
+* quote and context selectors for validation and recovery.
+
+The first release does not generate or resolve EPUB CFI.  Its versioned anchor
+representation reserves a later structural selector without treating a missing
+CFI as an error.  Adding CFI later requires preserving source boundaries through
+the parser and presentation model, but does not replace existing exact-version
+or quote selectors.
+
+An EPUB highlight derives its rectangles from current layout.  It never
+persists viewport, scroll, or pagination rectangles.
+
+A PDF anchor contains:
+
+* the zero-based page index;
+* ordered quadrilaterals or rectangles in canonical PDF user space;
+* the PDFium page character start and end as an exact-version fast path; and
+* quote and context selectors for validation and migration.
+
+PDF character indexes are local to the pinned extraction implementation and
+are not a portable locator.  Page-space geometry is the primary same-file
+visual anchor.  Viewport pixels are never persisted.
+
+=== Resolution and recovery
+
+For an unchanged content fingerprint, resolve the exact format anchor and
+validate it against the stored quote when available.  For changed content, the
+first release performs bounded quote-and-context recovery within the original
+EPUB spine resource or PDF page.  Later structural selectors may participate in
+format-specific recovery.  Position and progression may rank valid candidates
+but must not by themselves relocate a highlight.
+
+Every loaded highlight has one of four resolution states: exact, recovered,
+ambiguous, or orphaned.  Ambiguous and orphaned highlights remain available in
+the annotations list with their original quote and location metadata.  Shōsai
+must not silently select one of several matches.  A corrected durable anchor is
+only stored after deterministic recovery or explicit user confirmation.
+
+=== Storage boundary
+
+Use a dedicated SQLite annotation store rather than extending the bookmarks
+table.  A text range has different identity, update, deletion, and recovery
+semantics from a point bookmark.  The domain model should allow a highlight
+without a note and a highlight with an attached textual note without making
+the bookmark model represent both points and ranges.
+
+Records use opaque portable UUIDs and reference a local library book and path
+only as device-local associations.  The schema stores typed common columns for
+lifecycle and query behavior, a versioned document fingerprint, a versioned
+format-specific anchor representation, and provenance for imported annotations.
+It includes created, modified, and nullable deleted timestamps.  Normal deletes
+create hidden tombstones; retention, compaction, revisions, conflicts, and
+transport remain RFD 3 decisions.  External W3C or native PDF representations
+are import/export adapters rather than the SQLite schema.
+
+SQLite is initially the source of truth.  Shōsai does not modify referenced or
+managed PDF files when a highlight is created.  The next interoperability
+milestone reads native PDF text-markup annotations and exports Shōsai
+annotations to a user-selected PDF copy.  A later explicit action may write
+annotations into the source PDF only after validating file permissions,
+external changes, digital signatures, and encryption.  Highlight creation
+never mutates the source automatically.
+
+=== Limits and unavailable text
+
+Selection extraction, quote context, geometry, persisted payloads, and
+recovery searches are bounded.  A PDF page without an extractable text layer is
+not selectable; OCR is not implied by highlighting support.  Text with missing
+Unicode mappings may be highlighted geometrically but is marked as having an
+incomplete quote.  Copy and quote-based recovery are unavailable for that
+annotation, and its list entry falls back to the page number unless the user
+adds a note.  EPUB image alternative text and MathML fallbacks are selectable
+only when the reader visibly presents them as text.
+
+The normalization profile, offset units, and conversion rules are versioned.
+Original code points are retained separately from normalized matching text.
+The initial recovery profile uses Unicode NFC, normalizes line endings, collapses
+Unicode whitespace runs to one ASCII space, and ignores U+00AD SOFT HYPHEN.  It
+preserves case, punctuation, compatibility distinctions, and visible hard
+hyphens.  Prefix and suffix each contain at most 32 Unicode scalar values and
+are shortened as needed so their boundaries do not split grapheme clusters.
+EPUB CFI offsets count UTF-16 code units, while Shōsai's current chapter ranges
+count Unicode scalar values; conversion must be explicit and tested.  Selection
+endpoints snap to grapheme boundaries.
+
+== Standards and interoperability
+
+The W3C Web Annotation Data Model permits multiple selectors for one target and
+defines text quote selectors using exact text plus prefix and suffix context.
+It requires logical Unicode code-point order and recommends that selections not
+split grapheme clusters.  Text-position selectors are brittle under source
+changes and are not the EPUB interoperability anchor selected by this RFD.
+
+EPUB CFI defines structural point and range references, UTF-16 text offsets,
+XML ID and surrounding-text assertions, and correction of stale asserted paths.
+CFI improves portability but does not guarantee that every reading system can
+exchange annotations or resolve all CFIs.
+
+PDF text-markup annotations use page attachment points, commonly represented as
+QuadPoints.  PDFium exposes compatible page-space geometry and character hit
+testing, but a PDF's text stream and reading order are inferred from positioned
+content and can vary across extraction engines or regenerated documents.
+
+Readium's locator guidance similarly combines resource identity, text context,
+progression, and format-specific location expressions: structural selectors for
+EPUB and page/view rectangles for PDF.
+
+Sources:
+
+* https://www.w3.org/TR/annotation-model/[W3C Web Annotation Data Model]
+* https://w3c.github.io/epub-specs/epub33/epubcfi/[EPUB Canonical Fragment Identifier]
+* https://www.w3.org/TR/epub-33/[EPUB 3.3]
+* https://readium.org/architecture/models/locators/[Readium Locator model]
+* https://readium.org/architecture/models/locators/best-practices/format.html[Readium format-specific locator guidance]
+* https://pdfium.googlesource.com/pdfium/+/refs/heads/main/public/fpdf_text.h[PDFium text API]
+* https://pdfium.googlesource.com/pdfium/+/refs/heads/main/public/fpdf_annot.h[PDFium annotation API]
+
+== Alternatives considered
+
+=== One character-offset model for both formats
+
+Chapter and page offsets match Shōsai's current search implementation and would
+be the smallest first implementation.  They are retained as fast-path hints,
+but rejected as the only durable anchor because PDF extraction indexes are
+engine-specific and both formats' offsets become stale after preceding edits.
+
+=== Quote and context as the only anchor
+
+Text quote selectors tolerate unrelated structural edits and apply to both
+formats.  They are rejected as the only anchor because repeated passages are
+ambiguous, extraction and normalization can differ, storing text can be
+restricted, and geometry cannot always be reconstructed from a quote.
+
+=== Only format-native anchors
+
+EPUB CFI and PDF QuadPoints provide precise source-specific representations.
+They are rejected as the complete domain model because geometry alone has no
+semantic recovery, CFI does not apply to PDF, and direct PDF annotations would
+make one format mutate source files while EPUB still needs sidecar storage.
+
+=== Replace native EPUB rendering with a web view
+
+A browser DOM supplies built-in selection and range APIs, but RFD 1 rejected a
+production Wry renderer because of Wayland embedding, packaging, clipboard,
+accessibility-tree, and dual-renderer costs.  Highlighting extends the selected
+native renderer rather than reopening that architecture decision.
+
+== Decisions
+
+=== Selection scope
+
+The first release supports EPUB ranges across block widgets and visual page
+fragments within one spine item, and PDF ranges within one page.  It does not
+support ranges across EPUB spine items or PDF pages.  This avoids an artificial
+paragraph boundary in reflowable text while keeping one target resource per
+durable anchor.  Cross-resource selection can be added later without changing
+the interaction model or existing anchor versions.
+
+=== Annotation product model
+
+A highlight is an independent annotation that may own zero or one textual note.
+Existing bookmark notes remain unchanged and coexist with highlight notes; no
+bookmark migration or paired bookmark record is required.  The reader may
+present both record types in one annotations panel, but creating, updating, or
+deleting one does not implicitly modify the other.
+
+=== Initial locator milestone
+
+The first release stores exact-version logical offsets and geometry together
+with exact text and prefix/suffix context.  It validates fast-path anchors when
+the content fingerprint matches and performs bounded quote recovery within the
+original EPUB spine resource or PDF page when content changes.  EPUB CFI is
+deferred behind the versioned anchor contract; adding it later augments rather
+than migrates or replaces the initial selectors.
+
+=== PDF interoperability milestones
+
+The first release keeps PDF highlights in SQLite and does not modify PDF files.
+The interoperability target then imports native PDF text-markup annotations and
+exports Shōsai annotations to a new user-selected PDF copy.  In-place write-back
+is a later, explicit operation available only when Shōsai can safely handle
+permissions, external modifications, signatures, encryption, atomic
+replacement, and duplicate/conflict semantics.  Automatic write-back is not a
+supported storage mode.
+
+=== Text normalization
+
+Shōsai retains the original selected text and separately stores recovery text
+under a versioned normalization profile.  Version 1 applies Unicode NFC,
+normalizes line endings, collapses Unicode whitespace runs to one ASCII space,
+and ignores U+00AD SOFT HYPHEN.  It does not case-fold, apply compatibility
+normalization, remove punctuation, or join visible hard hyphens.  Prefix and
+suffix each contain at most 32 Unicode scalar values, shortened to avoid
+splitting a grapheme cluster.  These conservative rules recover representation
+differences without making semantically distinct passages compare equal.
+
+=== Visual composition and colors
+
+Saved highlights use named, theme-aware translucent fills in yellow, green,
+blue, pink, or purple and can be recolored.  The initial release does not offer
+arbitrary RGB colors.  Active selection uses a tint and handles, the current
+search result uses an outline, other search results use an underline, and link
+foregrounds and interactions remain intact.  These role-specific channels avoid
+blending unrelated colors into an ambiguous result.  For overlapping saved
+highlights, the most recently modified range supplies the fill, edge markers
+show the other stored colors, and hover or focus exposes all annotations.
+
+=== Unavailable and partial text
+
+PDF ranges with complete Unicode mappings support normal quoting, copying, and
+recovery.  If PDFium supplies selectable geometry but one or more glyphs lack a
+Unicode mapping, Shōsai permits a geometry-only highlight, marks its quote
+incomplete, disables copying and quote recovery, and labels it by page unless a
+note supplies a better label.  A scanned page without a PDF text layer remains
+unselectable and this RFD does not add OCR.  EPUB content participates only when
+the reader visibly presents it as selectable text; hidden alternative or
+fallback strings are not independent selection targets.
+
+=== Portability boundary
+
+The first schema is sync-ready without defining a synchronization wire format.
+Each annotation has an opaque portable UUID, versioned document fingerprint and
+anchor payload, created and modified timestamps, a nullable deleted timestamp,
+and import provenance.  Database book IDs and paths are device-local
+associations and never portable identities.  Normal deletion hides a tombstone;
+retention and compaction await RFD 3's protocol and conflict decisions.  W3C Web
+Annotation and native PDF forms are mapped at import/export boundaries rather
+than copied into the internal schema.
+
+== Implementation
+
+The link:IMPLEMENTATION.org[RFD 6 implementation checklist] is dependency
+ordered.  Phase 0 closes contracts and selection feasibility, phase 1 adds the
+shared domain and store, phases 2 and 3 deliver PDF and EPUB vertical slices,
+and phase 4 integrates and gates the first release.  Native PDF interoperability
+and EPUB CFI are independent post-MVP phases 5 and 6.
