@@ -3,7 +3,17 @@
 
 Implements [[file:README.adoc][RFD 6: Cross-format text highlighting]].
 
-* Decision gates
+Phases 0 through 4 deliver the first release.  Phase 0 closes contracts and
+technical risk before the database schema becomes durable.  Phases 1 through 3
+build the shared core and one vertical slice per format.  Phase 4 integrates
+the common product experience and is the first-release gate.  Phases 5 and 6
+are independent post-MVP interoperability work.
+
+* Phase 0 — Contracts and technical proof
+
+Complete this phase before committing the first database migration.
+
+** Recorded product decisions
 
 - [X] Select natural document boundaries for the first release: one EPUB spine
   item across block/page fragments, or one PDF page.
@@ -22,93 +32,128 @@ Implements [[file:README.adoc][RFD 6: Cross-format text highlighting]].
 - [X] Make the first schema sync-ready with portable IDs, versioned anchors and
   fingerprints, lifecycle timestamps, tombstones, and import provenance while
   deferring wire protocol and conflict rules to RFD 3.
+
+** Contracts and spikes
+
 - [ ] Define the shared interaction contract for pointer, keyboard, touch-ready
   endpoint behavior, action-surface placement, cancellation, and navigation.
 - [ ] Define a versioned anchor and Unicode normalization contract with test
   vectors before committing the first database migration.
 - [ ] Align portable record identity, modification, deletion, and tombstone
   fields with RFD 3 without making synchronization part of the read path.
-
-* Selection evidence
-
 - [ ] Prototype an Iced selectable PDF page widget that converts page-widget
   coordinates to PDF user space and emits stable character endpoints.
-- [ ] Extract bounded PDF page text and ordered highlight geometry once per
-  visible page; verify pointer movement does not reopen PDFium or acquire its
-  global lock.
 - [ ] Prototype hit testing for ordinary Iced EPUB rich text and custom native
   embedded-font text using the exact layout that paints each block.
 - [ ] Prove reader-level EPUB selection across adjacent inline spans, block
-  widgets, and page fragments to the extent required by the selection-scope
-  decision.
-- [ ] Test left-to-right, right-to-left, mixed-direction, combining-mark, emoji
-  ZWJ, CJK, ligature, multiline, and rotated-text fixtures.
+  widgets, and visual page fragments within one spine item.
 - [ ] Measure drag latency and retained geometry on representative large EPUB
   chapters and dense PDF pages; set explicit cache and payload limits.
 
-* Durable anchor model
+* Phase 1 — Annotation core and persistence
 
 - [ ] Introduce a renderer-independent annotation domain type in
   ~shosai-core~ with a portable record ID, content identity, lifecycle fields,
   color, optional body, and versioned target anchor.
 - [ ] Add an EPUB anchor containing spine occurrence, canonical resource path,
   chapter scalar range, quote context, and a versioned extension boundary.
-- [ ] As a post-MVP interoperability milestone, preserve source text-boundary
-  identity through EPUB parsing and presentation.
-- [ ] As a post-MVP interoperability milestone, add EPUB CFI range
-  generation/resolution and Unicode-scalar to UTF-16 conversion tests.
 - [ ] Add a PDF anchor containing page index, ordered page-space geometry,
   PDFium character range, and available quote context.
 - [ ] Specify deterministic exact, recovered, ambiguous, and orphaned
   resolution outcomes.  Never persist an automatic relocation from an
   ambiguous match.
-
-* Persistence and application integration
-
 - [ ] Add a forward-only SQLite migration and annotation store with CRUD,
   per-book listing, bounded values, and transaction tests.
+- [ ] Persist portable UUIDs, versioned fingerprints and anchors, original and
+  normalized quotes, import provenance, lifecycle timestamps, and hidden
+  tombstones while keeping paths and database book IDs device-local.
+- [ ] Implement and test version 1 normalization, grapheme-safe context
+  extraction, and explicit offset conversions.
+
+* Phase 2 — PDF selection vertical slice
+
+- [ ] Extract bounded PDF page text, mapping status, character endpoints, and
+  ordered page-space geometry once per visible page.
+- [ ] Add the selectable PDF page widget and verify pointer movement does not
+  reopen PDFium or acquire its global lock.
+- [ ] Render temporary and saved PDF overlays in continuous, single-page, and
+  spread modes across manual, fit-width, and fit-page zoom.
+- [ ] Preserve logical range order and correct page-space geometry for
+  multiline, bidirectional, ligature, cropped, and rotated text.
+- [ ] Permit geometry-only highlights for incomplete Unicode mappings while
+  disabling copy and quote recovery; explain pages without a text layer.
+
+* Phase 3 — EPUB selection vertical slice
+
+- [ ] Expose grapheme-safe logical hit testing from ordinary Iced rich text and
+  custom native embedded-font text using the layout that paints each block.
+- [ ] Coordinate drag selection across inline spans, block widgets, and visual
+  page fragments within one spine item, stopping at the spine boundary.
+- [ ] Render temporary and saved EPUB highlights in continuous and paginated
+  modes without changing pagination geometry.
+- [ ] Preserve logical ranges across font-size, line-spacing, theme, viewport,
+  and reading-mode relayout.
+- [ ] Test left-to-right, right-to-left, mixed-direction, combining-mark, emoji
+  ZWJ, CJK, ligature, and multiline fixtures.
+- [ ] Exclude hidden image alternative text and fallback strings as independent
+  selection targets while retaining visibly presented text.
+
+* Phase 4 — Shared annotation experience and first release
+
 - [ ] Load annotations outside the document-open critical path and preserve
   active-tab isolation when switching or closing reader tabs.
 - [ ] Add selection and annotation messages to the app dispatch boundary;
   keep PDF/EPUB extraction and anchor logic in ~shosai-core~.
-- [ ] Render temporary and saved EPUB highlights in continuous and paginated
-  modes without changing pagination geometry.
-- [ ] Render temporary and saved PDF overlays in continuous, single-page, and
-  spread modes across manual, fit-width, and fit-page zoom.
+- [ ] Provide the shared selection action surface for copy, named color choice,
+  optional note creation, and cancellation with equivalent behavior in both
+  formats.
 - [ ] Add an annotation list with navigate, recolor, note edit, and delete
-  behavior according to the product-model decision.
-- [ ] Keep existing bookmarks and notes backward compatible unless the approved
-  product-model decision includes an explicit migration.
-
-* Interoperability and recovery
-
+  behavior alongside, but independent from, bookmarks.
+- [ ] Keep existing bookmarks and notes backward compatible without migrating
+  or coupling their lifecycle to highlights.
 - [ ] Reopen unchanged documents and verify exact anchors survive restart,
   EPUB font-size/theme/viewport relayout, and PDF zoom/DPI changes.
 - [ ] Exercise bounded recovery against inserted, deleted, repeated, and
   normalized text and verify ambiguous/orphaned records remain visible.
+- [ ] Apply the named theme palette and role-specific selection, search, link,
+  and saved-highlight channels, including deterministic overlap behavior.
+- [ ] Provide keyboard-reachable highlight actions, visible focus, non-color
+  indication, theme contrast, and screen-reader labels for annotation controls.
+- [ ] Preserve logical selection order and grapheme-safe user endpoints for
+  bidirectional and complex Unicode text.
+- [ ] Bound copied quote/context and exclude it from logs and diagnostics.
+- [ ] Verify database migration behavior, process interruption, unavailable
+  files, malformed anchors, documents changed in place, and tab lifecycle.
+- [ ] Run ~cargo fmt --check~, targeted core/app tests, ~cargo clippy~ for the
+  changed crates, and ~make check-rfds~.
+
+Phases 0 through 4 are complete only when all first-release acceptance criteria
+below pass on supported desktop platforms.
+
+* Phase 5 — Native PDF interoperability (post-MVP)
+
 - [ ] After the first release, import native PDF text-markup annotations and
   export Shōsai annotations to a new user-selected PDF copy.
+- [ ] Preserve import provenance and deduplicate repeated imports without
+  changing the SQLite source-of-truth model.
 - [ ] Add explicit in-place PDF write-back only after encrypted, signed,
   read-only, externally modified, duplicate, conflict, and atomic-save cases are
   covered; never write back automatically.
 - [ ] Define a versioned portable serialization only when required by RFD 3 or
   the portability decision; local SQLite remains authoritative until then.
 
-* Accessibility, privacy, and quality
+* Phase 6 — EPUB CFI interoperability (post-MVP)
 
-- [ ] Provide keyboard-reachable highlight actions, visible focus, non-color
-  indication, theme contrast, and screen-reader labels for annotation controls.
-- [ ] Preserve logical selection order and grapheme-safe user endpoints for
-  bidirectional and complex Unicode text.
-- [ ] Explain unavailable selection on scanned PDF pages and other unsupported
-  visible content without implying OCR.
-- [ ] Bound copied quote/context and exclude it from logs and diagnostics.
-- [ ] Verify database migration rollback behavior, process interruption,
-  unavailable files, malformed anchors, and documents changed in place.
-- [ ] Run ~cargo fmt --check~, targeted core/app tests, ~cargo clippy~ for the
-  changed crates, and ~make check-rfds~.
+- [ ] Preserve source text-boundary identity through EPUB parsing and
+  presentation without changing existing scalar anchors.
+- [ ] Add EPUB CFI range generation and resolution, including package/spine
+  indirection, escaping, assertions, and malformed-input limits.
+- [ ] Add explicit Unicode-scalar to UTF-16 conversion and range tests across
+  elements, supplementary code points, and grapheme clusters.
+- [ ] Add CFI as an additional selector in the versioned EPUB anchor and prove
+  existing annotations require no migration.
 
-* Acceptance criteria
+* First-release acceptance criteria
 
 - EPUB and PDF expose the same create, preview, recolor, note, navigate, and
   delete experience within the approved selection scope.
