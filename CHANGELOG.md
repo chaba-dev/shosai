@@ -29,6 +29,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Allow removing books (#67)
 - *(app)* Add guided imports and settings (#68)
 - *(app)* Add staged book imports (#69)
+- *(reader)* Prove cross-format selection contracts (#75)
 
 ### 🐛 Bug Fixes
 
