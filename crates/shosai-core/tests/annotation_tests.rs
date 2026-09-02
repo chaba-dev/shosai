@@ -1,7 +1,10 @@
 use shosai_core::annotations::{
     AnnotationId, AnnotationStore, AnnotationTarget, DocumentFingerprint, EpubAnchor,
-    HighlightColor, ImportProvenance, NewAnnotation, PageRect, PdfAnchor, QuoteSelector,
-    normalize_quote_v1, scalar_range_to_utf16,
+    HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS, MAX_EPUB_RESOURCE_PATH_BYTES,
+    MAX_FINGERPRINT_ALGORITHM_BYTES, MAX_FINGERPRINT_BYTES, MAX_LOCAL_PATH_BYTES,
+    MAX_PDF_RECTANGLES, MAX_PROVENANCE_ID_BYTES, MAX_PROVENANCE_SYSTEM_BYTES,
+    MAX_QUOTE_CONTEXT_INPUT_SCALARS, MAX_QUOTE_SCALARS, NewAnnotation, PageRect, PdfAnchor,
+    QuoteSelector, normalize_quote_v1, scalar_range_to_utf16,
 };
 use shosai_core::reading_state::ReadingStateStore;
 use tempfile::TempDir;
@@ -70,6 +73,105 @@ fn scalar_offsets_convert_explicitly_to_utf16_units() {
     assert!(scalar_range_to_utf16("short", 0..6).is_err());
 }
 
+#[test]
+fn annotation_inputs_enforce_exact_resource_limits_before_persistence() {
+    assert!(QuoteSelector::new(&"x".repeat(MAX_QUOTE_SCALARS), "", "").is_ok());
+    assert!(QuoteSelector::new(&"x".repeat(MAX_QUOTE_SCALARS + 1), "", "").is_err());
+    assert!(
+        QuoteSelector::new(
+            "selected",
+            &"x".repeat(MAX_QUOTE_CONTEXT_INPUT_SCALARS + 1),
+            ""
+        )
+        .is_err()
+    );
+    assert!(DocumentFingerprint::new("sha256", 1, vec![0; MAX_FINGERPRINT_BYTES]).is_ok());
+    assert!(DocumentFingerprint::new("sha256", 1, vec![0; MAX_FINGERPRINT_BYTES + 1]).is_err());
+    assert!(
+        DocumentFingerprint::new("x".repeat(MAX_FINGERPRINT_ALGORITHM_BYTES + 1), 1, vec![0])
+            .is_err()
+    );
+    assert!(
+        EpubAnchor::new(
+            0,
+            format!("{}.xhtml", "x".repeat(MAX_EPUB_RESOURCE_PATH_BYTES)),
+            0,
+            1
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn exact_persisted_value_limits_round_trip() {
+    let (store, pool, _dir) = temp_store().await;
+    let resource_path = format!(
+        "{}.xhtml",
+        "x".repeat(MAX_EPUB_RESOURCE_PATH_BYTES - ".xhtml".len())
+    );
+    let input = NewAnnotation {
+        id: AnnotationId::new(),
+        book_id: None,
+        local_path: Some("x".repeat(MAX_LOCAL_PATH_BYTES)),
+        fingerprint: DocumentFingerprint::new(
+            "x".repeat(MAX_FINGERPRINT_ALGORITHM_BYTES),
+            1,
+            vec![0; MAX_FINGERPRINT_BYTES],
+        )
+        .unwrap(),
+        quote: Some(
+            QuoteSelector::new(
+                &"x".repeat(MAX_QUOTE_SCALARS),
+                &"x".repeat(MAX_QUOTE_CONTEXT_INPUT_SCALARS),
+                &"x".repeat(MAX_QUOTE_CONTEXT_INPUT_SCALARS),
+            )
+            .unwrap(),
+        ),
+        target: AnnotationTarget::Epub(EpubAnchor::new(0, resource_path, 0, 1).unwrap()),
+        color: HighlightColor::Green,
+        body: Some("x".repeat(MAX_ANNOTATION_BODY_SCALARS)),
+        provenance: Some(ImportProvenance {
+            source_system: "x".repeat(MAX_PROVENANCE_SYSTEM_BYTES),
+            source_id: Some("x".repeat(MAX_PROVENANCE_ID_BYTES)),
+        }),
+    };
+
+    let loaded = store.create_async(&input).await.unwrap();
+    assert_eq!(loaded.body, input.body);
+    assert_eq!(loaded.local_path, input.local_path);
+    assert_eq!(loaded.provenance, input.provenance);
+
+    let oversized_utf8_path = "é".repeat(MAX_LOCAL_PATH_BYTES / 2 + 1);
+    assert!(
+        sqlx::query("UPDATE annotations SET local_path = ? WHERE id = ?")
+            .bind(oversized_utf8_path)
+            .bind(input.id.to_string())
+            .execute(&pool)
+            .await
+            .is_err(),
+        "SQLite byte limits must match the Rust persistence contract"
+    );
+}
+
+#[test]
+fn epub_annotations_reuse_the_authoritative_canonical_path_contract() {
+    for invalid in [
+        "",
+        "/OEBPS/chapter.xhtml",
+        "OEBPS//chapter.xhtml",
+        "OEBPS/./chapter.xhtml",
+        "OEBPS/../chapter.xhtml",
+        "OEBPS\\chapter.xhtml",
+        "OEBPS/chapter.xhtml/",
+        "OEBPS/\u{7f}chapter.xhtml",
+    ] {
+        assert!(
+            EpubAnchor::new(0, invalid, 0, 1).is_err(),
+            "accepted noncanonical EPUB path {invalid:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn epub_annotation_round_trips_and_updates() {
     let (store, pool, _dir) = temp_store().await;
@@ -104,7 +206,7 @@ async fn epub_annotation_round_trips_and_updates() {
 
 #[tokio::test]
 async fn text_and_geometry_only_pdf_annotations_round_trip() {
-    let (store, _pool, _dir) = temp_store().await;
+    let (store, pool, _dir) = temp_store().await;
     let rectangles = vec![
         PageRect::new(1.0, 2.0, 5.0, 4.0).unwrap(),
         PageRect::new(1.0, 5.0, 8.0, 7.0).unwrap(),
@@ -125,7 +227,21 @@ async fn text_and_geometry_only_pdf_annotations_round_trip() {
             source_id: Some("42".into()),
         }),
     };
-    assert_eq!(store.create_async(&text).await.unwrap().target, text.target);
+    let created = store.create_async(&text).await.unwrap();
+    assert_eq!(created.target, text.target);
+    assert!(
+        sqlx::query(
+            "INSERT INTO annotation_pdf_rectangles
+                (annotation_id, rect_index, left, bottom, right, top)
+             VALUES (?, ?, 0, 0, 1, 1)"
+        )
+        .bind(created.id.to_string())
+        .bind(i64::try_from(MAX_PDF_RECTANGLES).unwrap())
+        .execute(&pool)
+        .await
+        .is_err(),
+        "SQLite must reject rectangle indexes outside the bounded read contract"
+    );
 
     let geometry_only = NewAnnotation {
         id: AnnotationId::new(),
@@ -152,8 +268,50 @@ async fn delete_creates_a_hidden_tombstone() {
 }
 
 #[tokio::test]
+async fn concurrent_deletes_never_make_book_listing_fail() {
+    let (store, pool, _dir) = temp_store().await;
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Example', 'epub', '/books/example.epub') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..32 {
+        ids.push(
+            store
+                .create_async(&epub_annotation(Some(book_id)))
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+
+    let listing_store = store.clone();
+    let listing = tokio::spawn(async move {
+        for _ in 0..32 {
+            listing_store.list_for_book_async(book_id).await?;
+            tokio::task::yield_now().await;
+        }
+        anyhow::Ok(())
+    });
+    let deleting_store = store.clone();
+    let deleting = tokio::spawn(async move {
+        for id in ids {
+            deleting_store.delete_async(&id).await?;
+            tokio::task::yield_now().await;
+        }
+        anyhow::Ok(())
+    });
+
+    listing.await.unwrap().unwrap();
+    deleting.await.unwrap().unwrap();
+    assert!(store.list_for_book_async(book_id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn invalid_cross_format_payloads_are_rejected_before_writing() {
-    let (store, _pool, _dir) = temp_store().await;
+    let (store, pool, _dir) = temp_store().await;
     let mut epub = epub_annotation(None);
     epub.quote = None;
     assert!(store.create_async(&epub).await.is_err());
@@ -166,6 +324,39 @@ async fn invalid_cross_format_payloads_are_rejected_before_writing() {
     assert!(PageRect::new(0.0, 0.0, f32::NAN, 1.0).is_err());
     assert!(EpubAnchor::new(0, "../chapter.xhtml", 0, 1).is_err());
     assert!(QuoteSelector::new("   ", "", "").is_err());
+
+    let mut oversized = epub_annotation(None);
+    oversized.local_path = Some("x".repeat(MAX_LOCAL_PATH_BYTES + 1));
+    assert!(store.create_async(&oversized).await.is_err());
+    oversized.local_path = None;
+    oversized.body = Some("x".repeat(MAX_ANNOTATION_BODY_SCALARS + 1));
+    assert!(store.create_async(&oversized).await.is_err());
+    assert!(
+        store
+            .update_async(
+                &oversized.id,
+                HighlightColor::Yellow,
+                Some(&"x".repeat(MAX_ANNOTATION_BODY_SCALARS + 1))
+            )
+            .await
+            .is_err()
+    );
+    oversized.body = None;
+    oversized.provenance = Some(ImportProvenance {
+        source_system: "x".repeat(MAX_PROVENANCE_SYSTEM_BYTES + 1),
+        source_id: None,
+    });
+    assert!(store.create_async(&oversized).await.is_err());
+    oversized.provenance = Some(ImportProvenance {
+        source_system: "test".into(),
+        source_id: Some("x".repeat(MAX_PROVENANCE_ID_BYTES + 1)),
+    });
+    assert!(store.create_async(&oversized).await.is_err());
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM annotations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0, "invalid inputs must be rejected before writing");
 }
 
 #[tokio::test]

@@ -27,6 +27,17 @@ CREATE TABLE annotations (
     modified_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     deleted_at            TEXT,
     CHECK (length(fingerprint) > 0),
+    CHECK (length(fingerprint) <= 1024),
+    CHECK (length(CAST(fingerprint_algorithm AS BLOB)) BETWEEN 1 AND 64),
+    CHECK (local_path IS NULL OR length(CAST(local_path AS BLOB)) BETWEEN 1 AND 32768),
+    CHECK (original_quote IS NULL OR length(original_quote) <= 65536),
+    CHECK (normalized_exact IS NULL OR length(normalized_exact) BETWEEN 1 AND 65536),
+    CHECK (normalized_prefix IS NULL OR length(normalized_prefix) <= 32),
+    CHECK (normalized_suffix IS NULL OR length(normalized_suffix) <= 32),
+    CHECK (body IS NULL OR length(body) <= 65536),
+    CHECK (source_system IS NULL OR length(CAST(source_system AS BLOB)) BETWEEN 1 AND 256),
+    CHECK (source_id IS NULL OR length(CAST(source_id AS BLOB)) BETWEEN 1 AND 4096),
+    CHECK (epub_resource_path IS NULL OR length(CAST(epub_resource_path AS BLOB)) BETWEEN 1 AND 4096),
     CHECK (
         (format = 'epub'
          AND epub_spine_occurrence IS NOT NULL
@@ -55,7 +66,7 @@ CREATE TABLE annotations (
 
 CREATE TABLE annotation_pdf_rectangles (
     annotation_id TEXT NOT NULL REFERENCES annotations(id) ON DELETE CASCADE,
-    rect_index    INTEGER NOT NULL CHECK (rect_index >= 0),
+    rect_index    INTEGER NOT NULL CHECK (rect_index >= 0 AND rect_index < 16384),
     left          REAL NOT NULL,
     bottom        REAL NOT NULL,
     right         REAL NOT NULL,

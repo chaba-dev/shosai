@@ -10,11 +10,21 @@ use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
 
+use crate::epub::CanonicalEpubPath;
+
 pub const ANCHOR_VERSION: u32 = 1;
 pub const QUOTE_PROFILE_V1: &str = "shosai-quote-v1";
 pub const MAX_QUOTE_SCALARS: usize = 65_536;
+pub const MAX_QUOTE_CONTEXT_INPUT_SCALARS: usize = 65_536;
 pub const MAX_CONTEXT_SCALARS: usize = 32;
 pub const MAX_PDF_RECTANGLES: usize = 16_384;
+pub const MAX_ANNOTATION_BODY_SCALARS: usize = 65_536;
+pub const MAX_FINGERPRINT_BYTES: usize = 1_024;
+pub const MAX_FINGERPRINT_ALGORITHM_BYTES: usize = 64;
+pub const MAX_LOCAL_PATH_BYTES: usize = 32_768;
+pub const MAX_EPUB_RESOURCE_PATH_BYTES: usize = 4_096;
+pub const MAX_PROVENANCE_SYSTEM_BYTES: usize = 256;
+pub const MAX_PROVENANCE_ID_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnnotationId(Uuid);
@@ -96,7 +106,12 @@ impl DocumentFingerprint {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.algorithm.trim().is_empty() || self.version == 0 || self.bytes.is_empty() {
+        if self.algorithm.trim().is_empty()
+            || self.algorithm.len() > MAX_FINGERPRINT_ALGORITHM_BYTES
+            || self.version == 0
+            || self.bytes.is_empty()
+            || self.bytes.len() > MAX_FINGERPRINT_BYTES
+        {
             bail!("annotation fingerprint requires an algorithm, version, and bytes");
         }
         Ok(())
@@ -112,8 +127,19 @@ pub struct QuoteSelector {
 }
 
 impl QuoteSelector {
-    /// Build a selector from the selected text and its unbounded surrounding text.
+    /// Build a selector from the selected text and its bounded surrounding text.
     pub fn new(selected: &str, before: &str, after: &str) -> Result<Self> {
+        ensure_scalar_limit(selected, MAX_QUOTE_SCALARS, "annotation quote")?;
+        ensure_scalar_limit(
+            before,
+            MAX_QUOTE_CONTEXT_INPUT_SCALARS,
+            "annotation prefix input",
+        )?;
+        ensure_scalar_limit(
+            after,
+            MAX_QUOTE_CONTEXT_INPUT_SCALARS,
+            "annotation suffix input",
+        )?;
         let exact = normalize_quote_v1(selected);
         if exact.is_empty() {
             bail!("annotation quote must not be empty");
@@ -134,8 +160,11 @@ impl QuoteSelector {
             || self.exact.chars().count() > MAX_QUOTE_SCALARS
             || self.prefix.chars().count() > MAX_CONTEXT_SCALARS
             || self.suffix.chars().count() > MAX_CONTEXT_SCALARS
+            || normalize_quote_v1(&self.exact) != self.exact
+            || normalize_quote_v1(&self.prefix) != self.prefix
+            || normalize_quote_v1(&self.suffix) != self.suffix
         {
-            bail!("annotation quote selector exceeds its scalar limit");
+            bail!("annotation quote selector is not normalized or exceeds its scalar limit");
         }
         if self.original.as_ref().is_some_and(|quote| {
             quote.chars().count() > MAX_QUOTE_SCALARS || normalize_quote_v1(quote) != self.exact
@@ -182,7 +211,7 @@ impl PageRect {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpubAnchor {
     pub spine_occurrence: u32,
-    pub resource_path: String,
+    pub resource_path: CanonicalEpubPath,
     pub scalar_start: u32,
     pub scalar_end: u32,
 }
@@ -190,13 +219,17 @@ pub struct EpubAnchor {
 impl EpubAnchor {
     pub fn new(
         spine_occurrence: u32,
-        resource_path: impl Into<String>,
+        resource_path: impl AsRef<str>,
         scalar_start: u32,
         scalar_end: u32,
     ) -> Result<Self> {
+        if resource_path.as_ref().len() > MAX_EPUB_RESOURCE_PATH_BYTES {
+            bail!("EPUB annotation resource path exceeds {MAX_EPUB_RESOURCE_PATH_BYTES} bytes");
+        }
         let anchor = Self {
             spine_occurrence,
-            resource_path: resource_path.into(),
+            resource_path: CanonicalEpubPath::new(resource_path.as_ref())
+                .context("EPUB annotation requires a canonical resource path")?,
             scalar_start,
             scalar_end,
         };
@@ -205,11 +238,8 @@ impl EpubAnchor {
     }
 
     fn validate(&self) -> Result<()> {
-        if self.resource_path.is_empty()
-            || self.resource_path.contains('\\')
-            || self.resource_path.split('/').any(|part| part == "..")
-        {
-            bail!("EPUB annotation requires a canonical resource path");
+        if self.resource_path.as_str().len() > MAX_EPUB_RESOURCE_PATH_BYTES {
+            bail!("EPUB annotation resource path exceeds {MAX_EPUB_RESOURCE_PATH_BYTES} bytes");
         }
         if self.scalar_start >= self.scalar_end {
             bail!("EPUB annotation range must be non-empty and half-open");
@@ -293,6 +323,16 @@ pub struct NewAnnotation {
 impl NewAnnotation {
     fn validate(&self) -> Result<()> {
         self.fingerprint.validate()?;
+        if self
+            .local_path
+            .as_ref()
+            .is_some_and(|path| path.is_empty() || path.len() > MAX_LOCAL_PATH_BYTES)
+        {
+            bail!("annotation local path is empty or exceeds {MAX_LOCAL_PATH_BYTES} bytes");
+        }
+        if let Some(body) = &self.body {
+            ensure_scalar_limit(body, MAX_ANNOTATION_BODY_SCALARS, "annotation body")?;
+        }
         if let Some(quote) = &self.quote {
             quote.validate()?;
         }
@@ -312,12 +352,15 @@ impl NewAnnotation {
                 }
             }
         }
-        if self
-            .provenance
-            .as_ref()
-            .is_some_and(|value| value.source_system.trim().is_empty())
+        if let Some(provenance) = &self.provenance
+            && (provenance.source_system.trim().is_empty()
+                || provenance.source_system.len() > MAX_PROVENANCE_SYSTEM_BYTES
+                || provenance
+                    .source_id
+                    .as_ref()
+                    .is_some_and(|id| id.is_empty() || id.len() > MAX_PROVENANCE_ID_BYTES))
         {
-            bail!("annotation provenance requires a source system");
+            bail!("annotation provenance is empty or exceeds its byte limit");
         }
         Ok(())
     }
@@ -445,31 +488,48 @@ impl AnnotationStore {
                 .fetch_optional(&self.pool)
                 .await
                 .context("failed to get annotation")?;
-        match row {
-            Some(row) => self.row_to_annotation(row).await.map(Some),
-            None => Ok(None),
-        }
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let rectangles = self
+            .load_pdf_rectangles(&row.try_get::<String, _>("id")?)
+            .await?;
+        row_to_annotation(row, rectangles).map(Some)
     }
 
     pub async fn list_for_book_async(&self, book_id: i64) -> Result<Vec<Annotation>> {
-        let ids = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM annotations
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin annotation list snapshot")?;
+        let rows = sqlx::query(
+            "SELECT * FROM annotations
              WHERE book_id = ? AND deleted_at IS NULL
              ORDER BY created_at, id",
         )
         .bind(book_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .context("failed to list annotations for book")?;
-        let mut annotations = Vec::with_capacity(ids.len());
-        for id in ids {
-            let id = AnnotationId::from_str(&id).context("invalid annotation ID in database")?;
-            annotations.push(
-                self.get_async(&id, false)
-                    .await?
-                    .context("listed annotation disappeared")?,
-            );
+        let mut annotations = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let rectangle_rows = sqlx::query(
+                "SELECT left, bottom, right, top FROM annotation_pdf_rectangles
+                 WHERE annotation_id = ? ORDER BY rect_index LIMIT ?",
+            )
+            .bind(id)
+            .bind(i64::try_from(MAX_PDF_RECTANGLES + 1).expect("rectangle limit fits in i64"))
+            .fetch_all(&mut *transaction)
+            .await
+            .context("failed to load PDF annotation rectangles")?;
+            annotations.push(row_to_annotation(row, rows_to_rectangles(rectangle_rows)?)?);
         }
+        transaction
+            .commit()
+            .await
+            .context("failed to finish annotation list snapshot")?;
         Ok(annotations)
     }
 
@@ -479,6 +539,9 @@ impl AnnotationStore {
         color: HighlightColor,
         body: Option<&str>,
     ) -> Result<bool> {
+        if let Some(body) = body {
+            ensure_scalar_limit(body, MAX_ANNOTATION_BODY_SCALARS, "annotation body")?;
+        }
         let result = sqlx::query(
             "UPDATE annotations
              SET color = ?, body = ?, modified_at =
@@ -517,117 +580,127 @@ impl AnnotationStore {
         Ok(result.rows_affected() == 1)
     }
 
-    async fn row_to_annotation(&self, row: SqliteRow) -> Result<Annotation> {
-        let id_text: String = row.try_get("id")?;
-        let id = AnnotationId::from_str(&id_text).context("invalid annotation ID in database")?;
-        let anchor_version: i64 = row.try_get("anchor_version")?;
-        if anchor_version != i64::from(ANCHOR_VERSION) {
-            bail!("unsupported annotation anchor version {anchor_version}");
-        }
-        let fingerprint_version =
-            positive_u32(row.try_get("fingerprint_version")?, "fingerprint version")?;
-        let fingerprint = DocumentFingerprint::new(
-            row.try_get::<String, _>("fingerprint_algorithm")?,
-            fingerprint_version,
-            row.try_get("fingerprint")?,
-        )?;
-        let profile: Option<String> = row.try_get("normalization_profile")?;
-        let quote = match profile.as_deref() {
-            None => None,
-            Some(QUOTE_PROFILE_V1) => Some(QuoteSelector {
-                original: row.try_get("original_quote")?,
-                exact: row.try_get("normalized_exact")?,
-                prefix: row.try_get("normalized_prefix")?,
-                suffix: row.try_get("normalized_suffix")?,
-            }),
-            Some(profile) => bail!("unsupported annotation quote profile {profile:?}"),
-        };
-        if let Some(quote) = &quote {
-            quote.validate()?;
-        }
-        let target = match row.try_get::<String, _>("format")?.as_str() {
-            "epub" => AnnotationTarget::Epub(EpubAnchor::new(
-                nonnegative_u32(
-                    row.try_get("epub_spine_occurrence")?,
-                    "EPUB spine occurrence",
-                )?,
-                row.try_get::<String, _>("epub_resource_path")?,
-                nonnegative_u32(row.try_get("epub_scalar_start")?, "EPUB scalar start")?,
-                nonnegative_u32(row.try_get("epub_scalar_end")?, "EPUB scalar end")?,
-            )?),
-            "pdf" => {
-                let start: Option<i64> = row.try_get("pdf_char_start")?;
-                let end: Option<i64> = row.try_get("pdf_char_end")?;
-                let character_range = match (start, end) {
-                    (Some(start), Some(end)) => Some((
-                        nonnegative_u32(start, "PDF character start")?,
-                        nonnegative_u32(end, "PDF character end")?,
-                    )),
-                    (None, None) => None,
-                    _ => bail!("incomplete PDF character range in database"),
-                };
-                let rectangle_rows = sqlx::query(
-                    "SELECT left, bottom, right, top FROM annotation_pdf_rectangles
-                     WHERE annotation_id = ? ORDER BY rect_index",
-                )
-                .bind(&id_text)
-                .fetch_all(&self.pool)
-                .await
-                .context("failed to load PDF annotation rectangles")?;
-                let rectangles = rectangle_rows
-                    .into_iter()
-                    .map(|rectangle| {
-                        PageRect::new(
-                            rectangle.try_get("left")?,
-                            rectangle.try_get("bottom")?,
-                            rectangle.try_get("right")?,
-                            rectangle.try_get("top")?,
-                        )
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                AnnotationTarget::Pdf(PdfAnchor::new(
-                    nonnegative_u32(row.try_get("pdf_page")?, "PDF page")?,
-                    character_range,
-                    rectangles,
-                )?)
-            }
-            format => bail!("unknown annotation format {format:?}"),
-        };
-        let provenance = match row.try_get::<Option<String>, _>("source_system")? {
-            Some(source_system) => Some(ImportProvenance {
-                source_system,
-                source_id: row.try_get("source_id")?,
-            }),
-            None => None,
-        };
-        let annotation = Annotation {
-            id,
-            book_id: row.try_get("book_id")?,
-            local_path: row.try_get("local_path")?,
-            fingerprint,
-            quote,
-            target,
-            color: HighlightColor::from_db(&row.try_get::<String, _>("color")?)?,
-            body: row.try_get("body")?,
-            provenance,
-            created_at: row.try_get("created_at")?,
-            modified_at: row.try_get("modified_at")?,
-            deleted_at: row.try_get("deleted_at")?,
-        };
-        NewAnnotation {
-            id: annotation.id.clone(),
-            book_id: annotation.book_id,
-            local_path: annotation.local_path.clone(),
-            fingerprint: annotation.fingerprint.clone(),
-            quote: annotation.quote.clone(),
-            target: annotation.target.clone(),
-            color: annotation.color,
-            body: annotation.body.clone(),
-            provenance: annotation.provenance.clone(),
-        }
-        .validate()?;
-        Ok(annotation)
+    async fn load_pdf_rectangles(&self, annotation_id: &str) -> Result<Vec<PageRect>> {
+        let rows = sqlx::query(
+            "SELECT left, bottom, right, top FROM annotation_pdf_rectangles
+             WHERE annotation_id = ? ORDER BY rect_index LIMIT ?",
+        )
+        .bind(annotation_id)
+        .bind(i64::try_from(MAX_PDF_RECTANGLES + 1).expect("rectangle limit fits in i64"))
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load PDF annotation rectangles")?;
+        rows_to_rectangles(rows)
     }
+}
+
+fn row_to_annotation(row: SqliteRow, rectangles: Vec<PageRect>) -> Result<Annotation> {
+    let id_text: String = row.try_get("id")?;
+    let id = AnnotationId::from_str(&id_text).context("invalid annotation ID in database")?;
+    let anchor_version: i64 = row.try_get("anchor_version")?;
+    if anchor_version != i64::from(ANCHOR_VERSION) {
+        bail!("unsupported annotation anchor version {anchor_version}");
+    }
+    let fingerprint_version =
+        positive_u32(row.try_get("fingerprint_version")?, "fingerprint version")?;
+    let fingerprint = DocumentFingerprint::new(
+        row.try_get::<String, _>("fingerprint_algorithm")?,
+        fingerprint_version,
+        row.try_get("fingerprint")?,
+    )?;
+    let profile: Option<String> = row.try_get("normalization_profile")?;
+    let quote = match profile.as_deref() {
+        None => None,
+        Some(QUOTE_PROFILE_V1) => Some(QuoteSelector {
+            original: row.try_get("original_quote")?,
+            exact: row.try_get("normalized_exact")?,
+            prefix: row.try_get("normalized_prefix")?,
+            suffix: row.try_get("normalized_suffix")?,
+        }),
+        Some(profile) => bail!("unsupported annotation quote profile {profile:?}"),
+    };
+    if let Some(quote) = &quote {
+        quote.validate()?;
+    }
+    let target = match row.try_get::<String, _>("format")?.as_str() {
+        "epub" => AnnotationTarget::Epub(EpubAnchor::new(
+            nonnegative_u32(
+                row.try_get("epub_spine_occurrence")?,
+                "EPUB spine occurrence",
+            )?,
+            row.try_get::<String, _>("epub_resource_path")?,
+            nonnegative_u32(row.try_get("epub_scalar_start")?, "EPUB scalar start")?,
+            nonnegative_u32(row.try_get("epub_scalar_end")?, "EPUB scalar end")?,
+        )?),
+        "pdf" => {
+            let start: Option<i64> = row.try_get("pdf_char_start")?;
+            let end: Option<i64> = row.try_get("pdf_char_end")?;
+            let character_range = match (start, end) {
+                (Some(start), Some(end)) => Some((
+                    nonnegative_u32(start, "PDF character start")?,
+                    nonnegative_u32(end, "PDF character end")?,
+                )),
+                (None, None) => None,
+                _ => bail!("incomplete PDF character range in database"),
+            };
+            AnnotationTarget::Pdf(PdfAnchor::new(
+                nonnegative_u32(row.try_get("pdf_page")?, "PDF page")?,
+                character_range,
+                rectangles,
+            )?)
+        }
+        format => bail!("unknown annotation format {format:?}"),
+    };
+    let provenance = match row.try_get::<Option<String>, _>("source_system")? {
+        Some(source_system) => Some(ImportProvenance {
+            source_system,
+            source_id: row.try_get("source_id")?,
+        }),
+        None => None,
+    };
+    let annotation = Annotation {
+        id,
+        book_id: row.try_get("book_id")?,
+        local_path: row.try_get("local_path")?,
+        fingerprint,
+        quote,
+        target,
+        color: HighlightColor::from_db(&row.try_get::<String, _>("color")?)?,
+        body: row.try_get("body")?,
+        provenance,
+        created_at: row.try_get("created_at")?,
+        modified_at: row.try_get("modified_at")?,
+        deleted_at: row.try_get("deleted_at")?,
+    };
+    NewAnnotation {
+        id: annotation.id.clone(),
+        book_id: annotation.book_id,
+        local_path: annotation.local_path.clone(),
+        fingerprint: annotation.fingerprint.clone(),
+        quote: annotation.quote.clone(),
+        target: annotation.target.clone(),
+        color: annotation.color,
+        body: annotation.body.clone(),
+        provenance: annotation.provenance.clone(),
+    }
+    .validate()?;
+    Ok(annotation)
+}
+
+fn rows_to_rectangles(rows: Vec<SqliteRow>) -> Result<Vec<PageRect>> {
+    if rows.len() > MAX_PDF_RECTANGLES {
+        bail!("PDF annotation exceeds {MAX_PDF_RECTANGLES} rectangles");
+    }
+    rows.into_iter()
+        .map(|rectangle| {
+            PageRect::new(
+                rectangle.try_get("left")?,
+                rectangle.try_get("bottom")?,
+                rectangle.try_get("right")?,
+                rectangle.try_get("top")?,
+            )
+        })
+        .collect()
 }
 
 pub fn normalize_quote_v1(value: &str) -> String {
@@ -761,4 +834,11 @@ fn positive_u32(value: i64, field: &str) -> Result<u32> {
         bail!("invalid {field} in annotation database");
     }
     Ok(value)
+}
+
+fn ensure_scalar_limit(value: &str, limit: usize, field: &str) -> Result<()> {
+    if value.chars().take(limit + 1).count() > limit {
+        bail!("{field} exceeds {limit} Unicode scalars");
+    }
+    Ok(())
 }
