@@ -8,7 +8,7 @@ Implements [[file:README.adoc][RFD 3: Cloud synchronization]].
 Add optional, dependable synchronization of reading progress and bookmarks
 without making local reading depend on a network service.  This plan extends the
 SQLite-backed APIs in ~crates/shosai-core~ and exposes configuration and status
-through the desktop Iced application.
+through the cross-platform Flutter frontend proposed by RFD 4.
 
 ** Goals
 
@@ -24,8 +24,9 @@ through the desktop Iced application.
 - Today ~books~, ~reading_state~, and ~bookmarks~ identify content with a local,
   best-effort canonical ~file_path~.  Such paths are neither portable nor stable
   after a move and cannot be the sync identity.
-- Existing SQLite databases must migrate in place; local reading, imports, and
-  bookmark APIs must continue to work while sync is disabled.
+- The application is unreleased. The development SQLite schema may be rebuilt
+  around portable identity; do not add dual reads or compatibility tables only
+  to preserve local test data. Compatibility becomes mandatory after release.
 - Book files and cover blobs are out of scope for the first release.  The first
   payload contains portable metadata, reading state, bookmarks/notes, and
   deletions only.
@@ -49,8 +50,9 @@ through the desktop Iced application.
 - ~crates/shosai-core/migrations/001_reading_state.sql~ through
   ~005_epub_locations.sql~ define current storage.
 - ~crates/shosai-app/src/app.rs~ currently contains the desktop Iced state,
-  settings UI, persistence wiring, and ~rfd~ file/folder dialogs.  Sync UI work
-  must follow that implementation rather than assuming separate view modules.
+  settings UI, persistence wiring, and ~rfd~ file/folder dialogs. Treat it as
+  migration evidence; new sync UI belongs in Flutter and core sync state must be
+  observable without either frontend.
 
 * Architecture Decisions Required
 
@@ -62,8 +64,8 @@ Decide and document:
   collision handling.
 - Whether ~book_id~ represents a particular byte stream or the user's logical
   book, and how replacements/editions and duplicate local paths are related.
-- When hashing occurs, how large files avoid blocking the Iced event loop, and
-  what happens when a file is unavailable or changes in place.
+- When hashing occurs, how large files avoid blocking the application executor,
+  and what happens when a file is unavailable or changes in place.
 - How imported legacy rows receive IDs and how another device associates a
   synced book with a newly imported local file.
 
@@ -122,15 +124,15 @@ but does not hide bookmark notes or reading habits from the storage provider.
 *Exit*: protocol vectors produce one unambiguous final state in every replay
 order, and the identity ADR explains moves, copies, changed bytes, and editions.
 
-** TODO M1 — Stable identity and compatible migration
+** TODO M1 — Stable identity and development schema
 
-- [ ] Add migrations for portable text IDs and identity version while preserving
-  existing integer primary keys and path columns during rollout.
-- [ ] Backfill IDs transactionally and lazily fingerprint content when a readable
-  file is available; track pending/failed identity work without inventing an ID
-  from the path.
-- [ ] Add ID-based library lookup and mutation APIs; retain path adapters for the
-  desktop reader during conversion.
+- [ ] Replace or add development migrations for portable text IDs and identity
+  versions. Preserve local integer keys only where they remain useful, not as a
+  compatibility requirement.
+- [ ] Fingerprint readable content during import or bounded background work;
+  track pending/failed identity work without inventing an ID from the path.
+- [ ] Add ID-based library lookup and mutation APIs; keep paths only as
+  device-local locator adapters during frontend conversion.
 - [ ] Detect local moves/reimports and associate them safely by content identity.
 - [ ] Cover duplicate bytes, inaccessible files, changed-in-place files, rollback,
   and migration restart in integration tests.
@@ -167,15 +169,17 @@ leave a changed record absent from the outbox, and deletes do not resurrect.
 *Exit*: interrupted push/pull and duplicate requests converge without data loss,
 and no transport-specific type enters merge or storage APIs.
 
-** TODO M4 — Credentials, settings, and status UI
+** TODO M4 — Credentials, settings, status, and notification intents
 
-- [ ] Add opt-in account/endpoint configuration to the existing settings flow in
-  ~crates/shosai-app/src/app.rs~.
+- [ ] Add opt-in account/endpoint configuration to the Flutter settings flow.
 - [ ] Store secrets through the approved credential provider; expose disconnect
   and erase-local-sync-metadata actions separately.
 - [ ] Show disabled/idle/syncing/offline/error states, last successful sync,
   actionable authentication errors, manual retry, and pending-change count.
 - [ ] Schedule sync outside the UI thread and cancel cleanly at shutdown.
+- [ ] Emit privacy-safe typed notification intents only for actionable events;
+  keep permission, local delivery, APNs/FCM/web push, and deep-link routing in
+  RFD 4's Flutter/platform adapters. Sync correctness must not depend on push.
 - [ ] Redact URLs containing user info, authorization headers, tokens, and notes
   from logs and diagnostics.
 
@@ -205,29 +209,34 @@ credential removal and status behavior pass platform smoke tests.
   adapter under ~sync/~ only after its ADR.
 - Add core integration tests beside ~crates/shosai-core/tests/library_tests.rs~,
   ~reading_state_tests.rs~, and ~bookmark_tests.rs~.
-- Integrate desktop commands, settings, status, and tests in
-  ~crates/shosai-app/src/app.rs~ initially; split modules only as a deliberate
-  refactor, not as a prerequisite hidden in this plan.
+- Integrate commands, settings, status, and tests through the Flutter application
+  boundary. Use ~crates/shosai-app/src/app.rs~ only to understand existing
+  behavior while migrating it.
 
-* Migration and Compatibility Strategy
+* Pre-release Schema and Future Compatibility Strategy
 
-- Use additive migrations first: nullable stable IDs, backfill status, new sync
-  tables/indexes, and dual-read/dual-write adapters while legacy paths remain.
-- Back up or use SQLite transactions around destructive table rebuilds; make
-  startup migration failures actionable and leave the old database recoverable.
+- Before the first release, prefer a clean portable-identity schema and reset
+  development databases when necessary. Do not retain nullable transitional IDs,
+  backfill state, or dual reads solely for unreleased schemas.
+- Use transactions around schema creation or rebuilds and make failures
+  actionable without promising preservation of development data.
 - Do not upload a row until it has a valid portable identity.  Surface pending
   identity work instead of dropping it.
 - Version both database-derived payloads and the remote manifest.  Reject a
   newer incompatible protocol without mutating local or remote state.
-- After at least one compatibility window, remove path-keyed writes only when all
-  desktop call sites and tests use stable identity.  Keep local paths as locators.
+- Remove path-keyed identity writes when Flutter and core callers use stable
+  identity. Keep local paths and platform file capabilities only as locators.
+- Once a public release or sync wire version exists, use forward migrations,
+  compatibility fixtures, and an explicit minimum-version window; never reset a
+  released user database as a routine upgrade strategy.
 - Disabling sync does not delete local books, progress, or bookmarks.  Remote
   reset and local unlink are explicit, separately confirmed operations.
 
 * Verification and Acceptance Criteria
 
-- A database created by migrations 001–005 upgrades with identical visible
-  books, progress, EPUB offsets, zoom, bookmarks, notes, and preferences.
+- A fresh database uses portable identities without path-keyed compatibility
+  machinery. After the first public release, every supported released schema
+  upgrades with the user-visible data guarantees declared for that version.
 - File rename/move, duplicate import, and import on a second device have the
   identity outcomes specified by the ADR.
 - Two or more replicas converge byte-for-byte in logical records after all
@@ -239,8 +248,9 @@ credential removal and status behavior pass platform smoke tests.
 - No credential or bookmark note appears in logs; secrets are absent from SQLite
   and serialized payload fixtures unless payload encryption explicitly protects
   them.
-- Core unit/integration tests and desktop tests pass; selected-backend tests run
-  against documented server versions in CI or a reproducible integration job.
+- Core unit/integration tests and Flutter platform tests pass; selected-backend
+  tests run against documented server versions in CI or a reproducible
+  integration job.
 
 * Security and Privacy Risks
 

@@ -49,27 +49,32 @@ do not design a plugin ABI.
   Avoid dynamic loading, object hierarchies that erase useful format behavior,
   and a premature universal document model.
 
-** App Factory
+** Frontend Contract and Reader Factory
 
-- [ ] Add one document-opening factory that returns reader state by media kind;
-  derive file-dialog filters from the core registry and replace extension matches
-  in ~crates/shosai-app/src/app.rs~.
+- [ ] Add one core document-opening factory that returns a typed reader
+  capability descriptor by media kind. Derive Flutter picker filters and library
+  labels from the registry; remove extension matches from the old Iced app as
+  each reader migrates.
 - [ ] Extract shared reflowable presentation (EPUB/FB2/text/Markdown/MOBI) and
-  archive-image presentation (CBZ/CBR) behind focused app modules while retaining
-  format-specific parsing and location types.
+  archive-image presentation (CBZ/CBR) behind focused renderer-neutral core
+  modules while retaining format-specific parsing and location types. Flutter
+  owns the reusable reader widgets and interactions for each media kind.
 - [ ] Define stable locations for progress/bookmarks/search: page index for
   raster/archive formats and source/chapter plus text offset for reflowable ones.
-  Confirm existing SQLite rows need no migration; add one only if unavoidable.
+  Because the application is unreleased, replace the development schema if that
+  produces a cleaner location model rather than adding compatibility-only data.
 - [ ] Registry tests must prove each descriptor drives detection, import, dialog
   filters, opening, and library filter labels without another extension table.
 
 ** Gate 0 Acceptance
 
-- [ ] PDF, EPUB, and CBZ behavior and database values are unchanged.
+- [ ] PDF, EPUB, and CBZ behavior is unchanged except for explicitly approved
+  pre-release schema or API simplifications.
 - [ ] Adding a test-only format requires one descriptor/adapter and one app
   opener, not edits to multiple extension matches.
 - [ ] Unsupported files produce a user-facing error and never enter the library.
-- [ ] Full existing core/app tests pass before any new format lands.
+- [ ] Full existing core tests and the active frontend regression tests pass
+  before any new format lands.
 
 * Common Dependency and Fixture Gate
 
@@ -256,8 +261,8 @@ does not approve another.
 - Core: ~crates/shosai-core/src/lib.rs~, new ~format.rs~ and format modules,
   ~library.rs~, ~document.rs~ only where raster reuse requires it, shared
   reflowable/archive-image modules, ~search.rs~, and ~crates/shosai-core/Cargo.toml~.
-- App: ~crates/shosai-app/src/app.rs~, new reader/opening modules under
-  ~crates/shosai-app/src/~, and ~crates/shosai-app/Cargo.toml~ only when needed.
+- Frontend: the Flutter reader shell and bridge DTOs planned by RFD 4; update
+  ~crates/shosai-app~ only when extracting or validating the Iced reference.
 - Tests: new per-format integration tests beside existing
   ~crates/shosai-core/tests/*_tests.rs~, fixtures under ~tests/fixtures~, and app
   unit tests for factory/reader/location behavior.
