@@ -483,6 +483,7 @@ mod tests {
             width: 100.0,
             height: 20.0,
             lines: vec![],
+            clusters: vec![],
             links: vec![EpubTextHit {
                 rect: EpubTextRect {
                     x: 10.0,
@@ -513,6 +514,7 @@ mod tests {
                 pixel_height: 20,
                 rgba: Vec::new(),
             }],
+            clusters: Vec::new(),
             links: Vec::new(),
         };
 
@@ -529,6 +531,7 @@ mod tests {
             width: 100.0,
             height: 20.0,
             lines: Vec::new(),
+            clusters: Vec::new(),
             links: Vec::new(),
         };
         assert_eq!(layout_height(Some(&layout), 60.0), 20.0);

@@ -1012,6 +1012,16 @@ mod tests {
         );
         assert!(first.links.iter().any(|hit| hit.scalars.start == 0));
         assert!(first.links.iter().all(|hit| hit.scalars.end <= 12));
+        assert!(!first.clusters.is_empty());
+        let cluster = &first.clusters[0];
+        assert_eq!(
+            first.hit_test(
+                cluster.rect.x + cluster.rect.width / 2.0,
+                cluster.rect.y + cluster.rect.height / 2.0,
+            ),
+            Some(cluster.scalars.clone()),
+            "native hit testing must reuse the cluster geometry used for painting"
+        );
         assert_eq!(first.lines.len(), 2);
         assert_eq!(first.lines[0].scalars, 0..3);
         assert_eq!(first.lines[1].scalars, 3..12);

@@ -7530,6 +7530,7 @@ mod tests {
                     rgba: Vec::new(),
                 },
             ],
+            clusters: Vec::new(),
             links: Vec::new(),
         };
         let measured_lengths = std::cell::RefCell::new(Vec::new());
@@ -7551,6 +7552,7 @@ mod tests {
                     pixel_height: 20,
                     rgba: Vec::new(),
                 }],
+                clusters: Vec::new(),
                 links: Vec::new(),
             })
         };
@@ -7636,6 +7638,7 @@ mod tests {
                         rgba: Vec::new(),
                     })
                     .collect(),
+                clusters: Vec::new(),
                 links: Vec::new(),
             })
         };

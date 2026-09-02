@@ -71,6 +71,11 @@ pub struct EpubTextHit {
     pub link: String,
 }
 #[derive(Clone, Debug)]
+pub struct EpubTextCluster {
+    pub rect: EpubTextRect,
+    pub scalars: Range<usize>,
+}
+#[derive(Clone, Debug)]
 pub struct EpubTextLine {
     pub top: f32,
     pub width: f32,
@@ -85,7 +90,21 @@ pub struct EpubTextLayout {
     pub width: f32,
     pub height: f32,
     pub lines: Vec<EpubTextLine>,
+    pub clusters: Vec<EpubTextCluster>,
     pub links: Vec<EpubTextHit>,
+}
+
+impl EpubTextLayout {
+    /// Returns the logical scalar range painted at a layout-local point.
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<Range<usize>> {
+        self.clusters
+            .iter()
+            .find(|cluster| {
+                let rect = cluster.rect;
+                x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
+            })
+            .map(|cluster| cluster.scalars.clone())
+    }
 }
 
 pub(super) struct NativeTextState {
@@ -220,6 +239,7 @@ impl EpubFontBook {
             width: 0.0,
             height: 0.0,
             lines: Vec::new(),
+            clusters: Vec::new(),
             links: Vec::new(),
         };
         for (index, paragraph) in requests.iter().enumerate() {
@@ -241,9 +261,15 @@ impl EpubFontBook {
                 hit.rect.y += result.height;
                 hit.scalars = hit.scalars.start + scalar_start..hit.scalars.end + scalar_start;
             }
+            for cluster in &mut layout.clusters {
+                cluster.rect.y += result.height;
+                cluster.scalars =
+                    cluster.scalars.start + scalar_start..cluster.scalars.end + scalar_start;
+            }
             result.width = result.width.max(layout.width);
             result.height += layout.height;
             result.lines.extend(layout.lines);
+            result.clusters.extend(layout.clusters);
             result.links.extend(layout.links);
         }
         Ok(result)
@@ -424,6 +450,7 @@ impl EpubFontBook {
             bail!("EPUB text output exceeds the {EPUB_TEXT_MAX_PIXELS}-pixel per-call ceiling");
         }
         let mut lines = Vec::with_capacity(runs.len());
+        let mut clusters = Vec::new();
         let mut links = Vec::new();
         for (run, line_range) in runs.into_iter().zip(line_ranges) {
             let ph = (run.line_height * request.scale).ceil() as usize;
@@ -458,6 +485,10 @@ impl EpubFontBook {
                     width: glyph.w.max(0.0),
                     height: run.line_height,
                 };
+                clusters.push(EpubTextCluster {
+                    rect,
+                    scalars: scalars.clone(),
+                });
                 if rasterize {
                     for h in &request.highlights {
                         if h.scalars.start < scalars.end && scalars.start < h.scalars.end {
@@ -540,6 +571,7 @@ impl EpubFontBook {
             width,
             height,
             lines,
+            clusters,
             links,
         })
     }
