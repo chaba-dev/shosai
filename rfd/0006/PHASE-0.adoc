@@ -1,0 +1,185 @@
+= RFD 6 Phase 0 contracts and evidence
+
+This document freezes the inputs to the first durable migration.  The types are
+conceptual contracts, not a synchronization wire format or a commitment to the
+eventual Rust and SQL names.  Changes to a numbered contract require a new
+version and new golden vectors; existing records retain their original version.
+
+== Interaction contract version 1
+
+The shared state machine is ~idle -> selecting -> selected -> committing ->
+idle~.  EPUB and PDF adapters expose only logical endpoints and display
+geometry; they do not own actions or persistence.
+
+[cols="1,3"]
+|===
+|Input |Required behavior
+
+|Pointer
+|Primary press on selectable text captures an anchor.  Movement updates the
+focus from retained geometry, may reverse direction, and clamps at one EPUB
+spine item or PDF page.  Release opens the action surface for a non-empty range.
+
+|Keyboard
+|A focused reader exposes the platform text-selection commands.  Shift plus a
+direction key extends by grapheme, word, or visual line as requested while the
+stored range remains in logical order.  The context-menu key or equivalent
+opens the same action surface; Escape cancels it.
+
+|Touch-ready endpoint
+|The adapter accepts the same press/move/release stream and endpoint model as a
+pointer.  Handles are presentation state and never enter an anchor.  Touch
+gesture recognition and platform testing are required before touch is enabled;
+version 1 does not claim touch-platform support.
+
+|Cancellation
+|Escape, a press outside the selection/action surface, tab close, document
+replacement, or navigation outside the allowed resource clears temporary state
+without writing.  Losing capture while dragging cancels.  A persistence error
+returns to ~selected~ and reports the error instead of discarding the range.
+
+|Navigation
+|Relayout, scroll, zoom, and navigation inside the selected resource preserve
+logical endpoints and recompute geometry.  Navigation to another spine item or
+PDF page cancels an uncommitted selection.  Activating a saved annotation first
+navigates to its resource, then resolves and focuses it.
+
+|Action placement
+|Place one shared action surface above the union of visible range rectangles,
+otherwise below it, then clamp to the reader viewport.  For a range extending
+offscreen, use the visible focus endpoint.  Keyboard invocation anchors to the
+focused range rectangle.  The surface contains Copy when text is complete,
+five named colors, Add note, and Cancel, in the same order for both formats.
+|===
+
+Selection endpoints are grapheme-safe.  Ranges are half-open and ordered in
+logical text order regardless of drag direction.  Empty clicks do not create a
+selection.  Drag processing performs no PDFium, SQLite, file, or asynchronous
+wait on the UI thread.
+
+== Anchor contract version 1
+
+The common envelope contains an opaque portable UUID, a format tag, anchor
+version ~1~, fingerprint algorithm/version and bytes, the original quote when
+available, normalization profile ~shosai-quote-v1~, normalized exact/prefix/
+suffix strings, and one format payload.
+
+EPUB payloads contain the spine occurrence, canonical resource path, and a
+half-open chapter range counted in Unicode scalar values.  PDF payloads contain
+the zero-based page, a half-open PDFium character range when mapping is
+complete, and ordered rectangles in canonical PDF user-space points.  Neither
+payload contains pixels, zoom, viewport, pagination, widget, or local database
+coordinates.  A geometry-only PDF payload marks text mapping incomplete and
+omits quote selectors and copy capability.
+
+All consumers reject unknown required contract versions without modifying the
+record.  They may preserve unknown optional fields.  Fingerprint equality only
+enables exact-anchor validation; it is not a portable book or record identity.
+Recovery is bounded to the recorded spine resource or PDF page and returns
+exactly one of ~exact~, ~recovered~, ~ambiguous~, or ~orphaned~.
+
+=== Quote normalization profile ~shosai-quote-v1~
+
+Version 1 pins Unicode 17.0.0 data for NFC, the White_Space property, and
+extended grapheme clusters.  In order: normalize CRLF and CR to LF, discard
+U+00AD SOFT HYPHEN, normalize to Unicode NFC, map every non-empty run of Unicode
+17 White_Space code points to one U+0020 SPACE, and trim leading/trailing
+collapsed space from each exact/prefix/suffix field.  Preserve case,
+punctuation, compatibility distinctions, and visible hyphens.  Normalize before
+bounding context.  Prefix retains the nearest trailing 32 Unicode scalar values
+in document order; suffix retains the nearest leading 32.  Move the retained
+edge inward rather than splitting an extended grapheme cluster.  Original text
+is never reconstructed from normalized text.
+
+[cols="2,2,2"]
+|===
+|Purpose |Input code points |Expected normalized value
+
+|Canonical equivalence |~Cafe\u0301~ |~Café~
+|Line endings and whitespace |~ a\r\n\t b\u00a0c ~ |~a b c~
+|Soft hyphen |~co\u00adoperate~ |~cooperate~
+|Preserved distinctions |~Case—A-B! ﬁ~ |~Case—A-B! ﬁ~
+|No case folding |~Résumé~ / ~résumé~ |Two unequal values
+|Prefix direction |~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~ |~456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~
+|Suffix direction |~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~ |~0123456789ABCDEFGHIJKLMNOPQRSTUV~
+|Grapheme-safe context |31 ~x~ values followed by ~e\u0301~ |31 ~x~ values plus ~é~
+|Prefix split EGC |~👩‍🔬~ followed by 31 ~x~ values |31 ~x~ values
+|Suffix split EGC |31 ~x~ values followed by ~👩‍🔬~ |31 ~x~ values
+|===
+
+These vectors are executable in
+~quote_v1_golden_vectors_pin_normalization_and_context_direction~.  The
+normalization and segmentation dependency versions remain pinned for every
+record written with profile ~shosai-quote-v1~.
+
+Offset conversions are explicit.  EPUB version 1 offsets and quote limits count
+Unicode scalar values; PDF offsets count PDFium characters from the pinned
+extractor; future CFI offsets count UTF-16 code units.  No API accepts an
+unlabelled integer offset.
+
+== Identity and lifecycle alignment with RFD 3
+
+An annotation record has one immutable opaque UUID independent of path and
+SQLite row ID.  ~created_at~ is immutable, ~modified_at~ changes for any user-
+visible body, color, or anchor edit, and nullable ~deleted_at~ makes a normal
+delete a hidden tombstone.  Import provenance identifies the source system and
+stable source identifier when one exists; it is not record identity.  A local
+book foreign key and path are associations only.
+
+RFD 3 still owns portable book identity, device identity, revisions, conflict
+resolution, outbox state, acknowledgements, and tombstone retention.  Phase 1
+must leave those fields additive: annotation reads never require sync metadata,
+deletion never hard-deletes a normal record, and no tombstone is compacted until
+RFD 3 defines a measurable safe condition.  This is the narrow overlap needed
+to avoid either RFD choosing the other's wire protocol.
+
+== Selection spikes and budgets
+
+The executable proofs are in ~crates/shosai-app/src/selection_spike.rs~ and the
+owned PDF snapshot in ~crates/shosai-core/src/pdf.rs~.  They establish:
+
+* a real Iced ~Widget~ draws an actual cropped/rotated PDF raster, maps its
+  content rectangle including letterboxing into that raster's dimensions, and
+  emits the independently verified PDFium character and page coordinates from
+  its pointer-event path without acquiring PDFium's global lock;
+* the underlying buffer of Iced's painting paragraph supplies line-local UTF-8
+  byte cursors.  The adapter explicitly rebases line bytes and converts them to
+  grapheme-safe chapter Unicode-scalar endpoints across non-ASCII, multiline,
+  adjacent rich-text spans;
+* the embedded-font spike derives bidi-aware half-grapheme endpoint zones and
+  rasterizes visible pixels from the same prepared cosmic-text buffer.
+  Ligature, combining-mark, emoji-ZWJ, and right-to-left cases emit only logical
+  grapheme boundaries;
+* a real two-block fixture is paginated into multiple visual page fragments,
+  hit through each fragment's Iced paragraph, and rebased through
+  ~PageNode::text_offset~.  Forward and reverse selections produce one chapter
+  range while a different spine occurrence is rejected.
+
+The Phase 0 ceiling is 65,536 selectable endpoints per EPUB layout request or
+PDF page snapshot, 16,384 ordered rectangles in one persisted annotation, and
+8 MiB of retained selection geometry per open document.  A quote or copied
+selection is limited to 65,536 Unicode scalar values; normalized prefix and
+suffix remain 32 each.  Exceeding an extraction ceiling disables selection for
+that surface with an actionable message; it never silently truncates an anchor.
+
+Endpoint and retained-byte ceilings are deterministic unit assertions against
+the actual proposed selectable-text surfaces.  PDF snapshots enforce per-page
+limits while extracting, and a format-independent document admission budget
+rejects additional EPUB or PDF geometry before exceeding 8 MiB.  PDF selection
+also rejects decoded rasters above 16,384 pixels on either axis or 40 million
+pixels before invoking PDFium rendering.  Wall-clock latency is not a portable
+unit-test assertion.  Measure the actual surfaces manually with:
+
+----
+cargo test -p shosai-app measure_actual_selection_hot_path -- --ignored --nocapture
+----
+
+The command samples first through last endpoint uniformly, sorts individual hit
+durations, and reports p50, p95, and maximum latency without imposing a flaky CI
+threshold.  On 2026-09-02, the x86-64 Linux development profile measured 59,502
+actual shaped EPUB endpoint zones using 1,546,240 retained bytes (p50 150 ns,
+p95 231 ns, maximum 3.386 µs) and 19,200 dense-PDF endpoint zones using 988,160
+retained bytes (p50 81 ns, p95 121 ns, maximum 711 ns), each over 10,000
+uniformly distributed hits.  Phase 2 must additionally measure PDFium extraction
+and Phase 3 must measure relayout on every supported platform because neither
+operation is permitted on the drag hot path.

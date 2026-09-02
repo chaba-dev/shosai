@@ -47,4 +47,6 @@ roxmltree = "0.21.1"
 taffy = { version = "=0.13.0", default-features = false, features = ["std", "alloc", "taffy_tree", "block_layout", "grid"] }
 tempfile = "3.27.0"
 ttf-parser = "=0.25.1"
+unicode-normalization = "=0.1.25"
+unicode-segmentation = "=1.13.2"
 zip = { version = "8.4.0", default-features = false }

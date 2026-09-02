@@ -5,6 +5,101 @@ use pdfium_render::prelude::*;
 
 use crate::document::{Document, DocumentMetadata, RenderedPage};
 
+/// Maximum number of character endpoints retained for one selectable PDF page.
+pub const PDF_SELECTION_MAX_ENDPOINTS: usize = 65_536;
+/// Maximum owned hit-test geometry retained for one selectable PDF page.
+pub const PDF_SELECTION_MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
+const PDF_SELECTION_MAX_BITMAP_DIMENSION: u32 = 16_384;
+const PDF_SELECTION_MAX_BITMAP_PIXELS: u64 = 40_000_000;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PdfSelectionRect {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl PdfSelectionRect {
+    fn contains(self, x: f32, y: f32) -> bool {
+        x >= self.left && x < self.right && y >= self.top && y < self.bottom
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PdfSelectionEndpoint {
+    pub character: usize,
+    pub page_x: f32,
+    pub page_y: f32,
+}
+
+#[derive(Clone, Debug)]
+struct PdfSelectionZone {
+    bounds: PdfSelectionRect,
+    endpoint: PdfSelectionEndpoint,
+}
+
+#[derive(Clone, Debug)]
+struct PdfSelectionRow {
+    bounds: PdfSelectionRect,
+    zones: Vec<PdfSelectionZone>,
+}
+
+/// PDFium-independent hit-test data for one rendered page.
+#[derive(Clone, Debug)]
+pub struct PdfSelectionSnapshot {
+    bitmap_width: u32,
+    bitmap_height: u32,
+    rows: Vec<PdfSelectionRow>,
+}
+
+impl PdfSelectionSnapshot {
+    pub fn bitmap_size(&self) -> (u32, u32) {
+        (self.bitmap_width, self.bitmap_height)
+    }
+
+    pub fn hit_test(&self, bitmap_x: f32, bitmap_y: f32) -> Option<PdfSelectionEndpoint> {
+        self.rows
+            .iter()
+            .filter(|row| row.bounds.contains(bitmap_x, bitmap_y))
+            .find_map(|row| {
+                row.zones
+                    .iter()
+                    .find(|zone| zone.bounds.contains(bitmap_x, bitmap_y))
+                    .map(|zone| zone.endpoint)
+            })
+    }
+
+    pub fn bitmap_bounds(&self, character: usize) -> Option<PdfSelectionRect> {
+        self.rows
+            .iter()
+            .flat_map(|row| &row.zones)
+            .find(|zone| zone.endpoint.character == character)
+            .map(|zone| zone.bounds)
+    }
+
+    pub fn bitmap_bounds_at(&self, endpoint: usize) -> Option<PdfSelectionRect> {
+        self.rows
+            .iter()
+            .flat_map(|row| &row.zones)
+            .nth(endpoint)
+            .map(|zone| zone.bounds)
+    }
+
+    pub fn endpoint_count(&self) -> usize {
+        self.rows.iter().map(|row| row.zones.len()).sum()
+    }
+
+    pub fn retained_bytes(&self) -> usize {
+        self.rows.capacity() * std::mem::size_of::<PdfSelectionRow>()
+            + self
+                .rows
+                .iter()
+                .map(|row| row.zones.capacity() * std::mem::size_of::<PdfSelectionZone>())
+                .sum::<usize>()
+    }
+}
+
 /// Create a short-lived Pdfium instance.
 ///
 /// `pdfium-render`'s `thread_safe` feature serializes all PDFium access behind a
@@ -56,8 +151,45 @@ fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::bundled_pdfium_path;
+    use super::{
+        PdfDoc, bundled_pdfium_path, validate_pdf_selection_bitmap_size,
+        validate_pdf_selection_endpoint_count,
+    };
     use std::path::{Path, PathBuf};
+
+    fn selectable_pdf(text: &str) -> Vec<u8> {
+        let content = format!("BT /F1 24 Tf 1 0 0 1 130 120 Tm ({text}) Tj ET");
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /CropBox [100 50 300 200] /Rotate 90 /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len() + 1
+            ),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
 
     #[test]
     fn bundled_pdfium_is_resolved_relative_to_executable() {
@@ -73,6 +205,42 @@ mod tests {
         let executable = Path::new("/opt/shosai/bin/shosai");
 
         assert_eq!(bundled_pdfium_path(executable), Some(expected));
+    }
+
+    #[test]
+    fn owned_snapshot_emits_a_stable_endpoint_on_a_cropped_rotated_page() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+        let snapshot = document.selection_snapshot(0, 1.0).unwrap();
+        let bounds = snapshot.bitmap_bounds(0).unwrap();
+        let endpoint = snapshot
+            .hit_test(
+                (bounds.left + bounds.right) / 2.0,
+                (bounds.top + bounds.bottom) / 2.0,
+            )
+            .unwrap();
+
+        assert_eq!(snapshot.bitmap_size(), (150, 200));
+        assert_eq!(snapshot.endpoint_count(), 6);
+        assert_eq!(endpoint.character, 0);
+        assert!((130.0..150.0).contains(&endpoint.page_x));
+        assert!((110.0..140.0).contains(&endpoint.page_y));
+    }
+
+    #[test]
+    fn selection_snapshot_rejects_excess_pdfium_endpoints_without_truncating() {
+        let error = validate_pdf_selection_endpoint_count(65_537).unwrap_err();
+
+        assert!(error.to_string().contains("65536-endpoint"));
+    }
+
+    #[test]
+    fn selection_snapshot_rejects_invalid_scales_before_pdfium_work() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+
+        assert!(document.selection_snapshot(0, f32::NAN).is_err());
+        assert!(document.selection_snapshot(0, 0.0).is_err());
+        assert!(document.selection_snapshot(0, -1.0).is_err());
+        assert!(validate_pdf_selection_bitmap_size(300.0, 200.0, 100_000.0).is_err());
     }
 }
 
@@ -170,6 +338,84 @@ impl PdfDoc {
             .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
 
         Ok(searchable_page_text(&page, &text))
+    }
+
+    /// Extracts a bounded owned hit-test snapshot for a page rendered at `scale`.
+    ///
+    /// This performs PDFium work once. Calling methods on the returned snapshot
+    /// performs no PDFium, file, or database access.
+    pub fn selection_snapshot(&self, index: usize, scale: f32) -> Result<PdfSelectionSnapshot> {
+        if !scale.is_finite() || scale <= 0.0 {
+            anyhow::bail!("page scale must be finite and positive");
+        }
+        if index >= self.page_count {
+            anyhow::bail!(
+                "page index {index} out of range (total: {})",
+                self.page_count
+            );
+        }
+        let pdfium = create_pdfium()?;
+        let document = pdfium
+            .load_pdf_from_byte_slice(&self.data, None)
+            .map_err(|e| anyhow::anyhow!("failed to load PDF for selection extraction: {e}"))?;
+        let page = document
+            .pages()
+            .get(index as u16)
+            .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
+        let text = page
+            .text()
+            .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
+        validate_pdf_selection_endpoint_count(text.chars().len())?;
+
+        let (pt_w, pt_h) = self.page_sizes[index];
+        let (pixel_w, pixel_h) = validate_pdf_selection_bitmap_size(pt_w, pt_h, scale)?;
+        let config = PdfRenderConfig::new()
+            .set_target_width(pixel_w)
+            .set_maximum_height(pixel_h)
+            .use_lcd_text_rendering(true);
+        let bitmap = page
+            .render_with_config(&config)
+            .map_err(|e| anyhow::anyhow!("failed to render PDF selection page {index}: {e}"))?;
+        let bitmap_width = bitmap.width() as u32;
+        let bitmap_height = bitmap.height() as u32;
+        let mut zones = Vec::with_capacity(text.chars().len());
+        for character in text.chars().iter() {
+            let Ok(page_bounds) = character.loose_bounds() else {
+                continue;
+            };
+            let Some((left, top, right, bottom)) = rect_to_pixels(&page, page_bounds, &config)
+            else {
+                continue;
+            };
+            let bounds = PdfSelectionRect {
+                left: left.max(0) as f32,
+                top: top.max(0) as f32,
+                right: right.min(bitmap_width as i32) as f32,
+                bottom: bottom.min(bitmap_height as i32) as f32,
+            };
+            if bounds.left >= bounds.right || bounds.top >= bounds.bottom {
+                continue;
+            }
+            zones.push(PdfSelectionZone {
+                bounds,
+                endpoint: PdfSelectionEndpoint {
+                    character: character.index(),
+                    page_x: (page_bounds.left().value + page_bounds.right().value) / 2.0,
+                    page_y: (page_bounds.bottom().value + page_bounds.top().value) / 2.0,
+                },
+            });
+        }
+        let snapshot = PdfSelectionSnapshot {
+            bitmap_width,
+            bitmap_height,
+            rows: pdf_selection_rows(zones),
+        };
+        if snapshot.retained_bytes() > PDF_SELECTION_MAX_RETAINED_BYTES {
+            anyhow::bail!(
+                "PDF page exceeds the {PDF_SELECTION_MAX_RETAINED_BYTES}-byte selection geometry ceiling"
+            );
+        }
+        Ok(snapshot)
     }
 
     /// Extract text from every page while loading the PDF only once.
@@ -271,6 +517,60 @@ impl PdfDoc {
             pixels: bytes::Bytes::from(pixels),
         })
     }
+}
+
+fn validate_pdf_selection_endpoint_count(count: usize) -> Result<()> {
+    if count > PDF_SELECTION_MAX_ENDPOINTS {
+        anyhow::bail!(
+            "PDF page exceeds the {PDF_SELECTION_MAX_ENDPOINTS}-endpoint selection ceiling"
+        );
+    }
+    Ok(())
+}
+
+fn validate_pdf_selection_bitmap_size(width: f32, height: f32, scale: f32) -> Result<(i32, i32)> {
+    let width = (f64::from(width) * f64::from(scale)).ceil();
+    let height = (f64::from(height) * f64::from(scale)).ceil();
+    if !width.is_finite()
+        || !height.is_finite()
+        || width < 1.0
+        || height < 1.0
+        || width > f64::from(PDF_SELECTION_MAX_BITMAP_DIMENSION)
+        || height > f64::from(PDF_SELECTION_MAX_BITMAP_DIMENSION)
+        || width * height > PDF_SELECTION_MAX_BITMAP_PIXELS as f64
+    {
+        anyhow::bail!("PDF selection bitmap exceeds decoded image limits");
+    }
+    Ok((width as i32, height as i32))
+}
+
+fn pdf_selection_rows(mut zones: Vec<PdfSelectionZone>) -> Vec<PdfSelectionRow> {
+    zones.sort_by(|left, right| {
+        left.bounds
+            .top
+            .total_cmp(&right.bounds.top)
+            .then_with(|| left.bounds.left.total_cmp(&right.bounds.left))
+    });
+    let mut rows: Vec<PdfSelectionRow> = Vec::new();
+    for zone in zones {
+        let center_y = (zone.bounds.top + zone.bounds.bottom) / 2.0;
+        if let Some(row) = rows
+            .last_mut()
+            .filter(|row| center_y >= row.bounds.top && center_y < row.bounds.bottom)
+        {
+            row.bounds.left = row.bounds.left.min(zone.bounds.left);
+            row.bounds.top = row.bounds.top.min(zone.bounds.top);
+            row.bounds.right = row.bounds.right.max(zone.bounds.right);
+            row.bounds.bottom = row.bounds.bottom.max(zone.bounds.bottom);
+            row.zones.push(zone);
+        } else {
+            rows.push(PdfSelectionRow {
+                bounds: zone.bounds,
+                zones: vec![zone],
+            });
+        }
+    }
+    rows
 }
 
 fn searchable_page_text(page: &PdfPage<'_>, text: &PdfPageText<'_>) -> String {
