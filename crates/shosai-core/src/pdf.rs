@@ -56,8 +56,43 @@ fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::bundled_pdfium_path;
+    use super::{bundled_pdfium_path, create_pdfium};
+    use pdfium_render::prelude::*;
     use std::path::{Path, PathBuf};
+
+    fn selectable_pdf() -> Vec<u8> {
+        let content = "BT /F1 24 Tf 1 0 0 1 130 120 Tm (TARGET) Tj ET";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /CropBox [100 50 300 200] /Rotate 90 /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            format!(
+                "<< /Length {} >>\nstream\n{content}\nendstream",
+                content.len() + 1
+            ),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        pdf
+    }
 
     #[test]
     fn bundled_pdfium_is_resolved_relative_to_executable() {
@@ -73,6 +108,45 @@ mod tests {
         let executable = Path::new("/opt/shosai/bin/shosai");
 
         assert_eq!(bundled_pdfium_path(executable), Some(expected));
+    }
+
+    #[test]
+    fn pdfium_round_trip_emits_a_stable_endpoint_on_a_cropped_rotated_page() {
+        let pdfium = create_pdfium().unwrap();
+        let bytes = selectable_pdf();
+        let document = pdfium.load_pdf_from_byte_slice(&bytes, None).unwrap();
+        let page = document.pages().get(0).unwrap();
+        let text = page.text().unwrap();
+        let characters = text.chars();
+        let character = characters
+            .iter()
+            .find(|character| character.unicode_char() == Some('T'))
+            .unwrap();
+        let expected_endpoint = character.index();
+        let center = character.loose_bounds().unwrap();
+        let center = (
+            PdfPoints::new((center.left().value + center.right().value) / 2.0),
+            PdfPoints::new((center.bottom().value + center.top().value) / 2.0),
+        );
+        let config = PdfRenderConfig::new()
+            .set_target_width(300)
+            .set_maximum_height(200);
+        let bitmap_point = page.points_to_pixels(center.0, center.1, &config).unwrap();
+        let page_point = page
+            .pixels_to_points(bitmap_point.0, bitmap_point.1, &config)
+            .unwrap();
+        let endpoint = text
+            .chars()
+            .get_char_near_point(
+                page_point.0,
+                PdfPoints::new(2.0),
+                page_point.1,
+                PdfPoints::new(2.0),
+            )
+            .unwrap()
+            .index();
+
+        assert_eq!(endpoint, expected_endpoint);
     }
 }
 
