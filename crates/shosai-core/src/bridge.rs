@@ -101,8 +101,14 @@ impl Cancellation {
     }
 
     async fn cancelled(&self) {
-        while !self.is_cancelled() {
-            self.0.notify.notified().await;
+        loop {
+            let notified = self.0.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
         }
     }
 }
@@ -589,6 +595,19 @@ mod tests {
         cancellation.cancel();
 
         assert_eq!(waiting.await.unwrap_err(), BridgeError::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn cancellation_cannot_be_lost_while_waiters_register() {
+        for _ in 0..1_000 {
+            let cancellation = Cancellation::new();
+            let waiting = cancellation.cancelled();
+            tokio::pin!(waiting);
+            cancellation.cancel();
+            tokio::time::timeout(std::time::Duration::from_millis(100), waiting)
+                .await
+                .expect("a cancellation notification must not be lost");
+        }
     }
 
     #[tokio::test]
