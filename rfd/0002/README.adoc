@@ -19,6 +19,13 @@ and open dispatch without forcing unlike raster, reflowable, and archive-image
 formats behind one rendering abstraction. Add only the seam required to remove
 existing duplicated dispatch; do not define a plugin ABI.
 
+The registry and format operations live in Rust and expose renderer-neutral
+capabilities to the Flutter reader shell proposed by RFD 4. Flutter reuses the
+same fixed-page, reflowable, and image-sequence interaction surfaces across
+formats; format parsing, admission limits, stable locations, and metadata do not
+move into Dart. The existing Iced branches remain migration evidence rather than
+the target application factory.
+
 Every format requires legally redistributable fixtures, explicit corrupt and
 unsupported errors, resource bounds, background parsing or decoding where
 needed, and supported-platform package validation. DRM circumvention, remote
@@ -28,3 +35,6 @@ resources, active content, and restrictive decoder licensing are out of scope.
 
 The format-specific gates and work packages are tracked in
 link:IMPLEMENTATION.org[RFD 2 implementation checklist].
+
+The frontend and bridge boundary is defined by
+link:../0004/README.adoc[RFD 4: Cross-platform Flutter frontend].

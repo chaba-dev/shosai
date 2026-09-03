@@ -7,22 +7,31 @@
 
 == Goal
 
-Deliver installable formats beyond the existing Linux archives, macOS app, and
-Nix package without turning independent distribution targets into an
-all-or-nothing rollout.
+Deliver validated Flutter desktop and mobile applications without turning
+independent distribution targets into an all-or-nothing rollout. Existing Iced
+archives remain historical packaging evidence, not layouts that the unreleased
+Flutter application must preserve.
 
 == Proposal
 
 Treat AppImage, Flatpak, Windows installers, macOS Developer ID
-signing/notarization, and shared icons/metadata as independent work packages.
-Each package owns dependency closure, PDFium placement and pinning, architecture
-validation, installation and launch smoke tests, licenses, update expectations,
-and platform-specific security boundaries.
+signing/notarization, Android/iOS store packages, and shared icons/metadata as
+independent work packages. Each native package owns its Flutter host, Rust
+library and bridge, PDFium placement and pinning, architecture validation,
+installation and launch smoke tests, licenses, update expectations, and
+platform-specific security boundaries.
 
 Release builds remain reproducible and must not fetch mutable assets. Signing
 credentials stay in protected CI environments, unsigned pull-request builds
 exercise the same layout and validation where possible, and package metadata
 must not claim unsupported formats or platform behavior.
+
+RFD 4's Flutter feasibility and parity gates precede new production packaging.
+Nix and existing archives may continue validating the Iced reference during
+migration, but new package recipes must be derived from the Flutter artifact
+rather than preserving Cargo-binary assumptions. Web deployment remains a
+separate feasibility result because it cannot package native FFI or PDFium in
+the same way.
 
 == Implementation
 

@@ -26,8 +26,10 @@ wuff = { version = "=0.2.8", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["default-formats"] }
 natord = "1.0.9"
 unicode-casefold = "0.2.0"
-unicode-normalization = "0.1.25"
+unicode-normalization = "=0.1.25"
+unicode-segmentation = "=1.13.2"
 sha2 = "0.10.9"
+uuid = { version = "1.23.0", features = ["js", "v4"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

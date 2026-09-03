@@ -5,11 +5,11 @@ Implements [[file:README.adoc][RFD 5: Distribution and packaging]].
 
 * Purpose
 
-This document plans distribution work beyond the existing release archives.  Each
-work package below is independently deliverable: it may be implemented, reviewed,
-and released without waiting for any other package.  Shared artwork and metadata
-should be reused when available, but must not turn the targets into an
-all-or-nothing rollout.
+This document plans distribution of the Flutter application proposed by RFD 4.
+Each work package below is independently deliverable: it may be implemented,
+reviewed, and released without waiting for any other package. Existing Iced
+artifacts record validated packaging techniques but do not constrain the
+unreleased Flutter host, Rust library, bridge, or native-library layout.
 
 * Current Repository State
 
@@ -56,9 +56,24 @@ all-or-nothing rollout.
   ~../lib/libpdfium.so~ on non-macOS and in an app bundle on macOS, then falls
   back to the system loader.  Windows needs an explicit, tested DLL layout.
 
+* Frontend transition gate
+
+- [ ] Complete RFD 4's bridge and Flutter desktop launch slice before adding new
+  production package formats.
+- [ ] Define the release artifact for each target as a Flutter host plus Rust
+  native library, bridge metadata, PDFium, assets, and notices.
+- [ ] Port launch/open smoke tests from the Iced executable to Flutter without
+  weakening the existing PDF/EPUB/CBZ assertions.
+- [ ] Decide whether existing Nix, tarball, and macOS package jobs remain
+  temporary Iced-reference checks or are replaced in place. The application is
+  unreleased, so preserving their internal layout is not a compatibility goal.
+- [ ] Add Android and iOS signing/store work packages after physical-device
+  feasibility; keep them independently releasable from desktop targets.
+
 * Delivery Rules
 
-- Preserve the current tarball and ~.app.zip~ outputs while adding targets.
+- Preserve validated supply-chain, license, architecture, and smoke-test
+  guarantees, not the current Iced executable or archive layout.
 - Add a target to the release matrix only after its own pull-request validation
   is reliable.  Failure or deferral of one target must not block work on another.
 - Keep PDFium versions and checksums explicit.  Do not download unpinned
@@ -69,19 +84,24 @@ all-or-nothing rollout.
 - Build untrusted pull requests without release credentials.  Signing,
   notarization, and publishing run only for protected release refs/environments.
 
-* Work Package: Nix Package
+* Work Package: Nix Package Migration
 :PROPERTIES:
-:STATUS: DONE
+:STATUS: TODO
 :DELIVERABLE: nix build .#shosai
 :END:
+
+The checked items below describe the completed Iced baseline. The work package
+returns to TODO until the same guarantees cover the Flutter host and Rust native
+library.
 
 ** Prerequisites
 
 - Decide whether the flake follows its locked nixpkgs ~pdfium-binaries~ or pins a
   separate PDFium derivation.  The initial package should use the locked nixpkgs
   dependency and record that provenance in its closure.
-- Confirm all Iced/wgpu Linux runtime libraries through ~nix why-depends~ and an
-  actual launch; do not copy the dev shell dependency list blindly.
+- Confirm all Flutter Linux host, Rust bridge, renderer, and plugin runtime
+  libraries through ~nix why-depends~ and an actual launch; do not copy either
+  the Iced or development-shell dependency list blindly.
 
 ** Actionable changes and likely files
 
@@ -94,6 +114,10 @@ all-or-nothing rollout.
 - [X] Add ~checks.shosai~ so ~nix flake check~ builds the package and runs its
   tests on the current system.  Cross-system builds remain dependent on suitable
   native or binary-cache runners.
+- [ ] Replace the Iced Cargo-binary derivation with the Flutter Linux bundle and
+  locked Rust native library while retaining the existing Nix entry points.
+- [ ] Include Flutter host/plugin dependencies and prove the bridge and PDFium
+  resolve only libraries in the Nix closure.
 
 ** PDFium and artifact handling
 
@@ -118,6 +142,8 @@ not a new GitHub tarball; publishing to a binary cache is a later decision.
 - [X] PDF integration tests pass using PDFium from the package closure.
 - [X] Nix license metadata, the desktop file, and the current raster icon are
   present; AppStream metadata remains owned by the shared metadata work package.
+- [ ] The same build, launch, PDF opening, software-renderer, and license checks
+  pass against the Flutter application before this package returns to DONE.
 
 ** Secrets and security
 
@@ -193,8 +219,8 @@ signing is a separate, protected-environment follow-up.
 
 ** Prerequisites
 
-- Choose a maintained Freedesktop runtime/SDK version and verify Iced works with
-  its Wayland/X11 and GPU interfaces.
+- Choose a maintained Freedesktop runtime/SDK version and verify the Flutter host
+  works with its Wayland/X11 and GPU interfaces.
 - Generate locked Cargo source entries (for example with ~flatpak-cargo-generator~)
   so the sandbox build is network-free.
 - Review the application ID ~io.github.chaba2.shosai~ for long-term ownership;
@@ -261,9 +287,9 @@ PDFium source hashes as supply-chain controls.
 
 ** Actionable changes and likely files
 
-- [ ] Fix/test ~crates/shosai-core/src/pdf.rs~ so Windows explicitly checks an
-  adjacent ~pdfium.dll~ (or a documented installer-relative location) rather
-  than constructing the non-macOS ~../lib/libpdfium.so~ path.
+- [ ] Make the Flutter/Rust bridge load the packaged Rust library and have the
+  Rust PDF adapter resolve an adjacent ~pdfium.dll~ or documented
+  installer-relative location.
 - [ ] Add ~scripts/package-windows.ps1~ and installer sources under
   ~packaging/windows/~, including file associations, Start menu entry, upgrade
   code, uninstall behavior, icon, and licenses.
@@ -281,8 +307,8 @@ on ~PATH~, and do not install PDFium globally or into ~System32~.
 
 ** CI validation
 
-- Build with ~cargo build --release --locked~ and verify installer contents and
-  Authenticode status (unsigned is expected initially).
+- Build Flutter release plus the locked Rust native library and verify installer
+  contents and Authenticode status (unsigned is expected initially).
 - Perform a silent per-user install in a disposable Windows runner, launch/open a
   PDF, verify file associations/shortcuts, then silently uninstall and assert
   installed files are removed.
@@ -372,6 +398,73 @@ rotation over Apple ID passwords.  Never upload signing artifacts from forks.
 - Mac App Store distribution, sandboxing solely for App Store policy, universal
   binaries, DMG creation, or changing the current minimum macOS version.
 
+* Work Package: Android Store Artifact
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: signed Android App Bundle and test APK
+:END:
+
+** Prerequisites and implementation
+
+- [ ] Pass RFD 4's Flutter/Rust bridge and physical Android device gate.
+- [ ] Build every claimed Android ABI with the Rust native library and pinned
+  PDFium packaged under the correct ~jniLibs~ layout; reject missing or duplicate
+  architectures during assembly.
+- [ ] Define the application ID, minimum/target SDK, file-provider behavior,
+  storage and notification permissions, deep links, backup policy, and Play data
+  safety declarations from implemented behavior.
+- [ ] Produce an unsigned/ephemerally signed APK for pull-request installation
+  tests and a protected-environment App Bundle signed with the release key.
+
+** Acceptance criteria
+
+- [ ] A clean physical-device install and upgrade launch the Flutter host and
+  open PDF, EPUB, and CBZ fixtures without system PDFium or developer tooling.
+- [ ] At least one device for every claimed ABI exercises suspend/resume, process
+  death, file capability restoration, and denied/revoked permissions.
+- [ ] Bundle inspection verifies ABI coverage, native-library alignment, notices,
+  manifest permissions, signing identity, and no release secrets in artifacts.
+
+** Secrets and security
+
+Keep keystore material and passwords in a protected release environment. Never
+expose them to pull requests or commit generated signing configuration. Store
+submission is a separately approved release action.
+
+* Work Package: iOS Store Artifact
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: signed iOS archive and exportable IPA
+:END:
+
+** Prerequisites and implementation
+
+- [ ] Pass RFD 4's Flutter/Rust bridge and physical iPhone/iPad gate.
+- [ ] Build and embed the Rust library and approved PDFium form for each claimed
+  device architecture; verify linkage, bitcode policy where applicable, and that
+  no simulator slice enters the device archive.
+- [ ] Define the bundle ID, deployment target, document capabilities, deep links,
+  background modes, notification entitlements, privacy manifest, usage strings,
+  and App Store privacy answers from implemented behavior.
+- [ ] Keep pull-request builds secretless and use protected certificates,
+  provisioning profiles, and App Store Connect credentials only for release
+  archives and exports.
+
+** Acceptance criteria
+
+- [ ] Clean installs on a physical iPhone and iPad launch and open PDF, EPUB, and
+  CBZ fixtures with all native code validly signed.
+- [ ] Device tests cover suspend/resume, process death, rotation, memory pressure,
+  security-scoped file restoration, and denied/revoked permissions.
+- [ ] Archive/export validation checks architectures, nested signatures,
+  entitlements, privacy manifests, notices, and absence of release credentials.
+
+** Secrets and security
+
+Use a protected release environment with least-privilege App Store Connect keys
+and temporary keychains. Store submission is a separately approved release
+action and does not block independently validated desktop or Android artifacts.
+
 * Work Package: Shared Icons and Metadata
 :PROPERTIES:
 :STATUS: TODO
@@ -424,8 +517,8 @@ PDFium notices in target packages rather than duplicating them into icon assets.
 - [ ] Desktop and AppStream metadata validate and consistently use the application
   ID, summary, and project URL.  Any MIME declarations have tested startup-path
   handling and a matching ~Exec~ field code.
-- [ ] Existing Linux tarball and macOS app can consume the assets without changing
-  executable or PDFium layout.
+- [ ] Flutter Linux, macOS, and Windows hosts consume the assets from one
+  canonical source without requiring one shared native-library layout.
 
 ** Secrets and security
 
@@ -452,3 +545,5 @@ This is sequencing guidance, not a dependency chain.
    Windows arm64 is a separate matrix expansion.
 5. macOS signing/notarization upgrades the existing app artifacts without waiting
    for any Linux or Windows package.
+6. Android and iOS proceed independently after their own physical-device bridge
+   gates; neither mobile store package blocks the other targets.

@@ -97,6 +97,21 @@ bounded owned cache.  Pointer movement must not reopen the PDF or acquire the
 global PDFium lock.  EPUB widgets reuse the layout used to draw their text;
 selection must not perform a second layout with different wrapping or shaping.
 
+=== Frontend migration sequencing
+
+The completed Phase 0 Iced spike is contract evidence, not a reason to finish a
+new production feature in the frontend that RFD 4 proposes replacing. It proves
+that the existing PDF and EPUB renderers can produce bounded, grapheme-safe
+logical endpoints and retained geometry without blocking the drag path.
+
+Continue next with the renderer-independent annotation model, normalization,
+anchor resolution, and SQLite store in Rust. Then use PDF and EPUB highlighting
+as the first Flutter vertical slice. This exercises the Dart/Rust boundary,
+owned geometry and buffers, pointer/keyboard/touch input, overlays, responsive
+layout, persistence, relayout, lifecycle, and accessibility before the rest of
+the UI migrates. Do not integrate the full highlighting product into Iced first;
+keep Iced only as an executable behavioral and geometry reference.
+
 === Layered durable anchors
 
 Persist a bundle of selectors rather than treating any one offset or rectangle
@@ -251,8 +266,11 @@ make one format mutate source files while EPUB still needs sidecar storage.
 
 A browser DOM supplies built-in selection and range APIs, but RFD 1 rejected a
 production Wry renderer because of Wayland embedding, packaging, clipboard,
-accessibility-tree, and dual-renderer costs.  Highlighting extends the selected
-native renderer rather than reopening that architecture decision.
+accessibility-tree, and dual-renderer costs. Highlighting retains the bounded
+Rust parser, resource policy, logical locations, and renderer-neutral layout
+work rather than reopening that architecture decision. RFD 4 may replace Iced
+presentation with Flutter without introducing a browser DOM or a second EPUB
+parser.
 
 == Decisions
 
@@ -340,10 +358,13 @@ than copied into the internal schema.
 
 The link:IMPLEMENTATION.org[RFD 6 implementation checklist] is dependency
 ordered.  Phase 0 closes contracts and selection feasibility, phase 1 adds the
-shared domain and store, phases 2 and 3 deliver PDF and EPUB vertical slices,
-and phase 4 integrates and gates the first release.  Native PDF interoperability
-and EPUB CFI are independent post-MVP phases 5 and 6.
+shared domain and store, phases 2 and 3 deliver PDF and EPUB Flutter vertical
+slices, and phase 4 integrates and gates the first release. Native PDF
+interoperability and EPUB CFI are independent post-MVP phases 5 and 6.
 
 The link:PHASE-0.adoc[Phase 0 contracts and evidence] freeze the interaction,
 anchor, normalization, identity, lifecycle, and resource-budget boundaries that
 must be versioned before the first durable annotation migration.
+
+The cross-platform frontend boundary, platform feasibility gate, and Iced
+retirement sequence are owned by link:../0004/README.adoc[RFD 4].

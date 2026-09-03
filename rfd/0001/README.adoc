@@ -34,6 +34,22 @@ repagination, decoding, and synchronous storage.
 The complete spike, trade-off, benchmark, and platform evidence is retained in
 link:EVIDENCE.md[the EPUB renderer decision evidence].
 
+== Frontend evolution
+
+In this RFD, “native” selects Shōsai's bounded parser, resource policy, computed
+presentation, stable locations, shaping, and layout over an operating-system
+webview. It does not require Iced to remain the product frontend forever. The
+Iced implementation and measurements remain evidence for the published
+renderer decision.
+
+link:../0004/README.adoc[RFD 4] proposes moving renderer-neutral pagination,
+geometry, and hit-testing into the Rust core and presenting them through
+Flutter. That proposal may supersede the Iced presentation boundary without
+reopening this RFD's no-script, no-network, bounded-resource, or native-layout
+decisions. A Flutter implementation must preserve the semantic fixtures, stable
+locations, fallback behavior, and performance budgets recorded here rather than
+introducing a second EPUB parser.
+
 == Implementation
 
 Progress and remaining cross-platform acceptance evidence are tracked in

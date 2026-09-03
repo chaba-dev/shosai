@@ -6,32 +6,36 @@
 
 * Overview
 
-Shōsai (書斎, "study/reading room") is a desktop ebook reader supporting EPUB,
-PDF, and CBZ formats, built in Rust with a native GUI.
+Shōsai (書斎, "study/reading room") is an ebook reader supporting EPUB, PDF, and
+CBZ formats. The current executable is a Rust/Iced desktop application. The
+target architecture in RFD 4 retains the Rust document/application core and
+replaces Iced with one Flutter frontend for desktop, phone, and tablet.
 
 ** Goals
 
-- Fast, native desktop ebook reader
+- Fast ebook reader across desktop, phone, and tablet
 - Support for EPUB, PDF, and CBZ/CBR formats
 - Clean library management for book collections
 - Customizable reading experience (fonts, themes, layout)
 - Permissively licensed (Apache-2.0)
-- Potential future mobile support
+- One responsive Flutter presentation codebase backed by the Rust core
+- An independently evaluated web path through WASM or a service boundary
 
-* Technology Stack
+* Technology Stack — Current Baseline and Target
 
-| Component     | Crate/Tool          | License          | Notes                                             |
-|---------------+---------------------+------------------+---------------------------------------------------|
-| Language      | Rust (edition 2024) | —                | Rust 1.94.0 via Nix flake                         |
-| GUI framework | ~iced~ 0.14         | MIT              | Native GPU-accelerated GUI                        |
-| PDF rendering | ~pdfium-render~     | Apache-2.0 / MIT | Bindings to Google's PDFium engine                |
-| EPUB parsing  | ~zip~ + ~roxmltree~ | MIT              | Custom parser (~300 LOC)                          |
-| EPUB display  | Custom renderer     | —                | Simplified HTML to Iced widgets                   |
-| CBZ support   | ~zip~ + ~image~     | MIT / Apache-2.0 | Extract images from ZIP archive                   |
-| File dialogs  | ~rfd~               | MIT              | Native OS file dialogs                            |
-| Database      | ~sqlx~              | MIT / Apache-2.0 | Async SQLite for library metadata & reading state |
-| Text shaping  | ~cosmic-text~       | MIT / Apache-2.0 | If needed for advanced text layout                |
-| Build/Dev     | Nix flake           | —                | Reproducible dev environment                      |
+| Component     | Crate/Tool             | License          | Direction                                      |
+|---------------+------------------------+------------------+------------------------------------------------|
+| Core language | Rust (edition 2024)    | —                | Retained; Rust 1.94.0 via Nix flake            |
+| Frontend      | ~iced~ 0.14 → Flutter  | MIT / BSD-3-Clause | Iced reference replaced after Flutter gates  |
+| Bridge        | To be selected         | —                | Measured Dart/Rust FFI spike under RFD 4       |
+| PDF rendering | ~pdfium-render~        | Apache-2.0 / MIT | Retained behind owned Rust buffers             |
+| EPUB parsing  | ~zip~ + ~roxmltree~    | MIT              | Retained custom admitted parser                |
+| EPUB display  | Rust model + Flutter   | —                | Rendering boundary selected by measured spike  |
+| CBZ support   | ~zip~ + ~image~        | MIT / Apache-2.0 | Retained extraction and bounded image handling |
+| Platform APIs | Flutter plugins/adapters | Varies         | Files, lifecycle, secure storage, notifications |
+| Database      | ~sqlx~                 | MIT / Apache-2.0 | Native SQLite; web requires a separate adapter |
+| Text shaping  | ~cosmic-text~          | MIT / Apache-2.0 | Retained where renderer-neutral layout needs it |
+| Build/Dev     | Nix + Flutter tooling  | —                | Reproducible native builds per target          |
 
 ** Licensing Decisions
 
@@ -41,7 +45,7 @@ PDF, and CBZ formats, built in Rust with a native GUI.
 - *PDFium selected*: Apache-2.0 licensed, battle-tested (used in Chromium).
 - *EPUB parser*: Custom implementation to avoid all GPL dependencies.
 
-** Architecture — Cargo Workspace
+** Current Architecture — Iced Baseline
 
 #+begin_src
 shosai/
@@ -74,10 +78,29 @@ shosai/
 └── LICENSE
 #+end_src
 
-The separation of ~shosai-core~ and ~shosai-app~ ensures:
-- Core logic (parsing, rendering, DB) is testable independently
-- Alternative frontends can be added later (e.g., mobile, TUI)
-- Clear dependency boundaries
+This tree records the executable baseline and historical phase results. It is
+not the target frontend architecture.
+
+** Target Architecture — RFD 4
+
+#+begin_src
+Flutter desktop / mobile hosts
+             │
+             ▼
+owned, coarse Dart/Rust bridge DTOs and handles
+             │
+             ▼
+shosai-core
+├── document admission, parsing, and format capabilities
+├── reader sessions, renderer-neutral layout, caches, and search
+├── library, reading state, bookmarks, annotations, and sync
+└── injected native storage, files, PDFium, and platform adapters
+#+end_src
+
+The Flutter frontend owns responsive presentation, navigation, gestures,
+accessibility, lifecycle, and platform-service adapters. The Rust core remains
+testable without Flutter or Iced. RFD 4 tracks extraction and the Flutter gate;
+RFD 5 tracks independently releasable packages.
 
 * Phase 1 — Foundation & PDF Viewer (MVP)
 :PROPERTIES:
@@ -269,18 +292,23 @@ RFD: [[file:../rfd/0002/README.adoc][RFD 2: Additional ebook formats]]
 ** TODO Cloud sync (optional)
 RFD: [[file:../rfd/0003/README.adoc][RFD 3: Cloud synchronization]]
 
-- [ ] Design sync protocol for reading progress + bookmarks
+- [ ] Design sync protocol for reading progress, bookmarks, and annotations
 - [ ] Evaluate backends (self-hosted, WebDAV, etc.)
 - [ ] Conflict resolution for concurrent reading on multiple devices
 - [ ] Start with local storage, architecture should support sync later
 
-** TODO Mobile support
-RFD: [[file:../rfd/0004/README.adoc][RFD 4: Mobile support]]
+** TODO Cross-platform Flutter frontend
+RFD: [[file:../rfd/0004/README.adoc][RFD 4: Cross-platform Flutter frontend]]
 
-- [ ] Prove the Flutter mobile and Rust-core boundary on physical Android and iOS
-  devices
-- [ ] Select companion versus full reader and the first release platform
-- [ ] Sync reading progress across desktop and mobile
+- [ ] Move coherent application policy, EPUB pagination, reader sessions, and
+  renderer-neutral geometry from the Iced app into the Rust core
+- [X] Implement RFD 6's renderer-independent annotation model and SQLite store
+- [ ] Use cross-format highlighting as the first Flutter desktop/mobile slice
+- [ ] Prove the Flutter/Rust boundary on desktop and at least one physical mobile
+  platform, then validate each additional platform before claiming support
+- [ ] Migrate PDF, EPUB, and CBZ readers plus the library shell before retiring
+  the Iced reference frontend
+- [ ] Evaluate Flutter Web separately through WASM or service adapters
 
 ** TODO Distribution & packaging
 RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
@@ -293,6 +321,8 @@ RFD: [[file:../rfd/0005/README.adoc][RFD 5: Distribution and packaging]]
 - [ ] Flatpak for Linux
 - [ ] Windows installer (NSIS or WiX)
 - [ ] macOS Developer ID signing and notarization
+- [ ] Android signed APK/App Bundle and store validation
+- [ ] iOS signed archive/IPA and store validation
 
 *Note — PDFium bundling*: The app depends on ~libpdfium~ at runtime (a C
 shared library). Development uses ~pdfium-binaries~ from the Nix dev shell.
@@ -319,11 +349,11 @@ layout:
 
 | Risk                                        | Impact | Mitigation                                                       |
 |---------------------------------------------+--------+------------------------------------------------------------------|
-| Iced is "experimental" software             | High   | Pin to 0.14, abstract GUI layer, monitor upstream closely        |
+| Flutter/Rust bridge ownership or latency     | High   | Coarse owned DTOs, measured highlighting slice, explicit release |
 | PDFium binary distribution complexity       | Medium | Nix handles dev; each distro format must bundle libpdfium       |
-| No pure-Rust HTML/CSS renderer for EPUB     | High   | Simplified renderer for MVP, webview fallback in Phase 5         |
-| Iced text rendering quality on non-HiDPI    | Medium | Test early, may need custom text rendering via canvas            |
-| Iced slow startup on Linux (font loading)   | Low    | Known issue #2455, may be fixed upstream; can lazy-load fonts    |
+| EPUB Flutter rendering boundary unclear     | High   | Measure Rust scene vs semantic model before broad migration      |
+| Mobile lifecycle and memory pressure        | High   | Physical-device suspend/resume and recovery gates per platform   |
+| Iced and Flutter behavior drift in migration | Medium | Freeze Iced; replace in tested vertical slices, then remove it  |
 | ~pdfium-render~ types thread safety         | Medium | Investigate early, may need message-passing architecture         |
 | Complex PDFs rendering incorrectly          | Medium | PDFium is battle-tested (Chromium), low risk in practice         |
 | EPUB content diversity (tables, math, etc.) | Medium | Simplified renderer won't handle all content; phase 5 addresses  |
