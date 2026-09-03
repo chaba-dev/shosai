@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
@@ -376,11 +376,15 @@ const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const EPUB_IMAGE_WORKERS: usize = 1;
+// Source, decode, and resized output share one process budget; worst-case jobs
+// serialize when two cannot fit together.
 const TRANSIENT_DECODE_BYTE_CAPACITY: usize = 320 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const RASTER_RENDER_WORKERS: usize = 2;
 const CBZ_DIMENSION_WORKERS: usize = 1;
+const RETAINED_DOCUMENT_COUNT_CAPACITY: usize = 16;
+const RETAINED_DOCUMENT_BYTE_CAPACITY: usize = 3 * 1024 * 1024 * 1024;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -656,6 +660,31 @@ struct ReaderTab {
     search_results: Vec<SearchMatch>,
     search_current: usize,
     search_text: Option<Arc<Vec<String>>>,
+    document_permit: RetainedDocumentPermit,
+}
+
+#[derive(Debug, Clone)]
+struct RetainedDocumentPermit {
+    _count: CachePermit,
+    _bytes: CachePermit,
+}
+
+fn retained_document_budgets() -> &'static (CacheBudget, CacheBudget) {
+    static BUDGETS: OnceLock<(CacheBudget, CacheBudget)> = OnceLock::new();
+    BUDGETS.get_or_init(|| {
+        (
+            CacheBudget::new(if cfg!(test) {
+                1024
+            } else {
+                RETAINED_DOCUMENT_COUNT_CAPACITY
+            }),
+            CacheBudget::new(if cfg!(test) {
+                RETAINED_DOCUMENT_BYTE_CAPACITY * 1024
+            } else {
+                RETAINED_DOCUMENT_BYTE_CAPACITY
+            }),
+        )
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -748,6 +777,8 @@ pub struct State {
     display_title: Option<String>,
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
+    document_permit: Option<RetainedDocumentPermit>,
+    pending_document_permit: Option<(u64, RetainedDocumentPermit)>,
     current_page: usize,
     total_pages: usize,
     zoom: ZoomMode,
@@ -908,6 +939,8 @@ pub fn boot() -> (State, Task<Message>) {
         display_title: None,
         file_path: None,
         document: None,
+        document_permit: None,
+        pending_document_permit: None,
         current_page: 0,
         total_pages: 0,
         zoom: ZoomMode::default(),
@@ -1311,6 +1344,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         search_results: state.search_results.clone(),
         search_current: state.search_current,
         search_text: state.search_text.clone(),
+        document_permit: state.document_permit.clone()?,
     })
 }
 
@@ -1320,6 +1354,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.display_title = Some(tab.display_title);
     state.file_path = Some(tab.session.locator.path().to_path_buf());
     state.document = Some(tab.session.document);
+    state.document_permit = Some(tab.document_permit);
     state.current_page = tab.session.location.page;
     state.total_pages = tab.total_pages;
     state.zoom = tab.session.preferences.pdf_zoom;
@@ -1477,6 +1512,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.display_title = None;
         state.file_path = None;
         state.document = None;
+        state.document_permit = None;
         state.rendered_page = None;
         state.rendered_page_index = None;
         state.rendered_page_handle = None;
@@ -1536,6 +1572,31 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
 
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
+    state.pending_document_permit = None;
+    let (count_budget, byte_budget) = retained_document_budgets();
+    let Some(count) = count_budget.try_reserve(1) else {
+        state.open_error = Some(AppError::Open {
+            format: "document",
+            detail: "retained document count limit exceeded".to_owned(),
+        });
+        return Task::none();
+    };
+    // Hold the full ceiling while parsing. Once the document exists,
+    // finish_open_document_with_permit atomically shrinks this to its derived charge.
+    let Some(bytes) = byte_budget.try_reserve(RETAINED_DOCUMENT_BYTE_CAPACITY) else {
+        state.open_error = Some(AppError::Open {
+            format: "document",
+            detail: "retained document byte limit exceeded".to_owned(),
+        });
+        return Task::none();
+    };
+    state.pending_document_permit = Some((
+        generation,
+        RetainedDocumentPermit {
+            _count: count,
+            _bytes: bytes,
+        },
+    ));
     state.document_opening = true;
     state.document_open_notice_visible = false;
     let book =
@@ -1586,6 +1647,72 @@ fn finish_open_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) -> Task<Message> {
+    let Some((_, document_permit)) = state
+        .pending_document_permit
+        .take()
+        .filter(|(generation, _)| *generation == state.document_open_generation)
+    else {
+        // Synchronous test opens do not pass through open_document; admit them
+        // conservatively from the already-read source file.
+        let retained_bytes = std::fs::metadata(&path)
+            .ok()
+            .and_then(|metadata| usize::try_from(metadata.len()).ok())
+            .unwrap_or_default();
+        let (count_budget, byte_budget) = retained_document_budgets();
+        let Some(count) = count_budget.try_reserve(1) else {
+            state.open_error = Some(AppError::Open {
+                format: "document",
+                detail: "retained document count limit exceeded".to_owned(),
+            });
+            return Task::none();
+        };
+        let Some(bytes) = byte_budget.try_reserve(retained_bytes) else {
+            state.open_error = Some(AppError::Open {
+                format: "document",
+                detail: "retained document byte limit exceeded".to_owned(),
+            });
+            return Task::none();
+        };
+        return finish_open_document_with_permit(
+            state,
+            path,
+            book_id,
+            document,
+            RetainedDocumentPermit {
+                _count: count,
+                _bytes: bytes,
+            },
+        );
+    };
+    finish_open_document_with_permit(state, path, book_id, document, document_permit)
+}
+
+fn finish_open_document_with_permit(
+    state: &mut State,
+    path: PathBuf,
+    book_id: Option<i64>,
+    document: OpenDocument,
+    mut document_permit: RetainedDocumentPermit,
+) -> Task<Message> {
+    let Some(retained_bytes) = document.retained_byte_len() else {
+        state.open_error = Some(AppError::Open {
+            format: "document",
+            detail: "retained document byte charge overflowed".to_owned(),
+        });
+        return Task::none();
+    };
+    let (_, byte_budget) = retained_document_budgets();
+    let Some(resized) =
+        byte_budget.try_reserve_replacing(retained_bytes, std::iter::once(&document_permit._bytes))
+    else {
+        state.open_error = Some(AppError::Open {
+            format: "document",
+            detail: "retained document byte limit exceeded".to_owned(),
+        });
+        return Task::none();
+    };
+    document_permit._bytes = resized;
+
     if let Some(index) = state.tabs.iter().position(|tab| {
         book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
     }) {
@@ -1611,6 +1738,7 @@ fn finish_open_document(
         state.open_error = None;
         state.missing_book_id = None;
         install_document(state, path, book_id, document);
+        state.document_permit = Some(document_permit);
         state.zoom = retained_preferences.pdf_zoom;
         state.font_size = retained_preferences.epub_font_size;
         state.line_spacing = retained_preferences.epub_line_spacing;
@@ -1637,6 +1765,7 @@ fn finish_open_document(
     state.open_error = None;
     state.missing_book_id = None;
     install_document(state, path, book_id, document);
+    state.document_permit = Some(document_permit);
     apply_reader_defaults(state);
     let task = refresh_content(state);
     if let Some(tab) = capture_reader_tab(state) {
@@ -2228,8 +2357,10 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         return Task::none();
     }
 
+    let current_chapter = state.current_page.min(chapters.len() - 1);
+    let nearby_range = nearby_chapters(current_chapter, chapters.len(), 1);
     let nearby = epub_image_paths(
-        chapters[nearby_chapters(state.current_page, chapters.len(), 1)]
+        chapters[nearby_range.clone()]
             .iter()
             .flat_map(|chapter| chapter.nodes()),
     );
@@ -2252,7 +2383,15 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         return Task::none();
     }
 
-    let Some(path) = state.epub_images_desired.iter().next().cloned() else {
+    // HashSet iteration is deliberately not used for scheduling: the chapter being
+    // read always wins over speculative neighbours, with document order as the tie-breaker.
+    let ordered_paths = std::iter::once(current_chapter)
+        .chain(nearby_range.filter(|chapter| *chapter != current_chapter))
+        .flat_map(|chapter| epub_image_paths(chapters[chapter].nodes()).into_iter());
+    let Some(path) = ordered_paths
+        .into_iter()
+        .find(|path| state.epub_images_desired.contains(path))
+    else {
         return Task::none();
     };
     state.epub_images_pending = [path.clone()].into_iter().collect();
@@ -2301,9 +2440,16 @@ fn decode_epub_image_task(
     let (permit, transient_permit) = if let Some(permits) = reserve(state) {
         permits
     } else {
+        // Inactive tabs and images outside the current chapter are speculative.
         for tab in &mut state.tabs {
             tab.epub_image_handles.clear();
         }
+        let chapters = document.presentation().chapters();
+        let current_paths =
+            epub_image_paths(chapters[state.current_page.min(chapters.len() - 1)].nodes());
+        state
+            .epub_image_handles
+            .retain(|path, _| current_paths.contains(path));
         reserve(state)?
     };
     let path = job.path.clone();
@@ -2800,7 +2946,9 @@ fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePer
 fn reserve_render_transient(state: &State, page: usize, scale: f32) -> Option<CachePermit> {
     let byte_len = match state.document.as_ref()? {
         OpenDocument::Pdf(document) => document.render_transient_byte_len(page, scale).ok()?,
-        OpenDocument::Cbz(document) => document.render_transient_byte_len(page, scale)?,
+        // CBZ admission includes the compressed source entry as well as the
+        // conservative decode and resize allocations.
+        OpenDocument::Cbz(document) => document.render_admission_byte_len_at_scale(page, scale)?,
         OpenDocument::Epub(_) => return None,
     };
     state.transient_decode_budget.try_reserve(byte_len)
@@ -2811,7 +2959,34 @@ fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermi
         if let Some(permit) = state.raster_budget.try_reserve(byte_len) {
             return Some(permit);
         }
-        state.page_cache.pop_oldest()?;
+        // The budget is shared by every tab. Release inactive displays/caches
+        // before sacrificing the currently visible page.
+        if let Some(tab) = state.tabs.iter_mut().find(|tab| {
+            !tab.page_cache.is_empty()
+                || tab.rendered_page.is_some()
+                || tab.rendered_facing_page.is_some()
+        }) {
+            tab.page_cache.clear();
+            tab.rendered_page = None;
+            tab.rendered_page_handle = None;
+            tab.rendered_facing_page = None;
+            tab.rendered_facing_page_handle = None;
+            tab.continuous_pages.fill(None);
+            continue;
+        }
+        // A navigation request supersedes this display. Clear its pixel clones
+        // before evicting the cache entry whose permit accounts for them.
+        if state.rendered_page.is_some() || state.rendered_facing_page.is_some() {
+            state.rendered_page = None;
+            state.rendered_page_handle = None;
+            state.rendered_facing_page = None;
+            state.rendered_facing_page_handle = None;
+            continue;
+        }
+        if state.page_cache.pop_oldest().is_some() {
+            continue;
+        }
+        return None;
     }
 }
 
@@ -6707,6 +6882,11 @@ mod tests {
 
     fn state_with_document(document: OpenDocument) -> State {
         let (mut state, _) = boot();
+        let (count_budget, byte_budget) = retained_document_budgets();
+        state.document_permit = Some(RetainedDocumentPermit {
+            _count: count_budget.try_reserve(1).unwrap(),
+            _bytes: byte_budget.try_reserve(0).unwrap(),
+        });
         state.screen = Screen::Reader;
         state.active_tab_id = Some(1);
         state.next_tab_id = 2;

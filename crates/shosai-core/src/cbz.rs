@@ -55,6 +55,33 @@ pub struct CbzDoc {
 }
 
 impl CbzDoc {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        let names = self
+            .page_paths
+            .iter()
+            .try_fold(0_usize, |total, path| total.checked_add(path.capacity()))?;
+        self.data
+            .capacity()
+            .checked_add(names)?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<String>())?,
+            )?
+            .checked_add(
+                self.page_byte_lengths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<usize>())?,
+            )?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<Option<(u32, u32)>>())?,
+            )?
+            .checked_add(self.title.as_ref().map_or(0, String::capacity))
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limits(path, CbzLimits::default())
     }
@@ -161,11 +188,17 @@ impl CbzDoc {
         self.page_byte_lengths.get(index).copied()
     }
 
-    /// Worst-case compressed-source plus temporary decode/resize allocation.
+    /// Worst-case source and decode admission used by non-rendering callers.
     pub fn render_admission_byte_len(&self, index: usize) -> Option<usize> {
         let source = self.page_source_byte_len(index)?;
         let decoded = usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?;
         source.checked_add(decoded.checked_mul(2)?)
+    }
+
+    /// Compressed source plus conservative temporary decode/resize allocation.
+    pub fn render_admission_byte_len_at_scale(&self, index: usize, scale: f32) -> Option<usize> {
+        let source = self.page_source_byte_len(index)?;
+        source.checked_add(self.render_transient_byte_len(index, scale)?)
     }
 
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
@@ -322,12 +355,14 @@ impl CbzDoc {
         {
             return None;
         }
+        let decoded = usize::try_from(width)
+            .ok()?
+            .checked_mul(usize::try_from(height).ok()?)?
+            .checked_mul(4)?;
         let resized = (target_width as usize)
             .checked_mul(target_height as usize)?
             .checked_mul(4)?;
-        usize::try_from(self.limits.max_decoded_rgba_bytes)
-            .ok()?
-            .checked_add(resized)
+        decoded.checked_add(resized)
     }
 
     /// Return dimensions already discovered by a prior size query or render.

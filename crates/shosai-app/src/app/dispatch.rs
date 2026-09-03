@@ -281,6 +281,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(document) => return finish_open_document(state, path, book_id, document),
                 Err(error) => {
+                    state.pending_document_permit = None;
                     let performance_task = perf::fail(state, &error.diagnostic());
                     state.screen = Screen::Reader;
                     state.open_error = Some(error);
@@ -1906,9 +1907,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.epub_image_jobs.remove(&job);
                     state.epub_image_decode_active = false;
                     state.epub_images_pending.remove(&path);
-                    state.epub_images_desired.remove(&path);
-                    state.epub_images_failed.insert(path);
-                    return load_epub_images_task(state);
+                    // A held permit is temporary contention. Keep the image
+                    // desired so a permit-releasing completion can retry it;
+                    // only an otherwise-empty budget proves permanent oversize.
+                    if state.epub_image_budget.used() == 0
+                        && state.transient_decode_budget.used() == 0
+                    {
+                        state.epub_images_desired.remove(&path);
+                        state.epub_images_failed.insert(path);
+                        return load_epub_images_task(state);
+                    }
+                    return Task::none();
                 }
                 state.epub_image_jobs.remove(&job);
                 state.epub_image_decode_active = false;
