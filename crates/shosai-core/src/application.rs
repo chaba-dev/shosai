@@ -218,7 +218,10 @@ fn classify_open_error(format: BookFormat, error: anyhow::Error) -> OpenDocument
     {
         return match io_error.kind() {
             std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
-            _ => OpenDocumentError::Inaccessible(detail),
+            std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::ReadOnlyFilesystem
+            | std::io::ErrorKind::ResourceBusy => OpenDocumentError::Inaccessible(detail),
+            _ => OpenDocumentError::Open { format, detail },
         };
     }
     OpenDocumentError::Open { format, detail }
@@ -298,6 +301,22 @@ mod tests {
             classify_open_error(BookFormat::Cbz, error),
             OpenDocumentError::LimitExceeded {
                 format: BookFormat::Cbz,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn malformed_io_is_not_classified_as_inaccessible() {
+        let error = anyhow::Error::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "malformed stream",
+        ));
+
+        assert!(matches!(
+            classify_open_error(BookFormat::Epub, error),
+            OpenDocumentError::Open {
+                format: BookFormat::Epub,
                 ..
             }
         ));

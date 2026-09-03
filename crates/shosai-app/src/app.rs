@@ -2040,12 +2040,16 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
+                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
+                    else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
                         tab_id,
                         generation,
                         key.clone(),
-                        None,
+                        Some(transient_permit),
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key.clone());
@@ -2127,9 +2131,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
-                    let Some(transient_permit) = doc
-                        .render_transient_byte_len(page, scale)
-                        .and_then(|bytes| state.transient_decode_budget.try_reserve(bytes))
+                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
                     else {
                         continue;
                     };
@@ -2675,22 +2677,12 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             let Some(permit) = reserve_raster_bytes(state, byte_len) else {
                 continue;
             };
-            let transient_permit = if let Some(OpenDocument::Cbz(document)) = &state.document {
-                let Some(transient_byte_len) = document.render_transient_byte_len(
-                    page,
-                    raster_render_scale(state, state.zoom.scale()),
-                ) else {
-                    continue;
-                };
-                let Some(transient_permit) = state
-                    .transient_decode_budget
-                    .try_reserve(transient_byte_len)
-                else {
-                    continue;
-                };
-                Some(transient_permit)
-            } else {
-                None
+            let Some(transient_permit) = reserve_render_transient(
+                state,
+                page,
+                raster_render_scale(state, state.zoom.scale()),
+            ) else {
+                continue;
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
@@ -2709,7 +2701,7 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
                 tab_id,
                 request,
                 page,
-                transient_permit,
+                Some(transient_permit),
             ));
         }
     }
@@ -2803,6 +2795,15 @@ fn raster_byte_len(state: &State, page: usize, scale: f32) -> Option<usize> {
 fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePermit> {
     let byte_len = raster_byte_len(state, page, scale)?;
     reserve_raster_bytes(state, byte_len)
+}
+
+fn reserve_render_transient(state: &State, page: usize, scale: f32) -> Option<CachePermit> {
+    let byte_len = match state.document.as_ref()? {
+        OpenDocument::Pdf(document) => document.render_transient_byte_len(page, scale).ok()?,
+        OpenDocument::Cbz(document) => document.render_transient_byte_len(page, scale)?,
+        OpenDocument::Epub(_) => return None,
+    };
+    state.transient_decode_budget.try_reserve(byte_len)
 }
 
 fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermit> {
@@ -3136,11 +3137,14 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 let Some(permit) = reserve_raster(state, page, scale) else {
                     continue;
                 };
+                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
+                    continue;
+                };
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
                     key.clone(),
-                    None,
+                    Some(transient_permit),
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key.clone());
@@ -3158,10 +3162,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 let Some(permit) = reserve_raster(state, page, scale) else {
                     continue;
                 };
-                let Some(transient_permit) = document
-                    .render_transient_byte_len(page, scale)
-                    .and_then(|bytes| state.transient_decode_budget.try_reserve(bytes))
-                else {
+                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
                     continue;
                 };
                 tasks.push(render_page_task(
@@ -6995,6 +6996,22 @@ mod tests {
         );
         document.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(document));
+        state.transient_decode_budget = CacheBudget::new(0);
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.raster_jobs.is_empty());
+        assert!(state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn pdf_render_waits_for_transient_decode_admission() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
         state.transient_decode_budget = CacheBudget::new(0);
 
         let task = refresh_content(&mut state);

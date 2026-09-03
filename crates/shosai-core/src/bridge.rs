@@ -419,6 +419,21 @@ impl Bridge {
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
+        let pdf_transient_byte_len = match &retained_document.document {
+            OpenDocument::Pdf(_) => byte_len,
+            OpenDocument::Cbz(_) => 0,
+            OpenDocument::Epub(_) => {
+                return Err(BridgeError::UnsupportedOperation(BookFormat::Epub));
+            }
+        };
+        let pdf_transient_permits =
+            u32::try_from(pdf_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
+        let _pdf_transient_bytes = acquire_permits(
+            Arc::clone(&self.admission.probe_bytes),
+            pdf_transient_permits,
+            &cancellation,
+        )
+        .await?;
         let transfer_peak = byte_len.checked_mul(2).ok_or(BridgeError::BufferLimit)?;
         let byte_permits = u32::try_from(transfer_peak).map_err(|_| BridgeError::BufferLimit)?;
         let buffer_bytes = acquire_permits(
@@ -675,11 +690,9 @@ fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<u
     match document {
         OpenDocument::Pdf(document) => document
             .rendered_byte_len(page, scale)
-            .map_err(|error| BridgeError::InvalidRequest(error.to_string())),
+            .map_err(map_preflight_error),
         OpenDocument::Cbz(document) => {
-            let (width, height) = document
-                .page_size(page)
-                .map_err(|error| BridgeError::InvalidRequest(error.to_string()))?;
+            let (width, height) = document.page_size(page).map_err(map_preflight_error)?;
             let width = (f64::from(width) * f64::from(scale)).ceil();
             let height = (f64::from(height) * f64::from(scale)).ceil();
             if !width.is_finite() || !height.is_finite() || width < 1.0 || height < 1.0 {
@@ -698,14 +711,34 @@ fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<u
 
 fn render(document: OpenDocument, page: usize, scale: f32) -> Result<RenderedPage, BridgeError> {
     match document {
-        OpenDocument::Pdf(document) => document
-            .render_page(page, scale)
-            .map_err(|error| BridgeError::Render(error.to_string())),
-        OpenDocument::Cbz(document) => document
-            .render_page(page, scale)
-            .map_err(|error| BridgeError::Render(error.to_string())),
+        OpenDocument::Pdf(document) => document.render_page(page, scale).map_err(map_render_error),
+        OpenDocument::Cbz(document) => document.render_page(page, scale).map_err(map_render_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
+}
+
+fn map_preflight_error(error: anyhow::Error) -> BridgeError {
+    if is_resource_limit(&error) {
+        BridgeError::BufferLimit
+    } else {
+        BridgeError::InvalidRequest(error.to_string())
+    }
+}
+
+fn map_render_error(error: anyhow::Error) -> BridgeError {
+    if is_resource_limit(&error) {
+        BridgeError::BufferLimit
+    } else {
+        BridgeError::Render(error.to_string())
+    }
+}
+
+fn is_resource_limit(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<crate::application::ResourceLimitError>()
+            .is_some()
+    })
 }
 
 #[cfg(test)]
@@ -721,6 +754,18 @@ mod tests {
                 "/tests/fixtures/sample.cbz"
             ))),
             format_hint: Some(BookFormat::Cbz),
+        }
+    }
+
+    fn pdf_request() -> OpenRequest {
+        OpenRequest {
+            book_id: None,
+            local_id: "pdf-fixture".to_owned(),
+            path_key: crate::path_key::path_key(std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            ))),
+            format_hint: Some(BookFormat::Pdf),
         }
     }
 
@@ -770,6 +815,12 @@ mod tests {
         assert_eq!(
             BridgeError::Render("backend error".to_owned()).kind(),
             BridgeErrorKind::RenderFailed
+        );
+        assert_eq!(
+            map_preflight_error(anyhow::Error::new(crate::application::ResourceLimitError(
+                "decoded image limit".to_owned()
+            ))),
+            BridgeError::BufferLimit
         );
     }
 
@@ -891,6 +942,34 @@ mod tests {
         );
         drop(first);
         let _second = second.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pdf_render_waits_for_transient_memory_admission() {
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.probe_bytes = Arc::new(Semaphore::new(0));
+        let bridge = Bridge::with_admission(Arc::new(admission));
+        let document = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let cancellation = Cancellation::new();
+        let mut render = Box::pin(bridge.render_page(
+            RenderRequest {
+                document: document.handle,
+                page: 0,
+                scale: 1.0,
+            },
+            cancellation.clone(),
+        ));
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut render)
+                .await
+                .is_err()
+        );
+        cancellation.cancel();
+        assert_eq!(render.await, Err(BridgeError::Cancelled));
     }
 
     #[test]

@@ -261,6 +261,11 @@ mod tests {
         let error = PdfDoc::from_bytes_with_limit(vec![0; 5], 4).unwrap_err();
 
         assert!(error.to_string().contains("4-byte input limit"));
+        assert!(
+            error
+                .downcast_ref::<crate::application::ResourceLimitError>()
+                .is_some()
+        );
     }
 }
 
@@ -285,7 +290,7 @@ impl PdfDoc {
         let metadata = std::fs::metadata(path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.len() > max_input_bytes {
-            anyhow::bail!("PDF exceeds the {max_input_bytes}-byte input limit");
+            crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
@@ -303,7 +308,7 @@ impl PdfDoc {
 
     pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > max_input_bytes {
-            anyhow::bail!("PDF exceeds the {max_input_bytes}-byte input limit");
+            crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
         let pdfium = create_pdfium()?;
         let document = pdfium
@@ -501,6 +506,11 @@ impl PdfDoc {
             .context("PDF raster byte size overflow")
     }
 
+    /// Temporary native bitmap bytes retained while producing the owned RGBA output.
+    pub fn render_transient_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
+        self.rendered_byte_len(index, scale)
+    }
+
     fn render_dimensions(&self, index: usize, scale: f32) -> Result<(i32, i32)> {
         let &(width, height) = self.page_sizes.get(index).with_context(|| {
             format!(
@@ -571,7 +581,7 @@ impl PdfDoc {
 
 fn validate_pdf_selection_endpoint_count(count: usize) -> Result<()> {
     if count > PDF_SELECTION_MAX_ENDPOINTS {
-        anyhow::bail!(
+        crate::resource_limit!(
             "PDF page exceeds the {PDF_SELECTION_MAX_ENDPOINTS}-endpoint selection ceiling"
         );
     }
@@ -589,7 +599,7 @@ fn validate_pdf_bitmap_size(width: f32, height: f32, scale: f32) -> Result<(i32,
         || height > f64::from(MAX_PDF_BITMAP_DIMENSION)
         || width * height > MAX_PDF_BITMAP_PIXELS as f64
     {
-        anyhow::bail!("PDF bitmap exceeds decoded image limits");
+        crate::resource_limit!("PDF bitmap exceeds decoded image limits");
     }
     Ok((width as i32, height as i32))
 }
