@@ -112,6 +112,17 @@ impl Cancellation {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeErrorKind {
+    Cancelled,
+    NotFound,
+    Inaccessible,
+    Malformed,
+    LimitExceeded,
+    BackendUnavailable,
+    RenderFailed,
+}
+
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum BridgeError {
     #[error("operation was cancelled")]
@@ -120,6 +131,10 @@ pub enum BridgeError {
     InvalidDocumentHandle,
     #[error("unknown, foreign, or released buffer handle")]
     InvalidBufferHandle,
+    #[error("document was not found")]
+    DocumentNotFound,
+    #[error("document is inaccessible")]
+    DocumentInaccessible,
     #[error("operation is unsupported for {0}")]
     UnsupportedOperation(BookFormat),
     #[error("unsupported file format: .{0}")]
@@ -138,6 +153,31 @@ pub enum BridgeError {
     Panic,
     #[error("bridge worker stopped unexpectedly")]
     Worker,
+}
+
+impl BridgeError {
+    pub fn kind(&self) -> BridgeErrorKind {
+        match self {
+            Self::Cancelled => BridgeErrorKind::Cancelled,
+            Self::InvalidDocumentHandle | Self::InvalidBufferHandle | Self::DocumentNotFound => {
+                BridgeErrorKind::NotFound
+            }
+            Self::DocumentInaccessible => BridgeErrorKind::Inaccessible,
+            Self::BufferLimit => BridgeErrorKind::LimitExceeded,
+            Self::Panic | Self::Worker => BridgeErrorKind::BackendUnavailable,
+            Self::Render(_) => BridgeErrorKind::RenderFailed,
+            Self::Open { detail, .. } if is_limit_error(detail) => BridgeErrorKind::LimitExceeded,
+            Self::Open { .. }
+            | Self::UnsupportedOperation(_)
+            | Self::UnsupportedFormat(_)
+            | Self::InvalidPage { .. }
+            | Self::InvalidRequest(_) => BridgeErrorKind::Malformed,
+        }
+    }
+}
+
+fn is_limit_error(detail: &str) -> bool {
+    detail.to_ascii_lowercase().contains("limit")
 }
 
 #[derive(Debug)]
@@ -191,6 +231,16 @@ impl Bridge {
         let mut locator = DeviceFileLocator::new(request.local_id, request.path);
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
+        }
+        match std::fs::metadata(locator.path()) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(BridgeError::DocumentNotFound);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                return Err(BridgeError::DocumentInaccessible);
+            }
+            Err(_) => return Err(BridgeError::Worker),
         }
         let document = tokio::task::spawn_blocking(move || {
             guarded(|| OpenDocument::open(&locator).map_err(map_open_error))
@@ -464,6 +514,38 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bridge_errors_expose_stable_categories() {
+        assert_eq!(
+            BridgeError::InvalidDocumentHandle.kind(),
+            BridgeErrorKind::NotFound
+        );
+        assert_eq!(
+            BridgeError::DocumentInaccessible.kind(),
+            BridgeErrorKind::Inaccessible
+        );
+        assert_eq!(
+            BridgeError::InvalidRequest("bad scale".to_owned()).kind(),
+            BridgeErrorKind::Malformed
+        );
+        assert_eq!(
+            BridgeError::Open {
+                format: BookFormat::Cbz,
+                detail: "entry exceeds byte limit".to_owned(),
+            }
+            .kind(),
+            BridgeErrorKind::LimitExceeded
+        );
+        assert_eq!(
+            BridgeError::Worker.kind(),
+            BridgeErrorKind::BackendUnavailable
+        );
+        assert_eq!(
+            BridgeError::Render("backend error".to_owned()).kind(),
+            BridgeErrorKind::RenderFailed
+        );
+    }
+
     #[tokio::test]
     async fn cancellation_prevents_opening_and_allocating_handles() {
         let bridge = Bridge::new();
@@ -477,6 +559,21 @@ mod tests {
 
         assert_eq!(error, BridgeError::Cancelled);
         assert!(bridge.registry.lock().unwrap().documents.is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_documents_have_a_stable_not_found_category() {
+        let bridge = Bridge::new();
+        let mut request = cbz_request();
+        request.path = "/definitely/missing/shosai-book.cbz".to_owned();
+
+        let error = bridge
+            .open_document(request, Cancellation::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, BridgeError::DocumentNotFound);
+        assert_eq!(error.kind(), BridgeErrorKind::NotFound);
     }
 
     #[test]
