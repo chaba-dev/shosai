@@ -179,11 +179,19 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
     let page = lib.page(None, None, u32::MAX, 0).await.unwrap();
     assert_eq!(page.books.len(), 500);
     assert!(page.has_more);
+    assert_eq!(lib.list_all().await.unwrap().len(), 500);
     let ids = lib.matching_ids(None, None).await.unwrap();
     let books = lib.books_by_ids(&ids).await.unwrap();
     assert_eq!(books.len(), 1_005);
     assert_eq!(books.first().unwrap().id, ids[0]);
     assert_eq!(books.last().unwrap().id, *ids.last().unwrap());
+    assert!(
+        lib.books_by_ids(&vec![0; 10_001])
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("snapshot exceeds")
+    );
 }
 
 #[tokio::test]

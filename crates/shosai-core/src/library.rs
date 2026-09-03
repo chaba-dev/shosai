@@ -27,12 +27,25 @@ pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
 const MAX_IMPORT_DISCOVERY_RESULTS: usize = 10_000;
 const MAX_IMPORT_ROOTS: usize = 10_000;
+const MAX_IMPORT_TRAVERSAL_ENTRIES: usize = 50_000;
 const MAX_LIBRARY_PAGE_SIZE: u32 = 500;
+const MAX_LIBRARY_SNAPSHOT_SIZE: usize = 10_000;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
     static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
     ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+}
+
+async fn acquire_scanner(
+    cancellation: &ImportCancellation,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    tokio::select! {
+        permit = scanner_admission().clone().acquire_owned() => {
+            Some(permit.expect("scanner semaphore closed"))
+        }
+        () = cancellation.cancelled() => None,
+    }
 }
 
 fn fingerprint_admission() -> &'static Arc<tokio::sync::Semaphore> {
@@ -181,16 +194,33 @@ pub struct ImportDiscovery {
     pub failures: Vec<ImportFailure>,
 }
 
+#[derive(Debug, Default)]
+struct ImportCancellationInner {
+    cancelled: AtomicBool,
+    notify: tokio::sync::Notify,
+}
+
 #[derive(Debug, Clone, Default)]
-pub struct ImportCancellation(Arc<AtomicBool>);
+pub struct ImportCancellation(Arc<ImportCancellationInner>);
 
 impl ImportCancellation {
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        self.0.cancelled.store(true, Ordering::Release);
+        self.0.notify.notify_waiters();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.cancelled.load(Ordering::Acquire)
+    }
+
+    async fn cancelled(&self) {
+        loop {
+            let notified = self.0.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
@@ -943,11 +973,9 @@ impl Library {
                 ..ImportDiscovery::default()
             };
         }
-        let scan_permit = scanner_admission()
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("scanner semaphore closed");
+        let Some(scan_permit) = acquire_scanner(&cancellation).await else {
+            return ImportDiscovery::default();
+        };
         let (scan_sender, mut scan_receiver) = tokio::sync::mpsc::channel(16);
         let scan_cancellation = cancellation.clone();
         let scan_progress = progress.clone();
@@ -1150,13 +1178,19 @@ impl Library {
 
     async fn add_files(&self, paths: &[PathBuf], managed: bool) -> ImportReport {
         let mut report = ImportReport::default();
-        for path in paths {
+        for path in paths.iter().take(MAX_IMPORT_ROOTS) {
             let result = if managed {
                 self.import_managed_file(path).await
             } else {
                 self.import_file(path).await
             };
             report.record(path.clone(), result);
+        }
+        if paths.len() > MAX_IMPORT_ROOTS {
+            report.failures.push(ImportFailure {
+                path: PathBuf::new(),
+                error: format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
+            });
         }
         report
     }
@@ -1176,8 +1210,19 @@ impl Library {
         let mut dirs = vec![dir.to_path_buf()];
         let mut visited_dirs = HashSet::new();
         let mut discovered = 0_usize;
+        let mut traversal_entries = 0_usize;
 
         while let Some(current) = dirs.pop() {
+            traversal_entries += 1;
+            if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
+                report.failures.push(ImportFailure {
+                    path: current,
+                    error: format!(
+                        "book import stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
+                    ),
+                });
+                return report;
+            }
             let current = canonical_path(&current);
             if !visited_dirs.insert(current.clone()) {
                 continue;
@@ -1194,6 +1239,16 @@ impl Library {
             };
 
             for entry in entries {
+                traversal_entries += 1;
+                if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
+                    report.failures.push(ImportFailure {
+                        path: current.clone(),
+                        error: format!(
+                            "book import stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
+                        ),
+                    });
+                    return report;
+                }
                 let entry = match entry {
                     Ok(entry) => entry,
                     Err(error) => {
@@ -1245,56 +1300,23 @@ impl Library {
 
     /// List all books, ordered by most recently read first, then by date added.
     pub async fn list_all(&self) -> Result<Vec<Book>> {
-        let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress,
-                    date_added, last_read
-             FROM books
-             ORDER BY last_read DESC NULLS LAST, date_added DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to list books")?;
-
-        Ok(rows.iter().filter_map(row_to_book).collect())
+        Ok(self.page(None, None, MAX_LIBRARY_PAGE_SIZE, 0).await?.books)
     }
 
     /// Search books by title or author.
     pub async fn search(&self, query: &str) -> Result<Vec<Book>> {
-        let pattern = format!("%{query}%");
-        let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress,
-                    date_added, last_read
-             FROM books
-             WHERE title LIKE ? OR author LIKE ?
-             ORDER BY last_read DESC NULLS LAST, date_added DESC",
-        )
-        .bind(&pattern)
-        .bind(&pattern)
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to search books")?;
-
-        Ok(rows.iter().filter_map(row_to_book).collect())
+        Ok(self
+            .page(Some(query), None, MAX_LIBRARY_PAGE_SIZE, 0)
+            .await?
+            .books)
     }
 
     /// Filter books by format.
     pub async fn filter_by_format(&self, format: BookFormat) -> Result<Vec<Book>> {
-        let rows = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress,
-                    date_added, last_read
-             FROM books
-             WHERE format = ?
-             ORDER BY last_read DESC NULLS LAST, date_added DESC",
-        )
-        .bind(format.as_str())
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to filter books")?;
-
-        Ok(rows.iter().filter_map(row_to_book).collect())
+        Ok(self
+            .page(None, Some(format), MAX_LIBRARY_PAGE_SIZE, 0)
+            .await?
+            .books)
     }
 
     /// Fetch a bounded page of books, optionally combining search and format filters.
@@ -1359,7 +1381,8 @@ impl Library {
     ) -> Result<Vec<i64>> {
         let mut builder = QueryBuilder::new("SELECT id FROM books");
         push_library_filters(&mut builder, query, format);
-        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC");
+        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC LIMIT ");
+        builder.push_bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64);
 
         let rows = builder
             .build()
@@ -1374,6 +1397,9 @@ impl Library {
 
     /// Load books from a previously captured ordered ID snapshot.
     pub async fn books_by_ids(&self, ids: &[i64]) -> Result<Vec<Book>> {
+        if ids.len() > MAX_LIBRARY_SNAPSHOT_SIZE {
+            bail!("library snapshot exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
+        }
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -1859,10 +1885,15 @@ fn spawn_candidate_fingerprint(
     let path = candidate.path.clone();
     let admission = fingerprint_admission().clone();
     tasks.spawn(async move {
-        let permit = admission
-            .acquire_owned()
-            .await
-            .expect("fingerprint semaphore closed");
+        let permit = tokio::select! {
+            permit = admission.acquire_owned() => {
+                permit.expect("fingerprint semaphore closed")
+            }
+            () = cancellation.cancelled() => return (
+                candidate,
+                Err(anyhow::anyhow!("discovery cancelled")),
+            ),
+        };
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let fingerprint = file_fingerprint_cancellable(&path, Some(&cancellation));
@@ -1914,9 +1945,20 @@ fn scan_import_candidates(
         .map(ScanCursor::Path)
         .collect::<Vec<_>>();
     let mut visited_dirs = HashSet::new();
+    let mut traversal_entries = 0_usize;
 
     while let Some(cursor) = pending.pop() {
         if cancellation.is_cancelled() {
+            break;
+        }
+        traversal_entries += 1;
+        if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
+            let _ = sender.blocking_send(ScannedImport::Failure(ImportFailure {
+                path: PathBuf::new(),
+                error: format!(
+                    "book discovery stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
+                ),
+            }));
             break;
         }
         let original_path = match cursor {
@@ -2516,6 +2558,25 @@ mod tests {
         let snapshot = progress.snapshot();
         assert_eq!(snapshot.hashed_files, 1);
         assert_eq!(snapshot.completed_files, 1);
+    }
+
+    #[tokio::test]
+    async fn scanner_admission_wait_is_cancelled_promptly() {
+        let held = scanner_admission().clone().acquire_owned().await.unwrap();
+        let cancellation = ImportCancellation::default();
+        let waiting = {
+            let cancellation = cancellation.clone();
+            tokio::spawn(async move { acquire_scanner(&cancellation).await })
+        };
+        tokio::task::yield_now().await;
+
+        cancellation.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+            .await
+            .expect("cancellation should wake scanner admission")
+            .unwrap();
+        assert!(result.is_none());
+        drop(held);
     }
 
     #[test]
