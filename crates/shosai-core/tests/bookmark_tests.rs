@@ -428,3 +428,26 @@ async fn concurrent_stable_book_toggles_are_linearizable() {
 
     assert!(store.list_for_book_async(book_id).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn concurrent_untracked_book_toggles_are_linearizable() {
+    let (store, _dir) = temp_store().await;
+    let first = store.clone();
+    let second = store.clone();
+    let path = PathBuf::from("/book.epub");
+    let first_toggle = tokio::spawn({
+        let path = path.clone();
+        async move { first.toggle_at_async(&path, 1, None, Some("Page 2")).await }
+    });
+    let second_path = path.clone();
+    let second_toggle = tokio::spawn(async move {
+        second
+            .toggle_at_async(&second_path, 1, None, Some("Page 2"))
+            .await
+    });
+
+    first_toggle.await.unwrap().unwrap();
+    second_toggle.await.unwrap().unwrap();
+
+    assert!(store.list_for_file_async(&path).await.unwrap().is_empty());
+}

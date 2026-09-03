@@ -130,7 +130,7 @@ impl BookmarkStore {
             .transpose()
             .context("bookmark location exceeds database range")?;
 
-        // Check for an existing bookmark on this page without a note.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
              WHERE file_path = ? AND page = ?
@@ -139,19 +139,45 @@ impl BookmarkStore {
         .bind(&key)
         .bind(page_db)
         .bind(location_offset_db)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .context("failed to check existing bookmark")?;
 
         if let Some(row) = existing {
             let id: i64 = row.get("id");
-            self.remove_async(id).await?;
+            sqlx::query("DELETE FROM bookmarks WHERE id = ?")
+                .bind(id)
+                .execute(&mut *transaction)
+                .await
+                .context("failed to remove bookmark")?;
+            transaction.commit().await?;
             Ok(None)
         } else {
-            let bm = self
-                .add_at_async(file_path, page, location_offset, title, None, "yellow")
-                .await?;
-            Ok(Some(bm))
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE file_path = ?")
+                    .bind(&key)
+                    .fetch_one(&mut *transaction)
+                    .await
+                    .context("failed to count bookmarks")?;
+            if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
+                anyhow::bail!("bookmark count limit exceeded");
+            }
+            let row = sqlx::query(
+                "INSERT INTO bookmarks (file_path, page, location_offset, title, note, color)
+                 VALUES (?, ?, ?, ?, NULL, 'yellow')
+                 RETURNING id, file_path, book_id, page, location_offset, title, note, color,
+                           created_at",
+            )
+            .bind(&key)
+            .bind(page_db)
+            .bind(location_offset_db)
+            .bind(title)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to add bookmark")?;
+            let bookmark = row_to_bookmark(&row).context("invalid bookmark after insert")?;
+            transaction.commit().await?;
+            Ok(Some(bookmark))
         }
     }
 
