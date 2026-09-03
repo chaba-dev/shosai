@@ -355,6 +355,7 @@ const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
+const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -636,6 +637,7 @@ struct ReaderTab {
 pub struct ContinuousRequest {
     id: u64,
     generation: u64,
+    byte_len: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -2385,54 +2387,85 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             .filter(|tab| Some(tab.id) != state.active_tab_id)
             .map(|tab| tab.continuous_pending.len())
             .sum::<usize>();
-    let missing_desired = desired
-        .iter()
-        .filter(|page| {
-            state.continuous_pages[**page].is_none() && !state.continuous_pending.contains_key(page)
-        })
-        .count();
-    let mut inactive_ready_budget =
-        CONTINUOUS_PAGE_CACHE_CAPACITY.saturating_sub(active_ready + pending + missing_desired);
     for tab in state
         .tabs
         .iter_mut()
         .filter(|tab| Some(tab.id) != state.active_tab_id)
     {
-        for rendered in &mut tab.continuous_pages {
-            if rendered.is_some() {
-                if inactive_ready_budget == 0 {
-                    *rendered = None;
-                } else {
-                    inactive_ready_budget -= 1;
-                }
-            }
-        }
+        tab.continuous_pages.fill(None);
     }
-    let inactive_ready = state
-        .tabs
-        .iter()
-        .filter(|tab| Some(tab.id) != state.active_tab_id)
-        .flat_map(|tab| &tab.continuous_pages)
-        .filter(|page| page.is_some())
-        .count();
-    let mut occupied = active_ready + inactive_ready + pending;
+    let mut occupied = active_ready + pending;
+    let mut occupied_bytes = retained_continuous_raster_bytes(state)
+        + state
+            .continuous_pending
+            .values()
+            .chain(
+                state
+                    .tabs
+                    .iter()
+                    .filter(|tab| Some(tab.id) != state.active_tab_id)
+                    .flat_map(|tab| tab.continuous_pending.values()),
+            )
+            .map(|request| request.byte_len)
+            .sum::<usize>();
     let mut tasks = Vec::new();
     for page in desired {
         if occupied >= CONTINUOUS_PAGE_CACHE_CAPACITY {
             break;
         }
         if state.continuous_pages[page].is_none() && !state.continuous_pending.contains_key(&page) {
+            let Some(byte_len) = raster_request_byte_len(state, page) else {
+                continue;
+            };
+            let Some(next_occupied_bytes) = occupied_bytes.checked_add(byte_len) else {
+                continue;
+            };
+            if next_occupied_bytes > CONTINUOUS_RASTER_BYTE_CAPACITY {
+                continue;
+            }
             let request = ContinuousRequest {
                 id: state.next_continuous_request_id,
                 generation: state.render_generation,
+                byte_len,
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
             occupied += 1;
+            occupied_bytes = next_occupied_bytes;
             tasks.push(Task::done(Message::RenderContinuousPage { tab_id, page }));
         }
     }
     Task::batch(tasks)
+}
+
+fn retained_continuous_raster_bytes(state: &State) -> usize {
+    state
+        .continuous_pages
+        .iter()
+        .chain(
+            state
+                .tabs
+                .iter()
+                .filter(|tab| Some(tab.id) != state.active_tab_id)
+                .flat_map(|tab| tab.continuous_pages.iter()),
+        )
+        .filter_map(|page| page.as_ref())
+        .map(|page| page.pixels.len())
+        .sum()
+}
+
+fn raster_request_byte_len(state: &State, page: usize) -> Option<usize> {
+    let scale = raster_render_scale(state, state.zoom.scale());
+    match state.document.as_ref()? {
+        OpenDocument::Pdf(document) => document.rendered_byte_len(page, scale).ok(),
+        OpenDocument::Cbz(document) => {
+            let (width, height) = document.page_size(page).ok()?;
+            let width = (f64::from(width) * f64::from(scale)).floor() as usize;
+            let height = (f64::from(height) * f64::from(scale)).floor() as usize;
+            width.checked_mul(height)?.checked_mul(4)
+        }
+        OpenDocument::Epub(_) => None,
+    }
 }
 
 fn invalidate_continuous_rasters(state: &mut State) {
@@ -6556,6 +6589,7 @@ mod tests {
         let stale_request = ContinuousRequest {
             id: 1,
             generation: state.render_generation,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, stale_request);
         let first = capture_reader_tab(&state).unwrap();
@@ -7130,17 +7164,33 @@ mod tests {
 
         let task = reconcile_continuous_rasters(&mut state);
 
-        assert_eq!(task.units(), CONTINUOUS_PAGE_CACHE_CAPACITY);
-        assert_eq!(
-            state.continuous_pending.len()
-                + state
-                    .continuous_pages
-                    .iter()
-                    .filter(|page| page.is_some())
-                    .count(),
-            CONTINUOUS_PAGE_CACHE_CAPACITY
+        assert!(task.units() > 0);
+        assert!(task.units() <= CONTINUOUS_PAGE_CACHE_CAPACITY);
+        assert!(
+            state
+                .continuous_pending
+                .values()
+                .map(|request| request.byte_len)
+                .sum::<usize>()
+                <= CONTINUOUS_RASTER_BYTE_CAPACITY
         );
         assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+    }
+
+    #[test]
+    fn continuous_scheduler_rejects_work_above_the_byte_budget() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        state.zoom = ZoomMode::Manual(10_000.0);
+
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+        assert!(state.continuous_pending.is_empty());
     }
 
     #[test]
@@ -7156,6 +7206,7 @@ mod tests {
         let request = ContinuousRequest {
             id: 1,
             generation: 1,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
         state.render_generation = 2;
@@ -7195,10 +7246,12 @@ mod tests {
         let old_request = ContinuousRequest {
             id: 1,
             generation: 1,
+            byte_len: 4,
         };
         let new_request = ContinuousRequest {
             id: 2,
             generation: 1,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, new_request);
 
@@ -7221,7 +7274,7 @@ mod tests {
     }
 
     #[test]
-    fn continuous_completion_is_saved_while_its_tab_is_inactive() {
+    fn continuous_completion_is_dropped_while_its_tab_is_inactive() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
@@ -7233,6 +7286,7 @@ mod tests {
         let request = ContinuousRequest {
             id: 1,
             generation: state.render_generation,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
         let first = capture_reader_tab(&state).unwrap();
@@ -7258,12 +7312,7 @@ mod tests {
         );
 
         assert!(state.tabs[0].continuous_pending.is_empty());
-        assert_eq!(
-            state.tabs[0].continuous_pages[0]
-                .as_ref()
-                .map(|page| page.width),
-            Some(7)
-        );
+        assert!(state.tabs[0].continuous_pages[0].is_none());
     }
 
     #[test]

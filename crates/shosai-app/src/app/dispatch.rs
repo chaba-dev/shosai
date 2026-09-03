@@ -1973,12 +1973,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     && tab.continuous_pending.get(&page) == Some(&request)
                 {
                     tab.continuous_pending.remove(&page);
-                    if request.generation == tab.render_generation
-                        && let (Some(slot), Ok(rendered)) =
-                            (tab.continuous_pages.get_mut(page), result)
-                    {
-                        *slot = Some(rendered);
-                    }
                 }
                 return reconcile_continuous_rasters(state);
             }
@@ -1991,7 +1985,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     return reconcile_continuous_rasters(state);
                 }
                 match (request.generation == state.render_generation, result) {
-                    (true, Ok(rendered)) => {
+                    (true, Ok(rendered))
+                        if rendered.pixels.len() <= request.byte_len
+                            && retained_continuous_raster_bytes(state)
+                                .saturating_add(rendered.pixels.len())
+                                <= CONTINUOUS_RASTER_BYTE_CAPACITY =>
+                    {
                         state.continuous_pages[page] = Some(rendered);
                         if page == state.current_page {
                             return Task::batch([
@@ -2006,6 +2005,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             return Task::none();
                         }
                         state.continuous_visible.remove(&page);
+                        return reconcile_continuous_rasters(state);
+                    }
+                    (true, Ok(_)) => {
+                        if page == state.current_page {
+                            state.error = Some(AppError::Render(
+                                "rendered page exceeds the continuous raster budget".to_owned(),
+                            ));
+                        }
                         return reconcile_continuous_rasters(state);
                     }
                     (false, _) => {}
