@@ -2642,10 +2642,35 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             );
             occupied += 1;
             occupied_bytes = next_occupied_bytes;
-            tasks.push(Task::done(Message::RenderContinuousPage { tab_id, page }));
+            tasks.push(start_continuous_page_task(state, tab_id, request, page));
         }
     }
     Task::batch(tasks)
+}
+
+fn start_continuous_page_task(
+    state: &State,
+    tab_id: u64,
+    request: ContinuousRequest,
+    page: usize,
+) -> Task<Message> {
+    let scale = raster_render_scale(state, state.zoom.scale());
+    match &state.document {
+        Some(OpenDocument::Pdf(document)) => {
+            let document = Arc::clone(document);
+            let highlights = search_highlights_for_page(state, page);
+            render_continuous_page_task(tab_id, request, page, move || {
+                document.render_page_with_highlights(page, scale, &highlights)
+            })
+        }
+        Some(OpenDocument::Cbz(document)) => {
+            let document = Arc::clone(document);
+            render_continuous_page_task(tab_id, request, page, move || {
+                document.render_page(page, scale)
+            })
+        }
+        _ => Task::none(),
+    }
 }
 
 fn pump_raster_queue(state: &mut State) -> Task<Message> {
@@ -7674,21 +7699,8 @@ mod tests {
                 4,
             );
         }
-        state.continuous_pending.insert(
-            0,
-            ContinuousRequest {
-                id: 1,
-                generation: state.render_generation,
-                byte_len: 4,
-            },
-        );
 
-        let task = update(
-            &mut state,
-            Message::RenderContinuousPage { tab_id: 1, page: 0 },
-        );
-
-        assert_eq!(task.units(), 0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
         assert!(state.continuous_pending.is_empty());
         assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
 
@@ -7762,7 +7774,7 @@ mod tests {
     }
 
     #[test]
-    fn deferred_continuous_render_is_rescheduled_after_tab_reactivation() {
+    fn in_flight_continuous_render_is_rescheduled_after_tab_reactivation() {
         let pdf = PdfDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
         )
@@ -7774,6 +7786,7 @@ mod tests {
         state.continuous_pages = vec![None];
         state.continuous_visible.insert(0);
         assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
         let first = capture_reader_tab(&state).unwrap();
 
         state.active_tab_id = Some(2);
@@ -7785,13 +7798,18 @@ mod tests {
         state.tabs = vec![first, second];
         state.active_tab = Some(1);
 
-        assert_eq!(
+        assert!(
             update(
                 &mut state,
-                Message::RenderContinuousPage { tab_id: 1, page: 0 }
+                Message::ContinuousPageRendered {
+                    tab_id: 1,
+                    request,
+                    page: 0,
+                    result: Err("inactive render".to_owned()),
+                }
             )
-            .units(),
-            0
+            .units()
+                > 0
         );
         assert!(state.tabs[0].continuous_pending.is_empty());
 
@@ -7850,6 +7868,78 @@ mod tests {
         );
         assert!(state.continuous_pending.contains_key(&0));
         assert!(state.continuous_pages[0].is_none());
+    }
+
+    #[test]
+    fn mode_change_releases_an_in_flight_continuous_job() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
+        state.reading_mode = ReadingMode::Paginated;
+        state.continuous_pages.clear();
+        state.render_generation = state.render_generation.wrapping_add(1);
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Err("obsolete render".to_owned()),
+            },
+        );
+
+        assert!(!state.raster_jobs.keys().any(|job| matches!(
+            job,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: admitted,
+                page: 0,
+            } if *admitted == request
+        )));
+        assert!(state.continuous_pending.is_empty());
+    }
+
+    #[test]
+    fn completion_from_a_closed_tab_releases_its_continuous_job() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
+        state.active_tab_id = Some(2);
+        state.continuous_pending.clear();
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Err("closed tab render".to_owned()),
+            },
+        );
+
+        assert!(!state.raster_jobs.keys().any(|job| matches!(
+            job,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: admitted,
+                page: 0,
+            } if *admitted == request
+        )));
     }
 
     #[test]

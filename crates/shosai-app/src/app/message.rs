@@ -267,11 +267,6 @@ pub enum Message {
         page: usize,
         result: Result<RenderedPage, String>,
     },
-    RenderContinuousPage {
-        tab_id: u64,
-        page: usize,
-    },
-
     // Keyboard
     KeyPressed(keyboard::Event),
     WindowEvent(window::Id, window::Event),

@@ -1994,6 +1994,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     Err(_) => return refresh_content(state),
                 }
+            } else {
+                return pump_raster_queue(state);
             }
         }
 
@@ -2129,59 +2131,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     (false, _) => {}
                 }
                 return reconcile_continuous_rasters(state);
-            }
-        }
-
-        Message::RenderContinuousPage { tab_id, page } => {
-            if state.active_tab_id != Some(tab_id) {
-                if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
-                    && let Some(request) = tab.continuous_pending.remove(&page)
-                {
-                    state.raster_jobs.remove(&RasterJob::Continuous {
-                        tab_id,
-                        request,
-                        page,
-                    });
-                }
-                return Task::none();
-            }
-            if state.reading_mode != ReadingMode::Continuous
-                || page >= state.continuous_pages.len()
-                || state.continuous_pages[page].is_some()
-                || !state.continuous_pending.contains_key(&page)
-            {
-                return Task::none();
-            }
-            let Some(request) = state.continuous_pending.get(&page).copied() else {
-                return Task::none();
-            };
-            let job = RasterJob::Continuous {
-                tab_id,
-                request,
-                page,
-            };
-            if !state.raster_jobs.contains_key(&job) {
-                state.continuous_pending.remove(&page);
-                return Task::none();
-            }
-            let scale = raster_render_scale(state, state.zoom.scale());
-            match &state.document {
-                Some(OpenDocument::Pdf(doc)) => {
-                    let doc = Arc::clone(doc);
-                    let highlights = search_highlights_for_page(state, page);
-                    return render_continuous_page_task(tab_id, request, page, move || {
-                        doc.render_page_with_highlights(page, scale, &highlights)
-                    });
-                }
-                Some(OpenDocument::Cbz(doc)) => {
-                    let doc = Arc::clone(doc);
-                    return render_continuous_page_task(tab_id, request, page, move || {
-                        doc.render_page(page, scale)
-                    });
-                }
-                _ => {
-                    state.raster_jobs.remove(&job);
-                }
             }
         }
 
