@@ -356,6 +356,7 @@ const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const RASTER_RENDER_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -708,6 +709,8 @@ pub struct State {
     continuous_activation: u64,
     continuous_measurement_index: Option<Arc<ContinuousMeasurementIndex>>,
     next_continuous_request_id: u64,
+    raster_workers_in_flight: usize,
+    epub_workers_in_flight: usize,
     page_input: String,
     error: Option<AppError>,
     font_size: f32,
@@ -861,6 +864,8 @@ pub fn boot() -> (State, Task<Message>) {
         continuous_activation: 0,
         continuous_measurement_index: None,
         next_continuous_request_id: 1,
+        raster_workers_in_flight: 0,
+        epub_workers_in_flight: 0,
         page_input: String::new(),
         error: None,
         font_size: 16.0,
@@ -1923,6 +1928,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             }
             let mut tasks = Vec::new();
             for key in state.paginated_requested.clone() {
+                if state.raster_workers_in_flight >= RASTER_RENDER_WORKERS {
+                    break;
+                }
                 if !is_page_cached(state, &key) {
                     let page = key.page;
                     let highlights = key.highlights.clone();
@@ -1934,6 +1942,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key);
+                    state.raster_workers_in_flight += 1;
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -1956,7 +1965,11 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             {
                 return load_epub_images_task(state);
             }
+            if state.epub_workers_in_flight != 0 {
+                return load_epub_images_task(state);
+            }
             state.epub_layout_pending = Some(layout_key);
+            state.epub_workers_in_flight = 1;
             return Task::batch([
                 paginate_epub_task(tab_id, generation, doc, layout_key, state.current_page),
                 load_epub_images_task(state),
@@ -1988,6 +2001,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             }
             let mut tasks = Vec::new();
             for key in state.paginated_requested.clone() {
+                if state.raster_workers_in_flight >= RASTER_RENDER_WORKERS {
+                    break;
+                }
                 if !is_page_cached(state, &key) {
                     let page = key.page;
                     let doc = Arc::clone(&doc);
@@ -1998,6 +2014,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page(page, scale),
                     ));
                     state.paginated_pending.push(key);
+                    state.raster_workers_in_flight += 1;
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -2750,6 +2767,9 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
     let mut tasks = Vec::new();
 
     for page in pages {
+        if state.raster_workers_in_flight >= RASTER_RENDER_WORKERS {
+            break;
+        }
         let highlights = if matches!(state.document, Some(OpenDocument::Pdf(_))) {
             search_highlights_for_page(state, page)
         } else {
@@ -2773,6 +2793,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key);
+                state.raster_workers_in_flight += 1;
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
@@ -2783,6 +2804,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page(page, scale),
                 ));
                 state.paginated_pending.push(key);
+                state.raster_workers_in_flight += 1;
             }
             _ => return Task::none(),
         }
@@ -7191,6 +7213,35 @@ mod tests {
 
         assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
         assert!(state.continuous_pending.is_empty());
+    }
+
+    #[test]
+    fn continuous_render_waits_for_a_global_worker_slot() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.raster_workers_in_flight = RASTER_RENDER_WORKERS;
+        state.continuous_pending.insert(
+            0,
+            ContinuousRequest {
+                id: 1,
+                generation: state.render_generation,
+                byte_len: 4,
+            },
+        );
+
+        let task = update(
+            &mut state,
+            Message::RenderContinuousPage { tab_id: 1, page: 0 },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(state.continuous_pending.is_empty());
+        assert_eq!(state.raster_workers_in_flight, RASTER_RENDER_WORKERS);
     }
 
     #[test]

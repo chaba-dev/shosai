@@ -1800,6 +1800,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             complete,
             pages,
         } => {
+            if complete {
+                state.epub_workers_in_flight = state.epub_workers_in_flight.saturating_sub(1);
+            }
             let active = state.active_tab_id == Some(tab_id);
             let accepts_active_layout = active
                 && generation == state.render_generation
@@ -1859,6 +1862,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 return refresh_content(state);
             }
+            if complete
+                && state.epub_workers_in_flight == 0
+                && matches!(state.document, Some(OpenDocument::Epub(_)))
+                && state.epub_layout_pending.is_none()
+                && state.epub_layout_requested.is_some()
+                && (state.epub_layout_key != state.epub_layout_requested
+                    || state.epub_pages.is_empty())
+            {
+                return refresh_content(state);
+            }
         }
 
         Message::EpubImagesDecoded {
@@ -1915,6 +1928,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             key,
             result,
         } => {
+            state.raster_workers_in_flight = state.raster_workers_in_flight.saturating_sub(1);
             let active = state.active_tab_id == Some(tab_id);
             let was_pending = if active {
                 state
@@ -1960,6 +1974,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if request_was_superseded {
                 return refresh_content(state);
             }
+            if state.paginated_pending.is_empty()
+                && state
+                    .paginated_requested
+                    .iter()
+                    .any(|requested| !is_page_cached(state, requested))
+            {
+                return refresh_content(state);
+            }
         }
 
         Message::ContinuousPageRendered {
@@ -1968,6 +1990,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             page,
             result,
         } => {
+            state.raster_workers_in_flight = state.raster_workers_in_flight.saturating_sub(1);
             if state.active_tab_id != Some(tab_id) {
                 if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                     && tab.continuous_pending.get(&page) == Some(&request)
@@ -2033,6 +2056,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(request) = state.continuous_pending.get(&page).copied() else {
                 return Task::none();
             };
+            if state.raster_workers_in_flight >= RASTER_RENDER_WORKERS {
+                state.continuous_pending.remove(&page);
+                return Task::none();
+            }
+            state.raster_workers_in_flight += 1;
             let scale = raster_render_scale(state, state.zoom.scale());
             match &state.document {
                 Some(OpenDocument::Pdf(doc)) => {
@@ -2048,7 +2076,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         doc.render_page(page, scale)
                     });
                 }
-                _ => {}
+                _ => {
+                    state.raster_workers_in_flight =
+                        state.raster_workers_in_flight.saturating_sub(1);
+                }
             }
         }
 
