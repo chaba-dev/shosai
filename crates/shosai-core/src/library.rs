@@ -25,11 +25,13 @@ use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
+const MANAGED_PREPARATION_CONCURRENCY: usize = 4;
 const MAX_IMPORT_DISCOVERY_RESULTS: usize = 10_000;
 const MAX_IMPORT_ROOTS: usize = 10_000;
 const MAX_IMPORT_TRAVERSAL_ENTRIES: usize = 50_000;
 const MAX_LIBRARY_PAGE_SIZE: u32 = 500;
 const MAX_LIBRARY_SNAPSHOT_SIZE: usize = 10_000;
+const MAX_LIBRARY_QUERY_BYTES: usize = 4 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
@@ -51,6 +53,30 @@ async fn acquire_scanner(
 fn fingerprint_admission() -> &'static Arc<tokio::sync::Semaphore> {
     static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
     ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(DISCOVERY_HASH_CONCURRENCY)))
+}
+
+fn managed_preparation_admission() -> &'static Arc<tokio::sync::Semaphore> {
+    static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MANAGED_PREPARATION_CONCURRENCY)))
+}
+
+async fn acquire_managed_preparation(
+    cancellation: Option<&ImportCancellation>,
+) -> Result<tokio::sync::OwnedSemaphorePermit> {
+    if let Some(cancellation) = cancellation {
+        tokio::select! {
+            permit = managed_preparation_admission().clone().acquire_owned() => {
+                permit.context("managed preparation admission closed")
+            }
+            () = cancellation.cancelled() => bail!("managed preparation cancelled"),
+        }
+    } else {
+        managed_preparation_admission()
+            .clone()
+            .acquire_owned()
+            .await
+            .context("managed preparation admission closed")
+    }
 }
 
 fn managed_storage_lock() -> &'static tokio::sync::Mutex<()> {
@@ -407,11 +433,15 @@ impl Library {
 
         let rows = sqlx::query(
             "SELECT id, file_path, content_hash FROM books
-             WHERE storage_kind = 'managed' ORDER BY id",
+             WHERE storage_kind = 'managed' ORDER BY id LIMIT ?",
         )
+        .bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64 + 1)
         .fetch_all(&self.pool)
         .await
         .context("failed to list managed books for relocation")?;
+        if rows.len() > MAX_LIBRARY_SNAPSHOT_SIZE {
+            bail!("managed relocation exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
+        }
         let mut changes = Vec::with_capacity(rows.len());
         let mut created_destinations = Vec::new();
 
@@ -642,7 +672,9 @@ impl Library {
         source: &Path,
         expected_hash: Option<&str>,
     ) -> Result<Book> {
-        let prepared = self.prepare_managed_file(source, expected_hash).await?;
+        let prepared = self
+            .prepare_managed_file(source, expected_hash, None)
+            .await?;
         self.commit_prepared_managed_file(&prepared).await
     }
 
@@ -651,15 +683,32 @@ impl Library {
         &self,
         candidate: ImportCandidate,
     ) -> Result<PreparedManagedImport> {
-        self.prepare_managed_file(&candidate.path, Some(&candidate.content_hash))
+        validate_import_candidate(&candidate)?;
+        self.prepare_managed_file(&candidate.path, Some(&candidate.content_hash), None)
             .await
+    }
+
+    pub async fn prepare_discovered_managed_file_cancellable(
+        &self,
+        candidate: ImportCandidate,
+        cancellation: ImportCancellation,
+    ) -> Result<PreparedManagedImport> {
+        validate_import_candidate(&candidate)?;
+        self.prepare_managed_file(
+            &candidate.path,
+            Some(&candidate.content_hash),
+            Some(&cancellation),
+        )
+        .await
     }
 
     async fn prepare_managed_file(
         &self,
         source: &Path,
         expected_hash: Option<&str>,
+        cancellation: Option<&ImportCancellation>,
     ) -> Result<PreparedManagedImport> {
+        let preparation_permit = acquire_managed_preparation(cancellation).await?;
         let source = canonical_path(source);
         let source_str = canonical_path_key(&source);
         let ext = source
@@ -689,6 +738,7 @@ impl Library {
         })
         .await
         .context("book inspection task failed")??;
+        drop(preparation_permit);
 
         Ok(PreparedManagedImport {
             source_str,
@@ -876,7 +926,11 @@ impl Library {
         managed: bool,
     ) -> ImportReport {
         let mut report = ImportReport::default();
-        for candidate in candidates {
+        for candidate in candidates.iter().take(MAX_IMPORT_DISCOVERY_RESULTS) {
+            if let Err(error) = validate_import_candidate(candidate) {
+                report.record(candidate.path.clone(), Err(error));
+                continue;
+            }
             let result = if managed {
                 self.import_managed_file_with_hash(&candidate.path, Some(&candidate.content_hash))
                     .await
@@ -885,6 +939,14 @@ impl Library {
                     .await
             };
             report.record(candidate.path.clone(), result);
+        }
+        if candidates.len() > MAX_IMPORT_DISCOVERY_RESULTS {
+            report.failures.push(ImportFailure {
+                path: PathBuf::new(),
+                error: format!(
+                    "too many discovered import candidates (maximum {MAX_IMPORT_DISCOVERY_RESULTS})"
+                ),
+            });
         }
         report
     }
@@ -1206,117 +1268,43 @@ impl Library {
     }
 
     async fn add_directory(&self, dir: &Path, managed: bool) -> ImportReport {
-        let mut report = ImportReport::default();
-        let mut dirs = vec![dir.to_path_buf()];
-        let mut visited_dirs = HashSet::new();
-        let mut discovered = 0_usize;
-        let mut traversal_entries = 0_usize;
-
-        while let Some(current) = dirs.pop() {
-            traversal_entries += 1;
-            if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
-                report.failures.push(ImportFailure {
-                    path: current,
-                    error: format!(
-                        "book import stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
-                    ),
-                });
-                return report;
-            }
-            let current = canonical_path(&current);
-            if !visited_dirs.insert(current.clone()) {
-                continue;
-            }
-            let entries = match std::fs::read_dir(&current) {
-                Ok(entries) => entries,
-                Err(error) => {
-                    report.failures.push(ImportFailure {
-                        path: current.clone(),
-                        error: format!("failed to read directory {}: {error}", current.display()),
-                    });
-                    continue;
-                }
-            };
-
-            for entry in entries {
-                traversal_entries += 1;
-                if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
-                    report.failures.push(ImportFailure {
-                        path: current.clone(),
-                        error: format!(
-                            "book import stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
-                        ),
-                    });
-                    return report;
-                }
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        report.failures.push(ImportFailure {
-                            path: current.clone(),
-                            error: format!(
-                                "failed to read an entry in {}: {error}",
-                                current.display()
-                            ),
-                        });
-                        continue;
-                    }
-                };
-                let path = entry.path();
-
-                if path.is_dir() {
-                    dirs.push(path);
-                    continue;
-                }
-
-                let ext = path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-
-                if BookFormat::from_extension(&ext).is_some() {
-                    if discovered >= MAX_IMPORT_DISCOVERY_RESULTS {
-                        report.failures.push(ImportFailure {
-                            path: PathBuf::new(),
-                            error: format!(
-                                "book import stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
-                            ),
-                        });
-                        return report;
-                    }
-                    discovered += 1;
-                    let result = if managed {
-                        self.import_managed_file(&path).await
-                    } else {
-                        self.import_file(&path).await
-                    };
-                    report.record(path, result);
-                }
-            }
-        }
-
+        let discovery = self.discover_directory(dir).await;
+        let mut report = self
+            .add_discovered_files(&discovery.candidates, managed)
+            .await;
+        report.failures.extend(discovery.failures);
         report
     }
 
     /// List all books, ordered by most recently read first, then by date added.
     pub async fn list_all(&self) -> Result<Vec<Book>> {
-        Ok(self.page(None, None, MAX_LIBRARY_PAGE_SIZE, 0).await?.books)
+        let page = self.page(None, None, MAX_LIBRARY_PAGE_SIZE, 0).await?;
+        if page.has_more {
+            bail!("library contains more than {MAX_LIBRARY_PAGE_SIZE} books; use page()");
+        }
+        Ok(page.books)
     }
 
     /// Search books by title or author.
     pub async fn search(&self, query: &str) -> Result<Vec<Book>> {
-        Ok(self
+        let page = self
             .page(Some(query), None, MAX_LIBRARY_PAGE_SIZE, 0)
-            .await?
-            .books)
+            .await?;
+        if page.has_more {
+            bail!("library search exceeds {MAX_LIBRARY_PAGE_SIZE} books; use page()");
+        }
+        Ok(page.books)
     }
 
     /// Filter books by format.
     pub async fn filter_by_format(&self, format: BookFormat) -> Result<Vec<Book>> {
-        Ok(self
+        let page = self
             .page(None, Some(format), MAX_LIBRARY_PAGE_SIZE, 0)
-            .await?
-            .books)
+            .await?;
+        if page.has_more {
+            bail!("library filter exceeds {MAX_LIBRARY_PAGE_SIZE} books; use page()");
+        }
+        Ok(page.books)
     }
 
     /// Fetch a bounded page of books, optionally combining search and format filters.
@@ -1330,6 +1318,9 @@ impl Library {
         limit: u32,
         offset: u32,
     ) -> Result<BookPage> {
+        if query.is_some_and(|query| query.len() > MAX_LIBRARY_QUERY_BYTES) {
+            bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
+        }
         let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
         let mut builder = QueryBuilder::new(
             "SELECT id, title, author, format, file_path, storage_kind, original_path, \
@@ -1379,20 +1370,27 @@ impl Library {
         query: Option<&str>,
         format: Option<BookFormat>,
     ) -> Result<Vec<i64>> {
+        if query.is_some_and(|query| query.len() > MAX_LIBRARY_QUERY_BYTES) {
+            bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
+        }
         let mut builder = QueryBuilder::new("SELECT id FROM books");
         push_library_filters(&mut builder, query, format);
         builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC LIMIT ");
-        builder.push_bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64);
+        builder.push_bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64 + 1);
 
         let rows = builder
             .build()
             .fetch_all(&self.pool)
             .await
             .context("failed to snapshot library order")?;
-        Ok(rows
+        let ids = rows
             .iter()
             .filter_map(|row| row.try_get("id").ok())
-            .collect())
+            .collect::<Vec<_>>();
+        if ids.len() > MAX_LIBRARY_SNAPSHOT_SIZE {
+            bail!("library snapshot exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
+        }
+        Ok(ids)
     }
 
     /// Load books from a previously captured ordered ID snapshot.
@@ -2086,6 +2084,35 @@ fn scan_import_candidates(
     progress.finish_enumerating();
 }
 
+/// Reject caller-supplied discovery DTOs that could bypass discovery bounds.
+fn validate_import_candidate(candidate: &ImportCandidate) -> Result<()> {
+    const MAX_IMPORT_TEXT_BYTES: usize = 4 * 1024;
+    const MAX_IMPORT_PATH_BYTES: usize = 16 * 1024;
+    const MAX_IMPORT_HASH_BYTES: usize = 128;
+
+    if candidate.title.len() > MAX_IMPORT_TEXT_BYTES
+        || candidate.group_key.len() > MAX_IMPORT_TEXT_BYTES
+        || candidate.content_hash.len() > MAX_IMPORT_HASH_BYTES
+        || candidate.path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES
+    {
+        bail!("import candidate metadata exceeds byte limits");
+    }
+    if let Some(duplicate) = &candidate.duplicate {
+        match duplicate {
+            ImportDuplicate::ExistingBook { title, .. } if title.len() > MAX_IMPORT_TEXT_BYTES => {
+                bail!("import candidate duplicate metadata exceeds byte limits");
+            }
+            ImportDuplicate::SelectedFile { path }
+                if path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES =>
+            {
+                bail!("import candidate duplicate metadata exceeds byte limits");
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// Normalize user-visible import text for grouping and filtering.
 pub fn normalize_import_text(text: &str) -> String {
     text.nfc()
@@ -2577,6 +2604,50 @@ mod tests {
             .unwrap();
         assert!(result.is_none());
         drop(held);
+    }
+
+    #[tokio::test]
+    async fn managed_preparation_wait_is_globally_bounded_and_cancellable() {
+        let held = managed_preparation_admission()
+            .clone()
+            .acquire_many_owned(MANAGED_PREPARATION_CONCURRENCY as u32)
+            .await
+            .unwrap();
+        let cancellation = ImportCancellation::default();
+        let waiting = {
+            let cancellation = cancellation.clone();
+            tokio::spawn(async move { acquire_managed_preparation(Some(&cancellation)).await })
+        };
+        tokio::task::yield_now().await;
+
+        cancellation.cancel();
+        let error = tokio::time::timeout(std::time::Duration::from_secs(1), waiting)
+            .await
+            .expect("cancellation should wake managed preparation admission")
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
+        drop(held);
+    }
+
+    #[test]
+    fn caller_supplied_import_candidate_strings_are_bounded() {
+        let candidate = ImportCandidate {
+            path: PathBuf::from("book.epub"),
+            title: "x".repeat(4 * 1024 + 1),
+            group_key: "book".to_owned(),
+            format: BookFormat::Epub,
+            file_size: 1,
+            content_hash: "0".repeat(64),
+            duplicate: None,
+        };
+
+        assert!(
+            validate_import_candidate(&candidate)
+                .unwrap_err()
+                .to_string()
+                .contains("metadata exceeds")
+        );
     }
 
     #[test]

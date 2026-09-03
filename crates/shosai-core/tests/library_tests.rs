@@ -179,7 +179,13 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
     let page = lib.page(None, None, u32::MAX, 0).await.unwrap();
     assert_eq!(page.books.len(), 500);
     assert!(page.has_more);
-    assert_eq!(lib.list_all().await.unwrap().len(), 500);
+    assert!(
+        lib.list_all()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("use page()")
+    );
     let ids = lib.matching_ids(None, None).await.unwrap();
     let books = lib.books_by_ids(&ids).await.unwrap();
     assert_eq!(books.len(), 1_005);
@@ -191,6 +197,13 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
             .unwrap_err()
             .to_string()
             .contains("snapshot exceeds")
+    );
+    assert!(
+        lib.page(Some(&"q".repeat(4 * 1024 + 1)), None, 10, 0)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("query exceeds")
     );
 }
 
