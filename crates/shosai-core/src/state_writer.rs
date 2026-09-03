@@ -298,6 +298,19 @@ impl StateWriter {
         Ok(())
     }
 
+    /// Wait until all writes accepted before this call have been attempted.
+    /// A failed flush leaves the writer running so retained writes can retry.
+    pub async fn flush(&self) -> Result<(), PersistError> {
+        let (flushed, wait) = oneshot::channel();
+        self.send(StateWriterMessage::Flush(flushed))
+            .map_err(|error| PersistError {
+                details: error.to_string(),
+            })?;
+        wait.await.map_err(|_| PersistError {
+            details: "state writer stopped before flush completed".to_owned(),
+        })?
+    }
+
     /// Stop accepting writes and wait until every accepted write has either
     /// persisted or produced a persistence error.
     pub async fn shutdown(&self) -> Result<(), PersistError> {
@@ -305,6 +318,8 @@ impl StateWriter {
         self.inner.notify.notify_one();
         loop {
             let completed = self.inner.completed.notified();
+            tokio::pin!(completed);
+            completed.as_mut().enable();
             let result = {
                 self.inner
                     .completion
@@ -845,6 +860,61 @@ mod tests {
         })
         .await
         .expect("retained write should retry autonomously");
+    }
+
+    #[tokio::test]
+    async fn failed_flush_can_recover_and_then_shutdown() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "language".to_owned(),
+                "en".to_owned(),
+            ))
+            .unwrap();
+
+        assert!(writer.flush().await.is_err());
+        sqlx::query("DROP TRIGGER reject_test_preference")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), writer.flush())
+            .await
+            .expect("a retry after transient failure must finish")
+            .unwrap();
+        writer.shutdown().await.unwrap();
+        assert_eq!(
+            store.get_pref_async("language").await.as_deref(),
+            Some("en")
+        );
+    }
+
+    #[tokio::test]
+    async fn immediate_shutdown_cannot_miss_worker_completion() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+
+        for _ in 0..100 {
+            let writer = start_state_writer(store.clone());
+            tokio::time::timeout(std::time::Duration::from_secs(1), writer.shutdown())
+                .await
+                .expect("shutdown notification must not be lost")
+                .unwrap();
+        }
     }
 
     #[tokio::test]
