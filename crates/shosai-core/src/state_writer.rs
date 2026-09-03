@@ -14,6 +14,7 @@ use crate::reading_state::{FileReadingState, ReadingStateStore};
 
 pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
 pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
+const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
 pub struct StateSave {
@@ -264,6 +265,10 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
             if worker.stopped.load(Ordering::Acquire) {
                 break;
             }
+            if !failed_keys.is_empty() {
+                tokio::time::sleep(RETRY_DELAY).await;
+                worker.notify.notify_one();
+            }
         }
     });
     StateWriter { inner }
@@ -459,5 +464,47 @@ mod tests {
 
         let error = wait.await.unwrap().unwrap_err();
         assert!(error.details().contains("preference language"));
+    }
+
+    #[tokio::test]
+    async fn failed_writes_retry_without_another_producer_message() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "language".to_owned(),
+                "en".to_owned(),
+            ))
+            .unwrap();
+        let (flushed, wait) = oneshot::channel();
+        writer.send(StateWriterMessage::Flush(flushed)).unwrap();
+        assert!(wait.await.unwrap().is_err());
+
+        sqlx::query("DROP TRIGGER reject_test_preference")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if store.get_pref_async("language").await.as_deref() == Some("en") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("retained write should retry autonomously");
     }
 }

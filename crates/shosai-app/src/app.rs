@@ -30,7 +30,7 @@ use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 use shosai_core::state_writer::{
     StateSave as ReadingStateSave, StateWriter, StateWriterMessage as ReadingStateWriterMessage,
-    start_state_writer as start_reading_state_writer,
+    StateWriterSendError, start_state_writer as start_reading_state_writer,
 };
 
 #[cfg(test)]
@@ -3166,7 +3166,7 @@ fn update_bookmark_status(state: &mut State) {
     });
 }
 
-fn save_reading_state(state: &State) {
+fn save_reading_state(state: &mut State) {
     if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
         let save = ReadingStateSave {
             book_id: state.book_id,
@@ -3177,8 +3177,8 @@ fn save_reading_state(state: &State) {
                 zoom: state.zoom.scale(),
             },
         };
-        if saves.send(ReadingStateWriterMessage::Save(save)).is_err() {
-            eprintln!("warning: reading state writer stopped unexpectedly");
+        if let Err(error) = saves.send(ReadingStateWriterMessage::Save(save)) {
+            state.open_error = Some(state_writer_send_error(error));
         }
     }
 
@@ -3188,26 +3188,31 @@ fn save_reading_state(state: &State) {
     {
         let progress = (state.current_page + 1) as f64 / state.total_pages as f64;
         let progress = progress.clamp(0.0, 1.0);
-        if saves
-            .send(ReadingStateWriterMessage::Progress { book_id, progress })
-            .is_err()
-        {
-            eprintln!("warning: reading state writer stopped unexpectedly");
+        if let Err(error) = saves.send(ReadingStateWriterMessage::Progress { book_id, progress }) {
+            state.open_error = Some(state_writer_send_error(error));
         }
     }
 }
 
-fn save_preference(state: &State, key: &'static str, value: impl Into<String>) {
+fn save_preference(state: &mut State, key: &'static str, value: impl Into<String>) {
     if let Some(saves) = &state.reading_state_saves
-        && saves
-            .send(ReadingStateWriterMessage::Preference(
-                key.to_owned(),
-                value.into(),
-            ))
-            .is_err()
+        && let Err(error) = saves.send(ReadingStateWriterMessage::Preference(
+            key.to_owned(),
+            value.into(),
+        ))
     {
-        eprintln!("warning: state writer stopped unexpectedly");
+        state.open_error = Some(state_writer_send_error(error));
     }
+}
+
+fn state_writer_send_error(error: StateWriterSendError) -> AppError {
+    let detail = match error {
+        StateWriterSendError::Stopped => "state writer stopped unexpectedly",
+        StateWriterSendError::Full => {
+            "state persistence queue is full; latest change was not saved"
+        }
+    };
+    AppError::Storage(detail.to_owned())
 }
 
 fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Message> {
@@ -11265,6 +11270,16 @@ mod tests {
         assert_eq!(
             store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await,
             Some(LanguagePreference::English.stored().to_string())
+        );
+    }
+
+    #[test]
+    fn persistence_overload_is_reported_as_data_loss() {
+        assert_eq!(
+            state_writer_send_error(StateWriterSendError::Full),
+            AppError::Storage(
+                "state persistence queue is full; latest change was not saved".to_owned()
+            )
         );
     }
 
