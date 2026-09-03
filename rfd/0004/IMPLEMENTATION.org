@@ -53,9 +53,9 @@ assuming native FFI works in a browser.
 - [X] Inventory every responsibility in ~shosai-app~ and classify it as core,
   Flutter presentation, platform adapter, temporary Iced reference, or obsolete.
 - [X] Choose the granularity of the Rust-laid-out EPUB scene and semantic model
-  consumed by Flutter. Measure bridge volume, fidelity, selection,
-  accessibility, relayout, and implementation duplication without moving
-  document layout into Flutter.
+  consumed by Flutter. Define the M2 measurement protocol and acceptance gates
+  for bridge volume, fidelity, selection, accessibility, relayout, and
+  implementation duplication without moving document layout into Flutter.
 - [X] Select a Dart/Rust bridge from its upstream target contract plus local
   Linux and Android-core evidence. Prove generated Android, iOS, macOS, Windows,
   and Linux host integration in M2 alongside owned buffers, cancellation, error
@@ -72,7 +72,7 @@ without maintaining two production feature paths.
 
 * M1 — Extract the Rust application core
 :PROPERTIES:
-:STATUS: DONE
+:STATUS: IN-PROGRESS
 :END:
 
 - [X] Move EPUB pagination and renderer-neutral geometry out of
