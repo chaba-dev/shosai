@@ -822,6 +822,12 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
         .unwrap()
         .remove(0);
     assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
+    let bookmark = bookmarks
+        .toggle_for_book_at_async(book.id, &old_path, 4, Some(9), None)
+        .await
+        .unwrap()
+        .expect("bookmark should be added using the stable book identity");
+    assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
     assert_eq!(
         path_from_key(
             &store

@@ -190,15 +190,15 @@ impl BookmarkStore {
             let id = sqlx::query(
                 "INSERT INTO bookmarks
                     (file_path, book_id, page, location_offset, title, note, color)
-                 SELECT ?, ?, ?, ?, ?, NULL, 'yellow'
-                 WHERE (SELECT COUNT(*) FROM bookmarks WHERE book_id = ?) < ?
+                 SELECT books.file_path, books.id, ?, ?, ?, NULL, 'yellow'
+                 FROM books WHERE books.id = ?
+                   AND (SELECT COUNT(*) FROM bookmarks WHERE book_id = ?) < ?
                  RETURNING id",
             )
-            .bind(key)
-            .bind(book_id)
             .bind(page)
             .bind(location_offset)
             .bind(title)
+            .bind(book_id)
             .bind(book_id)
             .bind(MAX_BOOKMARKS_PER_BOOK as i64)
             .fetch_optional(&self.pool)
