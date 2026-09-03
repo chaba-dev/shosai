@@ -1995,7 +1995,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     Err(_) => return refresh_content(state),
                 }
             } else {
-                return pump_raster_queue(state);
+                return if matches!(state.document, Some(OpenDocument::Cbz(_))) {
+                    refresh_content(state)
+                } else {
+                    pump_raster_queue(state)
+                };
             }
         }
 
@@ -2091,11 +2095,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             if state.active_tab_id == Some(tab_id) {
                 if state.continuous_pending.get(&page) != Some(&request) {
-                    return Task::none();
+                    return pump_raster_queue(state);
                 }
                 state.continuous_pending.remove(&page);
                 if page >= state.continuous_pages.len() {
-                    return reconcile_continuous_rasters(state);
+                    return pump_raster_queue(state);
                 }
                 match (request.generation == state.render_generation, result) {
                     (true, Ok(rendered))
@@ -2118,7 +2122,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             return Task::none();
                         }
                         state.continuous_visible.remove(&page);
-                        return reconcile_continuous_rasters(state);
+                        return pump_raster_queue(state);
                     }
                     (true, Ok(_)) => {
                         if page == state.current_page {
@@ -2126,11 +2130,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 "rendered page exceeds the continuous raster budget".to_owned(),
                             ));
                         }
-                        return reconcile_continuous_rasters(state);
+                        return pump_raster_queue(state);
                     }
                     (false, _) => {}
                 }
-                return reconcile_continuous_rasters(state);
+                return pump_raster_queue(state);
             }
         }
 
