@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
@@ -25,6 +26,24 @@ use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
 const MAX_IMPORT_DISCOVERY_RESULTS: usize = 10_000;
+const MAX_IMPORT_ROOTS: usize = 10_000;
+const MAX_LIBRARY_PAGE_SIZE: u32 = 500;
+const SQLITE_ID_CHUNK_SIZE: usize = 500;
+
+fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
+    static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+}
+
+fn fingerprint_admission() -> &'static Arc<tokio::sync::Semaphore> {
+    static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(DISCOVERY_HASH_CONCURRENCY)))
+}
+
+fn managed_storage_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
 
 /// Supported book format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -287,6 +306,25 @@ pub struct PreparedManagedImport {
     inspection: BookInspection,
 }
 
+struct ManagedPublication {
+    path: PathBuf,
+    remove_on_drop: bool,
+}
+
+impl ManagedPublication {
+    fn keep(&mut self) {
+        self.remove_on_drop = false;
+    }
+}
+
+impl Drop for ManagedPublication {
+    fn drop(&mut self) {
+        if self.remove_on_drop {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 /// Library backed by SQLite.
 #[derive(Debug, Clone)]
 pub struct Library {
@@ -328,6 +366,7 @@ impl Library {
     /// removed after the database commit, so interruption may leave harmless duplicates but never
     /// database rows pointing at incomplete files.
     pub async fn relocate_managed_books(&self, new_dir: &Path) -> Result<Vec<ManagedPathChange>> {
+        let _storage_guard = managed_storage_lock().lock().await;
         let new_dir = new_dir.to_path_buf();
         let create_dir = new_dir.clone();
         tokio::task::spawn_blocking(move || std::fs::create_dir_all(&create_dir))
@@ -440,6 +479,12 @@ impl Library {
 
         for change in &changes {
             if change.old_path != change.new_path
+                && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM books WHERE file_path = ?")
+                    .bind(canonical_path_key(&change.old_path))
+                    .fetch_one(&self.pool)
+                    .await
+                    .unwrap_or(1)
+                    == 0
                 && let Err(error) = std::fs::remove_file(&change.old_path)
             {
                 eprintln!(
@@ -487,7 +532,13 @@ impl Library {
 
         // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
-            return Ok(book);
+            let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
+            transaction.commit().await?;
+            return self
+                .get(book.id)
+                .await?
+                .context("book not found after identity repair");
         }
 
         let ext = path
@@ -514,8 +565,9 @@ impl Library {
         .await
         .context("metadata extraction task failed")??;
 
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
-            "INSERT INTO books
+            "INSERT OR IGNORE INTO books
                 (title, author, format, file_path, cover_blob, storage_kind,
                  original_path, content_hash, file_size)
              VALUES (?, ?, ?, ?, ?, 'referenced', ?, ?, ?)",
@@ -528,16 +580,19 @@ impl Library {
         .bind(&path_str)
         .bind(&inspection.fingerprint.hash)
         .bind(inspection.fingerprint.size as i64)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .context("failed to insert book")?;
-
-        let book = self
-            .get_by_path(&path_str)
-            .await?
+        let book_id: i64 = sqlx::query_scalar("SELECT id FROM books WHERE file_path = ?")
+            .bind(&path_str)
+            .fetch_one(&mut *transaction)
+            .await
             .context("book not found after insert")?;
-        self.attach_identity(book.id, &path_str, &path_str).await?;
-        Ok(book)
+        reconcile_identity(&mut transaction, book_id, &path_str, &path_str).await?;
+        transaction.commit().await?;
+        self.get(book_id)
+            .await?
+            .context("book not found after insert")
     }
 
     /// Copy a book into Shosai's private data directory and add it to the library.
@@ -612,6 +667,7 @@ impl Library {
         &self,
         prepared: &PreparedManagedImport,
     ) -> Result<Book> {
+        let _storage_guard = managed_storage_lock().lock().await;
         let PreparedManagedImport {
             source_str,
             extension,
@@ -623,6 +679,7 @@ impl Library {
         let destination = self
             .managed_dir
             .join(format!("{}.{extension}", inspection.fingerprint.hash));
+        let destination_existed = destination.exists();
         let publish_stage = staged.path.clone();
         let copy_destination = destination.clone();
         let expected_hash = inspection.fingerprint.hash.clone();
@@ -631,6 +688,10 @@ impl Library {
         })
         .await
         .context("managed book publication task failed")??;
+        let mut publication = ManagedPublication {
+            path: destination.clone(),
+            remove_on_drop: !destination_existed,
+        };
         let destination = canonical_path(&destination);
         let destination_str = canonical_path_key(&destination);
         let existing_hash = self.get_by_hash(&inspection.fingerprint.hash).await?;
@@ -638,7 +699,23 @@ impl Library {
         if let Some(existing) = &existing_hash
             && existing.storage_kind == StorageKind::Managed
         {
-            return Ok(existing.clone());
+            // Repair identity attachment if an earlier attempt committed the book row but was
+            // interrupted before reconciliation (or if this source is a newly seen alias).
+            let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            reconcile_identity(
+                &mut transaction,
+                existing.id,
+                source_str,
+                &existing.file_path,
+            )
+            .await?;
+            transaction.commit().await?;
+            let book = self
+                .get(existing.id)
+                .await?
+                .context("managed book not found after identity repair")?;
+            publication.keep();
+            return Ok(book);
         }
 
         if let Some(existing) = self.get_by_path(source_str).await?.or(existing_hash) {
@@ -651,14 +728,17 @@ impl Library {
                 &inspection.fingerprint,
             )
             .await?;
-            return self
+            let book = self
                 .get(existing.id)
                 .await?
-                .context("managed book not found after update");
+                .context("managed book not found after update")?;
+            publication.keep();
+            return Ok(book);
         }
 
-        let insert_result = sqlx::query(
-            "INSERT INTO books
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO books
                 (title, author, format, file_path, cover_blob, storage_kind,
                  original_path, content_hash, file_size)
              VALUES (?, ?, ?, ?, ?, 'managed', ?, ?, ?)",
@@ -671,20 +751,25 @@ impl Library {
         .bind(source_str)
         .bind(&inspection.fingerprint.hash)
         .bind(inspection.fingerprint.size as i64)
-        .execute(&self.pool)
-        .await;
-        if let Err(error) = insert_result {
-            if let Some(winner) = self.get_by_path(&destination_str).await? {
-                return Ok(winner);
-            }
-            return Err(error).context("failed to insert managed book");
-        }
+        .execute(&mut *transaction)
+        .await
+        .context("failed to insert managed book")?;
+        let book_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM books WHERE file_path = ? OR content_hash = ?
+             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
+        )
+        .bind(&destination_str)
+        .bind(&inspection.fingerprint.hash)
+        .fetch_one(&mut *transaction)
+        .await
+        .context("managed book not found after insert")?;
+        reconcile_identity(&mut transaction, book_id, source_str, &destination_str).await?;
+        transaction.commit().await?;
         let book = self
-            .get_by_path(&destination_str)
+            .get(book_id)
             .await?
             .context("managed book not found after insert")?;
-        self.attach_identity(book.id, source_str, &destination_str)
-            .await?;
+        publication.keep();
         Ok(book)
     }
 
@@ -841,10 +926,25 @@ impl Library {
         cancellation: ImportCancellation,
         progress: ImportDiscoveryProgress,
     ) -> ImportDiscovery {
+        if roots.len() > MAX_IMPORT_ROOTS {
+            return ImportDiscovery {
+                failures: vec![ImportFailure {
+                    path: PathBuf::new(),
+                    error: format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
+                }],
+                ..ImportDiscovery::default()
+            };
+        }
+        let scan_permit = scanner_admission()
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("scanner semaphore closed");
         let (scan_sender, mut scan_receiver) = tokio::sync::mpsc::channel(16);
         let scan_cancellation = cancellation.clone();
         let scan_progress = progress.clone();
         let scan_task = tokio::task::spawn_blocking(move || {
+            let _scan_permit = scan_permit;
             scan_import_candidates(
                 roots,
                 recursive,
@@ -862,7 +962,8 @@ impl Library {
         while scanning || !fingerprint_tasks.is_empty() {
             if cancellation.is_cancelled() {
                 fingerprint_tasks.abort_all();
-                break;
+                scanning = false;
+                scan_receiver.close();
             }
 
             if fingerprint_tasks.len() >= DISCOVERY_HASH_CONCURRENCY || !scanning {
@@ -945,9 +1046,17 @@ impl Library {
             }
         }
 
-        if !cancellation.is_cancelled()
-            && let Err(error) = scan_task.await
-        {
+        // `abort_all` cannot stop blocking tasks. Drain them so global admission remains charged
+        // until the underlying reads have actually observed cancellation and returned.
+        while let Some(result) = fingerprint_tasks.join_next().await {
+            collect_fingerprint_result(
+                result,
+                &progress,
+                &mut fingerprinted,
+                &mut discovery.failures,
+            );
+        }
+        if let Err(error) = scan_task.await {
             discovery.failures.push(ImportFailure {
                 path: PathBuf::new(),
                 error: format!("book discovery task failed: {error}"),
@@ -1057,8 +1166,14 @@ impl Library {
     async fn add_directory(&self, dir: &Path, managed: bool) -> ImportReport {
         let mut report = ImportReport::default();
         let mut dirs = vec![dir.to_path_buf()];
+        let mut visited_dirs = HashSet::new();
+        let mut discovered = 0_usize;
 
         while let Some(current) = dirs.pop() {
+            let current = canonical_path(&current);
+            if !visited_dirs.insert(current.clone()) {
+                continue;
+            }
             let entries = match std::fs::read_dir(&current) {
                 Ok(entries) => entries,
                 Err(error) => {
@@ -1097,6 +1212,16 @@ impl Library {
                     .unwrap_or_default();
 
                 if BookFormat::from_extension(&ext).is_some() {
+                    if discovered >= MAX_IMPORT_DISCOVERY_RESULTS {
+                        report.failures.push(ImportFailure {
+                            path: PathBuf::new(),
+                            error: format!(
+                                "book import stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
+                            ),
+                        });
+                        return report;
+                    }
+                    discovered += 1;
                     let result = if managed {
                         self.import_managed_file(&path).await
                     } else {
@@ -1175,7 +1300,7 @@ impl Library {
         limit: u32,
         offset: u32,
     ) -> Result<BookPage> {
-        let limit = limit.max(1);
+        let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
         let mut builder = QueryBuilder::new(
             "SELECT id, title, author, format, file_path, storage_kind, original_path, \
              content_hash, file_size, cover_blob, progress, \
@@ -1245,27 +1370,29 @@ impl Library {
             return Ok(Vec::new());
         }
 
-        let mut builder = QueryBuilder::new(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path, \
-             content_hash, file_size, cover_blob, progress, \
-             date_added, last_read FROM books WHERE id IN (",
-        );
-        let mut separated = builder.separated(", ");
-        for id in ids {
-            separated.push_bind(id);
+        let mut books_by_id = HashMap::new();
+        for chunk in ids.chunks(SQLITE_ID_CHUNK_SIZE) {
+            let mut builder = QueryBuilder::new(
+                "SELECT id, title, author, format, file_path, storage_kind, original_path, \
+                 content_hash, file_size, cover_blob, progress, \
+                 date_added, last_read FROM books WHERE id IN (",
+            );
+            let mut separated = builder.separated(", ");
+            for id in chunk {
+                separated.push_bind(id);
+            }
+            separated.push_unseparated(")");
+            let rows = builder
+                .build()
+                .fetch_all(&self.pool)
+                .await
+                .context("failed to load books from library snapshot")?;
+            books_by_id.extend(
+                rows.iter()
+                    .filter_map(row_to_book)
+                    .map(|book| (book.id, book)),
+            );
         }
-        separated.push_unseparated(")");
-
-        let rows = builder
-            .build()
-            .fetch_all(&self.pool)
-            .await
-            .context("failed to load books from library snapshot")?;
-        let mut books_by_id: HashMap<_, _> = rows
-            .iter()
-            .filter_map(row_to_book)
-            .map(|book| (book.id, book))
-            .collect();
 
         Ok(ids.iter().filter_map(|id| books_by_id.remove(id)).collect())
     }
@@ -1301,6 +1428,7 @@ impl Library {
 
     /// Remove a book from the library and delete its private managed copy, if any.
     pub async fn remove(&self, book_id: i64) -> Result<()> {
+        let _storage_guard = managed_storage_lock().lock().await;
         let book = self.get(book_id).await?;
         let mut transaction = self.pool.begin().await?;
         sqlx::query("UPDATE bookmarks SET book_id = NULL WHERE book_id = ?")
@@ -1398,15 +1526,6 @@ impl Library {
         Ok(())
     }
 
-    async fn attach_identity(&self, book_id: i64, old_path: &str, new_path: &str) -> Result<()> {
-        // Reconciliation reads before writing, so reserve SQLite's writer slot up front rather
-        // than failing a deferred transaction's lock upgrade during concurrent imports.
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        reconcile_identity(&mut transaction, book_id, old_path, new_path).await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
     async fn remove_unreferenced_managed_file(&self, file_path: &str) {
         let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE file_path = ?")
             .bind(file_path)
@@ -1480,9 +1599,14 @@ async fn reconcile_identity(
         "DELETE FROM bookmarks
          WHERE (book_id = ? OR file_path = ? OR file_path = ?)
            AND id NOT IN (
-             SELECT MIN(id) FROM bookmarks
-             WHERE book_id = ? OR file_path = ? OR file_path = ?
-             GROUP BY page, location_offset, note
+             SELECT id FROM (
+               SELECT id, ROW_NUMBER() OVER (
+                 PARTITION BY page, location_offset, note
+                 ORDER BY created_at DESC, id DESC
+               ) AS rank
+               FROM bookmarks
+               WHERE book_id = ? OR file_path = ? OR file_path = ?
+             ) WHERE rank = 1
            )",
     )
     .bind(book_id)
@@ -1643,9 +1767,12 @@ fn file_fingerprint_cancellable(
     if cancellation.is_some_and(ImportCancellation::is_cancelled) {
         bail!("discovery cancelled");
     }
-    let file =
+    let mut file =
         std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let file_size = file.metadata()?.len();
+    // Derive both the bound and expected byte count from the opened descriptor, not a path that
+    // can be replaced between metadata and open.
+    let before = file.metadata()?;
+    let file_size = before.len();
     if let Some(format) = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -1658,7 +1785,16 @@ fn file_fingerprint_cancellable(
             format.max_input_bytes()
         );
     }
-    fingerprint_reader(file, file_size, cancellation)
+    let fingerprint = fingerprint_reader(
+        std::io::Read::take(&mut file, file_size.saturating_add(1)),
+        file_size,
+        cancellation,
+    )?;
+    let after = file.metadata()?;
+    if after.len() != file_size {
+        bail!("file changed while fingerprinting: {}", path.display());
+    }
+    Ok(fingerprint)
 }
 
 fn fingerprint_reader(
@@ -1668,6 +1804,7 @@ fn fingerprint_reader(
 ) -> Result<FileFingerprint> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
+    let mut actual_size = 0_u64;
     loop {
         if cancellation.is_some_and(ImportCancellation::is_cancelled) {
             bail!("discovery cancelled");
@@ -1676,7 +1813,14 @@ fn fingerprint_reader(
         if read == 0 {
             break;
         }
+        actual_size = actual_size.saturating_add(read as u64);
+        if actual_size > file_size {
+            bail!("file grew while fingerprinting");
+        }
         hasher.update(&buffer[..read]);
+    }
+    if actual_size != file_size {
+        bail!("file size changed while fingerprinting (expected {file_size}, read {actual_size})");
     }
     Ok(FileFingerprint {
         hash: format!("{:x}", hasher.finalize()),
@@ -1705,9 +1849,19 @@ fn spawn_candidate_fingerprint(
     cancellation: ImportCancellation,
 ) {
     let path = candidate.path.clone();
-    tasks.spawn_blocking(move || {
-        let fingerprint = file_fingerprint_cancellable(&path, Some(&cancellation));
-        (candidate, fingerprint)
+    let admission = fingerprint_admission().clone();
+    tasks.spawn(async move {
+        let permit = admission
+            .acquire_owned()
+            .await
+            .expect("fingerprint semaphore closed");
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let fingerprint = file_fingerprint_cancellable(&path, Some(&cancellation));
+            (candidate, fingerprint)
+        })
+        .await
+        .unwrap_or_else(|error| panic!("fingerprint blocking task failed: {error}"))
     });
 }
 
@@ -2182,6 +2336,15 @@ mod tests {
         };
 
         assert!(error.to_string().contains("discovery cancelled"));
+    }
+
+    #[test]
+    fn fingerprinting_rejects_short_and_growing_readers_instead_of_claiming_metadata_size() {
+        let short = fingerprint_reader(&b"short"[..], 10, None).unwrap_err();
+        assert!(short.to_string().contains("expected 10, read 5"));
+
+        let growing = fingerprint_reader(&b"too long"[..], 3, None).unwrap_err();
+        assert!(growing.to_string().contains("grew"));
     }
 
     #[test]

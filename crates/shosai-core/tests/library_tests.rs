@@ -165,6 +165,44 @@ async fn test_library_pages_are_bounded_and_combine_filters() {
 }
 
 #[tokio::test]
+async fn library_caps_pages_and_chunks_large_id_snapshots() {
+    let (lib, store, _dir) = temp_library().await;
+    for id in 0..1_005 {
+        sqlx::query("INSERT INTO books (title, format, file_path) VALUES (?, 'pdf', ?)")
+            .bind(format!("Book {id}"))
+            .bind(format!("/synthetic/{id}.pdf"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    let page = lib.page(None, None, u32::MAX, 0).await.unwrap();
+    assert_eq!(page.books.len(), 500);
+    assert!(page.has_more);
+    let ids = lib.matching_ids(None, None).await.unwrap();
+    let books = lib.books_by_ids(&ids).await.unwrap();
+    assert_eq!(books.len(), 1_005);
+    assert_eq!(books.first().unwrap().id, ids[0]);
+    assert_eq!(books.last().unwrap().id, *ids.last().unwrap());
+}
+
+#[tokio::test]
+async fn discovery_caps_selected_roots_before_starting_scanners() {
+    let (lib, _, _dir) = temp_library().await;
+    let roots = vec![fixture_path("sample.epub"); 10_001];
+
+    let discovery = lib.discover_files(&roots).await;
+
+    assert!(discovery.candidates.is_empty());
+    assert_eq!(discovery.failures.len(), 1);
+    assert!(
+        discovery.failures[0]
+            .error
+            .contains("too many import roots")
+    );
+}
+
+#[tokio::test]
 async fn library_order_queries_have_covering_sort_indexes() {
     let (_lib, store, _dir) = temp_library().await;
     let indexes: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_index_list('books')")
@@ -290,6 +328,23 @@ async fn test_import_directory() {
 
     let report = lib.import_directory(&import_dir).await;
     assert_eq!(report.books.len(), 2);
+    assert!(report.failures.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn direct_directory_import_does_not_follow_directory_cycles() {
+    use std::os::unix::fs::symlink;
+
+    let (lib, _, dir) = temp_library().await;
+    let root = dir.path().join("cycle");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), root.join("book.epub")).unwrap();
+    symlink(&root, root.join("again")).unwrap();
+
+    let report = lib.link_directory(&root).await;
+
+    assert_eq!(report.books.len(), 1);
     assert!(report.failures.is_empty());
 }
 
@@ -958,6 +1013,53 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn bookmark_alias_merge_keeps_newest_row_and_all_of_its_metadata() {
+    let (lib, store, dir) = temp_library().await;
+    let original = dir.path().join("original.epub");
+    let replacement = dir.path().join("replacement.epub");
+    std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &replacement).unwrap();
+    let book = lib.import_file(&original).await.unwrap();
+    let original_key = book.file_path.clone();
+    let replacement_key = replacement
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    sqlx::query(
+        "INSERT INTO bookmarks
+         (file_path, book_id, page, location_offset, title, note, color, created_at)
+         VALUES (?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')",
+    )
+    .bind(&original_key)
+    .bind(book.id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO bookmarks
+         (file_path, page, location_offset, title, note, color, created_at)
+         VALUES (?, 4, 9, 'winner title', 'same note', 'blue', '2026-02-01')",
+    )
+    .bind(&replacement_key)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    lib.relink(book.id, &replacement).await.unwrap();
+
+    let row = sqlx::query("SELECT title, color, created_at FROM bookmarks WHERE book_id = ?")
+        .bind(book.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<String, _>("title"), "winner title");
+    assert_eq!(row.get::<String, _>("color"), "blue");
+    assert_eq!(row.get::<String, _>("created_at"), "2026-02-01");
 }
 
 #[tokio::test]
