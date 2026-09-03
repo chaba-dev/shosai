@@ -91,6 +91,7 @@ All notable changes to this project will be documented in this file.
 - Automate release flow (#8)
 - Change gh runners to github hosted ones (#18)
 - Update release PRs with append-only commits (#72)
+- *(nix)* Add Flutter mobile development tools (#77)
 
 ### 🛡️ Security
 
