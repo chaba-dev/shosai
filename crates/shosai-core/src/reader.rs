@@ -167,6 +167,10 @@ impl CacheBudget {
         self.0.used.load(Ordering::Acquire)
     }
 
+    pub fn limit(&self) -> usize {
+        self.0.limit
+    }
+
     pub fn try_reserve(&self, weight: usize) -> Option<CachePermit> {
         let result = self
             .0

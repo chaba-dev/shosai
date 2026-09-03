@@ -1902,17 +1902,46 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if let Some(byte_len) = byte_len
                     && state.epub_images_desired.contains(&path)
                 {
+                    let transient_byte_len = match &state.document {
+                        Some(OpenDocument::Epub(document)) => {
+                            epub_image_transient_byte_len(document, &path)
+                        }
+                        _ => None,
+                    };
+                    if byte_len > state.epub_image_budget.limit()
+                        || transient_byte_len
+                            .is_none_or(|bytes| bytes > state.transient_decode_budget.limit())
+                    {
+                        state.epub_image_jobs.remove(&job);
+                        state.epub_image_decode_active = false;
+                        state.epub_images_pending.remove(&path);
+                        state.epub_images_desired.remove(&path);
+                        state.epub_images_failed.insert(path);
+                        return load_epub_images_task(state);
+                    }
                     if let Some(task) = decode_epub_image_task(state, job.clone(), byte_len) {
                         return task;
                     }
                     state.epub_image_jobs.remove(&job);
                     state.epub_image_decode_active = false;
                     state.epub_images_pending.remove(&path);
-                    // A held permit is temporary contention. Keep the image
-                    // desired so a permit-releasing completion can retry it;
-                    // only an otherwise-empty budget proves permanent oversize.
-                    if state.epub_image_budget.used() == 0
-                        && state.transient_decode_budget.used() == 0
+                    let current_paths = match &state.document {
+                        Some(OpenDocument::Epub(document)) => {
+                            let chapters = document.presentation().chapters();
+                            epub_image_paths(
+                                chapters[state.current_page.min(chapters.len() - 1)].nodes(),
+                            )
+                        }
+                        _ => HashSet::new(),
+                    };
+                    // The first image in document order wins when the current
+                    // chapter cannot retain all its images simultaneously.
+                    // Transient contention remains retryable and is pumped by
+                    // every raster/image worker completion.
+                    if state.transient_decode_budget.used() == 0
+                        && current_paths.contains(&path)
+                        && state.epub_image_budget.used().saturating_add(byte_len)
+                            > state.epub_image_budget.limit()
                     {
                         state.epub_images_desired.remove(&path);
                         state.epub_images_failed.insert(path);
@@ -1935,7 +1964,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 state.epub_image_jobs.remove(&job);
             }
-            return load_epub_images_task(state);
+            return pump_background_work(state);
         }
 
         Message::EpubImagesDecoded {
@@ -1978,7 +2007,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
-            return load_epub_images_task(state);
+            return pump_background_work(state);
         }
 
         Message::CbzDimensionsLoaded {
@@ -2050,37 +2079,43 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && was_pending
                 && state.paginated_pending.is_empty()
                 && generation != state.render_generation;
-            if active && generation == state.render_generation {
-                match result {
-                    Ok(page) => {
-                        let Some(page) = attach_raster_permit(page, permit) else {
-                            state.error = Some(AppError::Render(
-                                "rendered page exceeds its admitted raster budget".to_owned(),
-                            ));
-                            return pump_raster_queue(state);
-                        };
-                        let is_visible = paginated_raster_pages(state).contains(&key.page);
-                        cache_rendered_page(state, key, page);
-                        let spread_changed = is_visible && show_cached_paginated_spread(state);
-                        state.error = None;
-                        if spread_changed {
-                            return prefetch_next_paginated_spread(state);
-                        }
-                    }
-                    Err(error) => {
-                        state.rendered_page = None;
-                        state.rendered_page_index = None;
-                        state.rendered_page_handle = None;
-                        state.rendered_facing_page = None;
-                        state.rendered_facing_page_handle = None;
-                        state.error = Some(AppError::Render(error));
+            if !active || generation != state.render_generation {
+                drop(permit);
+                if request_was_superseded {
+                    return Task::batch([refresh_content(state), load_epub_images_task(state)]);
+                }
+                return pump_background_work(state);
+            }
+            match result {
+                Ok(page) => {
+                    let Some(page) = attach_raster_permit(page, permit) else {
+                        state.error = Some(AppError::Render(
+                            "rendered page exceeds its admitted raster budget".to_owned(),
+                        ));
+                        return pump_background_work(state);
+                    };
+                    let is_visible = paginated_raster_pages(state).contains(&key.page);
+                    cache_rendered_page(state, key, page);
+                    let spread_changed = is_visible && show_cached_paginated_spread(state);
+                    state.error = None;
+                    if spread_changed {
+                        return Task::batch([
+                            prefetch_next_paginated_spread(state),
+                            load_epub_images_task(state),
+                        ]);
                     }
                 }
+                Err(error) => {
+                    drop(permit);
+                    state.rendered_page = None;
+                    state.rendered_page_index = None;
+                    state.rendered_page_handle = None;
+                    state.rendered_facing_page = None;
+                    state.rendered_facing_page_handle = None;
+                    state.error = Some(AppError::Render(error));
+                }
             }
-            if request_was_superseded {
-                return refresh_content(state);
-            }
-            return pump_raster_queue(state);
+            return pump_background_work(state);
         }
 
         Message::ContinuousPageRendered {
@@ -2103,15 +2138,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 {
                     tab.continuous_pending.remove(&page);
                 }
-                return pump_raster_queue(state);
+                drop(permit);
+                return pump_background_work(state);
             }
             if state.active_tab_id == Some(tab_id) {
                 if state.continuous_pending.get(&page) != Some(&request) {
-                    return pump_raster_queue(state);
+                    drop(permit);
+                    return pump_background_work(state);
                 }
                 state.continuous_pending.remove(&page);
                 if page >= state.continuous_pages.len() {
-                    return pump_raster_queue(state);
+                    drop(permit);
+                    return pump_background_work(state);
                 }
                 match (request.generation == state.render_generation, result) {
                     (true, Ok(rendered))
@@ -2129,24 +2167,29 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                     (true, Err(error)) => {
+                        drop(permit);
                         if page == state.current_page {
                             state.error = Some(AppError::Render(error));
-                            return Task::none();
+                            return load_epub_images_task(state);
                         }
                         state.continuous_visible.remove(&page);
-                        return pump_raster_queue(state);
+                        return pump_background_work(state);
                     }
                     (true, Ok(_)) => {
+                        drop(permit);
                         if page == state.current_page {
                             state.error = Some(AppError::Render(
                                 "rendered page exceeds the continuous raster budget".to_owned(),
                             ));
                         }
-                        return pump_raster_queue(state);
+                        return pump_background_work(state);
                     }
-                    (false, _) => {}
+                    (false, _) => {
+                        drop(permit);
+                        return pump_background_work(state);
+                    }
                 }
-                return pump_raster_queue(state);
+                return pump_background_work(state);
             }
         }
 

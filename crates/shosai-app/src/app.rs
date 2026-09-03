@@ -2177,9 +2177,13 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
-                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
-                    else {
-                        continue;
+                    let transient_permit = match reserve_render_transient(state, page, scale) {
+                        RenderTransientAdmission::Ready(permit) => permit,
+                        RenderTransientAdmission::Busy => continue,
+                        RenderTransientAdmission::Rejected(error) => {
+                            state.error = Some(AppError::Render(error));
+                            continue;
+                        }
                     };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
@@ -2268,9 +2272,13 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
-                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
-                    else {
-                        continue;
+                    let transient_permit = match reserve_render_transient(state, page, scale) {
+                        RenderTransientAdmission::Ready(permit) => permit,
+                        RenderTransientAdmission::Busy => continue,
+                        RenderTransientAdmission::Rejected(error) => {
+                            state.error = Some(AppError::Render(error));
+                            continue;
+                        }
                     };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
@@ -2831,12 +2839,17 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             let Some(permit) = reserve_raster_bytes(state, byte_len) else {
                 continue;
             };
-            let Some(transient_permit) = reserve_render_transient(
+            let transient_permit = match reserve_render_transient(
                 state,
                 page,
                 raster_render_scale(state, state.zoom.scale()),
-            ) else {
-                continue;
+            ) {
+                RenderTransientAdmission::Ready(permit) => permit,
+                RenderTransientAdmission::Busy => continue,
+                RenderTransientAdmission::Rejected(error) => {
+                    state.error = Some(AppError::Render(error));
+                    continue;
+                }
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
@@ -2951,15 +2964,51 @@ fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePer
     reserve_raster_bytes(state, byte_len)
 }
 
-fn reserve_render_transient(state: &State, page: usize, scale: f32) -> Option<CachePermit> {
-    let byte_len = match state.document.as_ref()? {
-        OpenDocument::Pdf(document) => document.render_transient_byte_len(page, scale).ok()?,
+enum RenderTransientAdmission {
+    Ready(CachePermit),
+    Busy,
+    Rejected(String),
+}
+
+fn reserve_render_transient(state: &State, page: usize, scale: f32) -> RenderTransientAdmission {
+    let Some(document) = state.document.as_ref() else {
+        return RenderTransientAdmission::Rejected("no document is open".to_owned());
+    };
+    let byte_len = match document {
+        OpenDocument::Pdf(document) => match document.render_transient_byte_len(page, scale) {
+            Ok(byte_len) => byte_len,
+            Err(error) => return RenderTransientAdmission::Rejected(error.to_string()),
+        },
         // CBZ admission includes the compressed source entry as well as the
         // conservative decode and resize allocations.
-        OpenDocument::Cbz(document) => document.render_admission_byte_len_at_scale(page, scale)?,
-        OpenDocument::Epub(_) => return None,
+        OpenDocument::Cbz(document) => {
+            let Some(byte_len) = document.render_admission_byte_len_at_scale(page, scale) else {
+                return RenderTransientAdmission::Rejected(
+                    "CBZ render memory requirement could not be bounded".to_owned(),
+                );
+            };
+            byte_len
+        }
+        OpenDocument::Epub(_) => {
+            return RenderTransientAdmission::Rejected(
+                "EPUB does not use raster page rendering".to_owned(),
+            );
+        }
     };
-    state.transient_decode_budget.try_reserve(byte_len)
+    if byte_len > state.transient_decode_budget.limit() {
+        return RenderTransientAdmission::Rejected(format!(
+            "page render requires {byte_len} transient bytes, exceeding the {} byte limit",
+            state.transient_decode_budget.limit()
+        ));
+    }
+    state.transient_decode_budget.try_reserve(byte_len).map_or(
+        RenderTransientAdmission::Busy,
+        RenderTransientAdmission::Ready,
+    )
+}
+
+pub(super) fn pump_background_work(state: &mut State) -> Task<Message> {
+    Task::batch([pump_raster_queue(state), load_epub_images_task(state)])
 }
 
 fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermit> {
@@ -3320,8 +3369,13 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 let Some(permit) = reserve_raster(state, page, scale) else {
                     continue;
                 };
-                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
-                    continue;
+                let transient_permit = match reserve_render_transient(state, page, scale) {
+                    RenderTransientAdmission::Ready(permit) => permit,
+                    RenderTransientAdmission::Busy => continue,
+                    RenderTransientAdmission::Rejected(error) => {
+                        state.error = Some(AppError::Render(error));
+                        continue;
+                    }
                 };
                 tasks.push(render_page_task(
                     tab_id,
@@ -3345,8 +3399,13 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 let Some(permit) = reserve_raster(state, page, scale) else {
                     continue;
                 };
-                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
-                    continue;
+                let transient_permit = match reserve_render_transient(state, page, scale) {
+                    RenderTransientAdmission::Ready(permit) => permit,
+                    RenderTransientAdmission::Busy => continue,
+                    RenderTransientAdmission::Rejected(error) => {
+                        state.error = Some(AppError::Render(error));
+                        continue;
+                    }
                 };
                 tasks.push(render_page_task(
                     tab_id,
@@ -7192,6 +7251,33 @@ mod tests {
         assert_eq!(task.units(), 0);
         assert!(state.raster_jobs.is_empty());
         assert!(state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn cbz_render_reports_intrinsic_transient_overflow_at_the_budget_boundary() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        document.page_size(0).unwrap();
+        let required = document.render_admission_byte_len_at_scale(0, 1.0).unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.transient_decode_budget = CacheBudget::new(required);
+        let RenderTransientAdmission::Ready(permit) = reserve_render_transient(&state, 0, 1.0)
+        else {
+            panic!("an exact-boundary render must be admitted");
+        };
+        drop(permit);
+
+        state.transient_decode_budget = CacheBudget::new(required - 1);
+        let RenderTransientAdmission::Rejected(error) = reserve_render_transient(&state, 0, 1.0)
+        else {
+            panic!("an intrinsically oversized render must be rejected");
+        };
+        assert!(error.contains("exceeding"));
     }
 
     #[test]
@@ -11266,6 +11352,136 @@ mod tests {
         assert_eq!(task.units(), 1);
         assert_eq!(state.epub_images_failed.len(), 1);
         assert_eq!(state.epub_image_jobs.len(), 1);
+    }
+
+    #[test]
+    fn current_epub_images_use_a_deterministic_first_fit_policy() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.epub_image_budget = CacheBudget::new(6);
+        let first_image = state.epub_image_budget.try_reserve(4).unwrap();
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path.clone(),
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(state.epub_images_failed.contains(&job.path));
+        assert!(!state.epub_images_desired.contains(&job.path));
+        drop(first_image);
+    }
+
+    #[test]
+    fn stale_raster_completion_wakes_epub_after_transient_contention() {
+        let epub = Arc::new(EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap());
+        let mut state = state_with_document(OpenDocument::Epub(Arc::clone(&epub)));
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let image_job = state.epub_image_jobs.iter().next().unwrap().clone();
+        let transient_bytes = epub_image_transient_byte_len(&epub, &image_job.path).unwrap();
+        state.transient_decode_budget = CacheBudget::new(transient_bytes);
+        let transient = state
+            .transient_decode_budget
+            .try_reserve(transient_bytes)
+            .unwrap();
+
+        assert_eq!(
+            update(
+                &mut state,
+                Message::EpubImageSizeLoaded {
+                    tab_id: image_job.tab_id,
+                    generation: image_job.generation,
+                    path: image_job.path.clone(),
+                    byte_len: Some(4),
+                },
+            )
+            .units(),
+            0
+        );
+        assert!(state.epub_images_desired.contains(&image_job.path));
+        drop(transient);
+
+        let key = PageCacheKey {
+            page: 0,
+            scale_bits: 1.0_f32.to_bits(),
+            highlights: Vec::new(),
+        };
+        let raster_job = RasterJob::Paginated {
+            tab_id: 99,
+            generation: 0,
+            key: key.clone(),
+        };
+        state
+            .raster_jobs
+            .insert(raster_job, state.raster_budget.try_reserve(4).unwrap());
+        let task = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id: 99,
+                generation: 0,
+                key,
+                result: Err("stale".to_owned()),
+            },
+        );
+
+        assert_eq!(task.units(), 1);
+        assert!(state.epub_image_decode_active);
+    }
+
+    #[test]
+    fn stale_and_failed_rasters_release_output_admission_before_pumping() {
+        for stale in [false, true] {
+            let pdf = PdfDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+            )
+            .unwrap();
+            let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+            let page = 0;
+            let scale = raster_render_scale(&state, state.zoom.scale());
+            let byte_len = raster_byte_len(&state, page, scale).unwrap();
+            state.raster_budget = CacheBudget::new(byte_len);
+            state.render_generation = 2;
+            let key = PageCacheKey {
+                page,
+                scale_bits: scale.to_bits(),
+                highlights: Vec::new(),
+            };
+            state.paginated_requested = vec![key.clone()];
+            let tab_id = if stale {
+                99
+            } else {
+                state.active_tab_id.unwrap()
+            };
+            let generation = if stale { 1 } else { state.render_generation };
+            state.raster_jobs.insert(
+                RasterJob::Paginated {
+                    tab_id,
+                    generation,
+                    key: key.clone(),
+                },
+                state.raster_budget.try_reserve(byte_len).unwrap(),
+            );
+
+            let task = update(
+                &mut state,
+                Message::PageRendered {
+                    tab_id,
+                    generation,
+                    key,
+                    result: Err("render failed".to_owned()),
+                },
+            );
+
+            assert!(task.units() > 0, "stale={stale}");
+            assert!(!state.raster_jobs.is_empty(), "stale={stale}");
+        }
     }
 
     #[test]
