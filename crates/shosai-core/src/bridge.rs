@@ -117,6 +117,8 @@ pub enum BridgeErrorKind {
     Cancelled,
     NotFound,
     Inaccessible,
+    Unsupported,
+    InvalidRequest,
     Malformed,
     LimitExceeded,
     BackendUnavailable,
@@ -166,18 +168,13 @@ impl BridgeError {
             Self::BufferLimit => BridgeErrorKind::LimitExceeded,
             Self::Panic | Self::Worker => BridgeErrorKind::BackendUnavailable,
             Self::Render(_) => BridgeErrorKind::RenderFailed,
-            Self::Open { detail, .. } if is_limit_error(detail) => BridgeErrorKind::LimitExceeded,
-            Self::Open { .. }
-            | Self::UnsupportedOperation(_)
-            | Self::UnsupportedFormat(_)
-            | Self::InvalidPage { .. }
-            | Self::InvalidRequest(_) => BridgeErrorKind::Malformed,
+            Self::UnsupportedOperation(_) | Self::UnsupportedFormat(_) => {
+                BridgeErrorKind::Unsupported
+            }
+            Self::InvalidPage { .. } | Self::InvalidRequest(_) => BridgeErrorKind::InvalidRequest,
+            Self::Open { .. } => BridgeErrorKind::Malformed,
         }
     }
-}
-
-fn is_limit_error(detail: &str) -> bool {
-    detail.to_ascii_lowercase().contains("limit")
 }
 
 #[derive(Debug)]
@@ -533,7 +530,7 @@ mod tests {
         );
         assert_eq!(
             BridgeError::InvalidRequest("bad scale".to_owned()).kind(),
-            BridgeErrorKind::Malformed
+            BridgeErrorKind::InvalidRequest
         );
         assert_eq!(
             BridgeError::Open {
@@ -541,6 +538,15 @@ mod tests {
                 detail: "entry exceeds byte limit".to_owned(),
             }
             .kind(),
+            BridgeErrorKind::Malformed,
+            "detail text must not determine the category"
+        );
+        assert_eq!(
+            BridgeError::UnsupportedOperation(BookFormat::Epub).kind(),
+            BridgeErrorKind::Unsupported
+        );
+        assert_eq!(
+            BridgeError::BufferLimit.kind(),
             BridgeErrorKind::LimitExceeded
         );
         assert_eq!(
