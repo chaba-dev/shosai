@@ -22,6 +22,7 @@ use shosai_core::library::{
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::pdf::PdfDoc;
+use shosai_core::reader::{BoundedCache, ReaderLocation, ReadingMode};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 
@@ -556,13 +557,6 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ReadingMode {
-    #[default]
-    Paginated,
-    Continuous,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EpubLayoutKey {
     width: u32,
@@ -582,22 +576,6 @@ impl EpubLayoutKey {
     }
 }
 
-impl ReadingMode {
-    fn from_stored(value: Option<&str>) -> Self {
-        match value {
-            Some("continuous") => Self::Continuous,
-            _ => Self::Paginated,
-        }
-    }
-
-    fn stored(self) -> &'static str {
-        match self {
-            Self::Paginated => "paginated",
-            Self::Continuous => "continuous",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
@@ -613,7 +591,7 @@ struct ReaderTab {
     rendered_page_handle: Option<RasterImageHandle>,
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
-    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
+    page_cache: BoundedCache<PageCacheKey, RenderedPage>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
     epub_images_desired: HashSet<String>,
@@ -717,7 +695,7 @@ pub struct State {
     rendered_page_handle: Option<RasterImageHandle>,
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
-    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
+    page_cache: BoundedCache<PageCacheKey, RenderedPage>,
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
@@ -866,7 +844,7 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_page_handle: None,
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
-        page_cache: VecDeque::new(),
+        page_cache: BoundedCache::new(PAGE_CACHE_CAPACITY),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
@@ -1740,13 +1718,9 @@ fn install_document(
             .and_then(|id| store.get_for_book(id))
             .or_else(|| store.get(&path))
     });
-    if let Some(saved) = saved {
-        state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
-        state.epub_offset = saved.location_offset.unwrap_or(0);
-    } else {
-        state.current_page = 0;
-        state.epub_offset = 0;
-    }
+    let location = ReaderLocation::restored(saved.as_ref(), state.total_pages);
+    state.current_page = location.page;
+    state.epub_offset = location.offset.unwrap_or(0);
     state.zoom = ZoomMode::FitPage;
 
     state.page_input = format!("{}", state.current_page + 1);
@@ -2797,17 +2771,7 @@ fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
 }
 
 fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
-    if let Some(position) = state
-        .page_cache
-        .iter()
-        .position(|(cached_key, _)| cached_key == &key)
-    {
-        state.page_cache.remove(position);
-    }
-    state.page_cache.push_back((key, page));
-    while state.page_cache.len() > PAGE_CACHE_CAPACITY {
-        state.page_cache.pop_front();
-    }
+    state.page_cache.insert(key, page);
 }
 
 fn raster_image_handle(rendered: &RenderedPage) -> RasterImageHandle {
@@ -9933,7 +9897,7 @@ mod tests {
             height: 11,
             pixels: bytes::Bytes::from(vec![0; 7 * 11 * 4]),
         });
-        state.page_cache.push_back((
+        state.page_cache.insert(
             PageCacheKey {
                 page: 0,
                 scale_bits: 1.0_f32.to_bits(),
@@ -9944,7 +9908,7 @@ mod tests {
                 height: 17,
                 pixels: bytes::Bytes::from(vec![0; 13 * 17 * 4]),
             },
-        ));
+        );
         let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
 
@@ -9958,7 +9922,7 @@ mod tests {
         assert!(Arc::ptr_eq(current_document, &old_document));
         assert_eq!(state.rendered_page.as_ref().map(|page| page.width), Some(7));
         assert_eq!(state.page_cache.len(), 1);
-        assert_eq!(state.page_cache[0].1.width, 13);
+        assert_eq!(state.page_cache.iter().next().unwrap().1.width, 13);
         assert!(matches!(
             &state.open_error,
             Some(AppError::Open { format: "EPUB", detail })
