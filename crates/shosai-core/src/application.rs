@@ -10,6 +10,7 @@ use crate::document::Document;
 use crate::epub::EpubDoc;
 use crate::epub::pagination::content_node_text_len;
 use crate::library::BookFormat;
+use crate::path_key::path_key;
 use crate::pdf::PdfDoc;
 
 /// A locator supplied by the current device.
@@ -39,7 +40,7 @@ impl DeviceFileLocator {
 
     pub fn from_path(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        Self::new(path.to_string_lossy(), path.clone())
+        Self::new(path_key(&path), path)
     }
 
     pub fn local_id(&self) -> &str {
@@ -221,5 +222,18 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_locators_keep_non_unicode_paths_distinct() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let first = DeviceFileLocator::from_path(Path::new(OsStr::from_bytes(b"book-\x80.epub")));
+        let second = DeviceFileLocator::from_path(Path::new(OsStr::from_bytes(b"book-\x81.epub")));
+
+        assert_ne!(first.local_id(), second.local_id());
+        assert_eq!(first.path().as_os_str().as_bytes(), b"book-\x80.epub");
     }
 }
