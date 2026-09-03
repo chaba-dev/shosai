@@ -353,6 +353,7 @@ const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_mil
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
+const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
@@ -827,7 +828,7 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_page_handle: None,
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
-        page_cache: BoundedCache::new(PAGE_CACHE_CAPACITY),
+        page_cache: BoundedCache::with_weight_limit(PAGE_CACHE_CAPACITY, PAGE_CACHE_BYTE_CAPACITY),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
@@ -2708,7 +2709,8 @@ fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
 }
 
 fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
-    state.page_cache.insert(key, page);
+    let weight = page.pixels.len();
+    state.page_cache.insert_weighted(key, page, weight);
 }
 
 fn raster_image_handle(rendered: &RenderedPage) -> RasterImageHandle {
@@ -10649,6 +10651,36 @@ mod tests {
 
         assert_eq!(state.page_cache.len(), PAGE_CACHE_CAPACITY);
         assert!(state.page_cache.iter().all(|(key, _)| key.page != 0));
+    }
+
+    #[test]
+    fn page_cache_evicts_by_decoded_pixel_bytes() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.page_cache = BoundedCache::with_weight_limit(8, 6);
+
+        for page in 0..2 {
+            cache_rendered_page(
+                &mut state,
+                PageCacheKey {
+                    page,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
+                RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                },
+            );
+        }
+
+        assert_eq!(state.page_cache.retained_weight(), 4);
+        assert_eq!(state.page_cache.len(), 1);
+        assert_eq!(state.page_cache.iter().next().unwrap().0.page, 1);
     }
 
     #[test]

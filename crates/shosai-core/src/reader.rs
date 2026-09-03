@@ -1,6 +1,8 @@
 //! Reader-session policy and bounded renderer-neutral caches.
 
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::application::{DeviceFileLocator, FormatCapabilities, OpenDocument};
 use crate::reading_state::FileReadingState;
@@ -141,40 +143,123 @@ impl ReaderSession {
     }
 }
 
-/// A deterministic least-recently-inserted cache with a fixed entry bound.
+#[derive(Debug)]
+struct CacheBudgetInner {
+    limit: usize,
+    used: AtomicUsize,
+}
+
 #[derive(Debug, Clone)]
+pub struct CacheBudget(Arc<CacheBudgetInner>);
+
+impl CacheBudget {
+    pub fn new(limit: usize) -> Self {
+        Self(Arc::new(CacheBudgetInner {
+            limit,
+            used: AtomicUsize::new(0),
+        }))
+    }
+
+    pub fn used(&self) -> usize {
+        self.0.used.load(Ordering::Acquire)
+    }
+
+    fn reserve(&self, weight: usize) -> Option<Arc<CacheReservation>> {
+        let result = self
+            .0
+            .used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(weight)
+                    .filter(|total| *total <= self.0.limit)
+            });
+        result.ok().map(|_| {
+            Arc::new(CacheReservation {
+                budget: Arc::clone(&self.0),
+                weight,
+            })
+        })
+    }
+}
+
+#[derive(Debug)]
+struct CacheReservation {
+    budget: Arc<CacheBudgetInner>,
+    weight: usize,
+}
+
+impl Drop for CacheReservation {
+    fn drop(&mut self) {
+        self.budget.used.fetch_sub(self.weight, Ordering::AcqRel);
+    }
+}
+
+/// A deterministic least-recently-inserted cache with shared entry and byte bounds.
+#[derive(Debug)]
 pub struct BoundedCache<K, V> {
     capacity: usize,
-    entries: VecDeque<(K, V)>,
+    budget: CacheBudget,
+    entries: VecDeque<((K, V), Arc<CacheReservation>)>,
+}
+
+impl<K: Clone, V: Clone> Clone for BoundedCache<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            capacity: self.capacity,
+            budget: self.budget.clone(),
+            entries: self.entries.clone(),
+        }
+    }
 }
 
 impl<K: PartialEq, V> BoundedCache<K, V> {
     pub fn new(capacity: usize) -> Self {
+        Self::with_budget(capacity, CacheBudget::new(usize::MAX))
+    }
+
+    pub fn with_weight_limit(capacity: usize, weight_limit: usize) -> Self {
+        Self::with_budget(capacity, CacheBudget::new(weight_limit))
+    }
+
+    pub fn with_budget(capacity: usize, budget: CacheBudget) -> Self {
         Self {
             capacity,
+            budget,
             entries: VecDeque::with_capacity(capacity),
         }
     }
 
     pub fn insert(&mut self, key: K, value: V) {
+        let _ = self.insert_weighted(key, value, 0);
+    }
+
+    pub fn insert_weighted(&mut self, key: K, value: V, weight: usize) -> bool {
         if let Some(position) = self
             .entries
             .iter()
-            .position(|(candidate, _)| candidate == &key)
+            .position(|((candidate, _), _)| candidate == &key)
         {
             self.entries.remove(position);
         }
         if self.capacity == 0 {
-            return;
+            return false;
         }
-        self.entries.push_back((key, value));
+        let reservation = loop {
+            if let Some(reservation) = self.budget.reserve(weight) {
+                break reservation;
+            }
+            if self.entries.pop_front().is_none() {
+                return false;
+            }
+        };
+        self.entries.push_back(((key, value), reservation));
         while self.entries.len() > self.capacity {
             self.entries.pop_front();
         }
+        true
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &(K, V)> {
-        self.entries.iter()
+        self.entries.iter().map(|(entry, _)| entry)
     }
 
     pub fn clear(&mut self) {
@@ -187,6 +272,10 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub fn retained_weight(&self) -> usize {
+        self.budget.used()
     }
 }
 
@@ -254,6 +343,19 @@ mod tests {
             cache.iter().copied().collect::<Vec<_>>(),
             vec![(1, "new"), (3, "third")]
         );
+    }
+
+    #[test]
+    fn weighted_cache_shares_reservations_across_clones() {
+        let mut first = BoundedCache::with_weight_limit(4, 6);
+        assert!(first.insert_weighted(1, "first", 4));
+        let clone = first.clone();
+        first.clear();
+        assert_eq!(first.retained_weight(), 4);
+        assert!(!first.insert_weighted(2, "too large", 3));
+        drop(clone);
+        assert!(first.insert_weighted(2, "fits", 3));
+        assert_eq!(first.retained_weight(), 3);
     }
 
     #[test]
