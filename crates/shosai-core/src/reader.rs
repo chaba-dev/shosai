@@ -242,15 +242,15 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
     }
 
     pub fn insert_weighted(&mut self, key: K, value: V, weight: usize) -> bool {
+        if self.capacity == 0 || weight > self.budget.0.limit {
+            return false;
+        }
         if let Some(position) = self
             .entries
             .iter()
             .position(|((candidate, _), _)| candidate == &key)
         {
             self.entries.remove(position);
-        }
-        if self.capacity == 0 {
-            return false;
         }
         let reservation = loop {
             if let Some(reservation) = self.budget.try_reserve(weight) {
@@ -369,6 +369,21 @@ mod tests {
         drop(clone);
         assert!(first.insert_weighted(2, "fits", 3));
         assert_eq!(first.retained_weight(), 3);
+    }
+
+    #[test]
+    fn oversized_insert_preserves_existing_entries() {
+        let mut cache = BoundedCache::with_weight_limit(4, 6);
+        assert!(cache.insert_weighted(1, "first", 3));
+        assert!(cache.insert_weighted(2, "second", 3));
+
+        assert!(!cache.insert_weighted(1, "oversized replacement", 7));
+
+        assert_eq!(
+            cache.iter().copied().collect::<Vec<_>>(),
+            vec![(1, "first"), (2, "second")]
+        );
+        assert_eq!(cache.retained_weight(), 6);
     }
 
     #[test]
