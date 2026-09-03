@@ -1139,6 +1139,30 @@ mod tests {
         assert!(error.to_string().contains("could not inspect dimensions"));
     }
 
+    #[test]
+    fn full_open_enforces_the_aggregate_presentation_node_limit() {
+        let bytes =
+            std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"))
+                .unwrap();
+        let limits = EpubLimits {
+            max_total_presentation_nodes: 0,
+            ..EpubLimits::default()
+        };
+
+        let error = EpubDoc::from_bytes_with_limits(bytes, limits).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("aggregate presentation node limit")
+        );
+        assert!(
+            error
+                .downcast_ref::<crate::application::ResourceLimitError>()
+                .is_some()
+        );
+    }
+
     fn linked_chapter_epub() -> Vec<u8> {
         archive_with_payloads(&[
             ("mimetype", b"application/epub+zip"),

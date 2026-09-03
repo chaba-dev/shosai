@@ -13,6 +13,7 @@ pub const PDF_SELECTION_MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PDF_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_PDF_BITMAP_DIMENSION: u32 = 16_384;
 pub const MAX_PDF_BITMAP_PIXELS: u64 = 40_000_000;
+const MAX_PDF_METADATA_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PdfSelectionRect {
@@ -343,6 +344,19 @@ impl PdfDoc {
                 .get(PdfDocumentMetadataTagType::Creator)
                 .map(|t| t.value().to_string()),
         };
+        let metadata_bytes = [
+            &metadata.title,
+            &metadata.author,
+            &metadata.subject,
+            &metadata.creator,
+        ]
+        .into_iter()
+        .flatten()
+        .try_fold(0_usize, |total, value| total.checked_add(value.len()))
+        .filter(|total| *total <= MAX_PDF_METADATA_BYTES);
+        if metadata_bytes.is_none() {
+            crate::resource_limit!("PDF metadata exceeds retained byte limit");
+        }
 
         // Explicitly drop document and pdfium before moving `data` into the struct.
         // This releases the borrow on `data` and the global PDFium mutex lock.

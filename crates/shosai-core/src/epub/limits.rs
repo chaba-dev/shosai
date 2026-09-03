@@ -27,6 +27,8 @@ pub struct EpubLimits {
     pub max_xml_depth: usize,
     /// Maximum presentation nodes admitted from an XML document.
     pub max_xml_nodes: usize,
+    /// Maximum native presentation nodes retained across all spine documents.
+    pub max_total_presentation_nodes: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
     /// Maximum number of reading-order items admitted from the OPF spine.
@@ -99,6 +101,7 @@ impl Default for EpubLimits {
             max_xml_bytes: 8 * MIB,
             max_xml_depth: 128,
             max_xml_nodes: 250_000,
+            max_total_presentation_nodes: 1_000_000,
             max_xml_text_bytes: 4 * MIB,
             max_spine_items: 10_000,
             max_css_resource_bytes: 8 * MIB,

@@ -23,8 +23,10 @@ pub const MAX_BRIDGE_BUFFERS: usize = 256;
 pub const MAX_BRIDGE_RETAINED_DOCUMENT_BYTES: usize = 3 * 1024 * 1024 * 1024;
 pub const MAX_BRIDGE_PROBE_BYTES: usize = 512 * 1024 * 1024;
 
-const EPUB_PRESENTATION_OVERHEAD_BYTES: usize = 256 * 1024 * 1024;
-const FIXED_DOCUMENT_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
+const EPUB_RETAINED_SOURCE_COPIES: usize = 4;
+const EPUB_PRESENTATION_NODE_BYTES: usize = 256;
+const EPUB_CONTAINER_OVERHEAD_BYTES: usize = 64 * 1024 * 1024;
+const PDF_RETAINED_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
 
 static NEXT_REGISTRY_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -619,11 +621,40 @@ fn retained_document_byte_len(
             let limits = EpubLimits::default();
             usize::try_from(limits.max_total_uncompressed_bytes)
                 .ok()
+                // Content/resources, parsed package/style strings, presentation strings, and
+                // search text can each retain source-derived bytes. The parser independently
+                // bounds aggregate presentation nodes and decoded font bytes.
+                .and_then(|bytes| bytes.checked_mul(EPUB_RETAINED_SOURCE_COPIES))
                 .and_then(|bytes| bytes.checked_add(limits.max_total_decoded_font_bytes))
-                .and_then(|bytes| bytes.checked_add(EPUB_PRESENTATION_OVERHEAD_BYTES))
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        limits
+                            .max_total_presentation_nodes
+                            .checked_mul(EPUB_PRESENTATION_NODE_BYTES)?,
+                    )
+                })
+                .and_then(|bytes| bytes.checked_add(EPUB_CONTAINER_OVERHEAD_BYTES))
                 .ok_or(BridgeError::DocumentLimit)?
         }
-        BookFormat::Pdf | BookFormat::Cbz => FIXED_DOCUMENT_OVERHEAD_BYTES,
+        BookFormat::Pdf => PDF_RETAINED_OVERHEAD_BYTES,
+        BookFormat::Cbz => {
+            let limits = crate::cbz::CbzLimits::default();
+            // Every retained page name came from the encoded ZIP directory. Account for that
+            // second copy plus bounded vectors, cached dimensions, and the path-derived title.
+            encoded_byte_len
+                .checked_add(
+                    limits
+                        .max_entries
+                        .checked_mul(
+                            std::mem::size_of::<String>()
+                                + std::mem::size_of::<usize>()
+                                + std::mem::size_of::<Option<(u32, u32)>>(),
+                        )
+                        .ok_or(BridgeError::DocumentLimit)?,
+                )
+                .and_then(|bytes| bytes.checked_add(4 * 1024))
+                .ok_or(BridgeError::DocumentLimit)?
+        }
     };
     let retained = encoded_byte_len
         .checked_add(expansion)
@@ -969,6 +1000,16 @@ mod tests {
             retained
                 >= usize::try_from(EpubLimits::default().max_total_uncompressed_bytes).unwrap()
         );
+        assert!(retained <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES);
+    }
+
+    #[test]
+    fn cbz_retention_charge_includes_copied_directory_names_and_indexes() {
+        let encoded = 1024;
+
+        let retained = retained_document_byte_len(BookFormat::Cbz, encoded).unwrap();
+
+        assert!(retained > encoded * 2);
     }
 
     #[tokio::test]
