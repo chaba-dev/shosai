@@ -152,6 +152,9 @@ struct CacheBudgetInner {
 #[derive(Debug, Clone)]
 pub struct CacheBudget(Arc<CacheBudgetInner>);
 
+#[derive(Debug, Clone)]
+pub struct CachePermit(Arc<CacheReservation>);
+
 impl CacheBudget {
     pub fn new(limit: usize) -> Self {
         Self(Arc::new(CacheBudgetInner {
@@ -164,7 +167,7 @@ impl CacheBudget {
         self.0.used.load(Ordering::Acquire)
     }
 
-    fn reserve(&self, weight: usize) -> Option<Arc<CacheReservation>> {
+    pub fn try_reserve(&self, weight: usize) -> Option<CachePermit> {
         let result = self
             .0
             .used
@@ -173,11 +176,17 @@ impl CacheBudget {
                     .filter(|total| *total <= self.0.limit)
             });
         result.ok().map(|_| {
-            Arc::new(CacheReservation {
+            CachePermit(Arc::new(CacheReservation {
                 budget: Arc::clone(&self.0),
                 weight,
-            })
+            }))
         })
+    }
+}
+
+impl CachePermit {
+    pub fn weight(&self) -> usize {
+        self.0.weight
     }
 }
 
@@ -198,7 +207,7 @@ impl Drop for CacheReservation {
 pub struct BoundedCache<K, V> {
     capacity: usize,
     budget: CacheBudget,
-    entries: VecDeque<((K, V), Arc<CacheReservation>)>,
+    entries: VecDeque<((K, V), CachePermit)>,
 }
 
 impl<K: Clone, V: Clone> Clone for BoundedCache<K, V> {
@@ -244,7 +253,7 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
             return false;
         }
         let reservation = loop {
-            if let Some(reservation) = self.budget.reserve(weight) {
+            if let Some(reservation) = self.budget.try_reserve(weight) {
                 break reservation;
             }
             if self.entries.pop_front().is_none() {
@@ -264,6 +273,10 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    pub fn pop_oldest(&mut self) -> Option<(K, V)> {
+        self.entries.pop_front().map(|(entry, _)| entry)
     }
 
     pub fn len(&self) -> usize {

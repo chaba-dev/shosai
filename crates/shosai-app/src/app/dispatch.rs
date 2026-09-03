@@ -1941,9 +1941,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 key: key.clone(),
             };
-            if !state.raster_jobs.remove(&job) {
+            let Some(permit) = state.raster_jobs.remove(&job) else {
                 return Task::none();
-            }
+            };
             let active = state.active_tab_id == Some(tab_id);
             let was_pending = if active {
                 state
@@ -1968,6 +1968,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if active && generation == state.render_generation {
                 match result {
                     Ok(page) => {
+                        let Some(page) = attach_raster_permit(page, permit) else {
+                            state.error = Some(AppError::Render(
+                                "rendered page exceeds its admitted raster budget".to_owned(),
+                            ));
+                            return pump_raster_queue(state);
+                        };
                         let is_visible = paginated_raster_pages(state).contains(&key.page);
                         cache_rendered_page(state, key, page);
                         let spread_changed = is_visible && show_cached_paginated_spread(state);
@@ -2003,9 +2009,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 request,
                 page,
             };
-            if !state.raster_jobs.remove(&job) {
+            let Some(permit) = state.raster_jobs.remove(&job) else {
                 return Task::none();
-            }
+            };
             if state.active_tab_id != Some(tab_id) {
                 if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                     && tab.continuous_pending.get(&page) == Some(&request)
@@ -2024,12 +2030,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 match (request.generation == state.render_generation, result) {
                     (true, Ok(rendered))
-                        if rendered.pixels.len() <= request.byte_len
+                        if rendered.pixels.len() <= permit.weight()
                             && retained_continuous_raster_bytes(state)
                                 .saturating_add(rendered.pixels.len())
                                 <= CONTINUOUS_RASTER_BYTE_CAPACITY =>
                     {
-                        state.continuous_pages[page] = Some(rendered);
+                        state.continuous_pages[page] = attach_raster_permit(rendered, permit);
                         if page == state.current_page {
                             return Task::batch([
                                 reconcile_continuous_rasters(state),
@@ -2061,8 +2067,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::RenderContinuousPage { tab_id, page } => {
             if state.active_tab_id != Some(tab_id) {
-                if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
-                    tab.continuous_pending.remove(&page);
+                if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                    && let Some(request) = tab.continuous_pending.remove(&page)
+                {
+                    state.raster_jobs.remove(&RasterJob::Continuous {
+                        tab_id,
+                        request,
+                        page,
+                    });
                 }
                 return Task::none();
             }
@@ -2076,16 +2088,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(request) = state.continuous_pending.get(&page).copied() else {
                 return Task::none();
             };
-            if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
-                state.continuous_pending.remove(&page);
-                return Task::none();
-            }
             let job = RasterJob::Continuous {
                 tab_id,
                 request,
                 page,
             };
-            state.raster_jobs.insert(job.clone());
+            if !state.raster_jobs.contains_key(&job) {
+                state.continuous_pending.remove(&page);
+                return Task::none();
+            }
             let scale = raster_render_scale(state, state.zoom.scale());
             match &state.document {
                 Some(OpenDocument::Pdf(doc)) => {

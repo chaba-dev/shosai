@@ -23,8 +23,8 @@ use shosai_core::library::{
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{
-    BoundedCache, ReaderLocation, ReaderPreferences, ReaderSession, ReadingMode, nearby_chapters,
-    prioritized_pages,
+    BoundedCache, CacheBudget, CachePermit, ReaderLocation, ReaderPreferences, ReaderSession,
+    ReadingMode, nearby_chapters, prioritized_pages,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
@@ -655,6 +655,17 @@ enum RasterJob {
     },
 }
 
+struct PermittedPixels {
+    pixels: bytes::Bytes,
+    _permit: CachePermit,
+}
+
+impl AsRef<[u8]> for PermittedPixels {
+    fn as_ref(&self) -> &[u8] {
+        &self.pixels
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct EpubJob {
     tab_id: u64,
@@ -730,7 +741,8 @@ pub struct State {
     continuous_activation: u64,
     continuous_measurement_index: Option<Arc<ContinuousMeasurementIndex>>,
     next_continuous_request_id: u64,
-    raster_jobs: HashSet<RasterJob>,
+    raster_budget: CacheBudget,
+    raster_jobs: HashMap<RasterJob, CachePermit>,
     epub_jobs: HashSet<EpubJob>,
     page_input: String,
     error: Option<AppError>,
@@ -862,7 +874,7 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_page_handle: None,
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
-        page_cache: BoundedCache::with_weight_limit(PAGE_CACHE_CAPACITY, PAGE_CACHE_BYTE_CAPACITY),
+        page_cache: BoundedCache::new(PAGE_CACHE_CAPACITY),
         paginated_pending: Vec::new(),
         paginated_requested: Vec::new(),
         render_generation: 0,
@@ -885,7 +897,8 @@ pub fn boot() -> (State, Task<Message>) {
         continuous_activation: 0,
         continuous_measurement_index: None,
         next_continuous_request_id: 1,
-        raster_jobs: HashSet::new(),
+        raster_budget: CacheBudget::new(PAGE_CACHE_BYTE_CAPACITY),
+        raster_jobs: HashMap::new(),
         epub_jobs: HashSet::new(),
         page_input: String::new(),
         error: None,
@@ -1967,6 +1980,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 if !is_page_cached(state, &key) {
                     let page = key.page;
                     let highlights = key.highlights.clone();
+                    let Some(permit) = reserve_raster(state, page, scale) else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
                         tab_id,
@@ -1975,11 +1991,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key.clone());
-                    state.raster_jobs.insert(RasterJob::Paginated {
-                        tab_id,
-                        generation,
-                        key,
-                    });
+                    state.raster_jobs.insert(
+                        RasterJob::Paginated {
+                            tab_id,
+                            generation,
+                            key,
+                        },
+                        permit,
+                    );
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -2047,6 +2066,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 }
                 if !is_page_cached(state, &key) {
                     let page = key.page;
+                    let Some(permit) = reserve_raster(state, page, scale) else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
                         tab_id,
@@ -2055,11 +2077,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page(page, scale),
                     ));
                     state.paginated_pending.push(key.clone());
-                    state.raster_jobs.insert(RasterJob::Paginated {
-                        tab_id,
-                        generation,
-                        key,
-                    });
+                    state.raster_jobs.insert(
+                        RasterJob::Paginated {
+                            tab_id,
+                            generation,
+                            key,
+                        },
+                        permit,
+                    );
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -2491,8 +2516,19 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
                 generation: state.render_generation,
                 byte_len,
             };
+            let Some(permit) = reserve_raster_bytes(state, byte_len) else {
+                continue;
+            };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
+            state.raster_jobs.insert(
+                RasterJob::Continuous {
+                    tab_id,
+                    request,
+                    page,
+                },
+                permit,
+            );
             occupied += 1;
             occupied_bytes = next_occupied_bytes;
             tasks.push(Task::done(Message::RenderContinuousPage { tab_id, page }));
@@ -2543,7 +2579,10 @@ fn retained_continuous_raster_bytes(state: &State) -> usize {
 }
 
 fn raster_request_byte_len(state: &State, page: usize) -> Option<usize> {
-    let scale = raster_render_scale(state, state.zoom.scale());
+    raster_byte_len(state, page, raster_render_scale(state, state.zoom.scale()))
+}
+
+fn raster_byte_len(state: &State, page: usize, scale: f32) -> Option<usize> {
     match state.document.as_ref()? {
         OpenDocument::Pdf(document) => document.rendered_byte_len(page, scale).ok(),
         OpenDocument::Cbz(document) => {
@@ -2554,6 +2593,34 @@ fn raster_request_byte_len(state: &State, page: usize) -> Option<usize> {
         }
         OpenDocument::Epub(_) => None,
     }
+}
+
+fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePermit> {
+    let byte_len = raster_byte_len(state, page, scale)?;
+    reserve_raster_bytes(state, byte_len)
+}
+
+fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermit> {
+    loop {
+        if let Some(permit) = state.raster_budget.try_reserve(byte_len) {
+            return Some(permit);
+        }
+        state.page_cache.pop_oldest()?;
+    }
+}
+
+fn attach_raster_permit(page: RenderedPage, permit: CachePermit) -> Option<RenderedPage> {
+    if page.pixels.len() > permit.weight() {
+        return None;
+    }
+    Some(RenderedPage {
+        width: page.width,
+        height: page.height,
+        pixels: bytes::Bytes::from_owner(PermittedPixels {
+            pixels: page.pixels,
+            _permit: permit,
+        }),
+    })
 }
 
 fn invalidate_continuous_rasters(state: &mut State) {
@@ -2857,6 +2924,9 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
         match &state.document {
             Some(OpenDocument::Pdf(document)) => {
                 let document = Arc::clone(document);
+                let Some(permit) = reserve_raster(state, page, scale) else {
+                    continue;
+                };
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
@@ -2864,14 +2934,20 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key.clone());
-                state.raster_jobs.insert(RasterJob::Paginated {
-                    tab_id,
-                    generation,
-                    key,
-                });
+                state.raster_jobs.insert(
+                    RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key,
+                    },
+                    permit,
+                );
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
+                let Some(permit) = reserve_raster(state, page, scale) else {
+                    continue;
+                };
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
@@ -2879,11 +2955,14 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page(page, scale),
                 ));
                 state.paginated_pending.push(key.clone());
-                state.raster_jobs.insert(RasterJob::Paginated {
-                    tab_id,
-                    generation,
-                    key,
-                });
+                state.raster_jobs.insert(
+                    RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key,
+                    },
+                    permit,
+                );
             }
             _ => return Task::none(),
         }
@@ -2900,8 +2979,7 @@ fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
 }
 
 fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
-    let weight = page.pixels.len();
-    state.page_cache.insert_weighted(key, page, weight);
+    state.page_cache.insert(key, page);
 }
 
 fn raster_image_handle(rendered: &RenderedPage) -> RasterImageHandle {
@@ -6417,6 +6495,11 @@ mod tests {
         state
     }
 
+    fn admit_test_raster(state: &mut State, job: RasterJob, bytes: usize) {
+        let permit = state.raster_budget.try_reserve(bytes).unwrap();
+        state.raster_jobs.insert(job, permit);
+    }
+
     fn complete_epub_pagination(state: &mut State) {
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
@@ -6873,6 +6956,16 @@ mod tests {
         state.zoom = ZoomMode::FitPage;
         let scale = paginated_raster_scale(&state, &[0, 1]);
         for page in [0, 1] {
+            let permit = reserve_raster_bytes(&mut state, 10 * 20 * 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+                permit,
+            )
+            .unwrap();
             cache_rendered_page(
                 &mut state,
                 PageCacheKey {
@@ -6880,11 +6973,7 @@ mod tests {
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
                 },
-                RenderedPage {
-                    width: 10,
-                    height: 20,
-                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
-                },
+                rendered,
             );
         }
 
@@ -6904,6 +6993,16 @@ mod tests {
         state.zoom = ZoomMode::FitPage;
         let scale = paginated_raster_scale(&state, &[0, 1]);
         for page in [0, 1] {
+            let permit = reserve_raster_bytes(&mut state, 10 * 20 * 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+                permit,
+            )
+            .unwrap();
             cache_rendered_page(
                 &mut state,
                 PageCacheKey {
@@ -6911,11 +7010,7 @@ mod tests {
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
                 },
-                RenderedPage {
-                    width: 10,
-                    height: 20,
-                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
-                },
+                rendered,
             );
         }
         assert!(show_cached_paginated_spread(&mut state));
@@ -6962,6 +7057,13 @@ mod tests {
             state.rendered_facing_page_handle.as_ref().unwrap().0.id(),
             facing_id
         );
+        state.page_cache.clear();
+        assert_eq!(state.raster_budget.used(), 2 * 10 * 20 * 4);
+        state.rendered_page = None;
+        state.rendered_page_handle = None;
+        state.rendered_facing_page = None;
+        state.rendered_facing_page_handle = None;
+        assert_eq!(state.raster_budget.used(), 0);
     }
 
     #[test]
@@ -6983,11 +7085,15 @@ mod tests {
             highlights: Vec::new(),
         });
         for key in &keys {
-            state.raster_jobs.insert(RasterJob::Paginated {
-                tab_id: 1,
-                generation,
-                key: key.clone(),
-            });
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 1,
+                    generation,
+                    key: key.clone(),
+                },
+                20 * 20 * 4,
+            );
         }
         let rendered = |width| RenderedPage {
             width,
@@ -7063,11 +7169,15 @@ mod tests {
             scale_bits: scale.to_bits(),
             highlights: Vec::new(),
         };
-        state.raster_jobs.insert(RasterJob::Paginated {
-            tab_id: 1,
-            generation,
-            key: key.clone(),
-        });
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation,
+                key: key.clone(),
+            },
+            20 * 30 * 4,
+        );
 
         assert_eq!(task.units(), 1);
         assert_eq!(displayed_paginated_raster_pages(&state), vec![0, 1]);
@@ -7359,15 +7469,19 @@ mod tests {
         state.continuous_pages = vec![None];
         state.continuous_visible.insert(0);
         for page in 0..RASTER_RENDER_WORKERS {
-            state.raster_jobs.insert(RasterJob::Paginated {
-                tab_id: 2,
-                generation: 1,
-                key: PageCacheKey {
-                    page,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 2,
+                    generation: 1,
+                    key: PageCacheKey {
+                        page,
+                        scale_bits: 1.0_f32.to_bits(),
+                        highlights: Vec::new(),
+                    },
                 },
-            });
+                4,
+            );
         }
         state.continuous_pending.insert(
             0,
@@ -7387,7 +7501,7 @@ mod tests {
         assert!(state.continuous_pending.is_empty());
         assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
 
-        let completed = state.raster_jobs.iter().next().unwrap().clone();
+        let completed = state.raster_jobs.keys().next().unwrap().clone();
         let RasterJob::Paginated {
             tab_id,
             generation,
@@ -7408,7 +7522,13 @@ mod tests {
 
         assert!(task.units() > 0);
         assert!(state.continuous_pending.contains_key(&0));
-        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS - 1);
+        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
+        assert!(
+            state
+                .raster_jobs
+                .keys()
+                .any(|job| matches!(job, RasterJob::Continuous { page: 0, .. }))
+        );
     }
 
     #[test]
@@ -7419,15 +7539,19 @@ mod tests {
         .expect("fixture should be a valid CBZ");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         for page in 0..RASTER_RENDER_WORKERS {
-            state.raster_jobs.insert(RasterJob::Paginated {
-                tab_id: 1,
-                generation: 1,
-                key: PageCacheKey {
-                    page,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 1,
+                    generation: 1,
+                    key: PageCacheKey {
+                        page,
+                        scale_bits: 1.0_f32.to_bits(),
+                        highlights: Vec::new(),
+                    },
                 },
-            });
+                4,
+            );
         }
         let unknown = Message::PageRendered {
             tab_id: 1,
@@ -7502,11 +7626,15 @@ mod tests {
             byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
-        state.raster_jobs.insert(RasterJob::Continuous {
-            tab_id: 1,
-            request,
-            page: 0,
-        });
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request,
+                page: 0,
+            },
+            4,
+        );
         state.render_generation = 2;
 
         let task = update(
@@ -7587,11 +7715,15 @@ mod tests {
             byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
-        state.raster_jobs.insert(RasterJob::Continuous {
-            tab_id: 1,
-            request,
-            page: 0,
-        });
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request,
+                page: 0,
+            },
+            4,
+        );
         let first = capture_reader_tab(&state).unwrap();
         state.active_tab_id = Some(2);
         state.file_path = Some(PathBuf::from("second.cbz"));
@@ -10029,11 +10161,15 @@ mod tests {
             scale_bits: 1.0_f32.to_bits(),
             highlights: Vec::new(),
         };
-        state.raster_jobs.insert(RasterJob::Paginated {
-            tab_id: 1,
-            generation: old_generation,
-            key: render_key.clone(),
-        });
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation: old_generation,
+                key: render_key.clone(),
+            },
+            400,
+        );
         let old_document = state.document.clone();
         let path = PathBuf::from("unsupported.txt");
         let open_task = open_document(&mut state, path.clone(), None);
@@ -11119,9 +11255,20 @@ mod tests {
         )
         .expect("fixture should be a valid CBZ");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
-        state.page_cache = BoundedCache::with_weight_limit(8, 6);
+        state.page_cache = BoundedCache::new(8);
+        state.raster_budget = CacheBudget::new(6);
 
         for page in 0..2 {
+            let permit = reserve_raster_bytes(&mut state, 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                },
+                permit,
+            )
+            .unwrap();
             cache_rendered_page(
                 &mut state,
                 PageCacheKey {
@@ -11129,15 +11276,11 @@ mod tests {
                     scale_bits: 1.0_f32.to_bits(),
                     highlights: Vec::new(),
                 },
-                RenderedPage {
-                    width: 1,
-                    height: 1,
-                    pixels: bytes::Bytes::from(vec![0; 4]),
-                },
+                rendered,
             );
         }
 
-        assert_eq!(state.page_cache.retained_weight(), 4);
+        assert_eq!(state.raster_budget.used(), 4);
         assert_eq!(state.page_cache.len(), 1);
         assert_eq!(state.page_cache.iter().next().unwrap().0.page, 1);
     }
@@ -11274,11 +11417,15 @@ mod tests {
             scale_bits: 1.0_f32.to_bits(),
             highlights: Vec::new(),
         };
-        state.raster_jobs.insert(RasterJob::Paginated {
-            tab_id: 1,
-            generation,
-            key: key.clone(),
-        });
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation,
+                key: key.clone(),
+            },
+            4,
+        );
 
         let _ = update(
             &mut state,
