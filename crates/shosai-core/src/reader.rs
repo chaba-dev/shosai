@@ -175,6 +175,38 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
     }
 }
 
+/// Prioritize visible pages nearest the logical reading position within a
+/// shared rendered-page budget.
+pub fn prioritized_pages(
+    visible: impl IntoIterator<Item = usize>,
+    current: usize,
+    total: usize,
+    capacity: usize,
+) -> Vec<usize> {
+    let mut pages = visible
+        .into_iter()
+        .filter(|page| *page < total)
+        .collect::<Vec<_>>();
+    if current < total && !pages.contains(&current) {
+        pages.push(current);
+    }
+    pages.sort_unstable();
+    pages.dedup();
+    pages.sort_by_key(|page| (page.abs_diff(current), *page));
+    pages.truncate(capacity);
+    pages
+}
+
+/// Chapters whose resources should remain warm around the current location.
+pub fn nearby_chapters(
+    current: usize,
+    total: usize,
+    radius: usize,
+) -> std::ops::RangeInclusive<usize> {
+    let last = total.saturating_sub(1);
+    current.saturating_sub(radius).min(last)..=current.saturating_add(radius).min(last)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +240,11 @@ mod tests {
             cache.iter().copied().collect::<Vec<_>>(),
             vec![(1, "new"), (3, "third")]
         );
+    }
+
+    #[test]
+    fn prefetch_prioritizes_current_then_nearest_visible_pages() {
+        assert_eq!(prioritized_pages([9, 3, 7, 3], 6, 10, 3), vec![6, 7, 3]);
+        assert_eq!(nearby_chapters(0, 3, 1), 0..=1);
     }
 }

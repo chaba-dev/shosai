@@ -22,7 +22,9 @@ use shosai_core::library::{
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::pdf::PdfDoc;
-use shosai_core::reader::{BoundedCache, ReaderLocation, ReadingMode};
+use shosai_core::reader::{
+    BoundedCache, ReaderLocation, ReadingMode, nearby_chapters, prioritized_pages,
+};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 use shosai_core::state_writer::{
@@ -1986,10 +1988,8 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         return Task::none();
     }
 
-    let first = state.current_page.saturating_sub(1);
-    let last = state.current_page.saturating_add(1).min(chapters.len() - 1);
     let nearby = epub_image_paths(
-        chapters[first..=last]
+        chapters[nearby_chapters(state.current_page, chapters.len(), 1)]
             .iter()
             .flat_map(|chapter| chapter.nodes()),
     );
@@ -2300,13 +2300,14 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
-    let mut desired = state.continuous_visible.iter().copied().collect::<Vec<_>>();
-    if state.current_page < state.total_pages && !desired.contains(&state.current_page) {
-        desired.push(state.current_page);
-    }
-    desired.sort_by_key(|page| (page.abs_diff(state.current_page), *page));
-    desired.truncate(CONTINUOUS_PAGE_CACHE_CAPACITY);
-    let desired = desired.into_iter().collect::<BTreeSet<_>>();
+    let desired = prioritized_pages(
+        state.continuous_visible.iter().copied(),
+        state.current_page,
+        state.total_pages,
+        CONTINUOUS_PAGE_CACHE_CAPACITY,
+    )
+    .into_iter()
+    .collect::<BTreeSet<_>>();
 
     for (page, rendered) in state.continuous_pages.iter_mut().enumerate() {
         if !desired.contains(&page) {
