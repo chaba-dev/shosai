@@ -2095,7 +2095,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     let is_visible = paginated_raster_pages(state).contains(&key.page);
                     cache_rendered_page(state, key, page);
                     let spread_changed = is_visible && show_cached_paginated_spread(state);
-                    state.error = None;
+                    if !has_current_raster_failure(state) {
+                        state.error = None;
+                    }
                     if spread_changed {
                         return Task::batch([
                             prefetch_next_paginated_spread(state),

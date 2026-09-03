@@ -2190,7 +2190,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 if state.continuous_pages.len() != state.total_pages {
                     state.continuous_pages = vec![None; state.total_pages];
                 }
-                state.error = None;
+                if !has_current_raster_failure(state) {
+                    state.error = None;
+                }
                 return Task::batch([
                     reconcile_continuous_rasters(state),
                     scroll_to_current_page(state),
@@ -2214,7 +2216,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 if state.continuous_pages.len() != state.total_pages {
                     state.continuous_pages = vec![None; state.total_pages];
                 }
-                state.error = None;
+                if !has_current_raster_failure(state) {
+                    state.error = None;
+                }
                 return Task::batch([
                     reconcile_continuous_rasters(state),
                     scroll_to_current_page(state),
@@ -2233,7 +2237,6 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let doc = Arc::clone(doc);
             let pages = paginated_raster_pages(state);
             let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
-            state.error = None;
             state.paginated_requested = pages
                 .iter()
                 .map(|page| PageCacheKey {
@@ -2242,6 +2245,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     highlights: search_highlights_for_page(state, *page),
                 })
                 .collect();
+            if !has_current_raster_failure(state) {
+                state.error = None;
+            }
             let spread_changed = show_cached_paginated_spread(state);
             if !state.paginated_pending.is_empty() {
                 return Task::none();
@@ -2262,14 +2268,19 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         continue;
                     }
                     let highlights = key.highlights.clone();
-                    let Some(permit) = reserve_raster(state, page, scale) else {
-                        continue;
+                    let permit = match reserve_raster(state, page, scale) {
+                        RasterAdmission::Ready(permit) => permit,
+                        RasterAdmission::Busy => continue,
+                        RasterAdmission::Rejected(error) => {
+                            record_raster_failure(state, &job, error);
+                            continue;
+                        }
                     };
                     let transient_permit = match reserve_render_transient(state, page, scale) {
                         RenderTransientAdmission::Ready(permit) => permit,
                         RenderTransientAdmission::Busy => continue,
                         RenderTransientAdmission::Rejected(error) => {
-                            state.error = Some(AppError::Render(error));
+                            record_raster_failure(state, &job, error);
                             continue;
                         }
                     };
@@ -2326,11 +2337,12 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 .iter()
                 .any(|page| doc.cached_page_size(*page).is_none())
             {
-                state.error = None;
+                if !has_current_raster_failure(state) {
+                    state.error = None;
+                }
                 return schedule_cbz_dimension(state, doc, pages);
             }
             let scale = paginated_raster_scale(state, &pages);
-            state.error = None;
             state.paginated_requested = pages
                 .iter()
                 .map(|page| PageCacheKey {
@@ -2339,6 +2351,9 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     highlights: Vec::new(),
                 })
                 .collect();
+            if !has_current_raster_failure(state) {
+                state.error = None;
+            }
             let spread_changed = show_cached_paginated_spread(state);
             if !state.paginated_pending.is_empty() {
                 return Task::none();
@@ -2358,14 +2373,19 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     if state.raster_failures.contains(&job.failure()) {
                         continue;
                     }
-                    let Some(permit) = reserve_raster(state, page, scale) else {
-                        continue;
+                    let permit = match reserve_raster(state, page, scale) {
+                        RasterAdmission::Ready(permit) => permit,
+                        RasterAdmission::Busy => continue,
+                        RasterAdmission::Rejected(error) => {
+                            record_raster_failure(state, &job, error);
+                            continue;
+                        }
                     };
                     let transient_permit = match reserve_render_transient(state, page, scale) {
                         RenderTransientAdmission::Ready(permit) => permit,
                         RenderTransientAdmission::Busy => continue,
                         RenderTransientAdmission::Rejected(error) => {
-                            state.error = Some(AppError::Render(error));
+                            record_raster_failure(state, &job, error);
                             continue;
                         }
                     };
@@ -2909,15 +2929,45 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             break;
         }
         if state.continuous_pages[page].is_none() && !state.continuous_pending.contains_key(&page) {
-            let Some(byte_len) = raster_request_byte_len(state, page) else {
-                continue;
-            };
-            let Some(next_occupied_bytes) = occupied_bytes.checked_add(byte_len) else {
-                continue;
-            };
-            if next_occupied_bytes > CONTINUOUS_RASTER_BYTE_CAPACITY {
+            if has_continuous_raster_failure(state, tab_id, page) {
                 continue;
             }
+            let byte_len = match raster_request_byte_len(state, page) {
+                Ok(byte_len) => byte_len,
+                Err(error) => {
+                    let job = RasterJob::Continuous {
+                        tab_id,
+                        request: ContinuousRequest {
+                            id: state.next_continuous_request_id,
+                            generation: state.render_generation,
+                            byte_len: 0,
+                        },
+                        page,
+                    };
+                    record_raster_failure(state, &job, error);
+                    continue;
+                }
+            };
+            let next_occupied_bytes = match occupied_bytes.checked_add(byte_len) {
+                Some(bytes) => bytes,
+                None => {
+                    let job = RasterJob::Continuous {
+                        tab_id,
+                        request: ContinuousRequest {
+                            id: state.next_continuous_request_id,
+                            generation: state.render_generation,
+                            byte_len,
+                        },
+                        page,
+                    };
+                    record_raster_failure(
+                        state,
+                        &job,
+                        "continuous raster byte charge overflowed".to_owned(),
+                    );
+                    continue;
+                }
+            };
             let request = ContinuousRequest {
                 id: state.next_continuous_request_id,
                 generation: state.render_generation,
@@ -2931,8 +2981,23 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             if state.raster_failures.contains(&job.failure()) {
                 continue;
             }
-            let Some(permit) = reserve_raster_bytes(state, byte_len) else {
+            if next_occupied_bytes > CONTINUOUS_RASTER_BYTE_CAPACITY {
+                record_raster_failure(
+                    state,
+                    &job,
+                    format!(
+                        "continuous rasters require {next_occupied_bytes} bytes, exceeding the {CONTINUOUS_RASTER_BYTE_CAPACITY} byte limit"
+                    ),
+                );
                 continue;
+            }
+            let permit = match reserve_raster_output_bytes(state, byte_len) {
+                RasterAdmission::Ready(permit) => permit,
+                RasterAdmission::Busy => continue,
+                RasterAdmission::Rejected(error) => {
+                    record_raster_failure(state, &job, error);
+                    continue;
+                }
             };
             let transient_permit = match reserve_render_transient(
                 state,
@@ -2942,7 +3007,7 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
                 RenderTransientAdmission::Ready(permit) => permit,
                 RenderTransientAdmission::Busy => continue,
                 RenderTransientAdmission::Rejected(error) => {
-                    state.error = Some(AppError::Render(error));
+                    record_raster_failure(state, &job, error);
                     continue;
                 }
             };
@@ -3005,10 +3070,13 @@ fn pump_raster_queue(state: &mut State) -> Task<Message> {
             Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
         )
         && state.paginated_pending.is_empty()
-        && state
-            .paginated_requested
-            .iter()
-            .any(|requested| !is_page_cached(state, requested))
+        && state.paginated_requested.iter().any(|requested| {
+            !is_page_cached(state, requested)
+                && !state.raster_failures.contains(&RasterFailure::Paginated {
+                    tab_id: state.active_tab_id.unwrap_or(0),
+                    key: requested.clone(),
+                })
+        })
     {
         return refresh_content(state);
     }
@@ -3065,26 +3133,98 @@ fn retained_continuous_raster_bytes(state: &State) -> usize {
         .sum()
 }
 
-fn raster_request_byte_len(state: &State, page: usize) -> Option<usize> {
+fn raster_request_byte_len(state: &State, page: usize) -> Result<usize, String> {
     raster_byte_len(state, page, raster_render_scale(state, state.zoom.scale()))
 }
 
-fn raster_byte_len(state: &State, page: usize, scale: f32) -> Option<usize> {
-    match state.document.as_ref()? {
-        OpenDocument::Pdf(document) => document.rendered_byte_len(page, scale).ok(),
+fn raster_byte_len(state: &State, page: usize, scale: f32) -> Result<usize, String> {
+    match state
+        .document
+        .as_ref()
+        .ok_or_else(|| "no document is open".to_owned())?
+    {
+        OpenDocument::Pdf(document) => document
+            .rendered_byte_len(page, scale)
+            .map_err(|error| error.to_string()),
         OpenDocument::Cbz(document) => {
-            let (width, height) = document.page_size(page).ok()?;
+            let (width, height) = document
+                .page_size(page)
+                .map_err(|error| error.to_string())?;
             let width = (f64::from(width) * f64::from(scale)).floor() as usize;
             let height = (f64::from(height) * f64::from(scale)).floor() as usize;
-            width.checked_mul(height)?.checked_mul(4)
+            width
+                .checked_mul(height)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| "rendered page byte charge overflowed".to_owned())
         }
-        OpenDocument::Epub(_) => None,
+        OpenDocument::Epub(_) => Err("EPUB does not use raster page rendering".to_owned()),
     }
 }
 
-fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePermit> {
-    let byte_len = raster_byte_len(state, page, scale)?;
-    reserve_raster_bytes(state, byte_len)
+enum RasterAdmission {
+    Ready(CachePermit),
+    Busy,
+    Rejected(String),
+}
+
+fn reserve_raster(state: &mut State, page: usize, scale: f32) -> RasterAdmission {
+    let byte_len = match raster_byte_len(state, page, scale) {
+        Ok(byte_len) => byte_len,
+        Err(error) => return RasterAdmission::Rejected(error),
+    };
+    reserve_raster_output_bytes(state, byte_len)
+}
+
+fn reserve_raster_output_bytes(state: &mut State, byte_len: usize) -> RasterAdmission {
+    if byte_len > state.raster_budget.limit() {
+        return RasterAdmission::Rejected(format!(
+            "rendered page requires {byte_len} bytes, exceeding the {} byte limit",
+            state.raster_budget.limit()
+        ));
+    }
+    reserve_raster_bytes(state, byte_len).map_or(RasterAdmission::Busy, RasterAdmission::Ready)
+}
+
+fn record_raster_failure(state: &mut State, job: &RasterJob, error: String) {
+    state.raster_failures.insert(job.failure());
+    state.error = Some(AppError::Render(error));
+}
+
+fn has_continuous_raster_failure(state: &State, tab_id: u64, page: usize) -> bool {
+    state.raster_failures.iter().any(|failure| {
+        matches!(
+            failure,
+            RasterFailure::Continuous {
+                tab_id: failed_tab,
+                page: failed_page,
+                ..
+            } if *failed_tab == tab_id && *failed_page == page
+        )
+    })
+}
+
+fn has_current_raster_failure(state: &State) -> bool {
+    let Some(tab_id) = state.active_tab_id else {
+        return false;
+    };
+    state.raster_failures.iter().any(|failure| match failure {
+        RasterFailure::Paginated {
+            tab_id: failed_tab,
+            key,
+        } => *failed_tab == tab_id && state.paginated_requested.contains(key),
+        RasterFailure::Continuous {
+            tab_id: failed_tab,
+            page,
+            ..
+        } => {
+            *failed_tab == tab_id
+                && state.reading_mode == ReadingMode::Continuous
+                && (*page == state.current_page || state.continuous_visible.contains(page))
+        }
+    }) || state
+        .cbz_dimension_failures
+        .iter()
+        .any(|failure| failure.tab_id == tab_id && failure.page == state.current_page)
 }
 
 enum RenderTransientAdmission {
@@ -3186,6 +3326,11 @@ fn attach_raster_permit(page: RenderedPage, permit: CachePermit) -> Option<Rende
 
 fn invalidate_continuous_rasters(state: &mut State) {
     state.continuous_pages.fill(None);
+    if let Some(tab_id) = state.active_tab_id {
+        state.raster_failures.retain(|failure| {
+            !matches!(failure, RasterFailure::Continuous { tab_id: failed_tab, .. } if *failed_tab == tab_id)
+        });
+    }
     state.render_generation = state.render_generation.wrapping_add(1);
 }
 
@@ -3497,14 +3642,19 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
         match &state.document {
             Some(OpenDocument::Pdf(document)) => {
                 let document = Arc::clone(document);
-                let Some(permit) = reserve_raster(state, page, scale) else {
-                    continue;
+                let permit = match reserve_raster(state, page, scale) {
+                    RasterAdmission::Ready(permit) => permit,
+                    RasterAdmission::Busy => continue,
+                    RasterAdmission::Rejected(_) => {
+                        state.raster_failures.insert(job.failure());
+                        continue;
+                    }
                 };
                 let transient_permit = match reserve_render_transient(state, page, scale) {
                     RenderTransientAdmission::Ready(permit) => permit,
                     RenderTransientAdmission::Busy => continue,
-                    RenderTransientAdmission::Rejected(error) => {
-                        state.error = Some(AppError::Render(error));
+                    RenderTransientAdmission::Rejected(_) => {
+                        state.raster_failures.insert(job.failure());
                         continue;
                     }
                 };
@@ -3520,14 +3670,19 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
-                let Some(permit) = reserve_raster(state, page, scale) else {
-                    continue;
+                let permit = match reserve_raster(state, page, scale) {
+                    RasterAdmission::Ready(permit) => permit,
+                    RasterAdmission::Busy => continue,
+                    RasterAdmission::Rejected(_) => {
+                        state.raster_failures.insert(job.failure());
+                        continue;
+                    }
                 };
                 let transient_permit = match reserve_render_transient(state, page, scale) {
                     RenderTransientAdmission::Ready(permit) => permit,
                     RenderTransientAdmission::Busy => continue,
-                    RenderTransientAdmission::Rejected(error) => {
-                        state.error = Some(AppError::Render(error));
+                    RenderTransientAdmission::Rejected(_) => {
+                        state.raster_failures.insert(job.failure());
                         continue;
                     }
                 };
@@ -11795,7 +11950,41 @@ mod tests {
                     state.raster_jobs.keys().all(|job| job.failure() != failed),
                     "a terminal failure must not immediately retry"
                 );
+                assert!(matches!(
+                    state.error,
+                    Some(AppError::Render(ref error)) if error == "render failed"
+                ));
             }
+        }
+    }
+
+    #[test]
+    fn unadmittable_raster_outputs_fail_once_with_an_actionable_error() {
+        for continuous in [false, true] {
+            let pdf = PdfDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+            )
+            .unwrap();
+            let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+            state.raster_budget = CacheBudget::new(0);
+            if continuous {
+                state.reading_mode = ReadingMode::Continuous;
+                state.continuous_pages = vec![None; state.total_pages];
+                state.continuous_visible.insert(0);
+                assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+            } else {
+                assert_eq!(refresh_content(&mut state).units(), 0);
+            }
+
+            assert!(matches!(
+                state.error,
+                Some(AppError::Render(ref error)) if error.contains("exceeding the 0 byte limit")
+            ));
+            assert!(state.raster_jobs.is_empty());
+            let failures = state.raster_failures.clone();
+            assert_eq!(pump_raster_queue(&mut state).units(), 0);
+            assert_eq!(state.raster_failures, failures);
+            assert!(state.error.is_some());
         }
     }
 
