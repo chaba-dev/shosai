@@ -682,8 +682,13 @@ mod tests {
             ),
         ];
         let chapter_text = shosai_core::search::extract_text_from_nodes(&nodes);
-        let pages =
-            crate::epub::paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(220.0, 130.0));
+        let pages = crate::epub::paginate_epub_chapter(
+            &nodes,
+            None,
+            16.0,
+            1.6,
+            crate::epub::LayoutSize::new(220.0, 130.0),
+        );
         assert!(pages.len() > 1);
         let first = pages.first().unwrap().first().unwrap();
         let last = pages.last().unwrap().last().unwrap();

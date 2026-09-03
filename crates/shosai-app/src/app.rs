@@ -2108,13 +2108,15 @@ fn epub_uses_spread(state: &State) -> bool {
 }
 
 fn epub_page_size(state: &State) -> Size {
-    crate::epub::page_size(
-        available_reader_size(state),
+    let available = available_reader_size(state);
+    let page = crate::epub::page_size(
+        crate::epub::LayoutSize::new(available.width, available.height),
         epub_uses_spread(state),
         PAGE_GUTTER,
         state.font_size,
         state.line_spacing,
-    )
+    );
+    Size::new(page.width, page.height)
 }
 
 fn epub_layout_key(state: &State) -> EpubLayoutKey {
@@ -2133,13 +2135,17 @@ fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
         && matches!(tab.document, OpenDocument::Epub(_))
         && available_size.width >= MIN_TWO_PAGE_WIDTH;
     let page_size = crate::epub::page_size(
-        available_size,
+        crate::epub::LayoutSize::new(available_size.width, available_size.height),
         uses_spread,
         PAGE_GUTTER,
         tab.font_size,
         tab.line_spacing,
     );
-    EpubLayoutKey::new(page_size, tab.font_size, tab.line_spacing)
+    EpubLayoutKey::new(
+        Size::new(page_size.width, page_size.height),
+        tab.font_size,
+        tab.line_spacing,
+    )
 }
 
 fn epub_spread_start(state: &State, page: usize) -> usize {
@@ -2195,7 +2201,7 @@ fn paginate_epub_task(
 ) -> Task<Message> {
     let font_size = f32::from_bits(layout_key.font_size);
     let line_spacing = f32::from_bits(layout_key.line_spacing);
-    let page_size = Size::new(
+    let page_size = crate::epub::LayoutSize::new(
         f32::from_bits(layout_key.width),
         f32::from_bits(layout_key.height),
     );
@@ -2240,7 +2246,7 @@ fn paginate_epub_document(
     document: &EpubDoc,
     font_size: f32,
     line_spacing: f32,
-    page_size: Size,
+    page_size: crate::epub::LayoutSize,
 ) -> Vec<EpubPage> {
     let mut pages = Vec::new();
     let chapters = document.presentation().chapters();
@@ -2266,7 +2272,7 @@ fn paginate_epub_document_chapter(
     chapter_index: usize,
     font_size: f32,
     line_spacing: f32,
-    page_size: Size,
+    page_size: crate::epub::LayoutSize,
     budget: &mut EpubPaginationBudget,
 ) -> Vec<EpubPage> {
     let Some(presentation) = document.presentation().chapter(chapter_index) else {
@@ -6430,11 +6436,12 @@ mod tests {
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
         };
+        let page_size = epub_page_size(state);
         let pages = paginate_epub_document(
             document,
             state.font_size,
             state.line_spacing,
-            epub_page_size(state),
+            crate::epub::LayoutSize::new(page_size.width, page_size.height),
         );
         let layout_key = epub_layout_key(state);
         let _ = update(

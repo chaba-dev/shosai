@@ -1,3 +1,5 @@
+extern crate self as shosai_core;
+
 pub mod annotations;
 pub mod bookmarks;
 pub mod cbz;
