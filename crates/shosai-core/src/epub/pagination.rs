@@ -1994,6 +1994,65 @@ pub struct EpubTableGeometry {
     pub height: f32,
 }
 
+/// Fenwick trees supporting ordered range additions and range sums in
+/// logarithmic time. Rowspan sizing uses both operations, so plain prefix
+/// sums would need rebuilding after every spanning cell.
+struct EpubTableRowHeights {
+    slope: Vec<f32>,
+    intercept: Vec<f32>,
+}
+
+impl EpubTableRowHeights {
+    fn new(len: usize, initial: f32) -> Self {
+        let mut heights = Self {
+            slope: vec![0.0; len + 1],
+            intercept: vec![0.0; len + 1],
+        };
+        heights.add_range(0, len, initial);
+        heights
+    }
+
+    fn add(tree: &mut [f32], mut index: usize, value: f32) {
+        while index < tree.len() {
+            tree[index] += value;
+            index += index & index.wrapping_neg();
+        }
+    }
+
+    fn sum(tree: &[f32], mut end: usize) -> f32 {
+        let mut total = 0.0;
+        while end > 0 {
+            total += tree[end];
+            end &= end - 1;
+        }
+        total
+    }
+
+    fn prefix_sum(&self, end: usize) -> f32 {
+        Self::sum(&self.slope, end) * end as f32 - Self::sum(&self.intercept, end)
+    }
+
+    fn range_sum(&self, start: usize, end: usize) -> f32 {
+        self.prefix_sum(end) - self.prefix_sum(start)
+    }
+
+    fn add_range(&mut self, start: usize, end: usize, value: f32) {
+        if start == end {
+            return;
+        }
+        Self::add(&mut self.slope, start + 1, value);
+        Self::add(&mut self.slope, end + 1, -value);
+        Self::add(&mut self.intercept, start + 1, value * start as f32);
+        Self::add(&mut self.intercept, end + 1, -value * end as f32);
+    }
+
+    fn into_values(self) -> Vec<f32> {
+        (0..self.slope.len() - 1)
+            .map(|row| self.range_sum(row, row + 1))
+            .collect()
+    }
+}
+
 /// Builds the logical grid used by both measurement and painting. Row spans are
 /// scoped to their row group, as required by the table model's group semantics.
 pub fn epub_table_cell_placements(
@@ -2059,7 +2118,7 @@ pub fn epub_table_geometry_from_placements(
         .iter()
         .flat_map(|group| &group.rows)
         .collect::<Vec<_>>();
-    let mut row_heights = vec![2.0 * EPUB_TABLE_CELL_PADDING; rows.len()];
+    let mut row_heights = EpubTableRowHeights::new(rows.len(), 2.0 * EPUB_TABLE_CELL_PADDING);
     let mut intrinsic = Vec::with_capacity(rows.len());
     let mut global_row = 0;
     for group in row_groups {
@@ -2085,7 +2144,8 @@ pub fn epub_table_geometry_from_placements(
                 .collect::<Vec<_>>();
             for &(height, span) in &measured {
                 if span == 1 {
-                    row_heights[global_row] = row_heights[global_row].max(height);
+                    let current = row_heights.range_sum(global_row, global_row + 1);
+                    row_heights.add_range(global_row, global_row + 1, (height - current).max(0.0));
                 }
             }
             intrinsic.push(measured);
@@ -2095,15 +2155,14 @@ pub fn epub_table_geometry_from_placements(
     for (row, measured) in intrinsic.iter().enumerate() {
         for &(height, span) in measured {
             if span > 1 {
-                let current = row_heights[row..row + span].iter().sum::<f32>()
+                let current = row_heights.range_sum(row, row + span)
                     + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
                 let deficit = (height - current).max(0.0) / span as f32;
-                for row_height in &mut row_heights[row..row + span] {
-                    *row_height += deficit;
-                }
+                row_heights.add_range(row, row + span, deficit);
             }
         }
     }
+    let row_heights = row_heights.into_values();
     let mut y = 0.0;
     let row_y = row_heights
         .iter()
@@ -2112,6 +2171,18 @@ pub fn epub_table_geometry_from_placements(
             y += *height + EPUB_TABLE_ROW_SPACING;
             current
         })
+        .collect::<Vec<_>>();
+    let row_height_prefix = std::iter::once(0.0)
+        .chain(row_heights.iter().scan(0.0, |sum, height| {
+            *sum += *height;
+            Some(*sum)
+        }))
+        .collect::<Vec<_>>();
+    let column_width_prefix = std::iter::once(0.0)
+        .chain(column_widths.iter().scan(0.0, |sum, width| {
+            *sum += *width;
+            Some(*sum)
+        }))
         .collect::<Vec<_>>();
     let cells = rows
         .iter()
@@ -2122,9 +2193,9 @@ pub fn epub_table_geometry_from_placements(
                 .zip(&placements[row_index])
                 .zip(&intrinsic[row_index])
                 .map(|((_cell, placement), &(_, span))| {
-                    let x = column_widths[..placement.column].iter().sum::<f32>()
+                    let x = column_width_prefix[placement.column]
                         + BLOCKQUOTE_SPACING * placement.column as f32;
-                    let height = row_heights[row_index..row_index + span].iter().sum::<f32>()
+                    let height = row_height_prefix[row_index + span] - row_height_prefix[row_index]
                         + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
                     EpubTableCellGeometry {
                         placement: *placement,

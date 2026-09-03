@@ -85,6 +85,14 @@ pub struct EpubLimits {
     pub max_image_pixels: u64,
     /// Maximum estimated RGBA allocation for an admitted image.
     pub max_decoded_image_bytes: u64,
+    /// Maximum aggregate encoded path-data bytes in an SVG resource.
+    pub max_svg_path_data_bytes: usize,
+    /// Maximum aggregate path commands in an SVG resource.
+    pub max_svg_path_commands: usize,
+    /// Maximum number of SVG `<use>` references in one resource.
+    pub max_svg_use_references: usize,
+    /// Maximum number of SVG filter primitive elements in one resource.
+    pub max_svg_filter_primitives: usize,
 }
 
 impl Default for EpubLimits {
@@ -130,6 +138,10 @@ impl Default for EpubLimits {
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,
             max_decoded_image_bytes: 160 * MIB,
+            max_svg_path_data_bytes: 4 * MIB as usize,
+            max_svg_path_commands: 500_000,
+            max_svg_use_references: 10_000,
+            max_svg_filter_primitives: 10_000,
         }
     }
 }
@@ -279,7 +291,7 @@ pub(crate) fn validate_resource(
     }
 
     if svg {
-        validate_svg_image_references(xml_text.expect("SVG was inspected as XML"), path)?;
+        validate_svg_complexity(xml_text.expect("SVG was inspected as XML"), path, limits)?;
         let (width, height) = svg_dimensions(bytes)
             .with_context(|| format!("EPUB SVG dimensions could not be bounded: {path}"))?;
         validate_image_dimensions(path, width, height, limits)?;
@@ -301,21 +313,63 @@ pub(crate) fn validate_resource(
     Ok(())
 }
 
-fn validate_svg_image_references(xml: &str, path: &str) -> Result<()> {
+fn validate_svg_complexity(xml: &str, path: &str, limits: &EpubLimits) -> Result<()> {
     let document = roxmltree::Document::parse(xml)
         .with_context(|| format!("failed to inspect EPUB SVG resource: {path}"))?;
+    let mut path_data_bytes = 0_usize;
+    let mut path_commands = 0_usize;
+    let mut use_references = 0_usize;
+    let mut filter_primitives = 0_usize;
     for element in document.descendants().filter(roxmltree::Node::is_element) {
-        if !matches!(element.tag_name().name(), "image" | "feImage") {
-            continue;
-        }
-        for href in element
-            .attributes()
-            .filter(|attribute| attribute.name() == "href")
-        {
-            let reference = href.value();
-            if !reference.starts_with('#') || reference.len() == 1 {
-                anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
+        let name = element.tag_name().name();
+        if name == "path" {
+            if let Some(data) = element.attribute("d") {
+                path_data_bytes = path_data_bytes.saturating_add(data.len());
+                path_commands = path_commands.saturating_add(
+                    data.bytes()
+                        .filter(|byte| b"MmZzLlHhVvCcSsQqTtAa".contains(byte))
+                        .count(),
+                );
             }
+        } else if name == "use" {
+            use_references = use_references.saturating_add(1);
+        } else if name.starts_with("fe") {
+            filter_primitives = filter_primitives.saturating_add(1);
+        }
+        if matches!(name, "image" | "feImage") {
+            for href in element
+                .attributes()
+                .filter(|attribute| attribute.name() == "href")
+            {
+                let reference = href.value();
+                if !reference.starts_with('#') || reference.len() == 1 {
+                    anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
+                }
+            }
+        }
+    }
+    for (actual, limit, kind) in [
+        (
+            path_data_bytes,
+            limits.max_svg_path_data_bytes,
+            "path data byte",
+        ),
+        (path_commands, limits.max_svg_path_commands, "path command"),
+        (
+            use_references,
+            limits.max_svg_use_references,
+            "use reference",
+        ),
+        (
+            filter_primitives,
+            limits.max_svg_filter_primitives,
+            "filter primitive",
+        ),
+    ] {
+        if actual > limit {
+            crate::resource_limit!(
+                "EPUB SVG resource exceeds {kind} limit: {path} ({actual} > {limit})"
+            );
         }
     }
     Ok(())
@@ -786,5 +840,49 @@ mod tests {
             &EpubLimits::default(),
         )
         .expect("internal fragment image references remain safe");
+    }
+
+    #[test]
+    fn svg_path_commands_are_bounded_even_in_one_node() {
+        let limits = EpubLimits {
+            max_svg_path_commands: 3,
+            ..EpubLimits::default()
+        };
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0 L1 0 L1 1 L0 1 Z"/></svg>"#;
+
+        let error = validate_resource("Images/path.svg", "image/svg+xml", svg, &limits)
+            .expect_err("one path with excessive commands must be rejected before rendering");
+
+        assert!(error.is::<crate::application::ResourceLimitError>());
+        assert!(error.to_string().contains("path command limit"));
+    }
+
+    #[test]
+    fn svg_use_references_and_filter_primitives_have_independent_budgets() {
+        let cases = [
+            (
+                br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><g id="shape"/><use href="#shape"/><use href="#shape"/></svg>"##.as_slice(),
+                EpubLimits {
+                    max_svg_use_references: 1,
+                    ..EpubLimits::default()
+                },
+                "use reference limit",
+            ),
+            (
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><filter id="fx"><feGaussianBlur/><feOffset/></filter></svg>"#.as_slice(),
+                EpubLimits {
+                    max_svg_filter_primitives: 1,
+                    ..EpubLimits::default()
+                },
+                "filter primitive limit",
+            ),
+        ];
+
+        for (svg, limits, expected) in cases {
+            let error = validate_resource("Images/complex.svg", "image/svg+xml", svg, &limits)
+                .expect_err("excess SVG renderer work must be rejected");
+            assert!(error.is::<crate::application::ResourceLimitError>());
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
     }
 }
