@@ -1,6 +1,6 @@
 //! Coalesced, bounded persistence for reader state, progress, and preferences.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,11 @@ use thiserror::Error;
 use tokio::sync::{Notify, oneshot};
 
 use crate::library::Library;
+use crate::path_key::canonical_path_key;
 use crate::reading_state::{FileReadingState, ReadingStateStore};
 
 pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
+pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
 
 #[derive(Debug, Clone)]
 pub struct StateSave {
@@ -51,14 +53,21 @@ pub enum StateWriterSendError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SaveKey {
     Book(i64),
-    Path(PathBuf),
+    Path(String),
 }
 
 impl SaveKey {
     fn for_save(save: &StateSave) -> Self {
         save.book_id
-            .map_or_else(|| Self::Path(save.path.clone()), Self::Book)
+            .map_or_else(|| Self::Path(canonical_path_key(&save.path)), Self::Book)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum WriteKey {
+    Save(SaveKey),
+    Progress(i64),
+    Preference(String),
 }
 
 #[derive(Debug, Default)]
@@ -70,20 +79,7 @@ struct Pending {
 }
 
 impl Pending {
-    fn write_count(&self) -> usize {
-        self.saves.len() + self.progress.len() + self.preferences.len()
-    }
-
-    fn insert(&mut self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
-        let adds_key = match &message {
-            StateWriterMessage::Save(save) => !self.saves.contains_key(&SaveKey::for_save(save)),
-            StateWriterMessage::Progress { book_id, .. } => !self.progress.contains_key(book_id),
-            StateWriterMessage::Preference(key, _) => !self.preferences.contains_key(key),
-            StateWriterMessage::Flush(_) => false,
-        };
-        if adds_key && self.write_count() >= MAX_PENDING_STATE_WRITES {
-            return Err(StateWriterSendError::Full);
-        }
+    fn insert(&mut self, message: StateWriterMessage) {
         match message {
             StateWriterMessage::Save(save) => {
                 self.saves.insert(SaveKey::for_save(&save), save);
@@ -99,7 +95,6 @@ impl Pending {
             }
             StateWriterMessage::Flush(flush) => self.flushes.push(flush),
         }
-        Ok(())
     }
 
     fn merge_failed(&mut self, failed: Pending) {
@@ -113,14 +108,56 @@ impl Pending {
             self.preferences.entry(key).or_insert(value);
         }
     }
+
+    fn write_keys(&self) -> HashSet<WriteKey> {
+        self.saves
+            .keys()
+            .cloned()
+            .map(WriteKey::Save)
+            .chain(self.progress.keys().copied().map(WriteKey::Progress))
+            .chain(self.preferences.keys().cloned().map(WriteKey::Preference))
+            .collect()
+    }
+
+    fn contains(&self, key: &WriteKey) -> bool {
+        match key {
+            WriteKey::Save(key) => self.saves.contains_key(key),
+            WriteKey::Progress(book_id) => self.progress.contains_key(book_id),
+            WriteKey::Preference(key) => self.preferences.contains_key(key),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct WriterState {
+    pending: Pending,
+    admitted: HashSet<WriteKey>,
+}
+
+impl WriterState {
+    fn insert(&mut self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
+        let key = message_key(&message);
+        if let Some(key) = &key
+            && !self.admitted.contains(key)
+            && self.admitted.len() >= MAX_PENDING_STATE_WRITES
+        {
+            return Err(StateWriterSendError::Full);
+        }
+        if let Some(key) = key {
+            self.admitted.insert(key);
+        }
+        self.pending.insert(message);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 struct StateWriterInner {
-    pending: Mutex<Pending>,
+    state: Mutex<WriterState>,
     notify: Notify,
     stopped: AtomicBool,
     handles: AtomicUsize,
+    outstanding_flushes: AtomicUsize,
 }
 
 #[derive(Debug)]
@@ -151,11 +188,34 @@ impl StateWriter {
         if self.inner.stopped.load(Ordering::Acquire) {
             return Err(StateWriterSendError::Stopped);
         }
-        self.inner
-            .pending
+        let is_flush = matches!(message, StateWriterMessage::Flush(_));
+        if is_flush
+            && !increment_bounded(&self.inner.outstanding_flushes, MAX_PENDING_STATE_FLUSHES)
+        {
+            return Err(StateWriterSendError::Full);
+        }
+        let mut state = self
+            .inner
+            .state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(message)?;
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.inner.stopped.load(Ordering::Acquire) {
+            if is_flush {
+                self.inner
+                    .outstanding_flushes
+                    .fetch_sub(1, Ordering::AcqRel);
+            }
+            return Err(StateWriterSendError::Stopped);
+        }
+        if let Err(error) = state.insert(message) {
+            if is_flush {
+                self.inner
+                    .outstanding_flushes
+                    .fetch_sub(1, Ordering::AcqRel);
+            }
+            return Err(error);
+        }
+        drop(state);
         self.inner.notify.notify_one();
         Ok(())
     }
@@ -163,10 +223,11 @@ impl StateWriter {
 
 pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
     let inner = Arc::new(StateWriterInner {
-        pending: Mutex::new(Pending::default()),
+        state: Mutex::new(WriterState::default()),
         notify: Notify::new(),
         stopped: AtomicBool::new(false),
         handles: AtomicUsize::new(1),
+        outstanding_flushes: AtomicUsize::new(0),
     });
     let worker = Arc::clone(&inner);
     let library = Library::new(store.pool().clone(), store.managed_books_dir());
@@ -174,23 +235,31 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
         loop {
             worker.notify.notified().await;
             let mut batch = {
-                let mut pending = worker
-                    .pending
+                let mut state = worker
+                    .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                std::mem::take(&mut *pending)
+                std::mem::take(&mut state.pending)
             };
             let flushes = std::mem::take(&mut batch.flushes);
+            let attempted = batch.write_keys();
             let (failed, error) = persist_batch(&store, &library, batch).await;
-            if failed.write_count() != 0 {
-                worker
-                    .pending
+            let failed_keys = failed.write_keys();
+            {
+                let mut state = worker
+                    .state
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .merge_failed(failed);
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                state.pending.merge_failed(failed);
+                for key in attempted {
+                    if !failed_keys.contains(&key) && !state.pending.contains(&key) {
+                        state.admitted.remove(&key);
+                    }
+                }
             }
             for flush in flushes {
                 let _ = flush.send(error.clone().map_or(Ok(()), Err));
+                worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
             }
             if worker.stopped.load(Ordering::Acquire) {
                 break;
@@ -198,6 +267,23 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
         }
     });
     StateWriter { inner }
+}
+
+fn message_key(message: &StateWriterMessage) -> Option<WriteKey> {
+    match message {
+        StateWriterMessage::Save(save) => Some(WriteKey::Save(SaveKey::for_save(save))),
+        StateWriterMessage::Progress { book_id, .. } => Some(WriteKey::Progress(*book_id)),
+        StateWriterMessage::Preference(key, _) => Some(WriteKey::Preference(key.clone())),
+        StateWriterMessage::Flush(_) => None,
+    }
+}
+
+fn increment_bounded(counter: &AtomicUsize, limit: usize) -> bool {
+    counter
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            (count < limit).then_some(count + 1)
+        })
+        .is_ok()
 }
 
 async fn persist_batch(
@@ -244,9 +330,9 @@ mod tests {
 
     #[test]
     fn book_saves_coalesce_across_relocated_paths() {
-        let mut pending = Pending::default();
+        let mut state = WriterState::default();
         for (path, page) in [("old.epub", 1), ("new.epub", 2)] {
-            pending
+            state
                 .insert(StateWriterMessage::Save(StateSave {
                     book_id: Some(7),
                     path: path.into(),
@@ -259,19 +345,19 @@ mod tests {
                 .unwrap();
         }
 
-        assert_eq!(pending.saves.len(), 1);
+        assert_eq!(state.pending.saves.len(), 1);
         assert_eq!(
-            pending.saves[&SaveKey::Book(7)].path,
+            state.pending.saves[&SaveKey::Book(7)].path,
             PathBuf::from("new.epub")
         );
-        assert_eq!(pending.saves[&SaveKey::Book(7)].reading.page, 2);
+        assert_eq!(state.pending.saves[&SaveKey::Book(7)].reading.page, 2);
     }
 
     #[test]
     fn distinct_pending_writes_are_bounded_but_existing_keys_can_update() {
-        let mut pending = Pending::default();
+        let mut state = WriterState::default();
         for index in 0..MAX_PENDING_STATE_WRITES {
-            pending
+            state
                 .insert(StateWriterMessage::Preference(
                     format!("key-{index}"),
                     "old".to_owned(),
@@ -279,20 +365,79 @@ mod tests {
                 .unwrap();
         }
 
-        pending
+        state
             .insert(StateWriterMessage::Preference(
                 "key-0".to_owned(),
                 "new".to_owned(),
             ))
             .unwrap();
         assert_eq!(
-            pending.insert(StateWriterMessage::Preference(
+            state.insert(StateWriterMessage::Preference(
                 "overflow".to_owned(),
                 "value".to_owned()
             )),
             Err(StateWriterSendError::Full)
         );
-        assert_eq!(pending.preferences["key-0"], "new");
+        assert_eq!(state.pending.preferences["key-0"], "new");
+    }
+
+    #[test]
+    fn failed_in_flight_writes_remain_inside_the_global_admission_bound() {
+        let mut state = WriterState::default();
+        for index in 0..MAX_PENDING_STATE_WRITES {
+            state
+                .insert(StateWriterMessage::Preference(
+                    format!("first-{index}"),
+                    "value".to_owned(),
+                ))
+                .unwrap();
+        }
+        let failed = std::mem::take(&mut state.pending);
+
+        assert_eq!(
+            state.insert(StateWriterMessage::Preference(
+                "not-admitted".to_owned(),
+                "value".to_owned(),
+            )),
+            Err(StateWriterSendError::Full)
+        );
+        state.pending.merge_failed(failed);
+        assert_eq!(state.admitted.len(), MAX_PENDING_STATE_WRITES);
+        assert_eq!(state.pending.write_keys().len(), MAX_PENDING_STATE_WRITES);
+    }
+
+    #[test]
+    fn canonical_path_aliases_coalesce_to_the_latest_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, b"book").unwrap();
+        let alias = directory.path().join(".").join("book.epub");
+        let mut state = WriterState::default();
+        for (path, page) in [(path, 1), (alias, 2)] {
+            state
+                .insert(StateWriterMessage::Save(StateSave {
+                    book_id: None,
+                    path,
+                    reading: FileReadingState {
+                        page,
+                        location_offset: None,
+                        zoom: 1.0,
+                    },
+                }))
+                .unwrap();
+        }
+
+        assert_eq!(state.pending.saves.len(), 1);
+        assert_eq!(state.pending.saves.values().next().unwrap().reading.page, 2);
+    }
+
+    #[test]
+    fn outstanding_flushes_are_bounded() {
+        let counter = AtomicUsize::new(0);
+        for _ in 0..MAX_PENDING_STATE_FLUSHES {
+            assert!(increment_bounded(&counter, MAX_PENDING_STATE_FLUSHES));
+        }
+        assert!(!increment_bounded(&counter, MAX_PENDING_STATE_FLUSHES));
     }
 
     #[tokio::test]
