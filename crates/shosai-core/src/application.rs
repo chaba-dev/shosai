@@ -148,12 +148,11 @@ impl OpenDocument {
             _ => OpenDocumentError::Inaccessible(error.to_string()),
         })?;
         let max_input_bytes = Self::max_input_bytes(format);
-        if file
+        let file_size = file
             .metadata()
             .map_err(|error| OpenDocumentError::Inaccessible(error.to_string()))?
-            .len()
-            > max_input_bytes
-        {
+            .len();
+        if file_size > max_input_bytes {
             return Err(OpenDocumentError::LimitExceeded {
                 format,
                 detail: format!("input is larger than {max_input_bytes} bytes"),
@@ -166,7 +165,12 @@ impl OpenDocument {
                     format,
                     detail: "input byte limit cannot be represented".to_owned(),
                 })?;
-        let mut data = Vec::new();
+        let initial_capacity =
+            usize::try_from(file_size).map_err(|_| OpenDocumentError::LimitExceeded {
+                format,
+                detail: "input size cannot be represented".to_owned(),
+            })?;
+        let mut data = Vec::with_capacity(initial_capacity);
         file.by_ref()
             .take(read_limit)
             .read_to_end(&mut data)

@@ -13,6 +13,7 @@ pub const PDF_SELECTION_MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PDF_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_PDF_BITMAP_DIMENSION: u32 = 16_384;
 pub const MAX_PDF_BITMAP_PIXELS: u64 = 40_000_000;
+pub const MAX_PDF_PAGE_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PDF_METADATA_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -293,6 +294,19 @@ mod tests {
             Err(BoundedPageTextError::Limit { actual }) if actual > 1
         ));
     }
+
+    #[test]
+    fn retained_charge_includes_input_allocation_capacity() {
+        let bytes = selectable_pdf("TARGET");
+        let logical_len = bytes.len();
+        let mut overallocated = Vec::with_capacity(logical_len * 4);
+        overallocated.extend_from_slice(&bytes);
+        let capacity = overallocated.capacity();
+
+        let document = PdfDoc::from_bytes(overallocated).unwrap();
+
+        assert!(document.retained_byte_len().unwrap() >= capacity);
+    }
 }
 
 /// A PDF document backed by pdfium-render.
@@ -315,9 +329,9 @@ impl PdfDoc {
         ]
         .into_iter()
         .flatten()
-        .try_fold(0_usize, |total, value| total.checked_add(value.len()))?;
+        .try_fold(0_usize, |total, value| total.checked_add(value.capacity()))?;
         self.data
-            .len()
+            .capacity()
             .checked_add(
                 self.page_sizes
                     .capacity()
@@ -421,28 +435,14 @@ impl PdfDoc {
 impl PdfDoc {
     /// Extract all text from a single page.
     pub fn page_text(&self, index: usize) -> Result<String> {
-        if index >= self.page_count {
-            anyhow::bail!(
-                "page index {index} out of range (total: {})",
-                self.page_count
-            );
-        }
-
-        let pdfium = create_pdfium()?;
-        let document = pdfium
-            .load_pdf_from_byte_slice(&self.data, None)
-            .map_err(|e| anyhow::anyhow!("failed to load PDF for text extraction: {e}"))?;
-
-        let page = document
-            .pages()
-            .get(index as u16)
-            .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
-
-        let text = page
-            .text()
-            .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
-
-        Ok(searchable_page_text(&page, &text))
+        self.page_text_bounded(index, MAX_PDF_PAGE_TEXT_BYTES, || false)
+            .map_err(|error| match error {
+                BoundedPageTextError::Cancelled => anyhow::anyhow!("PDF text extraction cancelled"),
+                BoundedPageTextError::Limit { .. } => anyhow::anyhow!(
+                    "PDF page text exceeds the {MAX_PDF_PAGE_TEXT_BYTES}-byte limit"
+                ),
+                BoundedPageTextError::Document(error) => error,
+            })
     }
 
     pub(crate) fn page_text_bounded(
@@ -722,11 +722,6 @@ fn pdf_selection_rows(mut zones: Vec<PdfSelectionZone>) -> Vec<PdfSelectionRow> 
         }
     }
     rows
-}
-
-fn searchable_page_text(page: &PdfPage<'_>, text: &PdfPageText<'_>) -> String {
-    searchable_page_text_bounded(page, text, usize::MAX, || false)
-        .expect("an unlimited, non-cancellable extraction cannot fail")
 }
 
 fn searchable_page_text_bounded(

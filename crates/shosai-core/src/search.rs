@@ -58,10 +58,26 @@ impl SearchCancellation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchError {
     Cancelled,
-    QueryLimit { actual: usize, limit: usize },
-    TextLimit { actual: usize, limit: usize },
-    MatchLimit { limit: usize },
-    ResultLimit { actual: usize, limit: usize },
+    QueryLimit {
+        actual: usize,
+        limit: usize,
+    },
+    TextLimit {
+        actual: usize,
+        limit: usize,
+    },
+    MatchLimit {
+        limit: usize,
+    },
+    ResultLimit {
+        actual: usize,
+        limit: usize,
+    },
+    InvalidLimit {
+        name: &'static str,
+        requested: usize,
+        maximum: usize,
+    },
     Document(String),
 }
 
@@ -90,6 +106,14 @@ impl fmt::Display for SearchError {
                     "search results exceed byte limit ({actual} > {limit})"
                 )
             }
+            Self::InvalidLimit {
+                name,
+                requested,
+                maximum,
+            } => write!(
+                formatter,
+                "search {name} limit exceeds hard maximum ({requested} > {maximum})"
+            ),
             Self::Document(error) => write!(formatter, "failed to extract document text: {error}"),
         }
     }
@@ -354,6 +378,29 @@ impl<'a> Search<'a> {
         limits: SearchLimits,
         cancellation: &'a SearchCancellation,
     ) -> Result<Self, SearchError> {
+        let hard = SearchLimits::default();
+        for (name, requested, maximum) in [
+            ("query bytes", limits.max_query_bytes, hard.max_query_bytes),
+            (
+                "indexed text bytes",
+                limits.max_indexed_text_bytes,
+                hard.max_indexed_text_bytes,
+            ),
+            ("match count", limits.max_matches, hard.max_matches),
+            (
+                "result bytes",
+                limits.max_result_bytes,
+                hard.max_result_bytes,
+            ),
+        ] {
+            if requested > maximum {
+                return Err(SearchError::InvalidLimit {
+                    name,
+                    requested,
+                    maximum,
+                });
+            }
+        }
         if query.len() > limits.max_query_bytes {
             return Err(SearchError::QueryLimit {
                 actual: query.len(),
@@ -647,7 +694,7 @@ mod tests {
             max_query_bytes: 2,
             max_indexed_text_bytes: 5,
             max_matches: 1,
-            max_result_bytes: usize::MAX,
+            max_result_bytes: SearchLimits::default().max_result_bytes,
         };
 
         assert_eq!(
@@ -700,6 +747,27 @@ mod tests {
             ),
             Err(SearchError::Cancelled)
         );
+    }
+
+    #[test]
+    fn configurable_limits_cannot_exceed_hard_maxima() {
+        let limits = SearchLimits {
+            max_indexed_text_bytes: usize::MAX,
+            ..SearchLimits::default()
+        };
+
+        assert!(matches!(
+            search_pages_with(
+                &["text".to_owned()],
+                "t",
+                limits,
+                &SearchCancellation::new()
+            ),
+            Err(SearchError::InvalidLimit {
+                name: "indexed text bytes",
+                ..
+            })
+        ));
     }
 
     #[test]
