@@ -10,7 +10,7 @@ authoritative merely because it exists; its `state` says how it should be read.
 | [2: Additional ebook formats](0002/README.adoc) | Format extensibility, plain text/Markdown, DjVu, FB2, MOBI/AZW3, and CBR |
 | [3: Cloud synchronization](0003/README.adoc) | Portable identity, offline-first records, conflict handling, transport, and privacy |
 | [4: Cross-platform Flutter frontend](0004/README.adoc) | One Flutter UI, shared Rust boundaries, mobile/desktop/web feasibility, notifications, and migration |
-| [5: Distribution and packaging](0005/README.adoc) | AppImage, Flatpak, Windows, macOS signing, and shared release assets |
+| [5: Distribution and packaging](0005/README.adoc) | Linux, Windows, macOS, Android, and iOS artifacts, signing, and shared release assets |
 | [6: Cross-format text highlighting](0006/README.adoc) | Shared selection UX, EPUB/PDF anchors, persistence, and recovery |
 
 ## Source format

@@ -93,9 +93,9 @@ Native targets call Rust through a generated or hand-written Dart FFI bridge
 selected by a measured spike. PDF rendering initially reuses Rust PDFium and
 transfers bounded page or tile buffers. EPUB parsing, resource admission,
 computed styles, stable offsets, embedded fonts, and MathML remain Rust-owned.
-The spike decides whether Flutter paints a renderer-neutral Rust scene or lays
-out a shared semantic model; it must not create another parser or resource
-security policy.
+The spike decides the granularity of a Rust-laid-out renderer-neutral scene and
+semantic representation that Flutter paints; it must not move document layout,
+parsing, or resource security policy into Flutter.
 
 Canonical paths, Android content URIs, iOS security-scoped URLs, and browser file
 handles are device-local locators, never portable book identities. Flutter
@@ -149,10 +149,11 @@ The Flutter slice must prove:
 * reproducible debug and release builds with measured startup, memory, binary
   size, bridge latency, rendering latency, and drag latency.
 
-Run the slice on desktop and physical Android and iOS devices. One mobile target
-may ship first, but evidence does not transfer between operating systems. Web
-feasibility separately proves the chosen WASM or service boundary and does not
-delay native migration.
+Run the M2 slice on desktop and at least one physical Android or iOS device. One
+mobile target may ship first, but evidence does not transfer between operating
+systems: independently validate the other OS before claiming or packaging it as
+supported. Web feasibility separately proves the chosen WASM or service boundary
+and does not delay native migration.
 
 After the gate, migrate the library shell and remaining reader behavior in
 vertical slices. Keep Iced runnable for behavioral comparison, but add no new

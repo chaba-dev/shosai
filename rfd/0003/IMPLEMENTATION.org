@@ -5,15 +5,16 @@ Implements [[file:README.adoc][RFD 3: Cloud synchronization]].
 
 * Purpose
 
-Add optional, dependable synchronization of reading progress and bookmarks
-without making local reading depend on a network service.  This plan extends the
-SQLite-backed APIs in ~crates/shosai-core~ and exposes configuration and status
-through the cross-platform Flutter frontend proposed by RFD 4.
+Add optional, dependable synchronization of reading progress, bookmarks, and
+annotations without making local reading depend on a network service.  This
+plan extends the SQLite-backed APIs in ~crates/shosai-core~ and exposes
+configuration and status through the cross-platform Flutter frontend proposed
+by RFD 4.
 
 ** Goals
 
 - Give every logical book and syncable record a stable, portable identifier.
-- Synchronize reading state and bookmarks across installations.
+- Synchronize reading state, bookmarks, and annotations across installations.
 - Preserve offline-first operation, with retries that are safe and observable.
 - Define deterministic conflict and deletion behavior before adding transport.
 - Deliver one replaceable first transport, with WebDAV as the initial candidate.
@@ -28,8 +29,8 @@ through the cross-platform Flutter frontend proposed by RFD 4.
   around portable identity; do not add dual reads or compatibility tables only
   to preserve local test data. Compatibility becomes mandatory after release.
 - Book files and cover blobs are out of scope for the first release.  The first
-  payload contains portable metadata, reading state, bookmarks/notes, and
-  deletions only.
+  payload contains portable metadata, reading state, bookmarks, annotations,
+  their notes/quotes, and deletions only.
 - Collaboration, shared libraries, a hosted Shōsai account service, and live
   multi-user editing are non-goals.
 - Do not select WebDAV, a custom server, or a vendor protocol as the permanent
@@ -47,8 +48,10 @@ through the cross-platform Flutter frontend proposed by RFD 4.
   canonical local path; ~Book.id~ is a database-local integer.
 - ~crates/shosai-core/src/bookmarks.rs~ provides bookmark CRUD keyed by canonical
   path plus page/chapter and optional EPUB character offset.
+- ~crates/shosai-core/src/annotations.rs~ provides portable UUID annotation
+  records, versioned EPUB/PDF anchors, bounded quotes, and hidden tombstones.
 - ~crates/shosai-core/migrations/001_reading_state.sql~ through
-  ~005_epub_locations.sql~ define current storage.
+  ~008_annotations.sql~ define current storage.
 - ~crates/shosai-app/src/app.rs~ currently contains the desktop Iced state,
   settings UI, persistence wiring, and ~rfd~ file/folder dialogs. Treat it as
   migration evidence; new sync UI belongs in Flutter and core sync state must be
@@ -88,6 +91,9 @@ Define semantics per record type before implementing a transport:
   Do not silently use the numerically furthest position: users reread books.
 - Bookmarks: immutable stable bookmark IDs; edits resolve deterministically per
   whole record unless field-level merge is deliberately specified.
+- Annotations: preserve RFD 6's opaque record IDs and versioned anchors; define
+  whole-record or field-level outcomes for concurrent anchor, color, body, and
+  delete edits without silently relocating ambiguous selectors.
 - Deletes: tombstones win over older updates, carry deletion revision/time, and
   remain until all relevant replicas have passed a documented retention or
   acknowledgement threshold.  A stale device must not resurrect deleted data.
@@ -115,8 +121,8 @@ but does not hide bookmark notes or reading habits from the storage provider.
 
 - [ ] Write and approve the four ADR areas above; backend selection is a result,
   not an assumption.
-- [ ] Define versioned examples for a book, reading state, bookmark, tombstone,
-  concurrent edits, and an unknown future field.
+- [ ] Define versioned examples for a book, reading state, bookmark, annotation,
+  tombstone, concurrent edits, and an unknown future field.
 - [ ] Establish invariants for stable IDs, idempotent replay, deterministic merge,
   and crash recovery.
 - [ ] Benchmark content fingerprinting on representative PDF, EPUB, and CBZ files.
@@ -137,13 +143,15 @@ order, and the identity ADR explains moves, copies, changed bytes, and editions.
 - [ ] Cover duplicate bytes, inaccessible files, changed-in-place files, rollback,
   and migration restart in integration tests.
 
-*Exit*: moving a file does not change its portable identity, two installations
-derive the same content ID, and a pre-sync database still opens with all state.
+*Exit*: moving a file does not change its portable identity and two installations
+derive the same content ID. Before the first public release, development
+databases may be reset; if portable identity lands after a public release, every
+supported released schema upgrades with its declared data guarantees.
 
 ** TODO M2 — Sync-ready local records
 
-- [ ] Re-key or relate reading state and bookmarks to stable IDs; assign stable
-  record IDs to bookmarks.
+- [ ] Re-key or relate reading state, bookmarks, and annotations to stable book
+  IDs; assign stable record IDs to bookmarks and retain annotation UUIDs.
 - [ ] Add revision metadata, device identity, dirty/outbox state, and tombstones.
 - [ ] Route every create/update/delete through transactional APIs that update the
   user record and change tracking atomically.
@@ -196,14 +204,16 @@ credential removal and status behavior pass platform smoke tests.
 - [ ] Gate rollout behind an explicit experimental opt-in until telemetry-free
   diagnostics and recovery procedures are proven.
 
-*Exit*: all acceptance criteria below pass on each supported desktop platform.
+*Exit*: all acceptance criteria below pass on every Flutter platform claimed for
+sync; a platform without credential, background, lifecycle, and recovery
+evidence remains unsupported even when another platform passes.
 
 * Likely Files and Modules
 
 - Extend ~crates/shosai-core/migrations/~ with ordered migrations; never rewrite
   released migration files ~001~–~005~.
 - Update ~crates/shosai-core/src/library.rs~, ~reading_state.rs~,
-  ~bookmarks.rs~, and exports in ~lib.rs~.
+  ~bookmarks.rs~, ~annotations.rs~, and exports in ~lib.rs~.
 - Add focused core modules such as ~identity.rs~, ~sync/model.rs~,
   ~sync/merge.rs~, ~sync/store.rs~, and ~sync/transport.rs~; place a WebDAV
   adapter under ~sync/~ only after its ADR.
@@ -229,8 +239,9 @@ credential removal and status behavior pass platform smoke tests.
 - Once a public release or sync wire version exists, use forward migrations,
   compatibility fixtures, and an explicit minimum-version window; never reset a
   released user database as a routine upgrade strategy.
-- Disabling sync does not delete local books, progress, or bookmarks.  Remote
-  reset and local unlink are explicit, separately confirmed operations.
+- Disabling sync does not delete local books, progress, bookmarks, or
+  annotations. Remote reset and local unlink are explicit, separately confirmed
+  operations.
 
 * Verification and Acceptance Criteria
 
@@ -241,13 +252,14 @@ credential removal and status behavior pass platform smoke tests.
   identity outcomes specified by the ADR.
 - Two or more replicas converge byte-for-byte in logical records after all
   messages are delivered, regardless of order or duplication.
-- Concurrent progress updates, bookmark edits, and edit/delete conflicts match
-  published test vectors; a stale replica cannot revive a collected tombstone.
+- Concurrent progress updates, bookmark and annotation edits, and edit/delete
+  conflicts match published test vectors; a stale replica cannot revive a
+  collected tombstone or silently choose an ambiguous annotation relocation.
 - Network loss, 401/403, timeout, conditional-write failure, malformed remote
   data, and process termination preserve local data and produce actionable state.
-- No credential or bookmark note appears in logs; secrets are absent from SQLite
-  and serialized payload fixtures unless payload encryption explicitly protects
-  them.
+- No credential, bookmark/annotation note, or selected quote appears in logs;
+  secrets are absent from SQLite and serialized payload fixtures unless payload
+  encryption explicitly protects them.
 - Core unit/integration tests and Flutter platform tests pass; selected-backend
   tests run against documented server versions in CI or a reproducible
   integration job.

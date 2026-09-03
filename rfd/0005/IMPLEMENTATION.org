@@ -398,6 +398,73 @@ rotation over Apple ID passwords.  Never upload signing artifacts from forks.
 - Mac App Store distribution, sandboxing solely for App Store policy, universal
   binaries, DMG creation, or changing the current minimum macOS version.
 
+* Work Package: Android Store Artifact
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: signed Android App Bundle and test APK
+:END:
+
+** Prerequisites and implementation
+
+- [ ] Pass RFD 4's Flutter/Rust bridge and physical Android device gate.
+- [ ] Build every claimed Android ABI with the Rust native library and pinned
+  PDFium packaged under the correct ~jniLibs~ layout; reject missing or duplicate
+  architectures during assembly.
+- [ ] Define the application ID, minimum/target SDK, file-provider behavior,
+  storage and notification permissions, deep links, backup policy, and Play data
+  safety declarations from implemented behavior.
+- [ ] Produce an unsigned/ephemerally signed APK for pull-request installation
+  tests and a protected-environment App Bundle signed with the release key.
+
+** Acceptance criteria
+
+- [ ] A clean physical-device install and upgrade launch the Flutter host and
+  open PDF, EPUB, and CBZ fixtures without system PDFium or developer tooling.
+- [ ] At least one device for every claimed ABI exercises suspend/resume, process
+  death, file capability restoration, and denied/revoked permissions.
+- [ ] Bundle inspection verifies ABI coverage, native-library alignment, notices,
+  manifest permissions, signing identity, and no release secrets in artifacts.
+
+** Secrets and security
+
+Keep keystore material and passwords in a protected release environment. Never
+expose them to pull requests or commit generated signing configuration. Store
+submission is a separately approved release action.
+
+* Work Package: iOS Store Artifact
+:PROPERTIES:
+:STATUS: TODO
+:DELIVERABLE: signed iOS archive and exportable IPA
+:END:
+
+** Prerequisites and implementation
+
+- [ ] Pass RFD 4's Flutter/Rust bridge and physical iPhone/iPad gate.
+- [ ] Build and embed the Rust library and approved PDFium form for each claimed
+  device architecture; verify linkage, bitcode policy where applicable, and that
+  no simulator slice enters the device archive.
+- [ ] Define the bundle ID, deployment target, document capabilities, deep links,
+  background modes, notification entitlements, privacy manifest, usage strings,
+  and App Store privacy answers from implemented behavior.
+- [ ] Keep pull-request builds secretless and use protected certificates,
+  provisioning profiles, and App Store Connect credentials only for release
+  archives and exports.
+
+** Acceptance criteria
+
+- [ ] Clean installs on a physical iPhone and iPad launch and open PDF, EPUB, and
+  CBZ fixtures with all native code validly signed.
+- [ ] Device tests cover suspend/resume, process death, rotation, memory pressure,
+  security-scoped file restoration, and denied/revoked permissions.
+- [ ] Archive/export validation checks architectures, nested signatures,
+  entitlements, privacy manifests, notices, and absence of release credentials.
+
+** Secrets and security
+
+Use a protected release environment with least-privilege App Store Connect keys
+and temporary keychains. Store submission is a separately approved release
+action and does not block independently validated desktop or Android artifacts.
+
 * Work Package: Shared Icons and Metadata
 :PROPERTIES:
 :STATUS: TODO
@@ -478,3 +545,5 @@ This is sequencing guidance, not a dependency chain.
    Windows arm64 is a separate matrix expansion.
 5. macOS signing/notarization upgrades the existing app artifacts without waiting
    for any Linux or Windows package.
+6. Android and iOS proceed independently after their own physical-device bridge
+   gates; neither mobile store package blocks the other targets.

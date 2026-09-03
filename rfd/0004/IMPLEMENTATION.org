@@ -52,9 +52,10 @@ assuming native FFI works in a browser.
   treat its completed Iced Phase 0 as contract evidence, not production UI.
 - [ ] Inventory every responsibility in ~shosai-app~ and classify it as core,
   Flutter presentation, platform adapter, temporary Iced reference, or obsolete.
-- [ ] Choose the EPUB boundary: a Rust layout/scene consumed by Flutter or a
-  semantic model laid out by Flutter.  Measure bridge volume, fidelity, selection,
-  accessibility, relayout, and implementation duplication before deciding.
+- [ ] Choose the granularity of the Rust-laid-out EPUB scene and semantic model
+  consumed by Flutter. Measure bridge volume, fidelity, selection,
+  accessibility, relayout, and implementation duplication without moving
+  document layout into Flutter.
 - [ ] Select a Dart/Rust bridge after proving Android, iOS, macOS, Windows, and
   Linux build integration, owned buffers, cancellation, error mapping, panic
   containment, and deterministic handle release.
@@ -159,6 +160,10 @@ Iced binary is no longer needed to operate or test the product.
 - [ ] Test denied/revoked permission, timezone and daylight-saving changes,
   duplicate delivery, stale deep links, sign-out, and lock-screen privacy.
 
+*Exit*: each delivered platform service has permission, lifecycle, privacy,
+duplicate-delivery, and stale-routing coverage, and notification or push failure
+cannot affect synchronization convergence or local reading.
+
 * M5 — Packaging and release
 :PROPERTIES:
 :STATUS: TODO
@@ -172,6 +177,10 @@ Iced binary is no longer needed to operate or test the product.
   jobs; one deferred target must not suppress validated artifacts.
 - [ ] Remove ~crates/shosai-app~ and its Iced-only dependencies after parity,
   packaging, and recovery gates pass.
+
+*Exit*: every claimed platform has an independently releasable, signed where
+required, installable artifact that launches, opens each supported format, loads
+native dependencies, and passes recovery smoke tests; only then is Iced removed.
 
 * M6 — Web feasibility, independent
 :PROPERTIES:
@@ -187,6 +196,10 @@ Iced binary is no longer needed to operate or test the product.
   offline behavior.
 - [ ] Record a separate go/no-go decision.  Do not weaken native core ownership
   or security boundaries merely to advertise a web target.
+
+*Exit*: a recorded go/no-go decision compares measured local-WASM and service
+evidence, names unsupported browser capabilities, and leaves native delivery
+unblocked.
 
 * Verification and acceptance
 
@@ -207,7 +220,8 @@ Iced binary is no longer needed to operate or test the product.
 
 - Which bridge passes every native build and lifecycle gate with the smallest
   generated API and maintenance surface?
-- Does Flutter paint a Rust EPUB scene or lay out a shared semantic model?
+- What granularity of Rust-laid-out EPUB scene and semantic representation gives
+  Flutter efficient painting, selection, and accessibility?
 - Which Android/iOS platform ships first after physical-device evidence?
 - Which native dependencies require platform adapters or replacement?
 - Does web use local WASM/browser storage, a remote service, or remain deferred?
