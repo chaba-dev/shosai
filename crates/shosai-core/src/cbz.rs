@@ -88,13 +88,16 @@ impl CbzDoc {
 
     pub fn open_with_limits(path: impl AsRef<Path>, limits: CbzLimits) -> Result<Self> {
         let path = path.as_ref();
-        let metadata = std::fs::metadata(path)
+        let mut file = std::fs::File::open(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let metadata = file
+            .metadata()
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.len() > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
-        let data =
-            std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let data = read_cbz_snapshot(&mut file, metadata.len(), limits.max_archive_bytes)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
         Self::from_bytes_with_title(data, title, limits)
     }
@@ -397,9 +400,45 @@ impl CbzDoc {
     }
 }
 
+fn read_cbz_snapshot(
+    reader: impl Read,
+    expected_bytes: u64,
+    max_archive_bytes: u64,
+) -> Result<Vec<u8>> {
+    let mut data = Vec::with_capacity(
+        usize::try_from(expected_bytes.min(max_archive_bytes)).unwrap_or_default(),
+    );
+    reader
+        .take(max_archive_bytes.saturating_add(1))
+        .read_to_end(&mut data)?;
+    let actual_bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
+    if actual_bytes > max_archive_bytes {
+        crate::resource_limit!("CBZ archive exceeds encoded byte limit");
+    }
+    if actual_bytes != expected_bytes {
+        anyhow::bail!(
+            "CBZ changed while reading (expected {expected_bytes} bytes, read {actual_bytes})"
+        );
+    }
+    Ok(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cbz_snapshot_rejects_growth_and_truncation() {
+        let growth = read_cbz_snapshot(&b"four"[..], 3, 3).unwrap_err();
+        assert!(
+            growth
+                .downcast_ref::<crate::application::ResourceLimitError>()
+                .is_some()
+        );
+
+        let truncation = read_cbz_snapshot(&b"two"[..], 4, 4).unwrap_err();
+        assert!(truncation.to_string().contains("changed while reading"));
+    }
 
     #[test]
     fn test_image_extensions() {
