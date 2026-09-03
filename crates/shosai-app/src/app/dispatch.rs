@@ -273,6 +273,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             result,
         } => {
             if generation != state.document_open_generation {
+                state.pending_document_permits.remove(&generation);
                 return Task::none();
             }
             state.document_opening = false;
@@ -281,7 +282,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(document) => return finish_open_document(state, path, book_id, document),
                 Err(error) => {
-                    state.pending_document_permit = None;
+                    state.pending_document_permits.remove(&generation);
                     let performance_task = perf::fail(state, &error.diagnostic());
                     state.screen = Screen::Reader;
                     state.open_error = Some(error);

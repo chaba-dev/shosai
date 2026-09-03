@@ -667,10 +667,11 @@ struct ReaderTab {
 struct RetainedDocumentPermit {
     _count: CachePermit,
     _bytes: CachePermit,
+    open_worker: Option<CachePermit>,
 }
 
-fn retained_document_budgets() -> &'static (CacheBudget, CacheBudget) {
-    static BUDGETS: OnceLock<(CacheBudget, CacheBudget)> = OnceLock::new();
+fn retained_document_budgets() -> &'static (CacheBudget, CacheBudget, CacheBudget) {
+    static BUDGETS: OnceLock<(CacheBudget, CacheBudget, CacheBudget)> = OnceLock::new();
     BUDGETS.get_or_init(|| {
         (
             CacheBudget::new(if cfg!(test) {
@@ -683,6 +684,7 @@ fn retained_document_budgets() -> &'static (CacheBudget, CacheBudget) {
             } else {
                 RETAINED_DOCUMENT_BYTE_CAPACITY
             }),
+            CacheBudget::new(if cfg!(test) { 1024 } else { 2 }),
         )
     })
 }
@@ -778,7 +780,7 @@ pub struct State {
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
     document_permit: Option<RetainedDocumentPermit>,
-    pending_document_permit: Option<(u64, RetainedDocumentPermit)>,
+    pending_document_permits: HashMap<u64, RetainedDocumentPermit>,
     current_page: usize,
     total_pages: usize,
     zoom: ZoomMode,
@@ -940,7 +942,7 @@ pub fn boot() -> (State, Task<Message>) {
         file_path: None,
         document: None,
         document_permit: None,
-        pending_document_permit: None,
+        pending_document_permits: HashMap::new(),
         current_page: 0,
         total_pages: 0,
         zoom: ZoomMode::default(),
@@ -1572,8 +1574,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
 
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
-    state.pending_document_permit = None;
-    let (count_budget, byte_budget) = retained_document_budgets();
+    let (count_budget, byte_budget, open_worker_budget) = retained_document_budgets();
     let Some(count) = count_budget.try_reserve(1) else {
         state.open_error = Some(AppError::Open {
             format: "document",
@@ -1581,22 +1582,28 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         });
         return Task::none();
     };
-    // Hold the full ceiling while parsing. Once the document exists,
-    // finish_open_document_with_permit atomically shrinks this to its derived charge.
-    let Some(bytes) = byte_budget.try_reserve(RETAINED_DOCUMENT_BYTE_CAPACITY) else {
+    let Some(bytes) = byte_budget.try_reserve(0) else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "retained document byte limit exceeded".to_owned(),
         });
         return Task::none();
     };
-    state.pending_document_permit = Some((
+    let Some(open_worker) = open_worker_budget.try_reserve(1) else {
+        state.open_error = Some(AppError::Open {
+            format: "document",
+            detail: "document open worker limit exceeded".to_owned(),
+        });
+        return Task::none();
+    };
+    state.pending_document_permits.insert(
         generation,
         RetainedDocumentPermit {
             _count: count,
             _bytes: bytes,
+            open_worker: Some(open_worker),
         },
-    ));
+    );
     state.document_opening = true;
     state.document_open_notice_visible = false;
     let book =
@@ -1647,10 +1654,9 @@ fn finish_open_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) -> Task<Message> {
-    let Some((_, document_permit)) = state
-        .pending_document_permit
-        .take()
-        .filter(|(generation, _)| *generation == state.document_open_generation)
+    let Some(document_permit) = state
+        .pending_document_permits
+        .remove(&state.document_open_generation)
     else {
         // Synchronous test opens do not pass through open_document; admit them
         // conservatively from the already-read source file.
@@ -1658,7 +1664,7 @@ fn finish_open_document(
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
             .unwrap_or_default();
-        let (count_budget, byte_budget) = retained_document_budgets();
+        let (count_budget, byte_budget, _) = retained_document_budgets();
         let Some(count) = count_budget.try_reserve(1) else {
             state.open_error = Some(AppError::Open {
                 format: "document",
@@ -1681,6 +1687,7 @@ fn finish_open_document(
             RetainedDocumentPermit {
                 _count: count,
                 _bytes: bytes,
+                open_worker: None,
             },
         );
     };
@@ -1701,7 +1708,7 @@ fn finish_open_document_with_permit(
         });
         return Task::none();
     };
-    let (_, byte_budget) = retained_document_budgets();
+    let (_, byte_budget, _) = retained_document_budgets();
     let Some(resized) =
         byte_budget.try_reserve_replacing(retained_bytes, std::iter::once(&document_permit._bytes))
     else {
@@ -1712,6 +1719,7 @@ fn finish_open_document_with_permit(
         return Task::none();
     };
     document_permit._bytes = resized;
+    document_permit.open_worker = None;
 
     if let Some(index) = state.tabs.iter().position(|tab| {
         book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
@@ -6882,10 +6890,11 @@ mod tests {
 
     fn state_with_document(document: OpenDocument) -> State {
         let (mut state, _) = boot();
-        let (count_budget, byte_budget) = retained_document_budgets();
+        let (count_budget, byte_budget, _) = retained_document_budgets();
         state.document_permit = Some(RetainedDocumentPermit {
             _count: count_budget.try_reserve(1).unwrap(),
             _bytes: byte_budget.try_reserve(0).unwrap(),
+            open_worker: None,
         });
         state.screen = Screen::Reader;
         state.active_tab_id = Some(1);

@@ -326,20 +326,12 @@ impl Bridge {
         let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
-        // Reserve against the format ceiling rather than path metadata: the file is opened and
-        // parsed from one bounded snapshot below, so replacement or growth cannot invalidate the
-        // retained-memory admission decision.
+        // Parsing is bounded by the open-worker slots and format parser ceilings. Retained bytes
+        // are admitted from the parsed document's derived charge below, so a large retained book
+        // cannot prevent an unrelated small book from being parsed.
         let admitted_input_bytes = usize::try_from(OpenDocument::max_input_bytes(format))
             .map_err(|_| BridgeError::DocumentLimit)?;
-        let retained_byte_len = retained_document_byte_len(format, admitted_input_bytes)?;
-        let document_byte_permits =
-            u32::try_from(retained_byte_len).map_err(|_| BridgeError::DocumentLimit)?;
-        let mut document_bytes = acquire_permits(
-            Arc::clone(&self.admission.document_bytes),
-            document_byte_permits,
-            &cancellation,
-        )
-        .await?;
+        let maximum_retained_bytes = retained_document_byte_len(format, admitted_input_bytes)?;
         let open_slot =
             acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
         let document = tokio::task::spawn_blocking(move || {
@@ -351,17 +343,17 @@ impl Bridge {
         let actual_retained_bytes = document
             .retained_byte_len()
             .ok_or(BridgeError::DocumentLimit)?;
-        if actual_retained_bytes > retained_byte_len {
+        if actual_retained_bytes > maximum_retained_bytes {
             return Err(BridgeError::DocumentLimit);
         }
-        let excess = retained_byte_len - actual_retained_bytes;
-        if excess > 0 {
-            drop(
-                document_bytes
-                    .split(excess)
-                    .ok_or(BridgeError::DocumentLimit)?,
-            );
-        }
+        let document_byte_permits =
+            u32::try_from(actual_retained_bytes).map_err(|_| BridgeError::DocumentLimit)?;
+        let document_bytes = acquire_permits(
+            Arc::clone(&self.admission.document_bytes),
+            document_byte_permits,
+            &cancellation,
+        )
+        .await?;
         let _publication = cancellation
             .0
             .publication
