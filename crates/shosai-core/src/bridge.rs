@@ -322,7 +322,7 @@ impl Bridge {
         let retained_byte_len = retained_document_byte_len(format, admitted_input_bytes)?;
         let document_byte_permits =
             u32::try_from(retained_byte_len).map_err(|_| BridgeError::DocumentLimit)?;
-        let document_bytes = acquire_permits(
+        let mut document_bytes = acquire_permits(
             Arc::clone(&self.admission.document_bytes),
             document_byte_permits,
             &cancellation,
@@ -336,6 +336,20 @@ impl Bridge {
         })
         .await
         .map_err(|_| BridgeError::Worker)??;
+        let actual_retained_bytes = document
+            .retained_byte_len()
+            .ok_or(BridgeError::DocumentLimit)?;
+        if actual_retained_bytes > retained_byte_len {
+            return Err(BridgeError::DocumentLimit);
+        }
+        let excess = retained_byte_len - actual_retained_bytes;
+        if excess > 0 {
+            drop(
+                document_bytes
+                    .split(excess)
+                    .ok_or(BridgeError::DocumentLimit)?,
+            );
+        }
         let _publication = cancellation
             .0
             .publication
@@ -786,6 +800,18 @@ mod tests {
         }
     }
 
+    fn epub_request() -> OpenRequest {
+        OpenRequest {
+            book_id: None,
+            local_id: "epub-fixture".to_owned(),
+            path_key: crate::path_key::path_key(std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.epub"
+            ))),
+            format_hint: Some(BookFormat::Epub),
+        }
+    }
+
     #[test]
     fn bridge_errors_expose_stable_categories() {
         assert_eq!(
@@ -1001,6 +1027,26 @@ mod tests {
                 >= usize::try_from(EpubLimits::default().max_total_uncompressed_bytes).unwrap()
         );
         assert!(retained <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES);
+    }
+
+    #[tokio::test]
+    async fn parsed_epub_charge_allows_two_retained_documents() {
+        let bridge = Bridge::new();
+        let first = bridge
+            .open_document(epub_request(), Cancellation::new())
+            .await
+            .unwrap();
+
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            bridge.open_document(epub_request(), Cancellation::new()),
+        )
+        .await
+        .expect("a small second EPUB must not wait for the first handle")
+        .unwrap();
+
+        assert!(bridge.release_document(first.handle));
+        assert!(bridge.release_document(second.handle));
     }
 
     #[test]

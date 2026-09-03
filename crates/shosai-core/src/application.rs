@@ -131,6 +131,16 @@ pub enum OpenDocument {
 }
 
 impl OpenDocument {
+    /// Conservative byte charge for memory retained by this parsed document.
+    #[doc(hidden)]
+    pub fn retained_byte_len(&self) -> Option<usize> {
+        match self {
+            Self::Pdf(document) => document.retained_byte_len(),
+            Self::Epub(document) => document.retained_byte_len(),
+            Self::Cbz(document) => document.retained_byte_len(),
+        }
+    }
+
     pub fn open(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
         let format = locator.format()?;
         let mut file = std::fs::File::open(locator.path()).map_err(|error| match error.kind() {

@@ -281,6 +281,27 @@ pub struct PdfDoc {
 }
 
 impl PdfDoc {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        let metadata = [
+            &self.metadata.title,
+            &self.metadata.author,
+            &self.metadata.subject,
+            &self.metadata.creator,
+        ]
+        .into_iter()
+        .flatten()
+        .try_fold(0_usize, |total, value| total.checked_add(value.len()))?;
+        self.data
+            .len()
+            .checked_add(
+                self.page_sizes
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<(f32, f32)>())?,
+            )?
+            .checked_add(metadata)
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
+    }
+
     /// Open a PDF file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limit(path, MAX_PDF_INPUT_BYTES)

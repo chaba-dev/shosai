@@ -59,6 +59,44 @@ impl EpubInspection {
 }
 
 impl EpubDoc {
+    /// Conservative retained-memory charge derived from this parsed document.
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        const SOURCE_DERIVED_COPIES: usize = 4;
+        const PRESENTATION_NODE_BYTES: usize = 256;
+        const CONTAINER_OVERHEAD_BYTES: usize = 1024 * 1024;
+
+        let chapter_bytes = self
+            .content
+            .chapters
+            .iter()
+            .try_fold(0_usize, |total, chapter| {
+                total
+                    .checked_add(chapter.path.len())?
+                    .checked_add(chapter.title.as_ref().map_or(0, String::len))?
+                    .checked_add(chapter.content.len())
+            })?;
+        let resource_bytes =
+            self.content
+                .resources
+                .iter()
+                .try_fold(0_usize, |total, (path, resource)| {
+                    total
+                        .checked_add(path.as_str().len())?
+                        .checked_add(resource.media_type.len())?
+                        .checked_add(resource.bytes.len())
+                })?;
+        chapter_bytes
+            .checked_add(resource_bytes)?
+            .checked_mul(SOURCE_DERIVED_COPIES)?
+            .checked_add(self.fonts.retained_decoded_bytes())?
+            .checked_add(
+                self.presentation
+                    .retained_node_count()
+                    .checked_mul(PRESENTATION_NODE_BYTES)?,
+            )?
+            .checked_add(CONTAINER_OVERHEAD_BYTES)
+    }
+
     /// Inspect package metadata and its referenced cover without loading reading content.
     pub fn inspect(path: impl AsRef<Path>) -> Result<EpubInspection> {
         Self::inspect_with_limits(path, EpubLimits::default())

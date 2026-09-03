@@ -110,6 +110,13 @@ impl EpubPresentation {
     pub fn chapter(&self, index: usize) -> Option<&EpubChapterPresentation> {
         self.chapters.get(index)
     }
+
+    pub(crate) fn retained_node_count(&self) -> usize {
+        self.chapters
+            .iter()
+            .map(|chapter| content_node_count(&chapter.nodes))
+            .sum()
+    }
 }
 
 fn content_node_count(nodes: &[ContentNode]) -> usize {

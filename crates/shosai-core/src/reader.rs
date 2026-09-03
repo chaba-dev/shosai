@@ -184,7 +184,7 @@ impl CacheBudget {
         })
     }
 
-    fn try_reserve_replacing<'a>(
+    pub fn try_reserve_replacing<'a>(
         &self,
         weight: usize,
         replaced: impl IntoIterator<Item = &'a CachePermit>,
