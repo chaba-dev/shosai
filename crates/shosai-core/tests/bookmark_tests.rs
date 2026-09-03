@@ -1,4 +1,7 @@
-use shosai_core::bookmarks::BookmarkStore;
+use shosai_core::bookmarks::{
+    BookmarkStore, MAX_BOOKMARK_COLOR_BYTES, MAX_BOOKMARK_EXPORT_BYTES, MAX_BOOKMARK_NOTE_BYTES,
+    MAX_BOOKMARK_PAGE_SIZE, MAX_BOOKMARK_TITLE_BYTES, MAX_BOOKMARKS_PER_BOOK,
+};
 use shosai_core::reading_state::ReadingStateStore;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -276,4 +279,103 @@ async fn test_export_empty() {
     assert!(md.contains("# Bookmarks: empty.pdf"));
     // No bookmark sections
     assert!(!md.contains("## Page"));
+}
+
+#[tokio::test]
+async fn bookmark_fields_are_bounded_at_public_write_boundaries() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/bounded.pdf");
+    let note = "n".repeat(MAX_BOOKMARK_NOTE_BYTES);
+    let bookmark = store
+        .add_async(&path, 0, Some("title"), Some(&note), "yellow")
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .update_note_async(bookmark.id, Some(&"n".repeat(MAX_BOOKMARK_NOTE_BYTES + 1)))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("note exceeds")
+    );
+    assert!(
+        store
+            .add_async(
+                &path,
+                1,
+                Some(&"t".repeat(MAX_BOOKMARK_TITLE_BYTES + 1)),
+                None,
+                "yellow",
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("title exceeds")
+    );
+    assert!(
+        store
+            .add_async(
+                &path,
+                1,
+                None,
+                None,
+                &"c".repeat(MAX_BOOKMARK_COLOR_BYTES + 1),
+            )
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("color exceeds")
+    );
+}
+
+#[tokio::test]
+async fn bookmark_count_and_page_results_are_bounded() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/many.pdf");
+    for page in 0..MAX_BOOKMARKS_PER_BOOK {
+        store
+            .add_async(&path, page, None, None, "yellow")
+            .await
+            .unwrap();
+    }
+
+    assert!(
+        store
+            .add_async(&path, MAX_BOOKMARKS_PER_BOOK, None, None, "yellow")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("count limit")
+    );
+    assert_eq!(
+        store
+            .list_for_file_page_async(&path, u32::MAX, 0)
+            .await
+            .unwrap()
+            .len(),
+        MAX_BOOKMARK_PAGE_SIZE as usize
+    );
+}
+
+#[tokio::test]
+async fn bookmark_markdown_export_has_an_aggregate_byte_limit() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/export.pdf");
+    let note = "n".repeat(MAX_BOOKMARK_NOTE_BYTES);
+    for page in 0..(MAX_BOOKMARK_EXPORT_BYTES / MAX_BOOKMARK_NOTE_BYTES + 1) {
+        store
+            .add_async(&path, page, None, Some(&note), "yellow")
+            .await
+            .unwrap();
+    }
+
+    assert!(
+        store
+            .export_markdown_async(&path)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("export exceeds")
+    );
 }
