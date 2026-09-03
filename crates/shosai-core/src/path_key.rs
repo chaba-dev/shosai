@@ -1,6 +1,9 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidPathKey;
+
 pub fn path_key(path: &Path) -> String {
     if let Some(path) = path.to_str() {
         return path.to_owned();
@@ -38,13 +41,18 @@ pub(crate) fn canonical_path_key(path: &Path) -> String {
 }
 
 pub fn path_from_key(key: &str) -> PathBuf {
+    try_path_from_key(key).unwrap_or_else(|_| PathBuf::from(key))
+}
+
+pub fn try_path_from_key(key: &str) -> Result<PathBuf, InvalidPathKey> {
     #[cfg(unix)]
     if let Some(encoded) = key.strip_prefix("\0unix-path-v1:") {
         use std::ffi::OsString;
         use std::os::unix::ffi::OsStringExt;
         if let Some(bytes) = decode_hex(encoded) {
-            return PathBuf::from(OsString::from_vec(bytes));
+            return Ok(PathBuf::from(OsString::from_vec(bytes)));
         }
+        return Err(InvalidPathKey);
     }
     #[cfg(windows)]
     if let Some(encoded) = key.strip_prefix("\0windows-path-v1:") {
@@ -56,10 +64,16 @@ pub fn path_from_key(key: &str) -> PathBuf {
             let units = bytes
                 .chunks_exact(2)
                 .map(|unit| u16::from_be_bytes([unit[0], unit[1]]));
-            return PathBuf::from(OsString::from_wide(&units.collect::<Vec<_>>()));
+            return Ok(PathBuf::from(OsString::from_wide(
+                &units.collect::<Vec<_>>(),
+            )));
         }
+        return Err(InvalidPathKey);
     }
-    PathBuf::from(key)
+    if key.starts_with('\0') {
+        return Err(InvalidPathKey);
+    }
+    Ok(PathBuf::from(key))
 }
 
 fn decode_hex(encoded: &str) -> Option<Vec<u8>> {
@@ -92,5 +106,17 @@ mod tests {
         assert_ne!(path_key(raw), path_key(literal));
         assert!(encoded.starts_with("\0unix-path-v1:"));
         assert_eq!(path_from_key(&encoded), raw);
+    }
+
+    #[test]
+    fn malformed_or_foreign_reserved_keys_are_rejected() {
+        assert_eq!(
+            try_path_from_key("\0unix-path-v1:not-hex"),
+            Err(InvalidPathKey)
+        );
+        assert_eq!(
+            try_path_from_key("\0windows-path-v1:0062"),
+            Err(InvalidPathKey)
+        );
     }
 }
