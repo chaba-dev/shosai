@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::application::{DeviceFileLocator, FormatCapabilities, OpenDocument};
 use crate::reading_state::FileReadingState;
@@ -179,8 +179,40 @@ impl CacheBudget {
             CachePermit(Arc::new(CacheReservation {
                 budget: Arc::clone(&self.0),
                 weight,
+                active: AtomicBool::new(true),
             }))
         })
+    }
+
+    fn try_reserve_replacing<'a>(
+        &self,
+        weight: usize,
+        replaced: impl IntoIterator<Item = &'a CachePermit>,
+    ) -> Option<CachePermit> {
+        let replaced = replaced.into_iter().collect::<Vec<_>>();
+        let releasable = replaced
+            .iter()
+            .filter(|permit| Arc::strong_count(&permit.0) == 1)
+            .map(|permit| permit.weight())
+            .sum::<usize>();
+        self.0
+            .used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_sub(releasable)?
+                    .checked_add(weight)
+                    .filter(|total| *total <= self.0.limit)
+            })
+            .ok()?;
+        for permit in &replaced {
+            if Arc::strong_count(&permit.0) == 1 {
+                permit.0.active.store(false, Ordering::Release);
+            }
+        }
+        Some(CachePermit(Arc::new(CacheReservation {
+            budget: Arc::clone(&self.0),
+            weight,
+            active: AtomicBool::new(true),
+        })))
     }
 }
 
@@ -194,11 +226,14 @@ impl CachePermit {
 struct CacheReservation {
     budget: Arc<CacheBudgetInner>,
     weight: usize,
+    active: AtomicBool,
 }
 
 impl Drop for CacheReservation {
     fn drop(&mut self) {
-        self.budget.used.fetch_sub(self.weight, Ordering::AcqRel);
+        if self.active.load(Ordering::Acquire) {
+            self.budget.used.fetch_sub(self.weight, Ordering::AcqRel);
+        }
     }
 }
 
@@ -245,25 +280,61 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
         if self.capacity == 0 || weight > self.budget.0.limit {
             return false;
         }
-        if let Some(position) = self
+        let duplicate = self
             .entries
             .iter()
-            .position(|((candidate, _), _)| candidate == &key)
+            .position(|((candidate, _), _)| candidate == &key);
+        let mut remove = vec![false; self.entries.len()];
+        if let Some(position) = duplicate {
+            remove[position] = true;
+        }
+        while self.entries.len() - remove.iter().filter(|selected| **selected).count() + 1
+            > self.capacity
         {
-            self.entries.remove(position);
-        }
-        let reservation = loop {
-            if let Some(reservation) = self.budget.try_reserve(weight) {
-                break reservation;
-            }
-            if self.entries.pop_front().is_none() {
+            let Some(position) = remove.iter().position(|selected| !selected) else {
                 return false;
-            }
-        };
-        self.entries.push_back(((key, value), reservation));
-        while self.entries.len() > self.capacity {
-            self.entries.pop_front();
+            };
+            remove[position] = true;
         }
+        loop {
+            let releasable = self
+                .entries
+                .iter()
+                .zip(&remove)
+                .filter(|((_, permit), selected)| **selected && Arc::strong_count(&permit.0) == 1)
+                .map(|((_, permit), _)| permit.weight())
+                .sum::<usize>();
+            if self
+                .budget
+                .used()
+                .checked_sub(releasable)
+                .and_then(|used| used.checked_add(weight))
+                .is_some_and(|used| used <= self.budget.0.limit)
+            {
+                break;
+            }
+            let Some(position) = remove.iter().position(|selected| !selected) else {
+                return false;
+            };
+            remove[position] = true;
+        }
+        let Some(reservation) = self.budget.try_reserve_replacing(
+            weight,
+            self.entries
+                .iter()
+                .zip(&remove)
+                .filter(|(_, selected)| **selected)
+                .map(|((_, permit), _)| permit),
+        ) else {
+            return false;
+        };
+        let mut position = 0;
+        self.entries.retain(|_| {
+            let retain = !remove[position];
+            position += 1;
+            retain
+        });
+        self.entries.push_back(((key, value), reservation));
         true
     }
 
@@ -384,6 +455,23 @@ mod tests {
             vec![(1, "first"), (2, "second")]
         );
         assert_eq!(cache.retained_weight(), 6);
+    }
+
+    #[test]
+    fn failed_in_range_replacement_preserves_existing_entries() {
+        let mut cache = BoundedCache::with_weight_limit(4, 6);
+        assert!(cache.insert_weighted(1, "first", 4));
+        assert!(cache.insert_weighted(2, "second", 2));
+        let clone = cache.clone();
+
+        assert!(!cache.insert_weighted(2, "replacement", 4));
+
+        assert_eq!(
+            cache.iter().copied().collect::<Vec<_>>(),
+            vec![(1, "first"), (2, "second")]
+        );
+        assert_eq!(cache.retained_weight(), 6);
+        drop(clone);
     }
 
     #[test]
