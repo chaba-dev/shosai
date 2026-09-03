@@ -23,7 +23,8 @@ use shosai_core::library::{
 };
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{
-    BoundedCache, ReaderLocation, ReadingMode, nearby_chapters, prioritized_pages,
+    BoundedCache, ReaderLocation, ReaderPreferences, ReaderSession, ReadingMode, nearby_chapters,
+    prioritized_pages,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
@@ -585,13 +586,9 @@ impl EpubLayoutKey {
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
-    book_id: Option<i64>,
+    session: ReaderSession,
     display_title: String,
-    file_path: PathBuf,
-    document: OpenDocument,
-    current_page: usize,
     total_pages: usize,
-    zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
     rendered_page_index: Option<usize>,
     rendered_page_handle: Option<RasterImageHandle>,
@@ -607,7 +604,6 @@ struct ReaderTab {
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_page: usize,
-    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -615,10 +611,7 @@ struct ReaderTab {
     render_generation: u64,
     page_input: String,
     error: Option<AppError>,
-    font_size: f32,
-    line_spacing: f32,
     theme: ReaderTheme,
-    reading_mode: ReadingMode,
     reader_overrides: ReaderOverrides,
     bookmarks: Vec<Bookmark>,
     show_bookmarks_panel: bool,
@@ -1155,18 +1148,30 @@ fn library_activity_active(state: &State) -> bool {
 }
 
 fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
+    let file_path = state.file_path.clone()?;
+    let document = state.document.clone()?;
     Some(ReaderTab {
         id: state.active_tab_id?,
-        book_id: state.book_id,
+        session: ReaderSession {
+            book_id: state.book_id,
+            locator: DeviceFileLocator::from_path(&file_path),
+            document,
+            location: ReaderLocation {
+                page: state.current_page,
+                offset: current_epub_offset(state),
+            },
+            preferences: ReaderPreferences {
+                reading_mode: state.reading_mode,
+                epub_font_size: state.font_size,
+                epub_line_spacing: state.line_spacing,
+                pdf_zoom: state.zoom,
+            },
+        },
         display_title: state
             .display_title
             .clone()
             .or_else(|| current_book_title(state))?,
-        file_path: state.file_path.clone()?,
-        document: state.document.clone()?,
-        current_page: state.current_page,
         total_pages: state.total_pages,
-        zoom: state.zoom,
         rendered_page: state.rendered_page.clone(),
         rendered_page_index: state.rendered_page_index,
         rendered_page_handle: state.rendered_page_handle.clone(),
@@ -1182,7 +1187,6 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         epub_pages: state.epub_pages.clone(),
         epub_layout_key: state.epub_layout_key,
         epub_page: state.epub_page,
-        epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
@@ -1190,10 +1194,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         render_generation: state.render_generation,
         page_input: state.page_input.clone(),
         error: state.error.clone(),
-        font_size: state.font_size,
-        line_spacing: state.line_spacing,
         theme: state.theme,
-        reading_mode: state.reading_mode,
         reader_overrides: state.reader_overrides,
         bookmarks: state.bookmarks.clone(),
         show_bookmarks_panel: state.show_bookmarks_panel,
@@ -1212,13 +1213,13 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
 
 fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.active_tab_id = Some(tab.id);
-    state.book_id = tab.book_id;
+    state.book_id = tab.session.book_id;
     state.display_title = Some(tab.display_title);
-    state.file_path = Some(tab.file_path);
-    state.document = Some(tab.document);
-    state.current_page = tab.current_page;
+    state.file_path = Some(tab.session.locator.path().to_path_buf());
+    state.document = Some(tab.session.document);
+    state.current_page = tab.session.location.page;
     state.total_pages = tab.total_pages;
-    state.zoom = tab.zoom;
+    state.zoom = tab.session.preferences.pdf_zoom;
     state.rendered_page = tab.rendered_page;
     state.rendered_page_index = tab.rendered_page_index;
     state.rendered_page_handle = tab.rendered_page_handle;
@@ -1234,17 +1235,17 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.epub_pages = tab.epub_pages;
     state.epub_layout_key = tab.epub_layout_key;
     state.epub_page = tab.epub_page;
-    state.epub_offset = tab.epub_offset;
+    state.epub_offset = tab.session.location.offset.unwrap_or_default();
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
     state.continuous_tail_extent = tab.continuous_tail_extent;
     state.page_input = tab.page_input;
     state.error = tab.error;
-    state.font_size = tab.font_size;
-    state.line_spacing = tab.line_spacing;
+    state.font_size = tab.session.preferences.epub_font_size;
+    state.line_spacing = tab.session.preferences.epub_line_spacing;
     state.theme = tab.theme;
-    state.reading_mode = tab.reading_mode;
+    state.reading_mode = tab.session.preferences.reading_mode;
     state.reader_overrides = tab.reader_overrides;
     state.bookmarks = tab.bookmarks;
     state.show_bookmarks_panel = tab.show_bookmarks_panel;
@@ -1281,8 +1282,8 @@ fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) 
             }
         }
         for tab in &mut state.tabs {
-            if tab.book_id == Some(change.book_id) {
-                tab.file_path = change.new_path.clone();
+            if tab.session.book_id == Some(change.book_id) {
+                tab.session.locator = DeviceFileLocator::from_path(&change.new_path);
                 for bookmark in &mut tab.bookmarks {
                     bookmark.file_path = change.new_path.to_string_lossy().into_owned();
                 }
@@ -1394,18 +1395,16 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
 }
 
 fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
-    if let Some(index) = state
-        .tabs
-        .iter()
-        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
-        && state.tabs[index].file_path == path
+    if let Some(index) = state.tabs.iter().position(|tab| {
+        book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
+    }) && state.tabs[index].session.locator.path() == path
     {
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
         state.document_open_notice_visible = false;
         state.document_open_preview = None;
         if let Some(book_id) = book_id {
-            state.tabs[index].book_id = Some(book_id);
+            state.tabs[index].session.book_id = Some(book_id);
             if let Some(title) = state
                 .library_books
                 .iter()
@@ -1475,11 +1474,9 @@ fn finish_open_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) -> Task<Message> {
-    if let Some(index) = state
-        .tabs
-        .iter()
-        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
-    {
+    if let Some(index) = state.tabs.iter().position(|tab| {
+        book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
+    }) {
         let retained_display_title = state.tabs[index].display_title.clone();
         let display_title = relocated_book_title(
             book_id,
@@ -1489,19 +1486,27 @@ fn finish_open_document(
             &retained_display_title,
         );
         save_active_tab(state);
+        state.tabs[index].session.book_id = book_id;
+        state.tabs[index]
+            .session
+            .replace_document(DeviceFileLocator::from_path(&path), document.clone());
         let relocated_tab = state.tabs[index].clone();
         restore_reader_tab(state, relocated_tab);
-        let retained_zoom = state.zoom;
-        let retained_page = state.current_page;
-        let retained_epub_offset = state.epub_offset;
+        let retained_preferences = state.tabs[index].session.preferences;
+        let retained_location = state.tabs[index].session.location;
         state.active_tab = Some(index);
         state.continuous_activation = state.continuous_activation.wrapping_add(1);
         state.open_error = None;
         state.missing_book_id = None;
         install_document(state, path, book_id, document);
-        state.zoom = retained_zoom;
-        state.current_page = retained_page.min(state.total_pages.saturating_sub(1));
-        state.epub_offset = retained_epub_offset;
+        state.zoom = retained_preferences.pdf_zoom;
+        state.font_size = retained_preferences.epub_font_size;
+        state.line_spacing = retained_preferences.epub_line_spacing;
+        state.reading_mode = retained_preferences.reading_mode;
+        state.current_page = retained_location
+            .page
+            .min(state.total_pages.saturating_sub(1));
+        state.epub_offset = retained_location.offset.unwrap_or_default();
         state.page_input = format!("{}", state.current_page + 1);
         state.display_title = display_title;
         let task = refresh_content(state);
@@ -1581,8 +1586,10 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
     }
 
     for tab in &mut state.tabs {
-        if !tab.reader_overrides.reading_mode && tab.reading_mode != defaults.reading_mode {
-            tab.reading_mode = defaults.reading_mode;
+        if !tab.reader_overrides.reading_mode
+            && tab.session.preferences.reading_mode != defaults.reading_mode
+        {
+            tab.session.preferences.reading_mode = defaults.reading_mode;
             tab.continuous_pages.clear();
             tab.continuous_pending.clear();
             tab.continuous_visible.clear();
@@ -1591,17 +1598,17 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
         if !tab.reader_overrides.theme {
             tab.theme = defaults.theme;
         }
-        if matches!(tab.document, OpenDocument::Epub(_)) {
+        if matches!(tab.session.document, OpenDocument::Epub(_)) {
             if !tab.reader_overrides.epub_font_size {
-                tab.font_size = defaults.epub_font_size;
+                tab.session.preferences.epub_font_size = defaults.epub_font_size;
             }
-            tab.line_spacing = defaults.epub_line_spacing;
+            tab.session.preferences.epub_line_spacing = defaults.epub_line_spacing;
         }
-        if matches!(tab.document, OpenDocument::Pdf(_))
+        if matches!(tab.session.document, OpenDocument::Pdf(_))
             && !tab.reader_overrides.pdf_zoom
-            && tab.zoom != defaults.pdf_zoom
+            && tab.session.preferences.pdf_zoom != defaults.pdf_zoom
         {
-            tab.zoom = defaults.pdf_zoom;
+            tab.session.preferences.pdf_zoom = defaults.pdf_zoom;
             tab.rendered_page = None;
             tab.rendered_page_index = None;
             tab.rendered_page_handle = None;
@@ -2064,20 +2071,20 @@ fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
         tab.show_reader_settings,
         tab.show_reader_more,
     );
-    let uses_spread = tab.reading_mode == ReadingMode::Paginated
-        && matches!(tab.document, OpenDocument::Epub(_))
+    let uses_spread = tab.session.preferences.reading_mode == ReadingMode::Paginated
+        && matches!(tab.session.document, OpenDocument::Epub(_))
         && available_size.width >= MIN_TWO_PAGE_WIDTH;
     let page_size = crate::epub::page_size(
         crate::epub::LayoutSize::new(available_size.width, available_size.height),
         uses_spread,
         PAGE_GUTTER,
-        tab.font_size,
-        tab.line_spacing,
+        tab.session.preferences.epub_font_size,
+        tab.session.preferences.epub_line_spacing,
     );
     EpubLayoutKey::new(
         Size::new(page_size.width, page_size.height),
-        tab.font_size,
-        tab.line_spacing,
+        tab.session.preferences.epub_font_size,
+        tab.session.preferences.epub_line_spacing,
     )
 }
 
@@ -2392,7 +2399,7 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
     state.window_scale_factor = scale_factor;
 
     for tab in &mut state.tabs {
-        if matches!(tab.document, OpenDocument::Pdf(_)) {
+        if matches!(tab.session.document, OpenDocument::Pdf(_)) {
             tab.rendered_page = None;
             tab.rendered_page_index = None;
             tab.rendered_page_handle = None;
@@ -3388,11 +3395,9 @@ fn reader_control_button(
 }
 
 fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
-    let is_pdf_or_cbz = matches!(
-        state.document,
-        Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
-    );
-    let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+    let capabilities = state.document.as_ref().map(OpenDocument::capabilities);
+    let is_pdf_or_cbz = capabilities.is_some_and(|capabilities| !capabilities.reflowable);
+    let is_epub = capabilities.is_some_and(|capabilities| capabilities.reflowable);
     let mut reading = row![].spacing(5).align_y(iced::Alignment::Center);
     let mode_label = match state.reading_mode {
         ReadingMode::Paginated => state.i18n.text("paginated"),
@@ -3494,6 +3499,7 @@ fn theme_label(state: &State) -> String {
 }
 
 fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
+    let capabilities = state.document.as_ref().map(OpenDocument::capabilities);
     let total = if uses_paginated_epub_layout(state) {
         state.epub_pages.len()
     } else {
@@ -3531,7 +3537,7 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
-    if state.document.is_some() && !matches!(state.document, Some(OpenDocument::Cbz(_))) {
+    if capabilities.is_some_and(|capabilities| capabilities.searchable) {
         actions = actions.push(reader_control_button(
             state.i18n.text("search"),
             Some(Message::ToggleSearchBar),
@@ -8388,8 +8394,8 @@ mod tests {
         let matching = capture_reader_tab(&state).unwrap();
         let mut unrelated = matching.clone();
         unrelated.id = 2;
-        unrelated.book_id = Some(7);
-        unrelated.file_path = PathBuf::from("other.epub");
+        unrelated.session.book_id = Some(7);
+        unrelated.session.locator = DeviceFileLocator::from_path("other.epub");
         state.tabs = vec![matching, unrelated];
         state.removing_book = Some(42);
 
@@ -8402,8 +8408,8 @@ mod tests {
         );
 
         assert_eq!(state.book_id, None);
-        assert_eq!(state.tabs[0].book_id, None);
-        assert_eq!(state.tabs[1].book_id, Some(7));
+        assert_eq!(state.tabs[0].session.book_id, None);
+        assert_eq!(state.tabs[1].session.book_id, Some(7));
         assert_eq!(state.removing_book, None);
         assert_eq!(
             state
@@ -8923,7 +8929,7 @@ mod tests {
         assert_eq!(state.active_tab, Some(0));
         assert_eq!(state.book_id, Some(42));
         assert_eq!(state.file_path.as_ref(), Some(&replacement));
-        assert_eq!(state.tabs[0].file_path, replacement);
+        assert_eq!(state.tabs[0].session.locator.path(), replacement);
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
         };
@@ -8997,7 +9003,10 @@ mod tests {
 
         assert_eq!(state.zoom, ZoomMode::FitWidth);
         assert!(state.reader_overrides.pdf_zoom);
-        assert_eq!(state.tabs[0].zoom, ZoomMode::FitWidth);
+        assert_eq!(
+            state.tabs[0].session.preferences.pdf_zoom,
+            ZoomMode::FitWidth
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use crate::application::{DeviceFileLocator, OpenDocument};
+use crate::application::{DeviceFileLocator, FormatCapabilities, OpenDocument};
 use crate::reading_state::FileReadingState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -70,6 +70,16 @@ impl ReaderLocation {
             ..self
         }
     }
+
+    pub fn clamped_for(self, document: &OpenDocument) -> Self {
+        let page = self.page.min(document.page_count().saturating_sub(1));
+        Self {
+            page,
+            offset: document
+                .max_location_offset(page)
+                .map(|maximum| self.offset.unwrap_or_default().min(maximum)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -109,7 +119,8 @@ impl ReaderSession {
         saved: Option<&FileReadingState>,
         preferences: ReaderPreferences,
     ) -> Self {
-        let location = ReaderLocation::restored(saved, document.page_count());
+        let location =
+            ReaderLocation::restored(saved, document.page_count()).clamped_for(&document);
         Self {
             book_id,
             locator,
@@ -120,9 +131,13 @@ impl ReaderSession {
     }
 
     pub fn replace_document(&mut self, locator: DeviceFileLocator, document: OpenDocument) {
-        self.location = self.location.clamped(document.page_count());
+        self.location = self.location.clamped_for(&document);
         self.locator = locator;
         self.document = document;
+    }
+
+    pub fn capabilities(&self) -> FormatCapabilities {
+        self.document.capabilities()
     }
 }
 
@@ -198,13 +213,12 @@ pub fn prioritized_pages(
 }
 
 /// Chapters whose resources should remain warm around the current location.
-pub fn nearby_chapters(
-    current: usize,
-    total: usize,
-    radius: usize,
-) -> std::ops::RangeInclusive<usize> {
-    let last = total.saturating_sub(1);
-    current.saturating_sub(radius).min(last)..=current.saturating_add(radius).min(last)
+pub fn nearby_chapters(current: usize, total: usize, radius: usize) -> std::ops::Range<usize> {
+    if total == 0 {
+        return 0..0;
+    }
+    let current = current.min(total - 1);
+    current.saturating_sub(radius)..current.saturating_add(radius).saturating_add(1).min(total)
 }
 
 #[cfg(test)]
@@ -245,6 +259,38 @@ mod tests {
     #[test]
     fn prefetch_prioritizes_current_then_nearest_visible_pages() {
         assert_eq!(prioritized_pages([9, 3, 7, 3], 6, 10, 3), vec![6, 7, 3]);
-        assert_eq!(nearby_chapters(0, 3, 1), 0..=1);
+        assert_eq!(nearby_chapters(0, 3, 1), 0..2);
+        assert_eq!(nearby_chapters(0, 0, 1), 0..0);
+    }
+
+    #[test]
+    fn session_clamps_epub_offsets_and_clears_them_for_fixed_pages() {
+        let epub = crate::epub::EpubDoc::from_bytes(
+            include_bytes!("../tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let saved = FileReadingState {
+            page: 0,
+            location_offset: Some(usize::MAX),
+            zoom: 1.0,
+        };
+        let mut session = ReaderSession::new(
+            None,
+            DeviceFileLocator::from_path("book.epub"),
+            OpenDocument::Epub(std::sync::Arc::new(epub)),
+            Some(&saved),
+            ReaderPreferences::default(),
+        );
+        assert_ne!(session.location.offset, Some(usize::MAX));
+
+        let cbz =
+            crate::cbz::CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec())
+                .unwrap();
+        session.replace_document(
+            DeviceFileLocator::from_path("book.cbz"),
+            OpenDocument::Cbz(std::sync::Arc::new(cbz)),
+        );
+
+        assert_eq!(session.location.offset, None);
     }
 }

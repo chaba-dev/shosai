@@ -8,6 +8,7 @@ use thiserror::Error;
 use crate::cbz::CbzDoc;
 use crate::document::Document;
 use crate::epub::EpubDoc;
+use crate::epub::pagination::content_node_text_len;
 use crate::library::BookFormat;
 use crate::pdf::PdfDoc;
 
@@ -164,6 +165,17 @@ impl OpenDocument {
             Self::Epub(document) => document.metadata().title,
             Self::Cbz(document) => document.metadata().title,
         }
+    }
+
+    pub fn max_location_offset(&self, page: usize) -> Option<usize> {
+        let Self::Epub(document) = self else {
+            return None;
+        };
+        document.presentation().chapter(page).map(|chapter| {
+            chapter.nodes().iter().fold(0usize, |offset, node| {
+                offset.saturating_add(content_node_text_len(node).saturating_add(1))
+            })
+        })
     }
 }
 

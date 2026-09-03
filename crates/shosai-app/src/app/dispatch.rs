@@ -1106,23 +1106,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                     for tab in &mut state.tabs {
-                        if tab.book_id == Some(id) {
-                            if detached_paths.insert(tab.file_path.clone()) {
+                        if tab.session.book_id == Some(id) {
+                            let path = tab.session.locator.path().to_path_buf();
+                            if detached_paths.insert(path.clone()) {
                                 detached_saves.push(ReadingStateSave {
                                     book_id: None,
-                                    path: tab.file_path.clone(),
+                                    path,
                                     reading: FileReadingState {
-                                        page: tab.current_page,
-                                        location_offset: matches!(
-                                            &tab.document,
-                                            OpenDocument::Epub(_)
-                                        )
-                                        .then_some(tab.epub_offset),
-                                        zoom: tab.zoom.scale(),
+                                        page: tab.session.location.page,
+                                        location_offset: tab.session.location.offset,
+                                        zoom: tab.session.preferences.pdf_zoom.scale(),
                                     },
                                 });
                             }
-                            tab.book_id = None;
+                            tab.session.book_id = None;
                             for bookmark in &mut tab.bookmarks {
                                 bookmark.book_id = None;
                             }
@@ -1837,9 +1834,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         tab.epub_page = 0;
                         tab.error = Some(AppError::EpubEmpty);
                     } else {
-                        tab.epub_page =
-                            epub_page_for_pages(&tab.epub_pages, tab.current_page, tab.epub_offset)
-                                .min(tab.epub_pages.len() - 1);
+                        tab.epub_page = epub_page_for_pages(
+                            &tab.epub_pages,
+                            tab.session.location.page,
+                            tab.session.location.offset.unwrap_or_default(),
+                        )
+                        .min(tab.epub_pages.len() - 1);
                         tab.page_input = (tab.epub_page + 1).to_string();
                         tab.error = None;
                     }
