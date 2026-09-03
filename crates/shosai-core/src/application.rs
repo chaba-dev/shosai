@@ -101,7 +101,7 @@ impl OpenDocument {
             .map(|extension| extension.to_string_lossy().to_lowercase())
             .unwrap_or_default();
         let format = BookFormat::from_extension(&extension)
-            .ok_or_else(|| OpenDocumentError::UnsupportedFormat(extension))?;
+            .ok_or(OpenDocumentError::UnsupportedFormat(extension))?;
 
         match format {
             BookFormat::Pdf => PdfDoc::open(locator.path())
