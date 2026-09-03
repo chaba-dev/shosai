@@ -350,6 +350,34 @@ struct FileFingerprint {
 struct FingerprintedFile {
     fingerprint: FileFingerprint,
     handle: same_file::Handle,
+    version: FileVersion,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileVersion {
+    device: u64,
+    inode: u64,
+    len: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileVersion {
+    volume_serial_number: Option<u32>,
+    file_index: Option<u64>,
+    len: u64,
+    creation_time: u64,
+    last_write_time: u64,
+}
+
+#[cfg(not(any(unix, windows)))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileVersion {
     len: u64,
     modified: Option<std::time::SystemTime>,
 }
@@ -611,18 +639,6 @@ impl Library {
         let path = canonical_path(path);
         let path_str = canonical_path_key(&path);
 
-        if expected_hash.is_none()
-            && let Some(book) = self.get_by_path(&path_str).await?
-        {
-            let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-            reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
-            transaction.commit().await?;
-            return self
-                .get(book.id)
-                .await?
-                .context("book not found after identity repair");
-        }
-
         let ext = path
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
@@ -662,6 +678,12 @@ impl Library {
         }
         // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
+            if book.content_hash.as_deref() != Some(&source_file.fingerprint.hash) {
+                bail!(
+                    "file contents no longer match the existing library book: {}",
+                    path.display()
+                );
+            }
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             verify_fingerprinted_path(&path, &source_file, "import")?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
@@ -1917,8 +1939,8 @@ fn fingerprint_file_with_limit(
     if cancellation.is_some_and(ImportCancellation::is_cancelled) {
         bail!("discovery cancelled");
     }
-    let mut file =
-        std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let mut file = open_fingerprint_file(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     // Derive both the bound and expected byte count from the opened descriptor, not a path that
     // can be replaced between metadata and open.
     let before = file.metadata()?;
@@ -1934,29 +1956,86 @@ fn fingerprint_file_with_limit(
         cancellation,
     )?;
     let after = file.metadata()?;
-    if after.len() != file_size || after.modified().ok() != before.modified().ok() {
+    let before_version = file_version(&before);
+    let after_version = file_version(&after);
+    if after_version != before_version {
         bail!("file changed while fingerprinting: {}", path.display());
     }
     Ok(FingerprintedFile {
         fingerprint,
         handle: same_file::Handle::from_file(file)?,
-        len: after.len(),
-        modified: after.modified().ok(),
+        version: after_version,
     })
 }
 
 fn verify_fingerprinted_path(path: &Path, file: &FingerprintedFile, operation: &str) -> Result<()> {
-    let metadata = std::fs::metadata(path)
+    let current = open_fingerprint_file(path)
         .with_context(|| format!("failed to verify {} during {operation}", path.display()))?;
-    let handle = same_file::Handle::from_path(path)
+    let version = file_version(
+        &current
+            .metadata()
+            .with_context(|| format!("failed to inspect {} during {operation}", path.display()))?,
+    );
+    let handle = same_file::Handle::from_file(current)
         .with_context(|| format!("failed to verify {} during {operation}", path.display()))?;
-    if handle != file.handle
-        || metadata.len() != file.len
-        || metadata.modified().ok() != file.modified
-    {
+    if handle != file.handle || version != file.version {
         bail!("file changed during {operation}: {}", path.display());
     }
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn open_fingerprint_file(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+#[cfg(windows)]
+fn open_fingerprint_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    std::fs::OpenOptions::new()
+        .read(true)
+        // Retain a handle which prevents replacement or mutation between the
+        // expensive hash and the database transaction.
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+}
+
+#[cfg(unix)]
+fn file_version(metadata: &std::fs::Metadata) -> FileVersion {
+    use std::os::unix::fs::MetadataExt;
+
+    FileVersion {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        len: metadata.len(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    }
+}
+
+#[cfg(windows)]
+fn file_version(metadata: &std::fs::Metadata) -> FileVersion {
+    use std::os::windows::fs::MetadataExt;
+
+    FileVersion {
+        volume_serial_number: metadata.volume_serial_number(),
+        file_index: metadata.file_index(),
+        len: metadata.file_size(),
+        creation_time: metadata.creation_time(),
+        last_write_time: metadata.last_write_time(),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_version(metadata: &std::fs::Metadata) -> FileVersion {
+    FileVersion {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    }
 }
 
 fn fingerprint_reader(
@@ -2649,6 +2728,27 @@ mod tests {
 
         let error = verify_fingerprinted_path(&path, &file, "test").unwrap_err();
 
+        assert!(error.to_string().contains("changed during test"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fingerprinted_file_detects_same_size_overwrite_with_restored_mtime() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, b"original").unwrap();
+        let original_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let file = fingerprint_file_with_limit(&path, Some(1024), None).unwrap();
+
+        std::fs::write(&path, b"replaced").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(original_mtime))
+            .unwrap();
+
+        let error = verify_fingerprinted_path(&path, &file, "test").unwrap_err();
         assert!(error.to_string().contains("changed during test"));
     }
 

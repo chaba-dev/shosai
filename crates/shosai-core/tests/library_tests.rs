@@ -56,6 +56,48 @@ async fn test_import_duplicate_returns_existing() {
     assert_eq!(book1.id, book2.id);
 }
 
+#[tokio::test]
+async fn direct_import_rejects_replaced_existing_path() {
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    lib.import_file(&path).await.unwrap();
+    let mut replacement = std::fs::read(&path).unwrap();
+    let comment_length = replacement.len() - 2;
+    replacement[comment_length..].copy_from_slice(&1_u16.to_le_bytes());
+    replacement.push(b'x');
+    std::fs::write(&path, replacement).unwrap();
+
+    let error = lib.import_file(&path).await.unwrap_err();
+    assert!(
+        error.to_string().contains("no longer match"),
+        "unexpected error: {error:#}"
+    );
+}
+
+#[tokio::test]
+async fn reviewed_import_rejects_replaced_existing_path() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    lib.import_file(&path).await.unwrap();
+    let candidate = lib.discover_files(std::slice::from_ref(&path)).await;
+    assert_eq!(candidate.candidates.len(), 1);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"replacement")
+        .unwrap();
+
+    let report = lib.link_discovered_files(&candidate.candidates).await;
+    assert!(report.books.is_empty());
+    assert_eq!(report.failures.len(), 1);
+    assert!(report.failures[0].error.contains("changed after review"));
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
