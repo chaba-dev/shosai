@@ -1758,22 +1758,32 @@ fn install_document(
     state.search_text = None;
     state.search_loading = false;
 
-    state.total_pages = document.page_count();
-    state.document = Some(document);
-
     let saved = state.reading_state.as_ref().and_then(|store| {
         book_id
             .and_then(|id| store.get_for_book(id))
             .or_else(|| store.get(&path))
     });
-    let location = ReaderLocation::restored(saved.as_ref(), state.total_pages);
-    state.current_page = location.page;
-    state.epub_offset = location.offset.unwrap_or(0);
-    state.zoom = ZoomMode::FitPage;
+    let session = ReaderSession::new(
+        book_id,
+        DeviceFileLocator::from_path(&path),
+        document,
+        saved.as_ref(),
+        ReaderPreferences {
+            pdf_zoom: ZoomMode::FitPage,
+            reading_mode: state.reading_mode,
+            epub_font_size: state.font_size,
+            epub_line_spacing: state.line_spacing,
+        },
+    );
+    state.total_pages = session.document.page_count();
+    state.current_page = session.location.page;
+    state.epub_offset = session.location.offset.unwrap_or_default();
+    state.zoom = session.preferences.pdf_zoom;
+    state.book_id = session.book_id;
+    state.file_path = Some(session.locator.path().to_path_buf());
+    state.document = Some(session.document);
 
     state.page_input = format!("{}", state.current_page + 1);
-    state.book_id = book_id;
-    state.file_path = Some(path);
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
         state.bookmarks = book_id
             .map(|id| store.list_for_book(id))
@@ -7115,6 +7125,45 @@ mod tests {
 
         assert_eq!(state.current_page, 1);
         assert_eq!(state.zoom, ZoomMode::FitPage);
+    }
+
+    #[test]
+    fn saved_epub_offset_is_clamped_when_the_document_is_installed() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = runtime
+            .block_on(ReadingStateStore::open_at_async(
+                &directory.path().join("state.db"),
+            ))
+            .unwrap();
+        let path = directory.path().join("book.epub");
+        runtime
+            .block_on(store.set_async(
+                &path,
+                &FileReadingState {
+                    page: 0,
+                    location_offset: Some(usize::MAX),
+                    zoom: 1.0,
+                },
+            ))
+            .unwrap();
+        let document = OpenDocument::Epub(Arc::new(
+            EpubDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+            )
+            .expect("fixture should be a valid EPUB"),
+        ));
+        let expected = document.max_location_offset(0).unwrap();
+        let (mut state, _) = boot();
+        state.reading_state = Some(store);
+
+        let _runtime = runtime.enter();
+        install_document(&mut state, path, None, document);
+
+        assert_eq!(state.epub_offset, expected);
     }
 
     fn test_book(id: i64) -> Book {
