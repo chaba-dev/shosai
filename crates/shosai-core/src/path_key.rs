@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn path_key(path: &Path) -> String {
+pub fn path_key(path: &Path) -> String {
     if let Some(path) = path.to_str() {
         return path.to_owned();
     }

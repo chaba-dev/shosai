@@ -23,7 +23,7 @@ static NEXT_REGISTRY_ID: AtomicU64 = AtomicU64::new(1);
 pub struct OpenRequest {
     pub book_id: Option<i64>,
     pub local_id: String,
-    pub path: String,
+    pub path_key: String,
     pub format_hint: Option<BookFormat>,
 }
 
@@ -226,7 +226,10 @@ impl Bridge {
         cancellation: Cancellation,
     ) -> Result<DocumentSummary, BridgeError> {
         check_cancelled(&cancellation)?;
-        let mut locator = DeviceFileLocator::new(request.local_id, request.path);
+        let mut locator = DeviceFileLocator::new(
+            request.local_id,
+            crate::path_key::path_from_key(&request.path_key),
+        );
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
@@ -513,7 +516,10 @@ mod tests {
         OpenRequest {
             book_id: Some(7),
             local_id: "fixture".to_owned(),
-            path: concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.cbz").to_owned(),
+            path_key: crate::path_key::path_key(std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.cbz"
+            ))),
             format_hint: Some(BookFormat::Cbz),
         }
     }
@@ -578,7 +584,7 @@ mod tests {
     async fn missing_documents_have_a_stable_not_found_category() {
         let bridge = Bridge::new();
         let mut request = cbz_request();
-        request.path = "/definitely/missing/shosai-book.cbz".to_owned();
+        request.path_key = "/definitely/missing/shosai-book.cbz".to_owned();
 
         let error = bridge
             .open_document(request, Cancellation::new())
@@ -587,6 +593,34 @@ mod tests {
 
         assert_eq!(error, BridgeError::DocumentNotFound);
         assert_eq!(error.kind(), BridgeErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_requests_decode_lossless_native_path_keys() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(OsStr::from_bytes(b"book-\x80.cbz"));
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.cbz"),
+            &path,
+        )
+        .unwrap();
+        let request = OpenRequest {
+            book_id: None,
+            local_id: "native-path".to_owned(),
+            path_key: crate::path_key::path_key(&path),
+            format_hint: Some(BookFormat::Cbz),
+        };
+
+        let summary = Bridge::new()
+            .open_document(request, Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(summary.format, BookFormat::Cbz);
     }
 
     #[test]

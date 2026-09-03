@@ -21,6 +21,7 @@ use shosai_core::library::{
     ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, Library,
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
+use shosai_core::path_from_key;
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{
     BoundedCache, CacheBudget, CachePermit, ReaderLocation, ReaderPreferences, ReaderSession,
@@ -1074,8 +1075,7 @@ pub fn boot() -> (State, Task<Message>) {
             );
             let managed_books_dir = preferences
                 .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
-                .cloned()
-                .map(PathBuf::from)
+                .map(|path| path_from_key(path))
                 .unwrap_or_else(|| store.managed_books_dir());
             if managed_books_dir != store.managed_books_dir() {
                 shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)

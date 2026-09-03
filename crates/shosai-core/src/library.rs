@@ -408,7 +408,7 @@ impl Library {
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             )
             .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
-            .bind(new_dir.to_string_lossy().as_ref())
+            .bind(canonical_path_key(&new_dir))
             .execute(&mut *transaction)
             .await
             .context("failed to save managed library location")?;
@@ -931,8 +931,8 @@ impl Library {
                     continue;
                 }
             };
-            let path_str = candidate.path.to_string_lossy();
-            let existing = match self.get_by_path(path_str.as_ref()).await {
+            let path_key = canonical_path_key(&candidate.path);
+            let existing = match self.get_by_path(&path_key).await {
                 Ok(Some(book)) => Ok(Some(book)),
                 Ok(None) => self.get_by_hash(&fingerprint.hash).await,
                 Err(error) => Err(error),
