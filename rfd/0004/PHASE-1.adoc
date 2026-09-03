@@ -1,0 +1,126 @@
+= RFD 4 Phase 1 extraction evidence
+
+Phase 1 preserves the Iced application as an executable reference while moving
+application policy and renderer-neutral state behind ~shosai-core~ APIs.  The
+old frontend may hold transient mirrors needed to paint a frame, but it no
+longer owns the extracted policies.
+
+== Extracted boundaries
+
+[cols="2,3,3"]
+|===
+|Checklist area |Core source of truth |Frontend boundary
+
+|EPUB pagination and geometry
+|~epub::pagination~ owns document/chapter pagination, page budgets, block and
+table geometry, MathML primitive geometry, ~Page~, ~PageNode~, and ~LayoutSize~.
+Its tests cover fragmentation, shaping bounds, authored spacing, tables,
+figures, bidi/native fonts, and document-wide budgets.
+|~shosai-app::epub~ is an Iced adapter/re-export.  ~epub_view~ and the EPUB
+widget modules create Iced paragraphs, widgets, and paint commands only.  No
+~iced::Size~ or widget type exists in core.
+
+|Reader sessions
+|~reader::{ReaderSession,ReaderLocation,ReaderPreferences,ReadingMode,ZoomMode}~
+owns document admission into a logical session, saved-location restoration and
+clamping, default preferences, relayout offsets, and document replacement while
+preserving/clamping the logical anchor.  Closing releases the owned session;
+bridge document handles provide the explicit foreign-frontend release path.
+|Tabs, active-index selection, panel visibility, measured scroll offsets, image
+handles, and current viewport remain frontend presentation state.  The Iced
+reference consumes the core reading mode, zoom mode, and restore policy.
+
+|Caches and prefetch
+|~reader::BoundedCache~ provides deterministic fixed-entry eviction.
+~prioritized_pages~ bounds visible raster work around the logical page and
+~nearby_chapters~ bounds EPUB resource warming around the logical chapter.
+|Iced owns only renderer handles and pending-task IDs.  It applies the core
+policy, drops continuous rasters outside the shared capacity, retains EPUB
+resources only for nearby chapters, and invalidates handles on relayout or
+document replacement.
+
+|Coalesced persistence
+|~state_writer~ owns the asynchronous queue and coalesces file/book reading
+positions, library progress, and key/value preference writes before SQLite.
+|The frontend sends owned ~StateWriterMessage~ values; it does not own a writer
+loop or pass Iced commands/tasks into persistence.
+
+|Capabilities, import, and open
+|~application::{format_capabilities,OpenDocument,OpenDocumentError}~ is the one
+document admission path.  ~library~ owns recursive discovery, fingerprints,
+duplicate classification, cancellation, ~ImportDiscoveryProgressSnapshot~,
+preparation, import/link execution, and typed reports/failures.
+|Pickers, staged-review widgets, progress display, delayed-open notice, and
+generation IDs remain frontend concerns.  The Iced loader delegates format
+admission to core.
+
+|Paths and identity
+|~reading_state::ApplicationDataPaths~ accepts a host-provided app-data
+directory and derives database/managed-book locations.  ~DeviceFileLocator~
+keeps a platform-local locator separate from stable book identity and logical
+annotation anchors.
+|Desktop defaults remain a compatibility convenience.  Future Flutter hosts
+inject their support directory and resolve picker/provider capabilities locally;
+neither paths nor provider tokens become portable identity.
+
+|Bridge ownership
+|~bridge::Bridge~ exposes coarse asynchronous open/render operations, owned
+request/summary/buffer DTOs, opaque document and buffer handles, atomic
+cancellation, typed errors, panic containment, and explicit take/release.
+Buffers are capped at 160 MiB individually and 320 MiB in aggregate.
+|Generated Dart bindings and Flutter image/scene materialization belong to M2.
+No borrowed Rust value, frontend type, or durable viewport coordinate is in the
+contract.
+
+|Target failures
+|The native SQLite/PDFium core emits an intentional ~wasm32~ compile error with
+the required future adapter.  Native dependencies compile for Android arm64
+with the NDK instead of failing at runtime.
+|Host projects and packaging still gate each claimed native target in M2/M5;
+the Android core check alone is not a mobile-support claim.
+|===
+
+RFD 6's renderer-independent annotation model was already in core before this
+extraction.  Its versioned EPUB/PDF anchors, quote normalization, resolution
+states, SQLite store, and retained-geometry budgets therefore remain independent
+of both frontends.
+
+== Ownership invariants
+
+* Core has no Iced or Flutter dependency.  Public bridge DTOs own their strings,
+  locators, summaries, and byte buffers; handles are numeric opaque identities.
+* Durable locations are a page/resource plus optional logical scalar offset.
+  Viewport size, zoomed pixels, scroll position, widget IDs, and GPU handles are
+  not persisted or exposed as document identity.
+* CPU/blocking document open, pagination, decode, and raster work executes off
+  the frontend event loop.  Cancellation is checked before and after worker
+  operations; deterministic release reclaims registry ownership.
+* Cache admission is bounded before work is scheduled.  Stale generations may
+  finish but cannot replace the active document or scene.
+* File paths and provider IDs are device-local associations.  Portable book and
+  annotation identity remain independent values.
+
+== Verification protocol
+
+The Phase 1 exit gate is checked from the repository root with:
+
+----
+.agents/dev cargo fmt --all -- --check
+.agents/dev cargo clippy --workspace --all-targets -- -D warnings
+.agents/dev cargo test --workspace --no-fail-fast
+.agents/dev make test-scripts
+.agents/dev make check-rfds
+HOST_CC=clang HOST_AR=ar .agents/dev cargo ndk -t arm64-v8a check -p shosai-core
+----
+
+The workspace checks exercise the Iced reference and all core modules.  Core
+unit/integration tests directly exercise pagination, document admission,
+session restoration and replacement policy, cache/prefetch bounds, coalesced
+writes, injected data paths, import progress/cancellation, annotation behavior,
+bridge cancellation/error/release, and aggregate buffer limits without an Iced
+event loop.
+
+The extraction does not prove a generated Dart API, Flutter scene fidelity,
+native host packaging, physical-device lifecycle, or the Phase 0 performance
+and accessibility budgets.  Those are Phase 2 gates rather than hidden Phase 1
+claims.

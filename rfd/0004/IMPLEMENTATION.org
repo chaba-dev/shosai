@@ -72,25 +72,28 @@ without maintaining two production feature paths.
 
 * M1 — Extract the Rust application core
 :PROPERTIES:
-:STATUS: IN-PROGRESS
+:STATUS: DONE
 :END:
 
-- [ ] Move EPUB pagination and renderer-neutral geometry out of
+- [X] Move EPUB pagination and renderer-neutral geometry out of
   ~crates/shosai-app~, replacing ~iced::Size~ and widget types at the boundary.
-- [ ] Extract reader-session policy: open/close, restore location, preferences,
+- [X] Extract reader-session policy: open/close, restore location, preferences,
   relayout anchors, and document replacement.
-- [ ] Extract bounded rendered-page/resource caches, prefetch policy, and
+- [X] Extract bounded rendered-page/resource caches, prefetch policy, and
   coalesced reading-state persistence without exposing Iced handles or tasks.
-- [ ] Centralize format capabilities, import/open orchestration, and typed
+- [X] Centralize format capabilities, import/open orchestration, and typed
   progress while leaving file pickers and UI progress presentation outside core.
 - [X] Implement RFD 6's renderer-independent annotation domain, anchors,
   normalization, resolution states, and store before Flutter persistence work.
-- [ ] Accept injected application-data locations and device-local file locators;
+- [X] Accept injected application-data locations and device-local file locators;
   stop requiring canonical desktop paths as portable record identity.
-- [ ] Expose coarse async operations, owned DTOs, stable opaque handles, bounded
+- [X] Expose coarse async operations, owned DTOs, stable opaque handles, bounded
   byte buffers, typed errors, cancellation, and release through the bridge API.
-- [ ] Feature-gate or adapt native-only dependencies so unsupported targets fail
+- [X] Feature-gate or adapt native-only dependencies so unsupported targets fail
   at build/configuration boundaries rather than through runtime surprises.
+
+The extracted ownership map, invariants, tests, and target-check protocol are
+recorded in [[file:PHASE-1.adoc][the Phase 1 evidence record]].
 
 *Exit*: core tests exercise the application behavior without an Iced event loop;
 no bridge-facing type contains Iced, Flutter, borrowed Rust, or durable viewport
