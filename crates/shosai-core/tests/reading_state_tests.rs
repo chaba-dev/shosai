@@ -427,6 +427,31 @@ async fn legacy_fingerprints_can_be_backfilled_after_migration() {
 }
 
 #[tokio::test]
+async fn legacy_fingerprint_backfill_processes_multiple_bounded_pages() {
+    let (store, dir) = temp_store().await;
+    for index in 0..105 {
+        let path = dir.path().join(format!("legacy-{index}.epub"));
+        std::fs::write(&path, format!("legacy-{index}")).unwrap();
+        sqlx::query(
+            "INSERT INTO books (title, format, file_path, content_hash)
+             VALUES ('Legacy', 'epub', ?, NULL)",
+        )
+        .bind(path.to_string_lossy().as_ref())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    }
+
+    store.backfill_missing_fingerprints().await.unwrap();
+
+    let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE content_hash IS NULL")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(pending, 0);
+}
+
+#[tokio::test]
 async fn stable_save_replaces_a_path_only_alias() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/relinked.epub");
