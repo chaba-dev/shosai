@@ -3925,7 +3925,12 @@ fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Messa
     };
     let saves = saves.clone();
     Task::perform(
-        async move { saves.flush().await.map_err(|error| error.to_string()) },
+        async move {
+            saves
+                .quiesce_and_shutdown()
+                .await
+                .map_err(|error| error.to_string())
+        },
         move |result| Message::ReadingStateFlushed { id, result },
     )
 }

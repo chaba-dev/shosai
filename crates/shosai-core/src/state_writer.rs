@@ -219,6 +219,7 @@ struct StateWriterInner {
     state: Mutex<WriterState>,
     notify: Notify,
     stopped: AtomicBool,
+    quiesced: AtomicBool,
     handles: AtomicUsize,
     outstanding_flushes: AtomicUsize,
     completed: Notify,
@@ -252,7 +253,17 @@ impl Drop for StateWriter {
 
 impl StateWriter {
     pub fn send(&self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
-        if self.inner.stopped.load(Ordering::Acquire) {
+        self.send_impl(message, false)
+    }
+
+    fn send_impl(
+        &self,
+        message: StateWriterMessage,
+        allow_quiesced: bool,
+    ) -> Result<(), StateWriterSendError> {
+        if self.inner.stopped.load(Ordering::Acquire)
+            || (!allow_quiesced && self.inner.quiesced.load(Ordering::Acquire))
+        {
             return Err(StateWriterSendError::Stopped);
         }
         let is_flush = matches!(message, StateWriterMessage::Flush(_));
@@ -277,7 +288,9 @@ impl StateWriter {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if self.inner.stopped.load(Ordering::Acquire) {
+        if self.inner.stopped.load(Ordering::Acquire)
+            || (!allow_quiesced && self.inner.quiesced.load(Ordering::Acquire))
+        {
             if is_flush {
                 self.inner
                     .outstanding_flushes
@@ -301,14 +314,38 @@ impl StateWriter {
     /// Wait until all writes accepted before this call have been attempted.
     /// A failed flush leaves the writer running so retained writes can retry.
     pub async fn flush(&self) -> Result<(), PersistError> {
+        self.flush_impl(false).await
+    }
+
+    async fn flush_impl(&self, allow_quiesced: bool) -> Result<(), PersistError> {
         let (flushed, wait) = oneshot::channel();
-        self.send(StateWriterMessage::Flush(flushed))
+        self.send_impl(StateWriterMessage::Flush(flushed), allow_quiesced)
             .map_err(|error| PersistError {
                 details: error.to_string(),
             })?;
         wait.await.map_err(|_| PersistError {
             details: "state writer stopped before flush completed".to_owned(),
         })?
+    }
+
+    /// Fence producers, flush accepted writes, and stop the worker. A failed
+    /// flush reopens admission so callers can retry after a transient error.
+    pub async fn quiesce_and_shutdown(&self) -> Result<(), PersistError> {
+        if self
+            .inner
+            .quiesced
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err(PersistError {
+                details: "state writer is already quiescing".to_owned(),
+            });
+        }
+        if let Err(error) = self.flush_impl(true).await {
+            self.inner.quiesced.store(false, Ordering::Release);
+            return Err(error);
+        }
+        self.shutdown().await
     }
 
     /// Stop accepting writes and wait until every accepted write has either
@@ -345,6 +382,7 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
         state: Mutex::new(WriterState::default()),
         notify: Notify::new(),
         stopped: AtomicBool::new(false),
+        quiesced: AtomicBool::new(false),
         handles: AtomicUsize::new(1),
         outstanding_flushes: AtomicUsize::new(0),
         completed: Notify::new(),
@@ -899,6 +937,43 @@ mod tests {
             store.get_pref_async("language").await.as_deref(),
             Some("en")
         );
+    }
+
+    #[tokio::test]
+    async fn failed_close_quiesce_reopens_write_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "language".to_owned(),
+                "en".to_owned(),
+            ))
+            .unwrap();
+
+        assert!(writer.quiesce_and_shutdown().await.is_err());
+        writer
+            .send(StateWriterMessage::Preference(
+                "theme".to_owned(),
+                "dark".to_owned(),
+            ))
+            .expect("failed close preparation must reopen producer admission");
+        sqlx::query("DROP TRIGGER reject_test_preference")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        writer.quiesce_and_shutdown().await.unwrap();
+        assert_eq!(store.get_pref_async("theme").await.as_deref(), Some("dark"));
     }
 
     #[tokio::test]
