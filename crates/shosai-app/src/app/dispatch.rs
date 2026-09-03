@@ -1800,10 +1800,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             complete,
             pages,
         } => {
-            if state.active_tab_id == Some(tab_id)
+            let active = state.active_tab_id == Some(tab_id);
+            let accepts_active_layout = active
                 && generation == state.render_generation
-                && layout_key == epub_layout_key(state)
-            {
+                && layout_key == epub_layout_key(state);
+            let active_request_completed =
+                active && complete && state.epub_layout_pending == Some(layout_key);
+            if active_request_completed {
+                state.epub_layout_pending = None;
+            }
+            if accepts_active_layout {
                 if !complete && state.epub_layout_key == Some(layout_key) {
                     return Task::none();
                 }
@@ -1823,6 +1829,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else if let Some(index) = state.tabs.iter().position(|tab| tab.id == tab_id) {
                 let accepts_layout = generation == state.tabs[index].render_generation
                     && layout_key == epub_layout_key_for_tab(state, &state.tabs[index]);
+                if complete && state.tabs[index].epub_layout_pending == Some(layout_key) {
+                    state.tabs[index].epub_layout_pending = None;
+                }
                 if accepts_layout {
                     let tab = &mut state.tabs[index];
                     if !complete && tab.epub_layout_key == Some(layout_key) {
@@ -1844,6 +1853,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         tab.error = None;
                     }
                 }
+            }
+            if active_request_completed
+                && (!accepts_active_layout || state.epub_layout_requested != Some(layout_key))
+            {
+                return refresh_content(state);
             }
         }
 
@@ -1901,7 +1915,28 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             key,
             result,
         } => {
-            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+            let active = state.active_tab_id == Some(tab_id);
+            let was_pending = if active {
+                state
+                    .paginated_pending
+                    .iter()
+                    .position(|pending| pending == &key)
+                    .map(|position| state.paginated_pending.remove(position))
+                    .is_some()
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                tab.paginated_pending
+                    .iter()
+                    .position(|pending| pending == &key)
+                    .map(|position| tab.paginated_pending.remove(position))
+                    .is_some()
+            } else {
+                false
+            };
+            let request_was_superseded = active
+                && was_pending
+                && state.paginated_pending.is_empty()
+                && generation != state.render_generation;
+            if active && generation == state.render_generation {
                 match result {
                     Ok(page) => {
                         let is_visible = paginated_raster_pages(state).contains(&key.page);
@@ -1921,6 +1956,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         state.error = Some(AppError::Render(error));
                     }
                 }
+            }
+            if request_was_superseded {
+                return refresh_content(state);
             }
         }
 

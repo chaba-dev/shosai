@@ -596,6 +596,8 @@ struct ReaderTab {
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: BoundedCache<PageCacheKey, RenderedPage>,
+    paginated_pending: Vec<PageCacheKey>,
+    paginated_requested: Vec<PageCacheKey>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
     epub_images_desired: HashSet<String>,
@@ -604,6 +606,8 @@ struct ReaderTab {
     epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
+    epub_layout_pending: Option<EpubLayoutKey>,
+    epub_layout_requested: Option<EpubLayoutKey>,
     epub_page: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
@@ -680,6 +684,8 @@ pub struct State {
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: BoundedCache<PageCacheKey, RenderedPage>,
+    paginated_pending: Vec<PageCacheKey>,
+    paginated_requested: Vec<PageCacheKey>,
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
@@ -689,6 +695,8 @@ pub struct State {
     epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
+    epub_layout_pending: Option<EpubLayoutKey>,
+    epub_layout_requested: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
@@ -829,6 +837,8 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
         page_cache: BoundedCache::with_weight_limit(PAGE_CACHE_CAPACITY, PAGE_CACHE_BYTE_CAPACITY),
+        paginated_pending: Vec::new(),
+        paginated_requested: Vec::new(),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
@@ -838,6 +848,8 @@ pub fn boot() -> (State, Task<Message>) {
         epub_image_generation: 0,
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
+        epub_layout_pending: None,
+        epub_layout_requested: None,
         epub_page: 0,
         epub_offset: 0,
         continuous_pages: Vec::new(),
@@ -1179,6 +1191,8 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         rendered_facing_page: state.rendered_facing_page.clone(),
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
+        paginated_pending: state.paginated_pending.clone(),
+        paginated_requested: state.paginated_requested.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_images_pending: state.epub_images_pending.clone(),
         epub_images_desired: state.epub_images_desired.clone(),
@@ -1187,6 +1201,8 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         epub_image_generation: state.epub_image_generation,
         epub_pages: state.epub_pages.clone(),
         epub_layout_key: state.epub_layout_key,
+        epub_layout_pending: state.epub_layout_pending,
+        epub_layout_requested: state.epub_layout_requested,
         epub_page: state.epub_page,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
@@ -1227,6 +1243,8 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.rendered_facing_page = tab.rendered_facing_page;
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
+    state.paginated_pending = tab.paginated_pending;
+    state.paginated_requested = tab.paginated_requested;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_images_pending = tab.epub_images_pending;
     state.epub_images_desired = tab.epub_images_desired;
@@ -1235,6 +1253,8 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.epub_image_generation = tab.epub_image_generation;
     state.epub_pages = tab.epub_pages;
     state.epub_layout_key = tab.epub_layout_key;
+    state.epub_layout_pending = tab.epub_layout_pending;
+    state.epub_layout_requested = tab.epub_layout_requested;
     state.epub_page = tab.epub_page;
     state.epub_offset = tab.session.location.offset.unwrap_or_default();
     state.continuous_pages = tab.continuous_pages;
@@ -1887,22 +1907,33 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let pages = paginated_raster_pages(state);
             let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
             state.error = None;
-            let mut tasks = Vec::new();
-            for page in pages {
-                let highlights = search_highlights_for_page(state, page);
-                let key = PageCacheKey {
-                    page,
+            state.paginated_requested = pages
+                .iter()
+                .map(|page| PageCacheKey {
+                    page: *page,
                     scale_bits: scale.to_bits(),
-                    highlights: highlights.clone(),
-                };
+                    highlights: search_highlights_for_page(state, *page),
+                })
+                .collect();
+            let spread_changed = show_cached_paginated_spread(state);
+            if !state.paginated_pending.is_empty() {
+                return Task::none();
+            }
+            let mut tasks = Vec::new();
+            for key in state.paginated_requested.clone() {
                 if !is_page_cached(state, &key) {
+                    let page = key.page;
+                    let highlights = key.highlights.clone();
                     let doc = Arc::clone(&doc);
-                    tasks.push(render_page_task(tab_id, generation, key, move || {
-                        doc.render_page_with_highlights(page, scale, &highlights)
-                    }));
+                    tasks.push(render_page_task(
+                        tab_id,
+                        generation,
+                        key.clone(),
+                        move || doc.render_page_with_highlights(page, scale, &highlights),
+                    ));
+                    state.paginated_pending.push(key);
                 }
             }
-            let spread_changed = show_cached_paginated_spread(state);
             if tasks.is_empty() && spread_changed {
                 tasks.push(prefetch_next_paginated_spread(state));
             }
@@ -1911,12 +1942,19 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         Some(OpenDocument::Epub(doc)) => {
             let doc = Arc::clone(doc);
             let layout_key = epub_layout_key(state);
+            state.epub_layout_requested = Some(layout_key);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
             state.error = None;
+            if state.epub_layout_pending.is_some()
+                || (state.epub_layout_key == Some(layout_key) && !state.epub_pages.is_empty())
+            {
+                return load_epub_images_task(state);
+            }
+            state.epub_layout_pending = Some(layout_key);
             return Task::batch([
                 paginate_epub_task(tab_id, generation, doc, layout_key, state.current_page),
                 load_epub_images_task(state),
@@ -1934,21 +1972,32 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             }
             let scale = paginated_raster_scale(state, &pages);
             state.error = None;
-            let mut tasks = Vec::new();
-            for page in pages {
-                let key = PageCacheKey {
-                    page,
+            state.paginated_requested = pages
+                .iter()
+                .map(|page| PageCacheKey {
+                    page: *page,
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
-                };
+                })
+                .collect();
+            let spread_changed = show_cached_paginated_spread(state);
+            if !state.paginated_pending.is_empty() {
+                return Task::none();
+            }
+            let mut tasks = Vec::new();
+            for key in state.paginated_requested.clone() {
                 if !is_page_cached(state, &key) {
+                    let page = key.page;
                     let doc = Arc::clone(&doc);
-                    tasks.push(render_page_task(tab_id, generation, key, move || {
-                        doc.render_page(page, scale)
-                    }));
+                    tasks.push(render_page_task(
+                        tab_id,
+                        generation,
+                        key.clone(),
+                        move || doc.render_page(page, scale),
+                    ));
+                    state.paginated_pending.push(key);
                 }
             }
-            let spread_changed = show_cached_paginated_spread(state);
             if tasks.is_empty() && spread_changed {
                 tasks.push(prefetch_next_paginated_spread(state));
             }
@@ -2657,7 +2706,7 @@ fn render_page_task(
     )
 }
 
-fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
+fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
     let Some(next_page) = next_page_location(state) else {
         return Task::none();
     };
@@ -2684,15 +2733,23 @@ fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
         match &state.document {
             Some(OpenDocument::Pdf(document)) => {
                 let document = Arc::clone(document);
-                tasks.push(render_page_task(tab_id, generation, key, move || {
-                    document.render_page_with_highlights(page, scale, &highlights)
-                }));
+                tasks.push(render_page_task(
+                    tab_id,
+                    generation,
+                    key.clone(),
+                    move || document.render_page_with_highlights(page, scale, &highlights),
+                ));
+                state.paginated_pending.push(key);
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
-                tasks.push(render_page_task(tab_id, generation, key, move || {
-                    document.render_page(page, scale)
-                }));
+                tasks.push(render_page_task(
+                    tab_id,
+                    generation,
+                    key.clone(),
+                    move || document.render_page(page, scale),
+                ));
+                state.paginated_pending.push(key);
             }
             _ => return Task::none(),
         }
@@ -6692,7 +6749,7 @@ mod tests {
         }
 
         assert!(show_cached_paginated_spread(&mut state));
-        assert_eq!(prefetch_next_paginated_spread(&state).units(), 1);
+        assert_eq!(prefetch_next_paginated_spread(&mut state).units(), 1);
     }
 
     #[test]
@@ -9200,38 +9257,41 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
 
         let first_task = refresh_content(&mut state);
         let first_generation = state.render_generation;
+        let first_key = state.paginated_pending[0].clone();
         state.zoom = ZoomMode::Manual(1.25);
         let second_task = refresh_content(&mut state);
         let second_generation = state.render_generation;
+        let latest_key = state.paginated_requested[0].clone();
 
         assert!(first_task.units() > 0);
-        assert!(second_task.units() > 0);
+        assert_eq!(second_task.units(), 0);
         assert!(second_generation > first_generation);
+        assert_eq!(state.paginated_pending, vec![first_key.clone()]);
 
         let stale_page = RenderedPage {
             width: 10,
             height: 10,
             pixels: bytes::Bytes::from(vec![0; 400]),
         };
-        let _ = update(
+        let latest_task = update(
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
                 generation: first_generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key: first_key,
                 result: Ok(stale_page),
             },
         );
 
         assert!(state.rendered_page.is_none());
+        assert!(latest_task.units() > 0);
+        assert_eq!(state.paginated_pending, vec![latest_key.clone()]);
+        let latest_generation = state.render_generation;
 
         let latest_page = RenderedPage {
             width: 20,
@@ -9242,12 +9302,8 @@ mod tests {
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
-                generation: second_generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.25_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                generation: latest_generation,
+                key: latest_key,
                 result: Ok(latest_page),
             },
         );
@@ -9285,6 +9341,41 @@ mod tests {
         );
 
         assert!(Arc::ptr_eq(&state.epub_pages, &current));
+    }
+
+    #[test]
+    fn epub_relayout_coalesces_to_one_in_flight_and_the_latest_request() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let first = refresh_content(&mut state);
+        let first_generation = state.render_generation;
+        let first_key = state.epub_layout_pending.unwrap();
+        state.font_size = 24.0;
+        let coalesced = refresh_content(&mut state);
+        let requested_key = state.epub_layout_requested.unwrap();
+
+        assert!(first.units() > 0);
+        assert_eq!(coalesced.units(), 0);
+        assert_ne!(first_key, requested_key);
+        assert_eq!(state.epub_layout_pending, Some(first_key));
+
+        let latest = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: first_generation,
+                layout_key: first_key,
+                complete: true,
+                pages: Arc::new(Vec::new()),
+            },
+        );
+
+        assert!(latest.units() > 0);
+        assert_eq!(state.epub_layout_pending, Some(requested_key));
     }
 
     #[test]
