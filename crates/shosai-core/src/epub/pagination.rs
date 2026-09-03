@@ -2,7 +2,8 @@
 
 use super::render::{ContentNode, TableRow, TableRowGroup};
 use super::{
-    EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest, EpubTextRun,
+    EpubDoc, EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest,
+    EpubTextRun,
 };
 
 pub mod math_layout;
@@ -1287,6 +1288,69 @@ pub fn paginate_epub_chapter_with_budget(
     }
     assign_paginated_block_geometry(nodes, font_size, default_block_spacing, &mut pages);
     pages
+}
+
+pub fn paginate_document(
+    document: &EpubDoc,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: LayoutSize,
+) -> Vec<Page> {
+    let mut pages = Vec::new();
+    let chapters = document.presentation().chapters();
+    let mut budget = EpubPaginationBudget::for_document(chapters.len());
+    for chapter in 0..chapters.len() {
+        if pages.len() >= MAX_EPUB_PAGES {
+            break;
+        }
+        pages.extend(paginate_document_chapter(
+            document,
+            chapter,
+            font_size,
+            line_spacing,
+            page_size,
+            &mut budget,
+        ));
+    }
+    pages
+}
+
+pub fn paginate_document_chapter(
+    document: &EpubDoc,
+    chapter: usize,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: LayoutSize,
+    budget: &mut EpubPaginationBudget,
+) -> Vec<Page> {
+    let Some(presentation) = document.presentation().chapter(chapter) else {
+        return Vec::new();
+    };
+    let nodes = presentation.nodes();
+    let source = document
+        .chapter(chapter)
+        .expect("presentation chapters match source chapters");
+    let title = source
+        .title
+        .as_deref()
+        .filter(|title| !content_starts_with_heading(nodes, title));
+    paginate_epub_chapter_with_budget(
+        nodes,
+        title,
+        font_size,
+        line_spacing,
+        page_size,
+        Some(document.fonts()),
+        budget,
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(page, nodes)| Page {
+        chapter,
+        title: (page == 0).then(|| title.map(str::to_owned)).flatten(),
+        nodes,
+    })
+    .collect()
 }
 
 /// Assign each original boundary exactly once. A boundary whose two nodes land

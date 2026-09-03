@@ -34,9 +34,9 @@ use shosai_core::state_writer::{
 use crate::epub::PageNode as EpubPageNode;
 use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
-    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
+    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget,
     PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, content_node_text_len,
-    content_starts_with_heading, paginate_epub_chapter_with_budget,
+    content_starts_with_heading,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
@@ -2144,12 +2144,17 @@ fn paginate_epub_task(
             let worker_document = Arc::clone(&document);
             let pages = tokio::task::spawn_blocking(move || {
                 if complete {
-                    paginate_epub_document(&worker_document, font_size, line_spacing, page_size)
+                    crate::epub::paginate_document(
+                        &worker_document,
+                        font_size,
+                        line_spacing,
+                        page_size,
+                    )
                 } else {
                     let mut budget = EpubPaginationBudget::for_document(
                         worker_document.presentation().chapters().len(),
                     );
-                    paginate_epub_document_chapter(
+                    crate::epub::paginate_document_chapter(
                         &worker_document,
                         current_chapter,
                         font_size,
@@ -2173,71 +2178,6 @@ fn paginate_epub_task(
             pages: Arc::new(pages),
         }
     })
-}
-
-fn paginate_epub_document(
-    document: &EpubDoc,
-    font_size: f32,
-    line_spacing: f32,
-    page_size: crate::epub::LayoutSize,
-) -> Vec<EpubPage> {
-    let mut pages = Vec::new();
-    let chapters = document.presentation().chapters();
-    let mut budget = EpubPaginationBudget::for_document(chapters.len());
-    for chapter_index in 0..chapters.len() {
-        if pages.len() >= MAX_EPUB_PAGES {
-            break;
-        }
-        pages.extend(paginate_epub_document_chapter(
-            document,
-            chapter_index,
-            font_size,
-            line_spacing,
-            page_size,
-            &mut budget,
-        ));
-    }
-    pages
-}
-
-fn paginate_epub_document_chapter(
-    document: &EpubDoc,
-    chapter_index: usize,
-    font_size: f32,
-    line_spacing: f32,
-    page_size: crate::epub::LayoutSize,
-    budget: &mut EpubPaginationBudget,
-) -> Vec<EpubPage> {
-    let Some(presentation) = document.presentation().chapter(chapter_index) else {
-        return Vec::new();
-    };
-    let nodes = presentation.nodes();
-    let source = document
-        .chapter(chapter_index)
-        .expect("presentation chapters match source chapters");
-    let title = source
-        .title
-        .as_deref()
-        .filter(|title| !content_starts_with_heading(nodes, title));
-    paginate_epub_chapter_with_budget(
-        nodes,
-        title,
-        font_size,
-        line_spacing,
-        page_size,
-        Some(document.fonts()),
-        budget,
-    )
-    .into_iter()
-    .enumerate()
-    .map(|(page_index, nodes)| EpubPage {
-        chapter: chapter_index,
-        title: (page_index == 0)
-            .then(|| title.map(str::to_string))
-            .flatten(),
-        nodes,
-    })
-    .collect()
 }
 
 fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
@@ -6279,7 +6219,7 @@ mod tests {
             panic!("expected EPUB document");
         };
         let page_size = epub_page_size(state);
-        let pages = paginate_epub_document(
+        let pages = crate::epub::paginate_document(
             document,
             state.font_size,
             state.line_spacing,

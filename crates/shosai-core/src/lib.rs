@@ -3,6 +3,7 @@ extern crate self as shosai_core;
 pub mod annotations;
 pub mod application;
 pub mod bookmarks;
+pub mod bridge;
 pub mod cbz;
 pub mod document;
 pub mod epub;
