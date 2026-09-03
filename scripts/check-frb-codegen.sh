@@ -3,9 +3,16 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary="$(mktemp -d)"
-rust_output="$root/crates/shosai-core/src/frb_codegen_smoke_generated.rs"
-trap 'rm -rf "$temporary"; rm -f "$rust_output"' EXIT
-test ! -e "$rust_output"
+rust_root="$temporary/rust/crates/shosai-core"
+rust_output="$rust_root/src/frb_codegen_smoke_generated.rs"
+trap 'rm -rf "$temporary"' EXIT
+
+mkdir -p "$rust_root"
+cp "$root/Cargo.lock" "$temporary/rust/Cargo.lock"
+sed 's/members = \["crates\/shosai-core", "crates\/shosai-app"\]/members = ["crates\/shosai-core"]/' \
+  "$root/Cargo.toml" >"$temporary/rust/Cargo.toml"
+cp "$root/crates/shosai-core/Cargo.toml" "$rust_root/Cargo.toml"
+cp -R "$root/crates/shosai-core/src" "$rust_root/src"
 
 mkdir -p "$temporary/dart/lib/generated"
 cat >"$temporary/dart/pubspec.yaml" <<'YAML'
@@ -46,7 +53,7 @@ sdks:
 YAML
 
 flutter_rust_bridge_codegen generate \
-  --rust-root "$root/crates/shosai-core" \
+  --rust-root "$rust_root" \
   --rust-input crate::bridge \
   --dart-root "$temporary/dart" \
   --dart-output "$temporary/dart/lib/generated" \
@@ -62,3 +69,6 @@ flutter_rust_bridge_codegen generate \
 
 test -s "$rust_output"
 test -n "$(find "$temporary/dart/lib/generated" -type f -print -quit)"
+for declaration in openDocument renderPage takeBuffer releaseDocument releaseBuffer cancel; do
+  grep -Rq "$declaration" "$temporary/dart/lib/generated"
+done
