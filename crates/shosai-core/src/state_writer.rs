@@ -61,18 +61,18 @@ enum SaveKey {
     Path(String),
 }
 
-impl SaveKey {
-    fn for_save(save: &StateSave) -> Self {
-        save.book_id
-            .map_or_else(|| Self::Path(canonical_path_key(&save.path)), Self::Book)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum WriteKey {
     Save(SaveKey),
     Progress(i64),
     Preference(String),
+}
+
+#[derive(Debug)]
+struct PreparedMessage {
+    message: StateWriterMessage,
+    key: Option<WriteKey>,
+    byte_len: usize,
 }
 
 #[derive(Debug, Default)]
@@ -84,10 +84,13 @@ struct Pending {
 }
 
 impl Pending {
-    fn insert(&mut self, message: StateWriterMessage) {
-        match message {
+    fn insert(&mut self, prepared: PreparedMessage) {
+        match prepared.message {
             StateWriterMessage::Save(save) => {
-                self.saves.insert(SaveKey::for_save(&save), save);
+                let Some(WriteKey::Save(key)) = prepared.key else {
+                    unreachable!("prepared save must have a save key");
+                };
+                self.saves.insert(key, save);
             }
             StateWriterMessage::Progress {
                 book_id,
@@ -137,14 +140,18 @@ impl Pending {
 struct WriterState {
     pending: Pending,
     admitted: HashSet<WriteKey>,
-    admitted_bytes: HashMap<WriteKey, usize>,
+    pending_bytes: HashMap<WriteKey, usize>,
     total_admitted_bytes: usize,
 }
 
 impl WriterState {
+    #[cfg(test)]
     fn insert(&mut self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
-        let byte_len = message_byte_len(&message)?;
-        let key = message_key(&message);
+        self.insert_prepared(prepare_message(message)?)
+    }
+
+    fn insert_prepared(&mut self, prepared: PreparedMessage) -> Result<(), StateWriterSendError> {
+        let key = prepared.key.as_ref();
         if let Some(key) = &key
             && !self.admitted.contains(key)
             && self.admitted.len() >= MAX_PENDING_STATE_WRITES
@@ -152,21 +159,43 @@ impl WriterState {
             return Err(StateWriterSendError::Full);
         }
         if let Some(key) = &key {
-            let previous = self.admitted_bytes.get(key).copied().unwrap_or(0);
+            // Only a queued payload can be replaced. An older value currently
+            // being persisted remains separately charged until its batch drops.
+            let previous = self.pending_bytes.get(key).copied().unwrap_or(0);
             let next_total = self
                 .total_admitted_bytes
                 .checked_sub(previous)
-                .and_then(|total| total.checked_add(byte_len))
+                .and_then(|total| total.checked_add(prepared.byte_len))
                 .filter(|total| *total <= MAX_PENDING_STATE_WRITE_BYTES)
                 .ok_or(StateWriterSendError::Full)?;
             self.total_admitted_bytes = next_total;
         }
-        if let Some(key) = key {
+        if let Some(key) = prepared.key.clone() {
             self.admitted.insert(key.clone());
-            self.admitted_bytes.insert(key, byte_len);
+            self.pending_bytes.insert(key, prepared.byte_len);
         }
-        self.pending.insert(message);
+        self.pending.insert(prepared);
         Ok(())
+    }
+
+    fn take_batch(&mut self) -> (Pending, HashMap<WriteKey, usize>) {
+        (
+            std::mem::take(&mut self.pending),
+            std::mem::take(&mut self.pending_bytes),
+        )
+    }
+
+    fn finish_batch(&mut self, failed: Pending, batch_bytes: HashMap<WriteKey, usize>) {
+        let failed_keys = failed.write_keys();
+        for (key, bytes) in batch_bytes {
+            if failed_keys.contains(&key) && !self.pending.contains(&key) {
+                self.pending_bytes.insert(key, bytes);
+            } else {
+                self.total_admitted_bytes = self.total_admitted_bytes.saturating_sub(bytes);
+            }
+        }
+        self.pending.merge_failed(failed);
+        self.admitted.retain(|key| self.pending.contains(key));
     }
 }
 
@@ -177,11 +206,14 @@ struct StateWriterInner {
     stopped: AtomicBool,
     handles: AtomicUsize,
     outstanding_flushes: AtomicUsize,
+    completed: Notify,
+    completion: Mutex<Option<Result<(), PersistError>>>,
 }
 
 #[derive(Debug)]
 pub struct StateWriter {
     inner: Arc<StateWriterInner>,
+    worker: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Clone for StateWriter {
@@ -189,6 +221,7 @@ impl Clone for StateWriter {
         self.inner.handles.fetch_add(1, Ordering::Relaxed);
         Self {
             inner: Arc::clone(&self.inner),
+            worker: Arc::clone(&self.worker),
         }
     }
 }
@@ -213,6 +246,17 @@ impl StateWriter {
         {
             return Err(StateWriterSendError::Full);
         }
+        let prepared = match prepare_message(message) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                if is_flush {
+                    self.inner
+                        .outstanding_flushes
+                        .fetch_sub(1, Ordering::AcqRel);
+                }
+                return Err(error);
+            }
+        };
         let mut state = self
             .inner
             .state
@@ -226,7 +270,7 @@ impl StateWriter {
             }
             return Err(StateWriterSendError::Stopped);
         }
-        if let Err(error) = state.insert(message) {
+        if let Err(error) = state.insert_prepared(prepared) {
             if is_flush {
                 self.inner
                     .outstanding_flushes
@@ -238,6 +282,32 @@ impl StateWriter {
         self.inner.notify.notify_one();
         Ok(())
     }
+
+    /// Stop accepting writes and wait until every accepted write has either
+    /// persisted or produced a persistence error.
+    pub async fn shutdown(&self) -> Result<(), PersistError> {
+        self.inner.stopped.store(true, Ordering::Release);
+        self.inner.notify.notify_one();
+        loop {
+            let completed = self.inner.completed.notified();
+            let result = {
+                self.inner
+                    .completion
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone()
+            };
+            if let Some(result) = result {
+                if let Some(worker) = self.worker.lock().await.take() {
+                    worker.await.map_err(|error| PersistError {
+                        details: format!("state writer worker failed: {error}"),
+                    })?;
+                }
+                return result;
+            }
+            completed.await;
+        }
+    }
 }
 
 pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
@@ -247,21 +317,22 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
         stopped: AtomicBool::new(false),
         handles: AtomicUsize::new(1),
         outstanding_flushes: AtomicUsize::new(0),
+        completed: Notify::new(),
+        completion: Mutex::new(None),
     });
     let worker = Arc::clone(&inner);
     let library = Library::new(store.pool().clone(), store.managed_books_dir());
-    tokio::spawn(async move {
+    let worker_handle = tokio::spawn(async move {
         loop {
             worker.notify.notified().await;
-            let mut batch = {
+            let (mut batch, batch_bytes) = {
                 let mut state = worker
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                std::mem::take(&mut state.pending)
+                state.take_batch()
             };
             let flushes = std::mem::take(&mut batch.flushes);
-            let attempted = batch.write_keys();
             let (failed, error) = persist_batch(&store, &library, batch).await;
             let failed_keys = failed.write_keys();
             {
@@ -269,16 +340,7 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
-                state.pending.merge_failed(failed);
-                for key in attempted {
-                    if !failed_keys.contains(&key) && !state.pending.contains(&key) {
-                        state.admitted.remove(&key);
-                        if let Some(bytes) = state.admitted_bytes.remove(&key) {
-                            state.total_admitted_bytes =
-                                state.total_admitted_bytes.saturating_sub(bytes);
-                        }
-                    }
-                }
+                state.finish_batch(failed, batch_bytes);
             }
             for flush in flushes {
                 let _ = flush.send(error.clone().map_or(Ok(()), Err));
@@ -291,8 +353,23 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 .pending
                 .write_keys()
                 .is_empty();
-            if worker.stopped.load(Ordering::Acquire) && pending_is_empty {
-                break;
+            if worker.stopped.load(Ordering::Acquire) {
+                if let Some(error) = error {
+                    *worker
+                        .completion
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Err(error));
+                    worker.completed.notify_waiters();
+                    break;
+                }
+                if pending_is_empty {
+                    *worker
+                        .completion
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Ok(()));
+                    worker.completed.notify_waiters();
+                    break;
+                }
             }
             if !failed_keys.is_empty() {
                 tokio::time::sleep(RETRY_DELAY).await;
@@ -302,37 +379,67 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
             }
         }
     });
-    StateWriter { inner }
-}
-
-fn message_key(message: &StateWriterMessage) -> Option<WriteKey> {
-    match message {
-        StateWriterMessage::Save(save) => Some(WriteKey::Save(SaveKey::for_save(save))),
-        StateWriterMessage::Progress { book_id, .. } => Some(WriteKey::Progress(*book_id)),
-        StateWriterMessage::Preference(key, _) => Some(WriteKey::Preference(key.clone())),
-        StateWriterMessage::Flush(_) => None,
+    StateWriter {
+        inner,
+        worker: Arc::new(tokio::sync::Mutex::new(Some(worker_handle))),
     }
 }
 
-fn message_byte_len(message: &StateWriterMessage) -> Result<usize, StateWriterSendError> {
+fn prepare_message(message: StateWriterMessage) -> Result<PreparedMessage, StateWriterSendError> {
+    prepare_message_with(message, canonical_path_key)
+}
+
+fn prepare_message_with(
+    message: StateWriterMessage,
+    normalize_path: impl FnOnce(&std::path::Path) -> String,
+) -> Result<PreparedMessage, StateWriterSendError> {
     match message {
         StateWriterMessage::Preference(key, value)
             if key.len() > MAX_PREFERENCE_KEY_BYTES || value.len() > MAX_PREFERENCE_VALUE_BYTES =>
         {
             Err(StateWriterSendError::Full)
         }
-        StateWriterMessage::Preference(key, value) => key
-            .len()
-            .checked_add(value.len())
-            .ok_or(StateWriterSendError::Full),
+        StateWriterMessage::Preference(key, value) => {
+            let byte_len = key
+                .len()
+                .checked_mul(2)
+                .and_then(|bytes| bytes.checked_add(value.len()))
+                .ok_or(StateWriterSendError::Full)?;
+            Ok(PreparedMessage {
+                key: Some(WriteKey::Preference(key.clone())),
+                message: StateWriterMessage::Preference(key, value),
+                byte_len,
+            })
+        }
         StateWriterMessage::Save(save) => {
-            let path = canonical_path_key(&save.path);
+            let path = normalize_path(&save.path);
             if path.len() > MAX_STATE_PATH_KEY_BYTES {
                 return Err(StateWriterSendError::Full);
             }
-            Ok(path.len())
+            let byte_len = path
+                .len()
+                .checked_mul(if save.book_id.is_some() { 1 } else { 3 })
+                .ok_or(StateWriterSendError::Full)?;
+            let key = save.book_id.map_or_else(
+                || WriteKey::Save(SaveKey::Path(path)),
+                |book_id| WriteKey::Save(SaveKey::Book(book_id)),
+            );
+            Ok(PreparedMessage {
+                message: StateWriterMessage::Save(save),
+                key: Some(key),
+                byte_len,
+            })
         }
-        StateWriterMessage::Progress { .. } | StateWriterMessage::Flush(_) => Ok(0),
+        StateWriterMessage::Progress { book_id, progress } => Ok(PreparedMessage {
+            message: StateWriterMessage::Progress { book_id, progress },
+            key: Some(WriteKey::Progress(book_id)),
+            byte_len: 0,
+        }),
+        StateWriterMessage::Flush(flush) => Ok(PreparedMessage {
+            message: StateWriterMessage::Flush(flush),
+            key: None,
+            byte_len: 0,
+        }),
     }
 }
 
@@ -385,6 +492,7 @@ async fn persist_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn book_saves_coalesce_across_relocated_paths() {
@@ -560,6 +668,78 @@ mod tests {
     }
 
     #[test]
+    fn save_normalization_runs_once_and_supplies_the_pending_identity() {
+        let calls = Cell::new(0);
+        let prepared = prepare_message_with(
+            StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: PathBuf::from("book.epub"),
+                reading: FileReadingState {
+                    page: 0,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }),
+            |_| {
+                calls.set(calls.get() + 1);
+                format!("normalized-{}", calls.get())
+            },
+        )
+        .unwrap();
+        let mut state = WriterState::default();
+        state.insert_prepared(prepared).unwrap();
+
+        assert_eq!(calls.get(), 1);
+        assert!(
+            state
+                .pending
+                .saves
+                .contains_key(&SaveKey::Path("normalized-1".to_owned()))
+        );
+        assert!(
+            state
+                .admitted
+                .contains(&WriteKey::Save(SaveKey::Path("normalized-1".to_owned())))
+        );
+    }
+
+    #[test]
+    fn in_flight_payloads_remain_charged_while_replacements_queue() {
+        let mut state = WriterState::default();
+        let value = "v".repeat(MAX_PREFERENCE_VALUE_BYTES);
+        let mut accepted = 0;
+        while state
+            .insert(StateWriterMessage::Preference(
+                format!("key-{accepted}"),
+                value.clone(),
+            ))
+            .is_ok()
+        {
+            accepted += 1;
+        }
+        let (batch, batch_bytes) = state.take_batch();
+        let in_flight_bytes = state.total_admitted_bytes;
+        let mut replacements = 0;
+        while replacements < accepted
+            && state
+                .insert(StateWriterMessage::Preference(
+                    format!("key-{replacements}"),
+                    value.clone(),
+                ))
+                .is_ok()
+        {
+            replacements += 1;
+        }
+
+        assert!(replacements < accepted);
+        assert!(state.total_admitted_bytes >= in_flight_bytes);
+        assert!(state.total_admitted_bytes <= MAX_PENDING_STATE_WRITE_BYTES);
+        state.finish_batch(Pending::default(), batch_bytes);
+        drop(batch);
+        assert!(state.total_admitted_bytes < in_flight_bytes);
+    }
+
+    #[test]
     fn outstanding_flushes_are_bounded() {
         let counter = AtomicUsize::new(0);
         for _ in 0..MAX_PENDING_STATE_FLUSHES {
@@ -671,5 +851,46 @@ mod tests {
         })
         .await
         .expect("the final writer drop must drain every accepted write");
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_persistence_and_joins_the_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let mut blocker = store.pool().acquire().await.unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "language".to_owned(),
+                "en".to_owned(),
+            ))
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let shutdown = {
+            let writer = writer.clone();
+            tokio::spawn(async move { writer.shutdown().await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(!shutdown.is_finished());
+
+        sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
+        shutdown.await.unwrap().unwrap();
+        assert_eq!(
+            store.get_pref_async("language").await.as_deref(),
+            Some("en")
+        );
+        assert_eq!(
+            writer.send(StateWriterMessage::Progress {
+                book_id: 1,
+                progress: 0.5,
+            }),
+            Err(StateWriterSendError::Stopped)
+        );
     }
 }

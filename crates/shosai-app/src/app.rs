@@ -3613,21 +3613,9 @@ fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Messa
     let Some(saves) = &state.reading_state_saves else {
         return window::close(id);
     };
-    let (flushed, wait_for_flush) = oneshot::channel();
-    if saves
-        .send(ReadingStateWriterMessage::Flush(flushed))
-        .is_err()
-    {
-        eprintln!("warning: reading state writer stopped before shutdown");
-        return window::close(id);
-    }
+    let saves = saves.clone();
     Task::perform(
-        async move {
-            wait_for_flush
-                .await
-                .map_err(|_| "state writer stopped before shutdown".to_owned())?
-                .map_err(|error| error.to_string())
-        },
+        async move { saves.shutdown().await.map_err(|error| error.to_string()) },
         move |result| Message::ReadingStateFlushed { id, result },
     )
 }
