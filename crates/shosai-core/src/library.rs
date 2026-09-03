@@ -347,6 +347,14 @@ struct FileFingerprint {
 }
 
 #[derive(Debug)]
+struct FingerprintedFile {
+    fingerprint: FileFingerprint,
+    handle: same_file::Handle,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+#[derive(Debug)]
 struct BookInspection {
     title: String,
     author: Option<String>,
@@ -356,7 +364,7 @@ struct BookInspection {
 
 struct LocationIdentity<'a> {
     fingerprint: &'a FileFingerprint,
-    verify_path: Option<&'a Path>,
+    verified_file: Option<(&'a Path, &'a FingerprintedFile)>,
 }
 
 /// A verified private copy that is ready to be published and recorded in the library.
@@ -643,10 +651,19 @@ impl Library {
         })
         .await
         .context("metadata extraction task failed")??;
+        let source_path = path.clone();
+        let source_file = tokio::task::spawn_blocking(move || {
+            fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
+        })
+        .await
+        .context("book verification task failed")??;
+        if source_file.fingerprint != inspection.fingerprint {
+            bail!("file changed during import: {}", path.display());
+        }
         // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-            verify_path_fingerprint(path.clone(), &inspection.fingerprint, "import").await?;
+            verify_fingerprinted_path(&path, &source_file, "import")?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
             transaction.commit().await?;
             return self
@@ -656,7 +673,7 @@ impl Library {
         }
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        verify_path_fingerprint(path.clone(), &inspection.fingerprint, "import").await?;
+        verify_fingerprinted_path(&path, &source_file, "import")?;
         sqlx::query(
             "INSERT OR IGNORE INTO books
                 (title, author, format, file_path, cover_blob, storage_kind,
@@ -865,7 +882,7 @@ impl Library {
                 Some(source_str),
                 LocationIdentity {
                     fingerprint: &inspection.fingerprint,
-                    verify_path: None,
+                    verified_file: None,
                 },
             )
             .await?;
@@ -950,6 +967,15 @@ impl Library {
         if expected != &fingerprint.hash {
             bail!("selected file does not match this book");
         }
+        let source_path = replacement.clone();
+        let source_file = tokio::task::spawn_blocking(move || {
+            fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
+        })
+        .await
+        .context("replacement verification task failed")??;
+        if source_file.fingerprint != fingerprint {
+            bail!("selected file changed during relink");
+        }
         let replacement_str = canonical_path_key(&replacement);
         self.update_location(
             book.id,
@@ -959,7 +985,7 @@ impl Library {
             Some(&replacement_str),
             LocationIdentity {
                 fingerprint: &fingerprint,
-                verify_path: Some(&replacement),
+                verified_file: Some((&replacement, &source_file)),
             },
         )
         .await?;
@@ -1608,13 +1634,8 @@ impl Library {
         identity: LocationIdentity<'_>,
     ) -> Result<()> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        if let Some(verify_path) = identity.verify_path {
-            verify_path_fingerprint(
-                verify_path.to_owned(),
-                identity.fingerprint,
-                "location update",
-            )
-            .await?;
+        if let Some((path, file)) = identity.verified_file {
+            verify_fingerprinted_path(path, file, "location update")?;
         }
         sqlx::query(
             "UPDATE books SET file_path = ?, storage_kind = ?, original_path = ?,
@@ -1868,21 +1889,6 @@ fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
     file_fingerprint_cancellable(path, None)
 }
 
-async fn verify_path_fingerprint(
-    path: PathBuf,
-    expected: &FileFingerprint,
-    operation: &str,
-) -> Result<()> {
-    let display = path.display().to_string();
-    let actual = tokio::task::spawn_blocking(move || file_fingerprint(&path))
-        .await
-        .with_context(|| format!("{operation} verification task failed"))??;
-    if &actual != expected {
-        bail!("file changed during {operation}: {display}");
-    }
-    Ok(())
-}
-
 fn file_fingerprint_cancellable(
     path: &Path,
     cancellation: Option<&ImportCancellation>,
@@ -1900,6 +1906,14 @@ fn file_fingerprint_with_limit(
     max_input_bytes: Option<u64>,
     cancellation: Option<&ImportCancellation>,
 ) -> Result<FileFingerprint> {
+    Ok(fingerprint_file_with_limit(path, max_input_bytes, cancellation)?.fingerprint)
+}
+
+fn fingerprint_file_with_limit(
+    path: &Path,
+    max_input_bytes: Option<u64>,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<FingerprintedFile> {
     if cancellation.is_some_and(ImportCancellation::is_cancelled) {
         bail!("discovery cancelled");
     }
@@ -1920,10 +1934,29 @@ fn file_fingerprint_with_limit(
         cancellation,
     )?;
     let after = file.metadata()?;
-    if after.len() != file_size {
+    if after.len() != file_size || after.modified().ok() != before.modified().ok() {
         bail!("file changed while fingerprinting: {}", path.display());
     }
-    Ok(fingerprint)
+    Ok(FingerprintedFile {
+        fingerprint,
+        handle: same_file::Handle::from_file(file)?,
+        len: after.len(),
+        modified: after.modified().ok(),
+    })
+}
+
+fn verify_fingerprinted_path(path: &Path, file: &FingerprintedFile, operation: &str) -> Result<()> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("failed to verify {} during {operation}", path.display()))?;
+    let handle = same_file::Handle::from_path(path)
+        .with_context(|| format!("failed to verify {} during {operation}", path.display()))?;
+    if handle != file.handle
+        || metadata.len() != file.len
+        || metadata.modified().ok() != file.modified
+    {
+        bail!("file changed during {operation}: {}", path.display());
+    }
+    Ok(())
 }
 
 fn fingerprint_reader(
@@ -2420,13 +2453,13 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
                 continue;
             }
             let _work_permit = acquire_import_work(None).await?;
-            let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
-            let fingerprint = match tokio::task::spawn_blocking(move || {
-                file_fingerprint_with_limit(&path, Some(format.max_input_bytes()), None)
+            let fingerprint_path = path.clone();
+            let file = match tokio::task::spawn_blocking(move || {
+                fingerprint_file_with_limit(&fingerprint_path, Some(format.max_input_bytes()), None)
             })
             .await
             {
-                Ok(Ok(fingerprint)) => fingerprint,
+                Ok(Ok(file)) => file,
                 Ok(Err(error)) => {
                     eprintln!("warning: failed to fingerprint legacy book {file_path}: {error}");
                     continue;
@@ -2436,12 +2469,17 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
                     continue;
                 }
             };
+            let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+            if let Err(error) = verify_fingerprinted_path(&path, &file, "fingerprint backfill") {
+                eprintln!("warning: failed to verify legacy book {file_path}: {error}");
+                continue;
+            }
             sqlx::query(
                 "UPDATE books SET content_hash = ?, file_size = ?
                  WHERE id = ? AND file_path = ? AND content_hash IS NULL",
             )
-            .bind(fingerprint.hash)
-            .bind(fingerprint.size as i64)
+            .bind(file.fingerprint.hash)
+            .bind(file.fingerprint.size as i64)
             .bind(id)
             .bind(file_path)
             .execute(&mut *transaction)
@@ -2597,6 +2635,21 @@ mod tests {
 
         let growing = fingerprint_reader(&b"too long"[..], 3, None).unwrap_err();
         assert!(growing.to_string().contains("grew"));
+    }
+
+    #[test]
+    fn fingerprinted_file_detects_atomic_path_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        let replacement = directory.path().join("replacement.epub");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::write(&replacement, b"replacement").unwrap();
+        let file = fingerprint_file_with_limit(&path, Some(1024), None).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+
+        let error = verify_fingerprinted_path(&path, &file, "test").unwrap_err();
+
+        assert!(error.to_string().contains("changed during test"));
     }
 
     #[test]
