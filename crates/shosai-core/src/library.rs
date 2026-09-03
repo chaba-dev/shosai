@@ -354,6 +354,11 @@ struct BookInspection {
     fingerprint: FileFingerprint,
 }
 
+struct LocationIdentity<'a> {
+    fingerprint: &'a FileFingerprint,
+    verify_path: Option<&'a Path>,
+}
+
 /// A verified private copy that is ready to be published and recorded in the library.
 #[derive(Debug)]
 pub struct PreparedManagedImport {
@@ -363,6 +368,17 @@ pub struct PreparedManagedImport {
     staged: ManagedStage,
     inspection: BookInspection,
     retention_permit: std::sync::Mutex<Option<tokio::sync::OwnedSemaphorePermit>>,
+}
+
+impl PreparedManagedImport {
+    fn release_admission(&self) {
+        drop(
+            self.retention_permit
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take(),
+        );
+    }
 }
 
 struct ManagedPublication {
@@ -425,6 +441,7 @@ impl Library {
     /// removed after the database commit, so interruption may leave harmless duplicates but never
     /// database rows pointing at incomplete files.
     pub async fn relocate_managed_books(&self, new_dir: &Path) -> Result<Vec<ManagedPathChange>> {
+        let _work_permit = acquire_import_work(None).await?;
         let _storage_guard = managed_storage_lock().lock().await;
         let new_dir = new_dir.to_path_buf();
         let create_dir = new_dir.clone();
@@ -626,18 +643,10 @@ impl Library {
         })
         .await
         .context("metadata extraction task failed")??;
-        let verify_path = path.clone();
-        let current_fingerprint =
-            tokio::task::spawn_blocking(move || file_fingerprint(&verify_path))
-                .await
-                .context("book verification task failed")??;
-        if current_fingerprint != inspection.fingerprint {
-            bail!("file changed during import: {}", path.display());
-        }
-
         // Check if already imported after validating a reviewed file.
         if let Some(book) = self.get_by_path(&path_str).await? {
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+            verify_path_fingerprint(path.clone(), &inspection.fingerprint, "import").await?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
             transaction.commit().await?;
             return self
@@ -647,6 +656,7 @@ impl Library {
         }
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        verify_path_fingerprint(path.clone(), &inspection.fingerprint, "import").await?;
         sqlx::query(
             "INSERT OR IGNORE INTO books
                 (title, author, format, file_path, cover_blob, storage_kind,
@@ -800,7 +810,7 @@ impl Library {
             format,
             staged,
             inspection,
-            retention_permit,
+            retention_permit: _,
         } = prepared;
 
         let destination = self
@@ -842,6 +852,7 @@ impl Library {
                 .await?
                 .context("managed book not found after identity repair")?;
             publication.keep();
+            prepared.release_admission();
             return Ok(book);
         }
 
@@ -852,7 +863,10 @@ impl Library {
                 &destination_str,
                 StorageKind::Managed,
                 Some(source_str),
-                &inspection.fingerprint,
+                LocationIdentity {
+                    fingerprint: &inspection.fingerprint,
+                    verify_path: None,
+                },
             )
             .await?;
             let book = self
@@ -860,6 +874,7 @@ impl Library {
                 .await?
                 .context("managed book not found after update")?;
             publication.keep();
+            prepared.release_admission();
             return Ok(book);
         }
 
@@ -897,12 +912,7 @@ impl Library {
             .await?
             .context("managed book not found after insert")?;
         publication.keep();
-        drop(
-            retention_permit
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take(),
-        );
+        prepared.release_admission();
         Ok(book)
     }
 
@@ -940,14 +950,6 @@ impl Library {
         if expected != &fingerprint.hash {
             bail!("selected file does not match this book");
         }
-        let verify_path = replacement.clone();
-        let current_fingerprint =
-            tokio::task::spawn_blocking(move || file_fingerprint(&verify_path))
-                .await
-                .context("replacement verification task failed")??;
-        if current_fingerprint != fingerprint {
-            bail!("selected file changed during relink");
-        }
         let replacement_str = canonical_path_key(&replacement);
         self.update_location(
             book.id,
@@ -955,7 +957,10 @@ impl Library {
             &replacement_str,
             StorageKind::Referenced,
             Some(&replacement_str),
-            &fingerprint,
+            LocationIdentity {
+                fingerprint: &fingerprint,
+                verify_path: Some(&replacement),
+            },
         )
         .await?;
         self.get(book.id)
@@ -1600,9 +1605,17 @@ impl Library {
         new_path: &str,
         storage_kind: StorageKind,
         original_path: Option<&str>,
-        fingerprint: &FileFingerprint,
+        identity: LocationIdentity<'_>,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(verify_path) = identity.verify_path {
+            verify_path_fingerprint(
+                verify_path.to_owned(),
+                identity.fingerprint,
+                "location update",
+            )
+            .await?;
+        }
         sqlx::query(
             "UPDATE books SET file_path = ?, storage_kind = ?, original_path = ?,
                               content_hash = ?, file_size = ? WHERE id = ?",
@@ -1610,8 +1623,8 @@ impl Library {
         .bind(new_path)
         .bind(storage_kind.as_str())
         .bind(original_path)
-        .bind(&fingerprint.hash)
-        .bind(fingerprint.size as i64)
+        .bind(&identity.fingerprint.hash)
+        .bind(identity.fingerprint.size as i64)
         .bind(book_id)
         .execute(&mut *transaction)
         .await
@@ -1855,8 +1868,36 @@ fn file_fingerprint(path: &Path) -> Result<FileFingerprint> {
     file_fingerprint_cancellable(path, None)
 }
 
+async fn verify_path_fingerprint(
+    path: PathBuf,
+    expected: &FileFingerprint,
+    operation: &str,
+) -> Result<()> {
+    let display = path.display().to_string();
+    let actual = tokio::task::spawn_blocking(move || file_fingerprint(&path))
+        .await
+        .with_context(|| format!("{operation} verification task failed"))??;
+    if &actual != expected {
+        bail!("file changed during {operation}: {display}");
+    }
+    Ok(())
+}
+
 fn file_fingerprint_cancellable(
     path: &Path,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<FileFingerprint> {
+    let max_input_bytes = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(BookFormat::from_extension)
+        .map(BookFormat::max_input_bytes);
+    file_fingerprint_with_limit(path, max_input_bytes, cancellation)
+}
+
+fn file_fingerprint_with_limit(
+    path: &Path,
+    max_input_bytes: Option<u64>,
     cancellation: Option<&ImportCancellation>,
 ) -> Result<FileFingerprint> {
     if cancellation.is_some_and(ImportCancellation::is_cancelled) {
@@ -1868,17 +1909,10 @@ fn file_fingerprint_cancellable(
     // can be replaced between metadata and open.
     let before = file.metadata()?;
     let file_size = before.len();
-    if let Some(format) = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .and_then(BookFormat::from_extension)
-        && file_size > format.max_input_bytes()
+    if let Some(max_input_bytes) = max_input_bytes
+        && file_size > max_input_bytes
     {
-        bail!(
-            "{} input is larger than {} bytes",
-            format,
-            format.max_input_bytes()
-        );
+        bail!("book input is larger than {max_input_bytes} bytes");
     }
     let fingerprint = fingerprint_reader(
         std::io::Read::take(&mut file, file_size.saturating_add(1)),
@@ -2257,32 +2291,39 @@ fn stage_managed_file(
         .create_new(true)
         .open(&path)
         .context("failed to create managed book staging file")?;
-    let result = (|| -> std::io::Result<()> {
-        let mut copied = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            if cancellation.is_some_and(ImportCancellation::is_cancelled) {
-                return Err(std::io::Error::other("managed preparation cancelled"));
-            }
-            let remaining = max_input_bytes.saturating_add(1).saturating_sub(copied);
-            let read =
-                std::io::Read::read(&mut std::io::Read::take(&mut input, remaining), &mut buffer)?;
-            if read == 0 {
-                break;
-            }
-            output.write_all(&buffer[..read])?;
-            copied = copied.saturating_add(read as u64);
-            if copied > max_input_bytes {
-                return Err(std::io::Error::other("book exceeds its input byte limit"));
-            }
-        }
-        output.flush().and_then(|_| output.sync_all())
-    })();
+    let result = copy_managed_file(&mut input, &mut output, max_input_bytes, cancellation)
+        .and_then(|_| output.flush().and_then(|_| output.sync_all()));
     if let Err(error) = result {
         let _ = std::fs::remove_file(&path);
         return Err(error).context("failed to stage managed book");
     }
     Ok(ManagedStage { path })
+}
+
+fn copy_managed_file(
+    mut input: impl std::io::Read,
+    mut output: impl std::io::Write,
+    max_input_bytes: u64,
+    cancellation: Option<&ImportCancellation>,
+) -> std::io::Result<()> {
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return Err(std::io::Error::other("managed preparation cancelled"));
+        }
+        let remaining = max_input_bytes.saturating_add(1).saturating_sub(copied);
+        let read =
+            std::io::Read::read(&mut std::io::Read::take(&mut input, remaining), &mut buffer)?;
+        if read == 0 {
+            return Ok(());
+        }
+        output.write_all(&buffer[..read])?;
+        copied = copied.saturating_add(read as u64);
+        if copied > max_input_bytes {
+            return Err(std::io::Error::other("book exceeds its input byte limit"));
+        }
+    }
 }
 
 fn publish_managed_file(stage: &Path, destination: &Path, expected_hash: &str) -> Result<()> {
@@ -2355,7 +2396,7 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
     let mut after_id = i64::MIN;
     loop {
         let rows = sqlx::query(
-            "SELECT id, file_path FROM books
+            "SELECT id, file_path, format FROM books
              WHERE content_hash IS NULL AND id > ? ORDER BY id LIMIT ?",
         )
         .bind(after_id)
@@ -2370,12 +2411,20 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
             let id: i64 = row.get("id");
             after_id = id;
             let file_path: String = row.get("file_path");
+            let Some(format) = BookFormat::from_db(&row.get::<String, _>("format")) else {
+                eprintln!("warning: legacy book {file_path} has an unsupported format");
+                continue;
+            };
             let path = path_from_key(&file_path);
             if !path.is_file() {
                 continue;
             }
-            let fingerprint = match tokio::task::spawn_blocking(move || file_fingerprint(&path))
-                .await
+            let _work_permit = acquire_import_work(None).await?;
+            let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+            let fingerprint = match tokio::task::spawn_blocking(move || {
+                file_fingerprint_with_limit(&path, Some(format.max_input_bytes()), None)
+            })
+            .await
             {
                 Ok(Ok(fingerprint)) => fingerprint,
                 Ok(Err(error)) => {
@@ -2395,9 +2444,10 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
             .bind(fingerprint.size as i64)
             .bind(id)
             .bind(file_path)
-            .execute(pool)
+            .execute(&mut *transaction)
             .await
             .context("failed to save legacy book fingerprint")?;
+            transaction.commit().await?;
         }
         tokio::task::yield_now().await;
     }
@@ -2523,6 +2573,21 @@ mod tests {
         };
 
         assert!(error.to_string().contains("discovery cancelled"));
+    }
+
+    #[test]
+    fn managed_copy_stops_after_mid_stream_cancellation() {
+        let cancellation = ImportCancellation::default();
+        let reader = CancellingReader {
+            cancellation: cancellation.clone(),
+            reads: 0,
+        };
+        let mut output = Vec::new();
+
+        let error = copy_managed_file(reader, &mut output, 1024, Some(&cancellation)).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(output.len(), 1);
     }
 
     #[test]
@@ -2816,6 +2881,47 @@ mod tests {
             .acquire_many_owned(IMPORT_WORK_CONCURRENCY as u32)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn successful_managed_commit_releases_retained_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::reading_state::ReadingStateStore::open_at_async(
+            &directory.path().join("state.db"),
+        )
+        .await
+        .unwrap();
+        let library = Library::new(store.pool().clone(), directory.path().join("managed"));
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let prepared = library
+            .prepare_managed_file(&source, None, None)
+            .await
+            .unwrap();
+
+        library
+            .commit_prepared_managed_file(&prepared)
+            .await
+            .unwrap();
+        let duplicate = library
+            .prepare_managed_file(&source, None, None)
+            .await
+            .unwrap();
+        library
+            .commit_prepared_managed_file(&duplicate)
+            .await
+            .unwrap();
+
+        let _all_permits = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            import_work_admission()
+                .clone()
+                .acquire_many_owned(IMPORT_WORK_CONCURRENCY as u32),
+        )
+        .await
+        .expect("a committed preparation must release its admission")
+        .unwrap();
+        drop(duplicate);
+        drop(prepared);
     }
 
     #[test]

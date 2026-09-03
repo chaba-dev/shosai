@@ -452,6 +452,32 @@ async fn legacy_fingerprint_backfill_processes_multiple_bounded_pages() {
 }
 
 #[tokio::test]
+async fn legacy_fingerprint_backfill_uses_the_stored_format_limit() {
+    let (store, dir) = temp_store().await;
+    let path = dir.path().join("legacy-without-supported-extension.bin");
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(shosai_core::epub::EpubLimits::default().max_input_bytes + 1)
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Legacy', 'epub', ?, NULL)",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    store.backfill_missing_fingerprints().await.unwrap();
+
+    let fingerprint: Option<String> = sqlx::query_scalar("SELECT content_hash FROM books")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(fingerprint, None);
+}
+
+#[tokio::test]
 async fn stable_save_replaces_a_path_only_alias() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/relinked.epub");
