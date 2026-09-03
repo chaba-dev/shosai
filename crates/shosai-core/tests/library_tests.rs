@@ -4,6 +4,7 @@ use shosai_core::library::{
     MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
+use shosai_core::{application::DeviceFileLocator, application::OpenDocument, path_from_key};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -53,6 +54,43 @@ async fn test_import_duplicate_returns_existing() {
     let book1 = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     let book2 = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     assert_eq!(book1.id, book2.id);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let (lib, _, dir) = temp_library().await;
+    let first = dir
+        .path()
+        .join(OsString::from_vec(b"book-\x80.epub".to_vec()));
+    let second = dir
+        .path()
+        .join(OsString::from_vec(b"book-\x81.epub".to_vec()));
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+
+    let first_book = lib.import_file(&first).await.unwrap();
+    let second_book = lib.import_file(&second).await.unwrap();
+
+    assert_ne!(first_book.id, second_book.id);
+    assert_ne!(first_book.file_path, second_book.file_path);
+    assert_eq!(
+        path_from_key(&first_book.file_path),
+        first.canonicalize().unwrap()
+    );
+    assert_eq!(
+        path_from_key(&second_book.file_path),
+        second.canonicalize().unwrap()
+    );
+    for book in lib.list_all().await.unwrap() {
+        OpenDocument::open(&DeviceFileLocator::from_path(path_from_key(
+            &book.file_path,
+        )))
+        .unwrap();
+    }
 }
 
 #[tokio::test]

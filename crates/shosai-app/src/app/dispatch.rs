@@ -978,7 +978,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.book_menu = None;
             state.pending_remove_book = None;
-            let path = PathBuf::from(file_path);
+            let path = shosai_core::path_from_key(&file_path);
             if !path.exists() {
                 state.screen = Screen::Reader;
                 state.open_error = Some(AppError::MissingBook);

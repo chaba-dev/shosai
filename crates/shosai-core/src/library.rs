@@ -19,6 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::cbz::CbzDoc;
 use crate::document::Document;
 use crate::epub::EpubDoc;
+use crate::path_key::{canonical_path_key, path_from_key};
 use crate::pdf::PdfDoc;
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
@@ -338,7 +339,7 @@ impl Library {
 
         for row in rows {
             let book_id = row.get::<i64, _>("id");
-            let old_path = PathBuf::from(row.get::<String, _>("file_path"));
+            let old_path = path_from_key(&row.get::<String, _>("file_path"));
             let expected_hash = row.get::<Option<String>, _>("content_hash");
             let extension = old_path
                 .extension()
@@ -385,10 +386,10 @@ impl Library {
         let database_result = async {
             let mut transaction = self.pool.begin().await?;
             for change in &changes {
-                let old_path = change.old_path.to_string_lossy();
-                let new_path = change.new_path.to_string_lossy();
+                let old_path = canonical_path_key(&change.old_path);
+                let new_path = canonical_path_key(&change.new_path);
                 sqlx::query("UPDATE books SET file_path = ? WHERE id = ?")
-                    .bind(new_path.as_ref())
+                    .bind(&new_path)
                     .bind(change.book_id)
                     .execute(&mut *transaction)
                     .await
@@ -396,8 +397,8 @@ impl Library {
                 reconcile_identity(
                     &mut transaction,
                     change.book_id,
-                    old_path.as_ref(),
-                    new_path.as_ref(),
+                    &old_path,
+                    &new_path,
                 )
                 .await?;
             }
@@ -456,7 +457,7 @@ impl Library {
     ) -> Result<Book> {
         // Normalize paths so lookups and progress updates stay consistent.
         let path = canonical_path(path);
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = canonical_path_key(&path);
 
         let initial_fingerprint = if let Some(expected_hash) = expected_hash {
             let fingerprint_path = path.clone();
@@ -556,7 +557,7 @@ impl Library {
         expected_hash: Option<&str>,
     ) -> Result<PreparedManagedImport> {
         let source = canonical_path(source);
-        let source_str = source.to_string_lossy().to_string();
+        let source_str = canonical_path_key(&source);
         let ext = source
             .extension()
             .map(|value| value.to_string_lossy().to_lowercase())
@@ -618,7 +619,7 @@ impl Library {
         .await
         .context("managed book publication task failed")??;
         let destination = canonical_path(&destination);
-        let destination_str = destination.to_string_lossy().to_string();
+        let destination_str = canonical_path_key(&destination);
         let existing_hash = self.get_by_hash(&inspection.fingerprint.hash).await?;
 
         if let Some(existing) = &existing_hash
@@ -698,7 +699,7 @@ impl Library {
         if expected != &fingerprint.hash {
             bail!("selected file does not match this book");
         }
-        let replacement_str = replacement.to_string_lossy().to_string();
+        let replacement_str = canonical_path_key(&replacement);
         self.update_location(
             book.id,
             &book.file_path,
@@ -1243,7 +1244,7 @@ impl Library {
     pub async fn update_progress_by_path(&self, path: &Path, progress: f64) -> Result<()> {
         // Use canonical paths so the reader and library always converge on one row.
         let progress = progress.clamp(0.0, 1.0);
-        let key = canonical_path(path).to_string_lossy().to_string();
+        let key = canonical_path_key(path);
 
         sqlx::query(
             "UPDATE books SET progress = ?, last_read = datetime('now') WHERE file_path = ?",
@@ -1373,7 +1374,7 @@ impl Library {
         if remaining != 0 {
             return;
         }
-        let path = PathBuf::from(file_path);
+        let path = path_from_key(file_path);
         let Ok(managed_dir) = self.managed_dir.canonicalize() else {
             return;
         };
@@ -1946,7 +1947,7 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
     for row in rows {
         let id: i64 = row.get("id");
         let file_path: String = row.get("file_path");
-        let path = PathBuf::from(&file_path);
+        let path = path_from_key(&file_path);
         if !path.is_file() {
             continue;
         }

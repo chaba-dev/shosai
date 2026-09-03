@@ -1359,17 +1359,20 @@ fn save_active_tab(state: &mut State) {
 
 fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) {
     for change in changes {
+        let path_key = DeviceFileLocator::from_path(&change.new_path)
+            .local_id()
+            .to_owned();
         if state.book_id == Some(change.book_id) {
             state.file_path = Some(change.new_path.clone());
             for bookmark in &mut state.bookmarks {
-                bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+                bookmark.file_path = path_key.clone();
             }
         }
         for tab in &mut state.tabs {
             if tab.session.book_id == Some(change.book_id) {
                 tab.session.locator = DeviceFileLocator::from_path(&change.new_path);
                 for bookmark in &mut tab.bookmarks {
-                    bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+                    bookmark.file_path = path_key.clone();
                 }
             }
         }
@@ -1378,7 +1381,7 @@ fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) 
             .iter_mut()
             .find(|book| book.id == change.book_id)
         {
-            book.file_path = change.new_path.to_string_lossy().into_owned();
+            book.file_path = path_key;
         }
     }
 }
