@@ -439,12 +439,19 @@ impl Library {
             for change in &changes {
                 let old_path = canonical_path_key(&change.old_path);
                 let new_path = canonical_path_key(&change.new_path);
-                sqlx::query("UPDATE books SET file_path = ? WHERE id = ?")
+                let result = sqlx::query(
+                    "UPDATE books SET file_path = ?
+                     WHERE id = ? AND file_path = ? AND storage_kind = 'managed'",
+                )
                     .bind(&new_path)
                     .bind(change.book_id)
+                    .bind(&old_path)
                     .execute(&mut *transaction)
                     .await
                     .context("failed to update managed book path")?;
+                if result.rows_affected() != 1 {
+                    bail!("managed book changed during relocation: {}", change.book_id);
+                }
                 reconcile_identity(
                     &mut transaction,
                     change.book_id,
@@ -775,6 +782,7 @@ impl Library {
 
     /// Relink a missing referenced book while preserving its stable identity and reader data.
     pub async fn relink(&self, book_id: i64, replacement: &Path) -> Result<Book> {
+        let _storage_guard = managed_storage_lock().lock().await;
         let book = self
             .get(book_id)
             .await?
