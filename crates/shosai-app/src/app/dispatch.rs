@@ -1800,8 +1800,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             complete,
             pages,
         } => {
+            let job = EpubJob {
+                tab_id,
+                generation,
+                layout_key,
+            };
+            if !state.epub_jobs.contains(&job) {
+                return Task::none();
+            }
             if complete {
-                state.epub_workers_in_flight = state.epub_workers_in_flight.saturating_sub(1);
+                state.epub_jobs.remove(&job);
             }
             let active = state.active_tab_id == Some(tab_id);
             let accepts_active_layout = active
@@ -1863,7 +1871,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return refresh_content(state);
             }
             if complete
-                && state.epub_workers_in_flight == 0
+                && state.epub_jobs.is_empty()
                 && matches!(state.document, Some(OpenDocument::Epub(_)))
                 && state.epub_layout_pending.is_none()
                 && state.epub_layout_requested.is_some()
@@ -1928,7 +1936,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             key,
             result,
         } => {
-            state.raster_workers_in_flight = state.raster_workers_in_flight.saturating_sub(1);
+            let job = RasterJob::Paginated {
+                tab_id,
+                generation,
+                key: key.clone(),
+            };
+            if !state.raster_jobs.remove(&job) {
+                return Task::none();
+            }
             let active = state.active_tab_id == Some(tab_id);
             let was_pending = if active {
                 state
@@ -1974,14 +1989,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if request_was_superseded {
                 return refresh_content(state);
             }
-            if state.paginated_pending.is_empty()
-                && state
-                    .paginated_requested
-                    .iter()
-                    .any(|requested| !is_page_cached(state, requested))
-            {
-                return refresh_content(state);
-            }
+            return pump_raster_queue(state);
         }
 
         Message::ContinuousPageRendered {
@@ -1990,14 +1998,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             page,
             result,
         } => {
-            state.raster_workers_in_flight = state.raster_workers_in_flight.saturating_sub(1);
+            let job = RasterJob::Continuous {
+                tab_id,
+                request,
+                page,
+            };
+            if !state.raster_jobs.remove(&job) {
+                return Task::none();
+            }
             if state.active_tab_id != Some(tab_id) {
                 if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                     && tab.continuous_pending.get(&page) == Some(&request)
                 {
                     tab.continuous_pending.remove(&page);
                 }
-                return reconcile_continuous_rasters(state);
+                return pump_raster_queue(state);
             }
             if state.active_tab_id == Some(tab_id) {
                 if state.continuous_pending.get(&page) != Some(&request) {
@@ -2045,8 +2060,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::RenderContinuousPage { tab_id, page } => {
+            if state.active_tab_id != Some(tab_id) {
+                if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                    tab.continuous_pending.remove(&page);
+                }
+                return Task::none();
+            }
             if state.reading_mode != ReadingMode::Continuous
-                || state.active_tab_id != Some(tab_id)
                 || page >= state.continuous_pages.len()
                 || state.continuous_pages[page].is_some()
                 || !state.continuous_pending.contains_key(&page)
@@ -2056,11 +2076,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(request) = state.continuous_pending.get(&page).copied() else {
                 return Task::none();
             };
-            if state.raster_workers_in_flight >= RASTER_RENDER_WORKERS {
+            if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
                 state.continuous_pending.remove(&page);
                 return Task::none();
             }
-            state.raster_workers_in_flight += 1;
+            let job = RasterJob::Continuous {
+                tab_id,
+                request,
+                page,
+            };
+            state.raster_jobs.insert(job.clone());
             let scale = raster_render_scale(state, state.zoom.scale());
             match &state.document {
                 Some(OpenDocument::Pdf(doc)) => {
@@ -2077,8 +2102,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     });
                 }
                 _ => {
-                    state.raster_workers_in_flight =
-                        state.raster_workers_in_flight.saturating_sub(1);
+                    state.raster_jobs.remove(&job);
                 }
             }
         }
