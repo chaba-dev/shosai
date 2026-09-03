@@ -26,6 +26,31 @@ pub const STORAGE_PROFILE_MARKER_FILE: &str = ".shosai-storage-profile";
 pub const DEVELOPMENT_STORAGE_PROFILE: &str = "shosai-development-v1";
 const DB_FILE: &str = "shosai.db";
 
+/// Storage locations supplied by the platform host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationDataPaths {
+    pub data_directory: PathBuf,
+    pub database: PathBuf,
+    pub managed_books: PathBuf,
+}
+
+impl ApplicationDataPaths {
+    pub fn new(data_directory: impl Into<PathBuf>) -> Self {
+        let data_directory = data_directory.into();
+        Self {
+            database: data_directory.join(DB_FILE),
+            managed_books: data_directory.join("books"),
+            data_directory,
+        }
+    }
+
+    /// Resolve legacy desktop defaults. Platform hosts should normally inject
+    /// their application-support directory with [`Self::new`].
+    pub fn desktop_default() -> Result<Self> {
+        Ok(Self::new(data_dir()?.join(app_data_directory_name())))
+    }
+}
+
 fn select_development_profile(runtime: Option<&str>, compiled: Option<&str>, debug: bool) -> bool {
     match runtime {
         Some("1") => true,
@@ -183,16 +208,23 @@ impl ReadingStateStore {
 
     /// Async: open at default platform path.
     pub async fn open_async() -> Result<Self> {
-        let path = db_file_path()?;
+        let paths = ApplicationDataPaths::desktop_default()?;
+        let path = paths.database;
         if is_development_profile() {
             prepare_development_data_directory(path.parent().context("database has no parent")?)?;
         }
         Self::open_at_async(&path).await
     }
 
+    /// Open storage in a platform-provided application data directory.
+    pub async fn open_in_data_directory_async(data_directory: &Path) -> Result<Self> {
+        Self::open_at_async(&ApplicationDataPaths::new(data_directory).database).await
+    }
+
     /// Open the default store without waiting for legacy book fingerprints to be backfilled.
     pub async fn open_async_deferred_backfill() -> Result<Self> {
-        let path = db_file_path()?;
+        let paths = ApplicationDataPaths::desktop_default()?;
+        let path = paths.database;
         if is_development_profile() {
             prepare_development_data_directory(path.parent().context("database has no parent")?)?;
         }
@@ -472,12 +504,6 @@ fn canonical_key(path: &Path) -> String {
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .to_string()
-}
-
-/// Get the path to the database file.
-fn db_file_path() -> Result<PathBuf> {
-    let data_dir = data_dir()?;
-    Ok(data_dir.join(app_data_directory_name()).join(DB_FILE))
 }
 
 /// Get the platform-specific data directory.

@@ -1,5 +1,10 @@
 extern crate self as shosai_core;
 
+#[cfg(target_arch = "wasm32")]
+compile_error!(
+    "shosai-core currently requires native SQLite and PDFium; use the future web adapter instead"
+);
+
 pub mod annotations;
 pub mod application;
 pub mod bookmarks;
