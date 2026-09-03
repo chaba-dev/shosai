@@ -318,7 +318,10 @@ impl ReadingStateStore {
     /// Async: set the reading state for a file.
     pub async fn set_async(&self, file_path: &Path, state: &FileReadingState) -> Result<()> {
         let key = canonical_key(file_path);
+        self.set_key_async(&key, state).await
+    }
 
+    pub(crate) async fn set_key_async(&self, key: &str, state: &FileReadingState) -> Result<()> {
         sqlx::query(
             "INSERT INTO reading_state (file_path, page, location_offset, zoom, updated_at)
              VALUES (?, ?, ?, ?, datetime('now'))
@@ -328,7 +331,7 @@ impl ReadingStateStore {
                 zoom = excluded.zoom,
                 updated_at = excluded.updated_at",
         )
-        .bind(&key)
+        .bind(key)
         .bind(state.page as i64)
         .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
@@ -389,6 +392,40 @@ impl ReadingStateStore {
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state for book")?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn set_for_book_current_path_async(
+        &self,
+        book_id: i64,
+        state: &FileReadingState,
+    ) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        let key: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
+            .bind(book_id)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to resolve current book path for reading state")?;
+        sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
+            .bind(book_id)
+            .bind(&key)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to reconcile reading state aliases")?;
+        sqlx::query(
+            "INSERT INTO reading_state
+                (file_path, book_id, page, location_offset, zoom, updated_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+        )
+        .bind(&key)
+        .bind(book_id)
+        .bind(state.page as i64)
+        .bind(state.location_offset.map(|offset| offset as i64))
+        .bind(state.zoom as f64)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to save reading state for current book path")?;
         transaction.commit().await?;
         Ok(())
     }

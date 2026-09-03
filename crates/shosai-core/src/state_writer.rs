@@ -72,12 +72,19 @@ enum WriteKey {
 struct PreparedMessage {
     message: StateWriterMessage,
     key: Option<WriteKey>,
+    normalized_path: Option<String>,
     byte_len: usize,
+}
+
+#[derive(Debug)]
+struct PendingSave {
+    save: StateSave,
+    normalized_path: String,
 }
 
 #[derive(Debug, Default)]
 struct Pending {
-    saves: HashMap<SaveKey, StateSave>,
+    saves: HashMap<SaveKey, PendingSave>,
     progress: HashMap<i64, f64>,
     preferences: HashMap<String, String>,
     flushes: Vec<oneshot::Sender<Result<(), PersistError>>>,
@@ -90,7 +97,15 @@ impl Pending {
                 let Some(WriteKey::Save(key)) = prepared.key else {
                     unreachable!("prepared save must have a save key");
                 };
-                self.saves.insert(key, save);
+                self.saves.insert(
+                    key,
+                    PendingSave {
+                        save,
+                        normalized_path: prepared
+                            .normalized_path
+                            .expect("prepared save must have a normalized path"),
+                    },
+                );
             }
             StateWriterMessage::Progress {
                 book_id,
@@ -408,6 +423,7 @@ fn prepare_message_with(
             Ok(PreparedMessage {
                 key: Some(WriteKey::Preference(key.clone())),
                 message: StateWriterMessage::Preference(key, value),
+                normalized_path: None,
                 byte_len,
             })
         }
@@ -421,23 +437,26 @@ fn prepare_message_with(
                 .checked_mul(if save.book_id.is_some() { 1 } else { 3 })
                 .ok_or(StateWriterSendError::Full)?;
             let key = save.book_id.map_or_else(
-                || WriteKey::Save(SaveKey::Path(path)),
+                || WriteKey::Save(SaveKey::Path(path.clone())),
                 |book_id| WriteKey::Save(SaveKey::Book(book_id)),
             );
             Ok(PreparedMessage {
                 message: StateWriterMessage::Save(save),
                 key: Some(key),
+                normalized_path: Some(path),
                 byte_len,
             })
         }
         StateWriterMessage::Progress { book_id, progress } => Ok(PreparedMessage {
             message: StateWriterMessage::Progress { book_id, progress },
             key: Some(WriteKey::Progress(book_id)),
+            normalized_path: None,
             byte_len: 0,
         }),
         StateWriterMessage::Flush(flush) => Ok(PreparedMessage {
             message: StateWriterMessage::Flush(flush),
             key: None,
+            normalized_path: None,
             byte_len: 0,
         }),
     }
@@ -458,17 +477,19 @@ async fn persist_batch(
 ) -> (Pending, Option<PersistError>) {
     let mut failed = Pending::default();
     let mut errors = Vec::new();
-    for (key, save) in batch.saves.drain() {
-        let result = if let Some(book_id) = save.book_id {
+    for (key, pending) in batch.saves.drain() {
+        let result = if let Some(book_id) = pending.save.book_id {
             store
-                .set_for_book_async(book_id, &save.path, &save.reading)
+                .set_for_book_current_path_async(book_id, &pending.save.reading)
                 .await
         } else {
-            store.set_async(&save.path, &save.reading).await
+            store
+                .set_key_async(&pending.normalized_path, &pending.save.reading)
+                .await
         };
         if let Err(error) = result {
             errors.push(format!("reading state: {error:#}"));
-            failed.saves.insert(key, save);
+            failed.saves.insert(key, pending);
         }
     }
     for (book_id, progress) in batch.progress.drain() {
@@ -513,10 +534,10 @@ mod tests {
 
         assert_eq!(state.pending.saves.len(), 1);
         assert_eq!(
-            state.pending.saves[&SaveKey::Book(7)].path,
+            state.pending.saves[&SaveKey::Book(7)].save.path,
             PathBuf::from("new.epub")
         );
-        assert_eq!(state.pending.saves[&SaveKey::Book(7)].reading.page, 2);
+        assert_eq!(state.pending.saves[&SaveKey::Book(7)].save.reading.page, 2);
     }
 
     #[test]
@@ -664,7 +685,18 @@ mod tests {
         }
 
         assert_eq!(state.pending.saves.len(), 1);
-        assert_eq!(state.pending.saves.values().next().unwrap().reading.page, 2);
+        assert_eq!(
+            state
+                .pending
+                .saves
+                .values()
+                .next()
+                .unwrap()
+                .save
+                .reading
+                .page,
+            2
+        );
     }
 
     #[test]
@@ -695,6 +727,10 @@ mod tests {
                 .pending
                 .saves
                 .contains_key(&SaveKey::Path("normalized-1".to_owned()))
+        );
+        assert_eq!(
+            state.pending.saves.values().next().unwrap().normalized_path,
+            "normalized-1"
         );
         assert!(
             state
@@ -892,5 +928,90 @@ mod tests {
             }),
             Err(StateWriterSendError::Stopped)
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn untracked_save_persists_the_path_identity_prepared_at_admission() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.epub");
+        let second = directory.path().join("second.epub");
+        let alias = directory.path().join("current.epub");
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(&second, b"second").unwrap();
+        symlink(&first, &alias).unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: alias.clone(),
+                reading: FileReadingState {
+                    page: 7,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (batch, _) = writer_state.take_batch();
+        std::fs::remove_file(&alias).unwrap();
+        symlink(&second, &alias).unwrap();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        assert_eq!(store.get_async(&first).await.unwrap().page, 7);
+        assert!(store.get_async(&second).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn tracked_save_uses_the_current_library_path_at_persistence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        let relocated = directory.path().join("relocated.epub");
+        std::fs::copy(&source, &relocated).unwrap();
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: Some(book.id),
+                path: source,
+                reading: FileReadingState {
+                    page: 9,
+                    location_offset: Some(3),
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (batch, _) = writer_state.take_batch();
+        let relocated_key = canonical_path_key(&relocated);
+        sqlx::query("UPDATE books SET file_path = ? WHERE id = ?")
+            .bind(&relocated_key)
+            .bind(book.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        let row: (String, i64) =
+            sqlx::query_as("SELECT file_path, page FROM reading_state WHERE book_id = ?")
+                .bind(book.id)
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(row, (relocated_key, 9));
     }
 }

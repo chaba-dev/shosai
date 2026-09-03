@@ -1389,14 +1389,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 async move {
                     if let Some(saves) = saves {
                         let (flushed, wait) = oneshot::channel();
-                        if saves
+                        saves
                             .send(ReadingStateWriterMessage::Flush(flushed))
-                            .is_ok()
-                        {
-                            wait.await
-                                .map_err(|_| "state writer stopped before relocation".to_owned())?
-                                .map_err(|error| error.to_string())?;
-                        }
+                            .map_err(|error| error.to_string())?;
+                        wait.await
+                            .map_err(|_| "state writer stopped before relocation".to_owned())?
+                            .map_err(|error| error.to_string())?;
                     }
                     shosai_core::reading_state::prepare_managed_library_directory(
                         &relocation_destination,
