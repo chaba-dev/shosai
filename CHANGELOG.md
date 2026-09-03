@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-02
+## [0.1.0] - 2026-09-03
 
 ### 🚀 Features
 
@@ -30,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - *(app)* Add guided imports and settings (#68)
 - *(app)* Add staged book imports (#69)
 - *(reader)* Prove cross-format selection contracts (#75)
+- *(core)* Prepare annotation core for Flutter migration (#76)
 
 ### 🐛 Bug Fixes
 
