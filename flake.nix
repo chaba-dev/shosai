@@ -23,7 +23,10 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true;
+          config = {
+            allowUnfree = true;
+            android_sdk.accept_license = true;
+          };
           overlays = [ rust-overlay.overlays.default ];
         };
 
@@ -36,6 +39,18 @@
           ];
         };
 
+        developmentRustToolchain = rustToolchain.override {
+          targets = [
+            "aarch64-linux-android"
+            "armv7-linux-androideabi"
+            "x86_64-linux-android"
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            "aarch64-apple-ios"
+            "aarch64-apple-ios-sim"
+            "x86_64-apple-ios"
+          ];
+        };
+
         rustPlatform = pkgs.makeRustPlatform {
           cargo = rustToolchain;
           rustc = rustToolchain;
@@ -43,11 +58,28 @@
 
         workspacePackage = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
 
+        androidSdk = (pkgs.androidenv.composeAndroidPackages {
+          platformVersions = [ "36" ];
+          buildToolsVersions = [ "36.0.0" ];
+          includeNDK = true;
+          ndkVersion = "28.2.13676358";
+        }).androidsdk;
+
+        androidJdk = pkgs.jdk17;
+
+        hostXcrun = pkgs.writeShellScriptBin "xcrun" ''
+          exec /usr/bin/xcrun "$@"
+        '';
+
         # Common dependencies across all platforms
         commonDeps = with pkgs; [
-          rustToolchain
+          developmentRustToolchain
 
           # tools
+          androidJdk
+          androidSdk
+          cargo-ndk
+          flutter
           git-cliff
           jujutsu
           hugo
@@ -70,6 +102,10 @@
         linuxDeps =
           with pkgs;
           pkgs.lib.optionals pkgs.stdenv.isLinux [
+            # Flutter Linux desktop build deps
+            gtk3
+            ninja
+
             # GUI deps (iced / wgpu)
             libxkbcommon
             wayland
@@ -98,6 +134,13 @@
             libiconv
             # macOS system frameworks are automatically available
             # iced uses Metal and native APIs which are built into macOS
+          ];
+
+        macosDevDeps =
+          with pkgs;
+          pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            cocoapods
+            hostXcrun
           ];
 
         # Windows-specific dependencies (when cross-compiling or running on Windows)
@@ -221,10 +264,16 @@
 
         devShells.default = pkgs.mkShell (
           {
-            nativeBuildInputs = commonDeps ++ linuxDeps ++ macosDeps ++ windowsDeps;
+            nativeBuildInputs = commonDeps ++ linuxDeps ++ macosDeps ++ macosDevDeps ++ windowsDeps;
 
             # Common environment variables
-            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+            ANDROID_HOME = "${androidSdk}/libexec/android-sdk";
+            ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";
+            ANDROID_NDK_HOME = "${androidSdk}/libexec/android-sdk/ndk-bundle";
+            ANDROID_NDK_ROOT = "${androidSdk}/libexec/android-sdk/ndk-bundle";
+            JAVA_HOME = androidJdk.home;
+            GRADLE_OPTS = "-Dorg.gradle.project.android.aapt2FromMavenOverride=${androidSdk}/libexec/android-sdk/build-tools/36.0.0/aapt2";
+            RUST_SRC_PATH = "${developmentRustToolchain}/lib/rustlib/src/rust/library";
           }
           // (pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             # Linux: LD_LIBRARY_PATH for shared libraries
@@ -257,8 +306,9 @@
             CC_aarch64_apple_darwin = "/usr/bin/clang";
             CXX_aarch64_apple_darwin = "/usr/bin/clang++";
             shellHook = ''
-              export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-              export SDKROOT="$DEVELOPER_DIR/SDKs/MacOSX.sdk"
+              export DEVELOPER_DIR="$(env -u DEVELOPER_DIR /usr/bin/xcode-select --print-path)"
+              export SDKROOT="$(/usr/bin/xcrun --sdk macosx --show-sdk-path)"
+              export PATH="${hostXcrun}/bin:$PATH"
               export MACOSX_DEPLOYMENT_TARGET=13.0
             '';
           })
