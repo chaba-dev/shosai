@@ -1920,12 +1920,27 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::CbzDimensionsLoaded {
             tab_id,
             generation,
+            page,
             result,
         } => {
-            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+            if state
+                .cbz_dimension_jobs
+                .remove(&CbzDimensionJob {
+                    tab_id,
+                    generation,
+                    page,
+                })
+                .is_none()
+            {
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id) {
                 match result {
                     Ok(()) => return refresh_content(state),
-                    Err(error) => state.error = Some(AppError::Render(error)),
+                    Err(error) if generation == state.render_generation => {
+                        state.error = Some(AppError::Render(error));
+                    }
+                    Err(_) => return refresh_content(state),
                 }
             }
         }

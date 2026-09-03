@@ -377,6 +377,7 @@ const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const RASTER_RENDER_WORKERS: usize = 2;
+const CBZ_DIMENSION_WORKERS: usize = 1;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -693,6 +694,13 @@ struct EpubJob {
     layout_key: EpubLayoutKey,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CbzDimensionJob {
+    tab_id: u64,
+    generation: u64,
+    page: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct InitializedState {
     store: ReadingStateStore,
@@ -764,6 +772,7 @@ pub struct State {
     next_continuous_request_id: u64,
     raster_budget: CacheBudget,
     raster_jobs: HashMap<RasterJob, CachePermit>,
+    cbz_dimension_jobs: HashMap<CbzDimensionJob, CachePermit>,
     epub_jobs: HashSet<EpubJob>,
     page_input: String,
     error: Option<AppError>,
@@ -921,6 +930,7 @@ pub fn boot() -> (State, Task<Message>) {
         next_continuous_request_id: 1,
         raster_budget: CacheBudget::new(PAGE_CACHE_BYTE_CAPACITY),
         raster_jobs: HashMap::new(),
+        cbz_dimension_jobs: HashMap::new(),
         epub_jobs: HashSet::new(),
         page_input: String::new(),
         error: None,
@@ -2068,7 +2078,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 .any(|page| doc.cached_page_size(*page).is_none())
             {
                 state.error = None;
-                return load_cbz_dimensions_task(tab_id, generation, doc, pages);
+                return schedule_cbz_dimension(state, doc, pages);
             }
             let scale = paginated_raster_scale(state, &pages);
             state.error = None;
@@ -2123,20 +2133,46 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
-fn load_cbz_dimensions_task(
-    tab_id: u64,
-    generation: u64,
+fn schedule_cbz_dimension(
+    state: &mut State,
     document: Arc<CbzDoc>,
     pages: Vec<usize>,
 ) -> Task<Message> {
+    if state.cbz_dimension_jobs.len() >= CBZ_DIMENSION_WORKERS {
+        return Task::none();
+    }
+    let tab_id = state.active_tab_id.unwrap_or(0);
+    let generation = state.render_generation;
+    let Some(page) = pages.into_iter().find(|page| {
+        document.cached_page_size(*page).is_none()
+            && !state.cbz_dimension_jobs.contains_key(&CbzDimensionJob {
+                tab_id,
+                generation,
+                page: *page,
+            })
+    }) else {
+        return Task::none();
+    };
+    let Some(byte_len) = document.page_source_byte_len(page) else {
+        return Task::none();
+    };
+    let Some(permit) = reserve_raster_bytes(state, byte_len) else {
+        return Task::none();
+    };
+    state.cbz_dimension_jobs.insert(
+        CbzDimensionJob {
+            tab_id,
+            generation,
+            page,
+        },
+        permit,
+    );
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                for page in pages {
-                    document
-                        .page_size(page)
-                        .map_err(|error| error.to_string())?;
-                }
+                document
+                    .page_size(page)
+                    .map_err(|error| error.to_string())?;
                 Ok(())
             })
             .await
@@ -2145,6 +2181,7 @@ fn load_cbz_dimensions_task(
         move |result| Message::CbzDimensionsLoaded {
             tab_id,
             generation,
+            page,
             result,
         },
     )
@@ -2474,7 +2511,6 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
-    let available_worker_slots = RASTER_RENDER_WORKERS.saturating_sub(state.raster_jobs.len());
     let desired = prioritized_pages(
         state.continuous_visible.iter().copied(),
         state.current_page,
@@ -2490,6 +2526,17 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
         }
     }
 
+    if let Some(OpenDocument::Cbz(document)) = &state.document {
+        let document = Arc::clone(document);
+        let pages = desired.iter().copied().collect::<Vec<_>>();
+        if pages
+            .iter()
+            .any(|page| document.cached_page_size(*page).is_none())
+        {
+            return schedule_cbz_dimension(state, document, pages);
+        }
+    }
+    let available_worker_slots = RASTER_RENDER_WORKERS.saturating_sub(state.raster_jobs.len());
     let active_ready = state
         .continuous_pages
         .iter()
@@ -6714,6 +6761,28 @@ mod tests {
     }
 
     #[test]
+    fn continuous_cbz_dimensions_are_coalesced_before_raster_work() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = document.page_count();
+        state.continuous_pages = vec![None; state.total_pages];
+        state.continuous_visible.extend(0..state.total_pages);
+
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), CBZ_DIMENSION_WORKERS);
+        assert!(state.continuous_pending.is_empty());
+        assert!(state.raster_jobs.is_empty());
+    }
+
+    #[test]
     fn paginated_cbz_loads_dimensions_before_scheduling_a_render() {
         let document = Arc::new(
             CbzDoc::open(concat!(
@@ -6728,21 +6797,72 @@ mod tests {
         let dimensions = refresh_content(&mut state);
 
         assert_eq!(dimensions.units(), 1);
+        assert_eq!(refresh_content(&mut state).units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
         assert_eq!(document.cached_page_size(0), None);
         assert!(state.rendered_page.is_none());
 
-        document.page_size(0).unwrap();
-        let generation = state.render_generation;
+        let first_job = *state.cbz_dimension_jobs.keys().next().unwrap();
+        document.page_size(first_job.page).unwrap();
         let render = update(
             &mut state,
             Message::CbzDimensionsLoaded {
-                tab_id: 1,
-                generation,
+                tab_id: first_job.tab_id,
+                generation: first_job.generation,
+                page: first_job.page,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(render.units(), 1);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
+        let second_job = *state.cbz_dimension_jobs.keys().next().unwrap();
+        assert_ne!(second_job.page, first_job.page);
+        assert_eq!(document.cached_page_size(second_job.page), None);
+
+        document.page_size(second_job.page).unwrap();
+        let render = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: second_job.tab_id,
+                generation: second_job.generation,
+                page: second_job.page,
                 result: Ok(()),
             },
         );
 
         assert!(render.units() > 0);
+        assert!(state.cbz_dimension_jobs.is_empty());
+        assert!(!state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn unknown_cbz_dimension_completion_does_not_release_the_worker() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(document));
+
+        assert_eq!(refresh_content(&mut state).units(), 1);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
+        let generation = state.render_generation;
+
+        let task = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: 1,
+                generation,
+                page: 99,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
     }
 
     #[test]
@@ -7475,6 +7595,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.reading_mode = ReadingMode::Continuous;
         state.continuous_pages = vec![None];
@@ -7491,6 +7612,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.reading_mode = ReadingMode::Continuous;
         state.continuous_pages = vec![None];
@@ -7643,6 +7765,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.reading_mode = ReadingMode::Continuous;
         state.continuous_pages = vec![None];

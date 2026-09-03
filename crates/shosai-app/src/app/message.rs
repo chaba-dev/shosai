@@ -245,6 +245,7 @@ pub enum Message {
     CbzDimensionsLoaded {
         tab_id: u64,
         generation: u64,
+        page: usize,
         result: Result<(), String>,
     },
     PageRendered {

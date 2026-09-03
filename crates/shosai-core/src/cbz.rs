@@ -47,6 +47,7 @@ impl Default for CbzLimits {
 #[derive(Debug)]
 pub struct CbzDoc {
     page_paths: Vec<String>,
+    page_byte_lengths: Vec<usize>,
     data: Vec<u8>,
     title: Option<String>,
     limits: CbzLimits,
@@ -123,16 +124,18 @@ impl CbzDoc {
                     .iter()
                     .any(|known| ext.eq_ignore_ascii_case(known))
             }) {
-                page_paths.push(name.to_owned());
+                page_paths.push((name.to_owned(), usize::try_from(size).unwrap_or(usize::MAX)));
             }
         }
-        page_paths.sort_by(|a, b| natord::compare(a, b));
+        page_paths.sort_by(|a, b| natord::compare(&a.0, &b.0));
         if page_paths.is_empty() {
             anyhow::bail!("CBZ archive contains no image files");
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
+        let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
         Ok(Self {
             page_paths,
+            page_byte_lengths,
             data,
             title,
             limits,
@@ -142,6 +145,10 @@ impl CbzDoc {
 
     pub fn page_count(&self) -> usize {
         self.page_paths.len()
+    }
+
+    pub fn page_source_byte_len(&self, index: usize) -> Option<usize> {
+        self.page_byte_lengths.get(index).copied()
     }
 
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
