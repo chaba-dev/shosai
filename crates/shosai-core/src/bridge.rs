@@ -17,7 +17,9 @@ pub const MAX_BRIDGE_BUFFER_BYTES: usize = 160 * 1024 * 1024;
 pub const MAX_BRIDGE_RETAINED_BUFFER_BYTES: usize = 320 * 1024 * 1024;
 pub const MAX_BRIDGE_RENDER_WORKERS: usize = 2;
 pub const MAX_BRIDGE_OPEN_WORKERS: usize = 2;
+pub const MAX_BRIDGE_REQUESTS: usize = 64;
 pub const MAX_BRIDGE_DOCUMENTS: usize = 64;
+pub const MAX_BRIDGE_BUFFERS: usize = 256;
 pub const MAX_BRIDGE_RETAINED_DOCUMENT_BYTES: usize = 3 * 1024 * 1024 * 1024;
 pub const MAX_BRIDGE_PROBE_BYTES: usize = 512 * 1024 * 1024;
 
@@ -165,6 +167,10 @@ pub enum BridgeError {
     BufferLimit,
     #[error("bridge document exceeds its retention budget")]
     DocumentLimit,
+    #[error("bridge request count exceeds its admission limit")]
+    RequestLimit,
+    #[error("bridge buffer count exceeds its retention limit")]
+    BufferCountLimit,
     #[error("Rust operation panicked")]
     Panic,
     #[error("bridge worker stopped unexpectedly")]
@@ -179,9 +185,11 @@ impl BridgeError {
                 BridgeErrorKind::NotFound
             }
             Self::DocumentInaccessible => BridgeErrorKind::Inaccessible,
-            Self::BufferLimit | Self::DocumentLimit | Self::OpenLimit { .. } => {
-                BridgeErrorKind::LimitExceeded
-            }
+            Self::BufferLimit
+            | Self::DocumentLimit
+            | Self::RequestLimit
+            | Self::BufferCountLimit
+            | Self::OpenLimit { .. } => BridgeErrorKind::LimitExceeded,
             Self::Panic | Self::Worker | Self::Backend { .. } => {
                 BridgeErrorKind::BackendUnavailable
             }
@@ -200,6 +208,7 @@ struct RetainedBuffer {
     pixels: Vec<u8>,
     transferred: bool,
     _bytes: OwnedSemaphorePermit,
+    _slot: OwnedSemaphorePermit,
 }
 
 #[derive(Debug)]
@@ -217,10 +226,12 @@ struct Registry {
 
 #[derive(Debug)]
 struct BridgeAdmission {
+    request_slots: Arc<Semaphore>,
     render_slots: Arc<Semaphore>,
     buffer_bytes: Arc<Semaphore>,
     open_slots: Arc<Semaphore>,
     document_slots: Arc<Semaphore>,
+    buffer_slots: Arc<Semaphore>,
     document_bytes: Arc<Semaphore>,
     probe_bytes: Arc<Semaphore>,
 }
@@ -228,10 +239,12 @@ struct BridgeAdmission {
 impl BridgeAdmission {
     fn new(buffer_bytes: usize, render_workers: usize) -> Self {
         Self {
+            request_slots: Arc::new(Semaphore::new(MAX_BRIDGE_REQUESTS)),
             render_slots: Arc::new(Semaphore::new(render_workers)),
             buffer_bytes: Arc::new(Semaphore::new(buffer_bytes)),
             open_slots: Arc::new(Semaphore::new(MAX_BRIDGE_OPEN_WORKERS)),
             document_slots: Arc::new(Semaphore::new(MAX_BRIDGE_DOCUMENTS)),
+            buffer_slots: Arc::new(Semaphore::new(MAX_BRIDGE_BUFFERS)),
             document_bytes: Arc::new(Semaphore::new(MAX_BRIDGE_RETAINED_DOCUMENT_BYTES)),
             probe_bytes: Arc::new(Semaphore::new(MAX_BRIDGE_PROBE_BYTES)),
         }
@@ -285,6 +298,10 @@ impl Bridge {
         cancellation: Cancellation,
     ) -> Result<DocumentSummary, BridgeError> {
         check_cancelled(&cancellation)?;
+        let _request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
         let path = crate::path_key::try_path_from_key(&request.path_key).map_err(|_| {
             BridgeError::InvalidRequest("path_key uses an invalid reserved encoding".to_owned())
         })?;
@@ -366,6 +383,14 @@ impl Bridge {
         cancellation: Cancellation,
     ) -> Result<RenderedBuffer, BridgeError> {
         check_cancelled(&cancellation)?;
+        let _request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let buffer_slot = try_acquire_slot(
+            Arc::clone(&self.admission.buffer_slots),
+            BridgeError::BufferCountLimit,
+        )?;
         if !request.scale.is_finite() || request.scale <= 0.0 {
             return Err(BridgeError::InvalidRequest(
                 "render scale must be finite and positive".to_owned(),
@@ -391,16 +416,6 @@ impl Bridge {
         })
         .await
         .map_err(|_| BridgeError::Worker)??;
-        let transient_byte_len =
-            render_transient_byte_len(&retained_document.document, request.page, request.scale)?;
-        let transient_byte_permits =
-            u32::try_from(transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
-        let _transient_bytes = acquire_permits(
-            Arc::clone(&self.admission.probe_bytes),
-            transient_byte_permits,
-            &cancellation,
-        )
-        .await?;
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
@@ -431,7 +446,7 @@ impl Bridge {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         check_cancelled(&cancellation)?;
-        self.store_buffer(request.document, rendered, buffer_bytes)
+        self.store_buffer(request.document, rendered, buffer_bytes, buffer_slot)
     }
 
     /// Copy a retained raster into the bridge generator's `Uint8List` representation.
@@ -519,6 +534,7 @@ impl Bridge {
         document: DocumentHandle,
         rendered: RenderedPage,
         bytes: OwnedSemaphorePermit,
+        slot: OwnedSemaphorePermit,
     ) -> Result<RenderedBuffer, BridgeError> {
         let byte_len = rendered.pixels.len();
         if byte_len
@@ -549,6 +565,7 @@ impl Bridge {
                 pixels,
                 transferred: false,
                 _bytes: bytes,
+                _slot: slot,
             },
         );
         Ok(result)
@@ -564,6 +581,13 @@ async fn acquire_permits(
         permit = semaphore.acquire_many_owned(permits) => permit.map_err(|_| BridgeError::Worker),
         () = cancellation.cancelled() => Err(BridgeError::Cancelled),
     }
+}
+
+fn try_acquire_slot(
+    semaphore: Arc<Semaphore>,
+    error: BridgeError,
+) -> Result<OwnedSemaphorePermit, BridgeError> {
+    semaphore.try_acquire_owned().map_err(|_| error)
 }
 
 fn guarded<T>(operation: impl FnOnce() -> Result<T, BridgeError>) -> Result<T, BridgeError> {
@@ -633,7 +657,7 @@ fn render_probe_byte_len(document: &OpenDocument, page: usize) -> Result<usize, 
     }
     let byte_len = match document {
         OpenDocument::Cbz(document) => document
-            .page_source_byte_len(page)
+            .render_admission_byte_len(page)
             .ok_or(BridgeError::InvalidPage { page, page_count })?,
         OpenDocument::Pdf(_) | OpenDocument::Epub(_) => 0,
     };
@@ -668,20 +692,6 @@ fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<u
                 .and_then(|pixels| pixels.checked_mul(4))
                 .ok_or(BridgeError::BufferLimit)
         }
-        OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
-    }
-}
-
-fn render_transient_byte_len(
-    document: &OpenDocument,
-    page: usize,
-    scale: f32,
-) -> Result<usize, BridgeError> {
-    match document {
-        OpenDocument::Cbz(document) => document
-            .render_transient_byte_len(page, scale)
-            .ok_or(BridgeError::BufferLimit),
-        OpenDocument::Pdf(_) => Ok(0),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }
@@ -793,6 +803,94 @@ mod tests {
         assert!(first_bridge.release_document(first.handle));
         let second = waiting.await.unwrap();
         assert!(second_bridge.release_document(second.handle));
+    }
+
+    #[tokio::test]
+    async fn request_count_rejects_without_creating_waiters() {
+        let admission = Arc::new(BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1));
+        let bridge = Bridge::with_admission(Arc::clone(&admission));
+        let _requests = Arc::clone(&admission.request_slots)
+            .acquire_many_owned(MAX_BRIDGE_REQUESTS as u32)
+            .await
+            .unwrap();
+
+        let error = bridge
+            .open_document(cbz_request(), Cancellation::new())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, BridgeError::RequestLimit);
+    }
+
+    #[tokio::test]
+    async fn buffer_count_is_shared_and_released_with_the_buffer() {
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.buffer_slots = Arc::new(Semaphore::new(1));
+        let admission = Arc::new(admission);
+        let first = Bridge::with_admission(Arc::clone(&admission));
+        let second = Bridge::with_admission(admission);
+        let first_document = first
+            .open_document(cbz_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let second_document = second
+            .open_document(cbz_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let request = |document| RenderRequest {
+            document,
+            page: 0,
+            scale: 1.0,
+        };
+        let buffer = first
+            .render_page(request(first_document.handle), Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            second
+                .render_page(request(second_document.handle), Cancellation::new())
+                .await,
+            Err(BridgeError::BufferCountLimit)
+        );
+        assert!(first.release_buffer(buffer.handle));
+        let buffer = second
+            .render_page(request(second_document.handle), Cancellation::new())
+            .await
+            .unwrap();
+        assert!(second.release_buffer(buffer.handle));
+    }
+
+    #[tokio::test]
+    async fn cbz_probe_and_decode_peak_is_acquired_atomically() {
+        let document = OpenDocument::open(&DeviceFileLocator::from_path(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.cbz"
+        )))
+        .unwrap();
+        let permits = render_probe_byte_len(&document, 0).unwrap();
+        let semaphore = Arc::new(Semaphore::new(permits));
+        let first = acquire_permits(
+            Arc::clone(&semaphore),
+            u32::try_from(permits).unwrap(),
+            &Cancellation::new(),
+        )
+        .await
+        .unwrap();
+        let cancellation = Cancellation::new();
+        let mut second = Box::pin(acquire_permits(
+            Arc::clone(&semaphore),
+            u32::try_from(permits).unwrap(),
+            &cancellation,
+        ));
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut second)
+                .await
+                .is_err()
+        );
+        drop(first);
+        let _second = second.await.unwrap();
     }
 
     #[test]
@@ -966,6 +1064,9 @@ mod tests {
             .acquire_many_owned(8)
             .await
             .unwrap();
+        let slot = Arc::clone(&bridge.admission.buffer_slots)
+            .try_acquire_owned()
+            .unwrap();
         let buffer = bridge
             .store_buffer(
                 document.handle,
@@ -975,6 +1076,7 @@ mod tests {
                     pixels: vec![0; 4].into(),
                 },
                 permit,
+                slot,
             )
             .unwrap();
         assert_eq!(bridge.admission.buffer_bytes.available_permits(), 0);
@@ -999,6 +1101,9 @@ mod tests {
             .acquire_many_owned(8)
             .await
             .unwrap();
+        let slot = Arc::clone(&bridge.admission.buffer_slots)
+            .try_acquire_owned()
+            .unwrap();
         assert!(bridge.release_document(document.handle));
 
         assert_eq!(
@@ -1010,6 +1115,7 @@ mod tests {
                     pixels: vec![0; 4].into(),
                 },
                 permit,
+                slot,
             ),
             Err(BridgeError::InvalidDocumentHandle)
         );

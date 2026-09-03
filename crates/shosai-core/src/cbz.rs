@@ -157,6 +157,13 @@ impl CbzDoc {
         self.page_byte_lengths.get(index).copied()
     }
 
+    /// Worst-case compressed-source plus temporary decode/resize allocation.
+    pub fn render_admission_byte_len(&self, index: usize) -> Option<usize> {
+        let source = self.page_source_byte_len(index)?;
+        let decoded = usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?;
+        source.checked_add(decoded.checked_mul(2)?)
+    }
+
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
         let path = self
             .page_paths
