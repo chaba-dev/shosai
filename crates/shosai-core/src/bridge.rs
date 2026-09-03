@@ -183,6 +183,7 @@ fn is_limit_error(detail: &str) -> bool {
 #[derive(Debug)]
 struct RetainedBuffer {
     pixels: Vec<u8>,
+    transferred: bool,
     _bytes: OwnedSemaphorePermit,
 }
 
@@ -313,16 +314,23 @@ impl Bridge {
         self.store_buffer(request.document, rendered, buffer_bytes)
     }
 
-    /// Transfer a retained raster into the bridge generator's `Uint8List` representation.
+    /// Copy a retained raster into the bridge generator's `Uint8List` representation.
+    /// The caller must release the handle after the Dart list is no longer retained.
     pub fn take_buffer(&self, handle: BufferHandle) -> Result<Vec<u8>, BridgeError> {
         self.ensure_buffer_handle(handle)?;
-        self.registry
+        let mut registry = self
+            .registry
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let buffer = registry
             .buffers
-            .remove(&handle)
-            .map(|buffer| buffer.pixels)
-            .ok_or(BridgeError::InvalidBufferHandle)
+            .get_mut(&handle)
+            .ok_or(BridgeError::InvalidBufferHandle)?;
+        if buffer.transferred {
+            return Err(BridgeError::InvalidBufferHandle);
+        }
+        buffer.transferred = true;
+        Ok(buffer.pixels.clone())
     }
 
     pub fn release_document(&self, handle: DocumentHandle) -> bool {
@@ -390,7 +398,7 @@ impl Bridge {
         &self,
         document: DocumentHandle,
         rendered: RenderedPage,
-        mut bytes: OwnedSemaphorePermit,
+        bytes: OwnedSemaphorePermit,
     ) -> Result<RenderedBuffer, BridgeError> {
         let byte_len = rendered.pixels.len();
         if byte_len
@@ -401,8 +409,6 @@ impl Bridge {
             return Err(BridgeError::BufferLimit);
         }
         let pixels = rendered.pixels.to_vec();
-        let retained_bytes = bytes.split(byte_len).ok_or(BridgeError::BufferLimit)?;
-        drop(bytes);
         let mut registry = self
             .registry
             .lock()
@@ -421,7 +427,8 @@ impl Bridge {
             handle,
             RetainedBuffer {
                 pixels,
-                _bytes: retained_bytes,
+                transferred: false,
+                _bytes: bytes,
             },
         );
         Ok(result)
@@ -626,6 +633,7 @@ mod tests {
             bridge.take_buffer(rendered.handle),
             Err(BridgeError::InvalidBufferHandle)
         );
+        assert!(bridge.release_buffer(rendered.handle));
         assert!(bridge.release_document(document.handle));
         assert!(!bridge.release_document(document.handle));
     }
@@ -652,12 +660,14 @@ mod tests {
                 permit,
             )
             .unwrap();
-        assert_eq!(bridge.buffer_bytes.available_permits(), 4);
+        assert_eq!(bridge.buffer_bytes.available_permits(), 0);
         let retained_pointer = bridge.registry.lock().unwrap().buffers[&buffer.handle]
             .pixels
             .as_ptr();
         let transferred = bridge.take_buffer(buffer.handle).unwrap();
-        assert_eq!(transferred.as_ptr(), retained_pointer);
+        assert_ne!(transferred.as_ptr(), retained_pointer);
+        assert_eq!(bridge.buffer_bytes.available_permits(), 0);
+        assert!(bridge.release_buffer(buffer.handle));
         assert_eq!(bridge.buffer_bytes.available_permits(), 8);
     }
 
