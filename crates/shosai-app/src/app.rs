@@ -672,6 +672,13 @@ struct RetainedDocumentPermit {
     open_worker: Option<CachePermit>,
 }
 
+fn retain_document_for_worker(state: &State) -> RetainedDocumentPermit {
+    state
+        .document_permit
+        .clone()
+        .expect("an open document must retain its admission permit")
+}
+
 #[derive(Debug, Clone)]
 struct DocumentAdmission {
     count: CacheBudget,
@@ -2290,6 +2297,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         generation,
                         key.clone(),
                         Some(transient_permit),
+                        retain_document_for_worker(state),
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key.clone());
@@ -2326,7 +2334,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 layout_key,
             });
             return Task::batch([
-                paginate_epub_task(tab_id, generation, doc, layout_key, state.current_page),
+                paginate_epub_task(
+                    tab_id,
+                    generation,
+                    doc,
+                    retain_document_for_worker(state),
+                    layout_key,
+                    state.current_page,
+                ),
                 load_epub_images_task(state),
             ]);
         }
@@ -2395,6 +2410,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         generation,
                         key.clone(),
                         Some(transient_permit),
+                        retain_document_for_worker(state),
                         move || doc.render_page(page, scale),
                     ));
                     state.paginated_pending.push(key.clone());
@@ -2451,9 +2467,11 @@ fn schedule_cbz_dimension(
         },
         permit,
     );
+    let document_permit = retain_document_for_worker(state);
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
                 document
                     .page_size(page)
                     .map_err(|error| error.to_string())?;
@@ -2528,11 +2546,15 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         path: path.clone(),
     });
     let probe_path = path.clone();
+    let document_permit = retain_document_for_worker(state);
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || epub_image_byte_len(&document, &probe_path))
-                .await
-                .unwrap_or_default()
+            tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
+                epub_image_byte_len(&document, &probe_path)
+            })
+            .await
+            .unwrap_or_default()
         },
         move |byte_len| Message::EpubImageSizeLoaded {
             tab_id,
@@ -2576,9 +2598,11 @@ fn decode_epub_image_task(
         reserve(state)?
     };
     let path = job.path.clone();
+    let document_permit = retain_document_for_worker(state);
     Some(Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
                 let _transient_permit = transient_permit;
                 decode_epub_images(&document, [(path, permit)])
             })
@@ -2668,11 +2692,13 @@ fn render_continuous_page_task(
     request: ContinuousRequest,
     page: usize,
     transient_permit: Option<CachePermit>,
+    document_permit: RetainedDocumentPermit,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
                 let _transient_permit = transient_permit;
                 render()
             })
@@ -2693,6 +2719,7 @@ fn paginate_epub_task(
     tab_id: u64,
     generation: u64,
     document: Arc<EpubDoc>,
+    document_permit: RetainedDocumentPermit,
     layout_key: EpubLayoutKey,
     current_chapter: usize,
 ) -> Task<Message> {
@@ -2702,11 +2729,14 @@ fn paginate_epub_task(
         f32::from_bits(layout_key.width),
         f32::from_bits(layout_key.height),
     );
-    let pagination =
-        iced::futures::stream::unfold(Some((document, false)), move |state| async move {
-            let (document, complete) = state?;
+    let pagination = iced::futures::stream::unfold(
+        Some((document, document_permit, false)),
+        move |state| async move {
+            let (document, document_permit, complete) = state?;
             let worker_document = Arc::clone(&document);
+            let worker_permit = document_permit.clone();
             let pages = tokio::task::spawn_blocking(move || {
+                let _document_permit = worker_permit;
                 if complete {
                     crate::epub::paginate_document(
                         &worker_document,
@@ -2730,9 +2760,10 @@ fn paginate_epub_task(
             })
             .await
             .unwrap_or_default();
-            let next = (!complete).then_some((document, true));
+            let next = (!complete).then_some((document, document_permit, true));
             Some(((complete, pages), next))
-        });
+        },
+    );
     Task::run(pagination, move |(complete, pages)| {
         Message::EpubPaginated {
             tab_id,
@@ -3040,15 +3071,25 @@ fn start_continuous_page_task(
         Some(OpenDocument::Pdf(document)) => {
             let document = Arc::clone(document);
             let highlights = search_highlights_for_page(state, page);
-            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
-                document.render_page_with_highlights(page, scale, &highlights)
-            })
+            render_continuous_page_task(
+                tab_id,
+                request,
+                page,
+                transient_permit,
+                retain_document_for_worker(state),
+                move || document.render_page_with_highlights(page, scale, &highlights),
+            )
         }
         Some(OpenDocument::Cbz(document)) => {
             let document = Arc::clone(document);
-            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
-                document.render_page(page, scale)
-            })
+            render_continuous_page_task(
+                tab_id,
+                request,
+                page,
+                transient_permit,
+                retain_document_for_worker(state),
+                move || document.render_page(page, scale),
+            )
         }
         _ => Task::none(),
     }
@@ -3285,6 +3326,7 @@ fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermi
             !tab.page_cache.is_empty()
                 || tab.rendered_page.is_some()
                 || tab.rendered_facing_page.is_some()
+                || tab.continuous_pages.iter().any(Option::is_some)
         }) {
             tab.page_cache.clear();
             tab.rendered_page = None;
@@ -3583,11 +3625,13 @@ fn render_page_task(
     generation: u64,
     key: PageCacheKey,
     transient_permit: Option<CachePermit>,
+    document_permit: RetainedDocumentPermit,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
                 let _transient_permit = transient_permit;
                 render()
             })
@@ -3663,6 +3707,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     generation,
                     key.clone(),
                     Some(transient_permit),
+                    retain_document_for_worker(state),
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key.clone());
@@ -3691,6 +3736,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     generation,
                     key.clone(),
                     Some(transient_permit),
+                    retain_document_for_worker(state),
                     move || document.render_page(page, scale),
                 ));
                 state.paginated_pending.push(key.clone());
@@ -3940,10 +3986,12 @@ fn perform_search(state: &mut State) -> Task<Message> {
     state.search_cancellation = Some(cancellation.clone());
     state.search_loading = true;
     state.search_waiting = false;
+    let document_permit = retain_document_for_worker(state);
 
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
+                let _document_permit = document_permit;
                 let _worker = worker;
                 match document {
                     OpenDocument::Pdf(document) => shosai_core::search::search_pdf_with(
@@ -7208,6 +7256,25 @@ mod tests {
         state.library_loading = false;
         state.storage_initializing = false;
         state
+    }
+
+    #[test]
+    fn worker_document_permit_keeps_admission_until_worker_finishes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.document_admission.count = CacheBudget::new(1);
+        state.document_permit.as_mut().unwrap()._count =
+            state.document_admission.count.try_reserve(1).unwrap();
+
+        let worker_permit = retain_document_for_worker(&state);
+        state.document_permit = None;
+
+        assert!(state.document_admission.count.try_reserve(1).is_none());
+        drop(worker_permit);
+        assert!(state.document_admission.count.try_reserve(1).is_some());
     }
 
     fn admit_test_raster(state: &mut State, job: RasterJob, bytes: usize) {
@@ -12827,6 +12894,35 @@ mod tests {
         assert_eq!(state.raster_budget.used(), 4);
         assert_eq!(state.page_cache.len(), 1);
         assert_eq!(state.page_cache.iter().next().unwrap().0.page, 1);
+    }
+
+    #[test]
+    fn paginated_admission_evicts_inactive_continuous_only_rasters() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.file_path = Some(PathBuf::from("inactive.cbz"));
+        state.display_title = Some("Inactive".to_owned());
+        state.raster_budget = CacheBudget::new(4);
+        let permit = state.raster_budget.try_reserve(4).unwrap();
+        state.continuous_pages = vec![attach_raster_permit(
+            RenderedPage {
+                width: 1,
+                height: 1,
+                pixels: bytes::Bytes::from(vec![0; 4]),
+            },
+            permit,
+        )];
+        state.tabs.push(capture_reader_tab(&state).unwrap());
+        state.continuous_pages.clear();
+        state.reading_mode = ReadingMode::Paginated;
+
+        let paginated = reserve_raster_bytes(&mut state, 4);
+
+        assert!(paginated.is_some());
+        assert!(state.tabs[0].continuous_pages[0].is_none());
     }
 
     #[test]
