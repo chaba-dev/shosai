@@ -2303,7 +2303,7 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
     let desired = prioritized_pages(
         state.continuous_visible.iter().copied(),
         state.current_page,
-        state.total_pages,
+        state.continuous_pages.len(),
         CONTINUOUS_PAGE_CACHE_CAPACITY,
     )
     .into_iter()
