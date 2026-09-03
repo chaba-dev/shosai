@@ -11,6 +11,7 @@ use iced::widget::{
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
 
+use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
@@ -87,17 +88,6 @@ impl<T> std::fmt::Display for SelectOption<T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.label)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Open document wrapper
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub(crate) enum OpenDocument {
-    Pdf(Arc<PdfDoc>),
-    Epub(Arc<EpubDoc>),
-    Cbz(Arc<CbzDoc>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1690,30 +1680,15 @@ fn reader_defaults_changed_task(
 }
 
 fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
-    let ext = path
-        .extension()
-        .map(|extension| extension.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "pdf" => PdfDoc::open(path)
-            .map(|document| OpenDocument::Pdf(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "PDF",
-                detail: error.to_string(),
-            }),
-        "epub" => EpubDoc::open(path)
-            .map(|document| OpenDocument::Epub(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "EPUB",
-                detail: format!("{error:#}"),
-            }),
-        "cbz" => CbzDoc::open(path)
-            .map(|document| OpenDocument::Cbz(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "CBZ",
-                detail: error.to_string(),
-            }),
-        _ => Err(AppError::UnsupportedFormat(ext)),
+    match OpenDocument::open(&DeviceFileLocator::from_path(path)) {
+        Ok(document) => Ok(document),
+        Err(OpenDocumentError::UnsupportedFormat(extension)) => {
+            Err(AppError::UnsupportedFormat(extension))
+        }
+        Err(OpenDocumentError::Open { format, detail }) => Err(AppError::Open {
+            format: format.display_name(),
+            detail,
+        }),
     }
 }
 
@@ -1757,11 +1732,7 @@ fn install_document(
     state.search_text = None;
     state.search_loading = false;
 
-    state.total_pages = match &document {
-        OpenDocument::Pdf(document) => document.page_count(),
-        OpenDocument::Epub(document) => document.chapter_count(),
-        OpenDocument::Cbz(document) => document.page_count(),
-    };
+    state.total_pages = document.page_count();
     state.document = Some(document);
 
     let saved = state.reading_state.as_ref().and_then(|store| {

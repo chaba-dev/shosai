@@ -74,6 +74,14 @@ impl BookFormat {
         }
     }
 
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Pdf => "PDF",
+            Self::Epub => "EPUB",
+            Self::Cbz => "CBZ",
+        }
+    }
+
     fn from_db(s: &str) -> Option<Self> {
         match s {
             "pdf" => Some(Self::Pdf),
@@ -81,6 +89,12 @@ impl BookFormat {
             "cbz" => Some(Self::Cbz),
             _ => None,
         }
+    }
+}
+
+impl std::fmt::Display for BookFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.display_name())
     }
 }
 
