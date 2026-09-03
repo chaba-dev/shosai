@@ -110,6 +110,14 @@ impl PdfSelectionSnapshot {
 /// a `Pdfium`, doing work, and dropping it promptly is the intended usage pattern
 /// — it keeps the lock held only as long as needed and allows other threads to
 /// proceed in between.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub(crate) struct PdfBackendUnavailable(pub(crate) String);
+
+pub(crate) fn is_backend_unavailable(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<PdfBackendUnavailable>().is_some()
+}
+
 fn create_pdfium() -> Result<Pdfium> {
     let bundled = std::env::current_exe()
         .ok()
@@ -125,11 +133,11 @@ fn create_pdfium() -> Result<Pdfium> {
         }),
         None => Pdfium::bind_to_system_library().context("failed to load PDFium system library"),
     }
-    .map_err(|e| {
-        anyhow::anyhow!(
-            "{e}. Install a Shosai package containing PDFium, or ensure \
+    .map_err(|error| {
+        PdfBackendUnavailable(format!(
+            "{error}. Install a Shosai package containing PDFium, or ensure \
              pdfium-binaries is available through the system library path"
-        )
+        ))
     })?;
 
     Ok(Pdfium::new(bindings))

@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::cbz::CbzDoc;
+use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
-use crate::epub::EpubDoc;
 use crate::epub::pagination::content_node_text_len;
+use crate::epub::{EpubDoc, EpubLimits};
 use crate::library::BookFormat;
 use crate::path_key::path_key;
-use crate::pdf::PdfDoc;
+use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
 
 /// A locator supplied by the current device.
 ///
@@ -95,6 +95,14 @@ pub fn format_capabilities(format: BookFormat) -> FormatCapabilities {
 pub enum OpenDocumentError {
     #[error("unsupported file format: .{0}")]
     UnsupportedFormat(String),
+    #[error("document was not found")]
+    NotFound,
+    #[error("document is inaccessible: {0}")]
+    Inaccessible(String),
+    #[error("{format} exceeds an opening resource limit: {detail}")]
+    LimitExceeded { format: BookFormat, detail: String },
+    #[error("{format} backend is unavailable: {detail}")]
+    BackendUnavailable { format: BookFormat, detail: String },
     #[error("failed to open {format}: {detail}")]
     Open { format: BookFormat, detail: String },
 }
@@ -117,26 +125,32 @@ impl OpenDocument {
             .format_hint()
             .or_else(|| BookFormat::from_extension(&extension))
             .ok_or(OpenDocumentError::UnsupportedFormat(extension))?;
+        let metadata = std::fs::metadata(locator.path()).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
+            _ => OpenDocumentError::Inaccessible(error.to_string()),
+        })?;
+        let max_input_bytes = match format {
+            BookFormat::Pdf => MAX_PDF_INPUT_BYTES,
+            BookFormat::Epub => EpubLimits::default().max_input_bytes,
+            BookFormat::Cbz => CbzLimits::default().max_archive_bytes,
+        };
+        if metadata.len() > max_input_bytes {
+            return Err(OpenDocumentError::LimitExceeded {
+                format,
+                detail: format!("input is larger than {max_input_bytes} bytes"),
+            });
+        }
 
         match format {
             BookFormat::Pdf => PdfDoc::open(locator.path())
                 .map(|document| Self::Pdf(Arc::new(document)))
-                .map_err(|error| OpenDocumentError::Open {
-                    format,
-                    detail: error.to_string(),
-                }),
+                .map_err(|error| classify_open_error(format, error)),
             BookFormat::Epub => EpubDoc::open(locator.path())
                 .map(|document| Self::Epub(Arc::new(document)))
-                .map_err(|error| OpenDocumentError::Open {
-                    format,
-                    detail: format!("{error:#}"),
-                }),
+                .map_err(|error| classify_open_error(format, error)),
             BookFormat::Cbz => CbzDoc::open(locator.path())
                 .map(|document| Self::Cbz(Arc::new(document)))
-                .map_err(|error| OpenDocumentError::Open {
-                    format,
-                    detail: error.to_string(),
-                }),
+                .map_err(|error| classify_open_error(format, error)),
         }
     }
 
@@ -180,6 +194,23 @@ impl OpenDocument {
     }
 }
 
+fn classify_open_error(format: BookFormat, error: anyhow::Error) -> OpenDocumentError {
+    let detail = format!("{error:#}");
+    if format == BookFormat::Pdf && crate::pdf::is_backend_unavailable(&error) {
+        return OpenDocumentError::BackendUnavailable { format, detail };
+    }
+    if let Some(io_error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+    {
+        return match io_error.kind() {
+            std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
+            _ => OpenDocumentError::Inaccessible(detail),
+        };
+    }
+    OpenDocumentError::Open { format, detail }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,15 +241,44 @@ mod tests {
     }
 
     #[test]
-    fn platform_format_hint_admits_extensionless_staged_paths() {
+    fn platform_format_hint_is_checked_before_document_io() {
         let locator = DeviceFileLocator::new("content:42", "missing-provider-file")
             .with_format_hint(BookFormat::Epub);
         let error = OpenDocument::open(&locator).unwrap_err();
 
+        assert_eq!(error, OpenDocumentError::NotFound);
+    }
+
+    #[test]
+    fn oversized_inputs_have_a_structural_limit_category() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.pdf");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_PDF_INPUT_BYTES + 1)
+            .unwrap();
+
+        let error = OpenDocument::open(&DeviceFileLocator::from_path(path)).unwrap_err();
+
         assert!(matches!(
             error,
-            OpenDocumentError::Open {
-                format: BookFormat::Epub,
+            OpenDocumentError::LimitExceeded {
+                format: BookFormat::Pdf,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pdf_backend_failures_have_a_structural_category() {
+        let error = anyhow::Error::new(crate::pdf::PdfBackendUnavailable(
+            "missing PDFium".to_owned(),
+        ));
+
+        assert!(matches!(
+            classify_open_error(BookFormat::Pdf, error),
+            OpenDocumentError::BackendUnavailable {
+                format: BookFormat::Pdf,
                 ..
             }
         ));

@@ -151,6 +151,10 @@ pub enum BridgeError {
     InvalidRequest(String),
     #[error("failed to open {format}: {detail}")]
     Open { format: BookFormat, detail: String },
+    #[error("{format} exceeds an opening resource limit: {detail}")]
+    OpenLimit { format: BookFormat, detail: String },
+    #[error("{format} backend is unavailable: {detail}")]
+    Backend { format: BookFormat, detail: String },
     #[error("document render failed: {0}")]
     Render(String),
     #[error("bridge buffer exceeds its memory budget")]
@@ -171,8 +175,12 @@ impl BridgeError {
                 BridgeErrorKind::NotFound
             }
             Self::DocumentInaccessible => BridgeErrorKind::Inaccessible,
-            Self::BufferLimit | Self::DocumentLimit => BridgeErrorKind::LimitExceeded,
-            Self::Panic | Self::Worker => BridgeErrorKind::BackendUnavailable,
+            Self::BufferLimit | Self::DocumentLimit | Self::OpenLimit { .. } => {
+                BridgeErrorKind::LimitExceeded
+            }
+            Self::Panic | Self::Worker | Self::Backend { .. } => {
+                BridgeErrorKind::BackendUnavailable
+            }
             Self::Render(_) => BridgeErrorKind::RenderFailed,
             Self::UnsupportedOperation(_) | Self::UnsupportedFormat(_) => {
                 BridgeErrorKind::Unsupported
@@ -554,6 +562,14 @@ fn map_open_error(error: OpenDocumentError) -> BridgeError {
         OpenDocumentError::UnsupportedFormat(extension) => {
             BridgeError::UnsupportedFormat(extension)
         }
+        OpenDocumentError::NotFound => BridgeError::DocumentNotFound,
+        OpenDocumentError::Inaccessible(_) => BridgeError::DocumentInaccessible,
+        OpenDocumentError::LimitExceeded { format, detail } => {
+            BridgeError::OpenLimit { format, detail }
+        }
+        OpenDocumentError::BackendUnavailable { format, detail } => {
+            BridgeError::Backend { format, detail }
+        }
         OpenDocumentError::Open { format, detail } => BridgeError::Open { format, detail },
     }
 }
@@ -662,6 +678,14 @@ mod tests {
         assert_eq!(
             BridgeError::BufferLimit.kind(),
             BridgeErrorKind::LimitExceeded
+        );
+        assert_eq!(
+            map_open_error(OpenDocumentError::BackendUnavailable {
+                format: BookFormat::Pdf,
+                detail: "missing PDFium".to_owned(),
+            })
+            .kind(),
+            BridgeErrorKind::BackendUnavailable
         );
         assert_eq!(
             BridgeError::Worker.kind(),

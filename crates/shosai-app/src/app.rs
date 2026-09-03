@@ -1769,7 +1769,16 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
         Err(OpenDocumentError::UnsupportedFormat(extension)) => {
             Err(AppError::UnsupportedFormat(extension))
         }
-        Err(OpenDocumentError::Open { format, detail }) => Err(AppError::Open {
+        Err(OpenDocumentError::NotFound) => Err(AppError::MissingBook),
+        Err(OpenDocumentError::Inaccessible(detail)) => Err(AppError::Open {
+            format: "document",
+            detail,
+        }),
+        Err(
+            OpenDocumentError::Open { format, detail }
+            | OpenDocumentError::LimitExceeded { format, detail }
+            | OpenDocumentError::BackendUnavailable { format, detail },
+        ) => Err(AppError::Open {
             format: format.display_name(),
             detail,
         }),
