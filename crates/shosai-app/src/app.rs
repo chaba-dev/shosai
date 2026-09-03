@@ -2016,6 +2016,7 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     let paths = state
         .epub_images_desired
         .iter()
+        .take(1)
         .cloned()
         .collect::<Vec<_>>();
     if paths.is_empty() {
@@ -9862,7 +9863,7 @@ mod tests {
     }
 
     #[test]
-    fn epub_image_loading_is_off_thread_and_bounded_to_nearby_chapters() {
+    fn epub_image_loading_decodes_one_nearby_resource_at_a_time() {
         let epub = EpubDoc::from_bytes(epub_with_image_chapters(5)).unwrap();
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.current_page = 2;
@@ -9871,18 +9872,11 @@ mod tests {
 
         assert_eq!(task.units(), 1);
         assert!(state.epub_image_handles.is_empty());
-        assert_eq!(state.epub_images_pending.len(), 3);
-        for chapter in [1, 2, 3] {
-            assert!(
-                state
-                    .epub_images_pending
-                    .iter()
-                    .any(|path| path.ends_with(&format!("image-{chapter}.png")))
-            );
-        }
+        assert_eq!(state.epub_images_desired.len(), 3);
+        assert_eq!(state.epub_images_pending.len(), 1);
         assert!(
             state
-                .epub_images_pending
+                .epub_images_desired
                 .iter()
                 .all(|path| !path.ends_with("image-0.png") && !path.ends_with("image-4.png"))
         );
@@ -9957,7 +9951,7 @@ mod tests {
         assert_eq!(next.units(), 1);
         assert!(state.epub_image_handles.is_empty());
         assert!(state.epub_image_decode_active);
-        assert_eq!(state.epub_images_pending.len(), 2);
+        assert_eq!(state.epub_images_pending.len(), 1);
         assert!(
             state
                 .epub_images_pending
