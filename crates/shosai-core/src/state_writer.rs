@@ -16,6 +16,7 @@ pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
 pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
 pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
 pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
+pub const MAX_STATE_PATH_KEY_BYTES: usize = 16 * 1024;
 pub const MAX_PENDING_STATE_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
@@ -142,8 +143,8 @@ struct WriterState {
 
 impl WriterState {
     fn insert(&mut self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
-        let key = message_key(&message);
         let byte_len = message_byte_len(&message)?;
+        let key = message_key(&message);
         if let Some(key) = &key
             && !self.admitted.contains(key)
             && self.admitted.len() >= MAX_PENDING_STATE_WRITES
@@ -283,11 +284,20 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 let _ = flush.send(error.clone().map_or(Ok(()), Err));
                 worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
             }
-            if worker.stopped.load(Ordering::Acquire) {
+            let pending_is_empty = worker
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pending
+                .write_keys()
+                .is_empty();
+            if worker.stopped.load(Ordering::Acquire) && pending_is_empty {
                 break;
             }
             if !failed_keys.is_empty() {
                 tokio::time::sleep(RETRY_DELAY).await;
+                worker.notify.notify_one();
+            } else if !pending_is_empty {
                 worker.notify.notify_one();
             }
         }
@@ -315,9 +325,14 @@ fn message_byte_len(message: &StateWriterMessage) -> Result<usize, StateWriterSe
             .len()
             .checked_add(value.len())
             .ok_or(StateWriterSendError::Full),
-        StateWriterMessage::Save(_)
-        | StateWriterMessage::Progress { .. }
-        | StateWriterMessage::Flush(_) => Ok(0),
+        StateWriterMessage::Save(save) => {
+            let path = canonical_path_key(&save.path);
+            if path.len() > MAX_STATE_PATH_KEY_BYTES {
+                return Err(StateWriterSendError::Full);
+            }
+            Ok(path.len())
+        }
+        StateWriterMessage::Progress { .. } | StateWriterMessage::Flush(_) => Ok(0),
     }
 }
 
@@ -465,6 +480,36 @@ mod tests {
     }
 
     #[test]
+    fn save_paths_are_bounded_and_charged() {
+        let mut state = WriterState::default();
+        state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: PathBuf::from("book.epub"),
+                reading: FileReadingState {
+                    page: 0,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        assert!(state.total_admitted_bytes >= "book.epub".len());
+
+        assert_eq!(
+            state.insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: PathBuf::from("x".repeat(MAX_STATE_PATH_KEY_BYTES + 1)),
+                reading: FileReadingState {
+                    page: 0,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            })),
+            Err(StateWriterSendError::Full)
+        );
+    }
+
+    #[test]
     fn failed_in_flight_writes_remain_inside_the_global_admission_bound() {
         let mut state = WriterState::default();
         for index in 0..MAX_PENDING_STATE_WRITES {
@@ -584,5 +629,47 @@ mod tests {
         })
         .await
         .expect("retained write should retry autonomously");
+    }
+
+    #[tokio::test]
+    async fn final_drop_drains_writes_queued_behind_an_in_flight_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let mut blocker = store.pool().acquire().await.unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "first".to_owned(),
+                "one".to_owned(),
+            ))
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        writer
+            .send(StateWriterMessage::Preference(
+                "second".to_owned(),
+                "two".to_owned(),
+            ))
+            .unwrap();
+        drop(writer);
+        sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if store.get_pref_async("first").await.as_deref() == Some("one")
+                    && store.get_pref_async("second").await.as_deref() == Some("two")
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the final writer drop must drain every accepted write");
     }
 }
