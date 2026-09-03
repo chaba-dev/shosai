@@ -374,6 +374,7 @@ const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const EPUB_IMAGE_WORKERS: usize = 1;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const RASTER_RENDER_WORKERS: usize = 2;
@@ -701,6 +702,13 @@ struct CbzDimensionJob {
     page: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EpubImageJob {
+    tab_id: u64,
+    generation: u64,
+    path: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct InitializedState {
     store: ReadingStateStore,
@@ -757,6 +765,7 @@ pub struct State {
     epub_image_decode_active: bool,
     epub_image_generation: u64,
     epub_image_budget: CacheBudget,
+    epub_image_jobs: HashSet<EpubImageJob>,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_layout_pending: Option<EpubLayoutKey>,
@@ -915,6 +924,7 @@ pub fn boot() -> (State, Task<Message>) {
         epub_image_decode_active: false,
         epub_image_generation: 0,
         epub_image_budget: CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY),
+        epub_image_jobs: HashSet::new(),
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
         epub_layout_pending: None,
@@ -2213,36 +2223,63 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     if state.epub_image_decode_active {
         return Task::none();
     }
+    if state.epub_image_jobs.len() >= EPUB_IMAGE_WORKERS {
+        return Task::none();
+    }
 
     let Some(path) = state.epub_images_desired.iter().next().cloned() else {
         return Task::none();
     };
-    let Some(byte_len) = epub_image_byte_len(document, &path) else {
-        state.epub_images_desired.remove(&path);
-        state.epub_images_failed.insert(path);
-        return load_epub_images_task(state);
-    };
-    let Some(permit) = state.epub_image_budget.try_reserve(byte_len) else {
-        return Task::none();
-    };
-
     state.epub_images_pending = [path.clone()].into_iter().collect();
     state.epub_image_decode_active = true;
     let document = Arc::clone(document);
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.epub_image_generation;
+    state.epub_image_jobs.insert(EpubImageJob {
+        tab_id,
+        generation,
+        path: path.clone(),
+    });
+    let probe_path = path.clone();
     Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || epub_image_byte_len(&document, &probe_path))
+                .await
+                .unwrap_or_default()
+        },
+        move |byte_len| Message::EpubImageSizeLoaded {
+            tab_id,
+            generation,
+            path,
+            byte_len,
+        },
+    )
+}
+
+fn decode_epub_image_task(
+    state: &mut State,
+    job: EpubImageJob,
+    byte_len: usize,
+) -> Option<Task<Message>> {
+    let Some(OpenDocument::Epub(document)) = &state.document else {
+        return None;
+    };
+    let permit = state.epub_image_budget.try_reserve(byte_len)?;
+    let document = Arc::clone(document);
+    let path = job.path.clone();
+    Some(Task::perform(
         async move {
             tokio::task::spawn_blocking(move || decode_epub_images(&document, [(path, permit)]))
                 .await
                 .unwrap_or_default()
         },
         move |images| Message::EpubImagesDecoded {
-            tab_id,
-            generation,
+            tab_id: job.tab_id,
+            generation: job.generation,
+            path: job.path,
             images,
         },
-    )
+    ))
 }
 
 fn epub_uses_spread(state: &State) -> bool {
@@ -10649,6 +10686,7 @@ mod tests {
             Message::EpubImagesDecoded {
                 tab_id: 1,
                 generation,
+                path: path.clone(),
                 images: vec![(
                     path.clone(),
                     Some(DecodedEpubImage::Raster {
@@ -10674,9 +10712,48 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.epub_image_budget = CacheBudget::new(0);
 
-        assert_eq!(load_epub_images_task(&mut state).units(), 0);
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
         assert!(!state.epub_image_decode_active);
         assert!(state.epub_images_pending.is_empty());
+        assert!(state.epub_image_jobs.is_empty());
+    }
+
+    #[test]
+    fn epub_image_workers_are_bounded_globally_and_require_exact_completions() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        state.epub_image_decode_active = false;
+
+        assert_eq!(load_epub_images_task(&mut state).units(), 0);
+        assert_eq!(state.epub_image_jobs.len(), EPUB_IMAGE_WORKERS);
+        assert_eq!(
+            update(
+                &mut state,
+                Message::EpubImageSizeLoaded {
+                    tab_id: job.tab_id,
+                    generation: job.generation,
+                    path: "unknown.png".to_owned(),
+                    byte_len: Some(4),
+                },
+            )
+            .units(),
+            0
+        );
+        assert_eq!(state.epub_image_jobs.len(), EPUB_IMAGE_WORKERS);
     }
 
     #[test]
@@ -10689,6 +10766,7 @@ mod tests {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
+        let obsolete_job = obsolete[0].clone();
 
         state.current_page = 4;
         assert_eq!(load_epub_images_task(&mut state).units(), 0);
@@ -10701,6 +10779,7 @@ mod tests {
             Message::EpubImagesDecoded {
                 tab_id: 1,
                 generation: 0,
+                path: obsolete_job,
                 images: obsolete
                     .into_iter()
                     .map(|path| {

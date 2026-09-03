@@ -1882,11 +1882,63 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::EpubImageSizeLoaded {
+            tab_id,
+            generation,
+            path,
+            byte_len,
+        } => {
+            let job = EpubImageJob {
+                tab_id,
+                generation,
+                path: path.clone(),
+            };
+            if !state.epub_image_jobs.contains(&job) {
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
+                if let Some(byte_len) = byte_len
+                    && state.epub_images_desired.contains(&path)
+                {
+                    if let Some(task) = decode_epub_image_task(state, job.clone(), byte_len) {
+                        return task;
+                    }
+                    state.epub_image_jobs.remove(&job);
+                    state.epub_image_decode_active = false;
+                    state.epub_images_pending.remove(&path);
+                    return Task::none();
+                }
+                state.epub_image_jobs.remove(&job);
+                state.epub_image_decode_active = false;
+                state.epub_images_pending.remove(&path);
+                if byte_len.is_none() && state.epub_images_desired.remove(&path) {
+                    state.epub_images_failed.insert(path);
+                }
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                && generation == tab.epub_image_generation
+            {
+                state.epub_image_jobs.remove(&job);
+                tab.epub_image_decode_active = false;
+                tab.epub_images_pending.remove(&path);
+            } else {
+                state.epub_image_jobs.remove(&job);
+            }
+            return load_epub_images_task(state);
+        }
+
         Message::EpubImagesDecoded {
             tab_id,
             generation,
+            path,
             images,
         } => {
+            if !state.epub_image_jobs.remove(&EpubImageJob {
+                tab_id,
+                generation,
+                path,
+            }) {
+                return Task::none();
+            }
             if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
                 state.epub_image_decode_active = false;
                 for (path, decoded) in images {
@@ -1899,7 +1951,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                 }
-                return load_epub_images_task(state);
             } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                 && generation == tab.epub_image_generation
             {
@@ -1915,6 +1966,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
+            return load_epub_images_task(state);
         }
 
         Message::CbzDimensionsLoaded {

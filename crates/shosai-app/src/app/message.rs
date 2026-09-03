@@ -240,7 +240,14 @@ pub enum Message {
     EpubImagesDecoded {
         tab_id: u64,
         generation: u64,
+        path: String,
         images: Vec<(String, Option<DecodedEpubImage>)>,
+    },
+    EpubImageSizeLoaded {
+        tab_id: u64,
+        generation: u64,
+        path: String,
+        byte_len: Option<usize>,
     },
     CbzDimensionsLoaded {
         tab_id: u64,
