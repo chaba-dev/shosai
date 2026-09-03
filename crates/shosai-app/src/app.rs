@@ -25,6 +25,10 @@ use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{BoundedCache, ReaderLocation, ReadingMode};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
+use shosai_core::state_writer::{
+    StateSave as ReadingStateSave, StateWriterMessage as ReadingStateWriterMessage,
+    start_state_writer as start_reading_state_writer,
+};
 
 #[cfg(test)]
 use crate::epub::PageNode as EpubPageNode;
@@ -642,22 +646,6 @@ pub struct InitializedState {
     managed_books_dir: PathBuf,
     add_book_behavior: AddBookBehavior,
     reader_defaults: ReaderDefaults,
-}
-
-#[derive(Debug)]
-struct ReadingStateSave {
-    book_id: Option<i64>,
-    path: PathBuf,
-    reading: FileReadingState,
-}
-
-#[derive(Debug)]
-enum ReadingStateWriterMessage {
-    Save(ReadingStateSave),
-    Progress { book_id: i64, progress: f64 },
-    Language(LanguagePreference),
-    Preference(&'static str, String),
-    Flush(oneshot::Sender<()>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2918,95 +2906,14 @@ fn save_reading_state(state: &State) {
 fn save_preference(state: &State, key: &'static str, value: impl Into<String>) {
     if let Some(saves) = &state.reading_state_saves
         && saves
-            .send(ReadingStateWriterMessage::Preference(key, value.into()))
+            .send(ReadingStateWriterMessage::Preference(
+                key.to_owned(),
+                value.into(),
+            ))
             .is_err()
     {
         eprintln!("warning: state writer stopped unexpectedly");
     }
-}
-
-fn start_reading_state_writer(
-    store: ReadingStateStore,
-) -> mpsc::UnboundedSender<ReadingStateWriterMessage> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<ReadingStateWriterMessage>();
-    let library = Library::new(store.pool().clone(), store.managed_books_dir());
-    tokio::spawn(async move {
-        while let Some(first) = receiver.recv().await {
-            let mut pending = HashMap::new();
-            let mut progress = HashMap::new();
-            let mut language = None;
-            let mut preferences = HashMap::new();
-            let mut flushes = Vec::new();
-            match first {
-                ReadingStateWriterMessage::Save(save) => {
-                    pending.insert((save.book_id, save.path), save.reading);
-                }
-                ReadingStateWriterMessage::Progress {
-                    book_id,
-                    progress: value,
-                } => {
-                    progress.insert(book_id, value);
-                }
-                ReadingStateWriterMessage::Language(preference) => language = Some(preference),
-                ReadingStateWriterMessage::Preference(key, value) => {
-                    preferences.insert(key, value);
-                }
-                ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
-            }
-            while let Ok(message) = receiver.try_recv() {
-                match message {
-                    ReadingStateWriterMessage::Save(save) => {
-                        pending.insert((save.book_id, save.path), save.reading);
-                    }
-                    ReadingStateWriterMessage::Progress {
-                        book_id,
-                        progress: value,
-                    } => {
-                        progress.insert(book_id, value);
-                    }
-                    ReadingStateWriterMessage::Language(preference) => {
-                        language = Some(preference);
-                    }
-                    ReadingStateWriterMessage::Preference(key, value) => {
-                        preferences.insert(key, value);
-                    }
-                    ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
-                }
-            }
-
-            for ((book_id, path), reading) in pending {
-                let result = if let Some(book_id) = book_id {
-                    store.set_for_book_async(book_id, &path, &reading).await
-                } else {
-                    store.set_async(&path, &reading).await
-                };
-                if let Err(error) = result {
-                    eprintln!("warning: failed to save reading state: {error}");
-                }
-            }
-            for (book_id, progress) in progress {
-                if let Err(error) = library.update_progress(book_id, progress).await {
-                    eprintln!("warning: failed to save library progress: {error}");
-                }
-            }
-            if let Some(preference) = language
-                && let Err(error) = store
-                    .set_pref_async(LANGUAGE_PREFERENCE_KEY, preference.stored())
-                    .await
-            {
-                eprintln!("warning: failed to save language preference: {error}");
-            }
-            for (key, value) in preferences {
-                if let Err(error) = store.set_pref_async(key, &value).await {
-                    eprintln!("warning: failed to save preference {key}: {error}");
-                }
-            }
-            for flush in flushes {
-                let _ = flush.send(());
-            }
-        }
-    });
-    sender
 }
 
 fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Message> {
@@ -10607,13 +10514,15 @@ mod tests {
         let saves = start_reading_state_writer(store.clone());
 
         saves
-            .send(ReadingStateWriterMessage::Language(
-                LanguagePreference::Japanese,
+            .send(ReadingStateWriterMessage::Preference(
+                LANGUAGE_PREFERENCE_KEY.to_owned(),
+                LanguagePreference::Japanese.stored().to_owned(),
             ))
             .unwrap();
         saves
-            .send(ReadingStateWriterMessage::Language(
-                LanguagePreference::English,
+            .send(ReadingStateWriterMessage::Preference(
+                LANGUAGE_PREFERENCE_KEY.to_owned(),
+                LanguagePreference::English.stored().to_owned(),
             ))
             .unwrap();
         let (flushed, wait_for_flush) = oneshot::channel();

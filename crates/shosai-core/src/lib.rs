@@ -12,3 +12,4 @@ pub mod pdf;
 pub mod reader;
 pub mod reading_state;
 pub mod search;
+pub mod state_writer;
