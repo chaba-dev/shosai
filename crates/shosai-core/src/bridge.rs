@@ -75,6 +75,7 @@ pub struct RenderedBuffer {
 struct CancellationInner {
     cancelled: AtomicBool,
     notify: Notify,
+    publication: Mutex<()>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -86,6 +87,11 @@ impl Cancellation {
     }
 
     pub fn cancel(&self) {
+        let _publication = self
+            .0
+            .publication
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.0.cancelled.store(true, Ordering::Release);
         self.0.notify.notify_waiters();
     }
@@ -186,6 +192,11 @@ impl Bridge {
         })
         .await
         .map_err(|_| BridgeError::Worker)??;
+        let _publication = cancellation
+            .0
+            .publication
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         check_cancelled(&cancellation)?;
 
         let handle = self.document_handle();
@@ -237,6 +248,11 @@ impl Bridge {
         })
         .await
         .map_err(|_| BridgeError::Worker)??;
+        let _publication = cancellation
+            .0
+            .publication
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         check_cancelled(&cancellation)?;
         self.store_buffer(request.document, rendered, buffer_bytes)
     }
@@ -449,6 +465,30 @@ mod tests {
 
         assert_eq!(error, BridgeError::Cancelled);
         assert!(bridge.registry.lock().unwrap().documents.is_empty());
+    }
+
+    #[test]
+    fn cancellation_waits_for_the_publication_barrier() {
+        let cancellation = Cancellation::new();
+        let publication = cancellation.0.publication.lock().unwrap();
+        let cancelling = cancellation.clone();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            cancelling.cancel();
+            finished_tx.send(()).unwrap();
+        });
+
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(20))
+                .is_err()
+        );
+        drop(publication);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        thread.join().unwrap();
+        assert!(cancellation.is_cancelled());
     }
 
     #[tokio::test]
