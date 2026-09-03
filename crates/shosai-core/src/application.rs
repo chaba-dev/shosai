@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::cbz::{CbzDoc, CbzLimits};
+use crate::cbz::CbzDoc;
 use crate::document::Document;
+use crate::epub::EpubDoc;
 use crate::epub::pagination::content_node_text_len;
-use crate::epub::{EpubDoc, EpubLimits};
 use crate::library::BookFormat;
 use crate::path_key::path_key;
-use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
+use crate::pdf::PdfDoc;
 
 /// A locator supplied by the current device.
 ///
@@ -175,11 +175,7 @@ impl OpenDocument {
     }
 
     pub(crate) fn max_input_bytes(format: BookFormat) -> u64 {
-        match format {
-            BookFormat::Pdf => MAX_PDF_INPUT_BYTES,
-            BookFormat::Epub => EpubLimits::default().max_input_bytes,
-            BookFormat::Cbz => CbzLimits::default().max_archive_bytes,
-        }
+        format.max_input_bytes()
     }
 
     pub(crate) fn from_bytes(
@@ -269,6 +265,8 @@ fn classify_open_error(format: BookFormat, error: anyhow::Error) -> OpenDocument
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cbz::CbzLimits;
+    use crate::pdf::MAX_PDF_INPUT_BYTES;
 
     #[test]
     fn locator_identity_is_device_local_and_does_not_rewrite_the_path() {
