@@ -57,7 +57,7 @@ pub use dispatch::update;
 use epub_navigation::*;
 use epub_view::{
     continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_byte_len,
-    epub_image_paths,
+    epub_image_paths, epub_image_transient_byte_len,
 };
 pub use message::Message;
 
@@ -376,6 +376,7 @@ const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const EPUB_IMAGE_WORKERS: usize = 1;
+const TRANSIENT_DECODE_BYTE_CAPACITY: usize = 320 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const RASTER_RENDER_WORKERS: usize = 2;
@@ -766,6 +767,7 @@ pub struct State {
     epub_image_decode_active: bool,
     epub_image_generation: u64,
     epub_image_budget: CacheBudget,
+    transient_decode_budget: CacheBudget,
     epub_image_jobs: HashSet<EpubImageJob>,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
@@ -925,6 +927,7 @@ pub fn boot() -> (State, Task<Message>) {
         epub_image_decode_active: false,
         epub_image_generation: 0,
         epub_image_budget: CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY),
+        transient_decode_budget: CacheBudget::new(TRANSIENT_DECODE_BYTE_CAPACITY),
         epub_image_jobs: HashSet::new(),
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
@@ -2042,6 +2045,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         tab_id,
                         generation,
                         key.clone(),
+                        None,
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key.clone());
@@ -2123,11 +2127,18 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
+                    let Some(transient_permit) = doc
+                        .render_transient_byte_len(page, scale)
+                        .and_then(|bytes| state.transient_decode_budget.try_reserve(bytes))
+                    else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
                     tasks.push(render_page_task(
                         tab_id,
                         generation,
                         key.clone(),
+                        Some(transient_permit),
                         move || doc.render_page(page, scale),
                     ));
                     state.paginated_pending.push(key.clone());
@@ -2274,13 +2285,20 @@ fn decode_epub_image_task(
         return None;
     };
     let permit = state.epub_image_budget.try_reserve(byte_len)?;
+    let transient_byte_len = epub_image_transient_byte_len(document, &job.path)?;
+    let transient_permit = state
+        .transient_decode_budget
+        .try_reserve(transient_byte_len)?;
     let document = Arc::clone(document);
     let path = job.path.clone();
     Some(Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || decode_epub_images(&document, [(path, permit)]))
-                .await
-                .unwrap_or_default()
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                decode_epub_images(&document, [(path, permit)])
+            })
+            .await
+            .unwrap_or_default()
         },
         move |images| Message::EpubImagesDecoded {
             tab_id: job.tab_id,
@@ -2364,14 +2382,18 @@ fn render_continuous_page_task(
     tab_id: u64,
     request: ContinuousRequest,
     page: usize,
+    transient_permit: Option<CachePermit>,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(render)
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()))
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                render()
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
         },
         move |result| Message::ContinuousPageRendered {
             tab_id,
@@ -2639,6 +2661,23 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             let Some(permit) = reserve_raster_bytes(state, byte_len) else {
                 continue;
             };
+            let transient_permit = if let Some(OpenDocument::Cbz(document)) = &state.document {
+                let Some(transient_byte_len) = document.render_transient_byte_len(
+                    page,
+                    raster_render_scale(state, state.zoom.scale()),
+                ) else {
+                    continue;
+                };
+                let Some(transient_permit) = state
+                    .transient_decode_budget
+                    .try_reserve(transient_byte_len)
+                else {
+                    continue;
+                };
+                Some(transient_permit)
+            } else {
+                None
+            };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
             state.raster_jobs.insert(
@@ -2651,7 +2690,13 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             );
             occupied += 1;
             occupied_bytes = next_occupied_bytes;
-            tasks.push(start_continuous_page_task(state, tab_id, request, page));
+            tasks.push(start_continuous_page_task(
+                state,
+                tab_id,
+                request,
+                page,
+                transient_permit,
+            ));
         }
     }
     Task::batch(tasks)
@@ -2662,19 +2707,20 @@ fn start_continuous_page_task(
     tab_id: u64,
     request: ContinuousRequest,
     page: usize,
+    transient_permit: Option<CachePermit>,
 ) -> Task<Message> {
     let scale = raster_render_scale(state, state.zoom.scale());
     match &state.document {
         Some(OpenDocument::Pdf(document)) => {
             let document = Arc::clone(document);
             let highlights = search_highlights_for_page(state, page);
-            render_continuous_page_task(tab_id, request, page, move || {
+            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
                 document.render_page_with_highlights(page, scale, &highlights)
             })
         }
         Some(OpenDocument::Cbz(document)) => {
             let document = Arc::clone(document);
-            render_continuous_page_task(tab_id, request, page, move || {
+            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
                 document.render_page(page, scale)
             })
         }
@@ -3021,14 +3067,18 @@ fn render_page_task(
     tab_id: u64,
     generation: u64,
     key: PageCacheKey,
+    transient_permit: Option<CachePermit>,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(render)
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()))
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                render()
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
         },
         move |result| Message::PageRendered {
             tab_id,
@@ -3076,6 +3126,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     tab_id,
                     generation,
                     key.clone(),
+                    None,
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key.clone());
@@ -3093,10 +3144,17 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 let Some(permit) = reserve_raster(state, page, scale) else {
                     continue;
                 };
+                let Some(transient_permit) = document
+                    .render_transient_byte_len(page, scale)
+                    .and_then(|bytes| state.transient_decode_budget.try_reserve(bytes))
+                else {
+                    continue;
+                };
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
                     key.clone(),
+                    Some(transient_permit),
                     move || document.render_page(page, scale),
                 ));
                 state.paginated_pending.push(key.clone());
@@ -6910,6 +6968,26 @@ mod tests {
         assert!(render.units() > 0);
         assert!(state.cbz_dimension_jobs.is_empty());
         assert!(!state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn cbz_render_waits_for_transient_decode_admission() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        document.page_size(0).unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(document));
+        state.transient_decode_budget = CacheBudget::new(0);
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.raster_jobs.is_empty());
+        assert!(state.paginated_pending.is_empty());
     }
 
     #[test]
@@ -10939,6 +11017,30 @@ mod tests {
         assert!(!state.epub_image_decode_active);
         assert!(state.epub_images_pending.is_empty());
         assert!(state.epub_image_jobs.is_empty());
+    }
+
+    #[test]
+    fn epub_image_decode_holds_transient_memory_admission() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        let transient_budget = state.transient_decode_budget.clone();
+
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 1);
+        assert!(transient_budget.used() > 0);
+        drop(task);
+        assert_eq!(transient_budget.used(), 0);
     }
 
     #[test]

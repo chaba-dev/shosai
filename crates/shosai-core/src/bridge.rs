@@ -19,7 +19,7 @@ pub const MAX_BRIDGE_RENDER_WORKERS: usize = 2;
 pub const MAX_BRIDGE_OPEN_WORKERS: usize = 2;
 pub const MAX_BRIDGE_DOCUMENTS: usize = 64;
 pub const MAX_BRIDGE_RETAINED_DOCUMENT_BYTES: usize = 3 * 1024 * 1024 * 1024;
-pub const MAX_BRIDGE_PROBE_BYTES: usize = 256 * 1024 * 1024;
+pub const MAX_BRIDGE_PROBE_BYTES: usize = 512 * 1024 * 1024;
 
 const EPUB_PRESENTATION_OVERHEAD_BYTES: usize = 256 * 1024 * 1024;
 const FIXED_DOCUMENT_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
@@ -391,6 +391,16 @@ impl Bridge {
         })
         .await
         .map_err(|_| BridgeError::Worker)??;
+        let transient_byte_len =
+            render_transient_byte_len(&retained_document.document, request.page, request.scale)?;
+        let transient_byte_permits =
+            u32::try_from(transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
+        let _transient_bytes = acquire_permits(
+            Arc::clone(&self.admission.probe_bytes),
+            transient_byte_permits,
+            &cancellation,
+        )
+        .await?;
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
@@ -658,6 +668,20 @@ fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<u
                 .and_then(|pixels| pixels.checked_mul(4))
                 .ok_or(BridgeError::BufferLimit)
         }
+        OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
+    }
+}
+
+fn render_transient_byte_len(
+    document: &OpenDocument,
+    page: usize,
+    scale: f32,
+) -> Result<usize, BridgeError> {
+    match document {
+        OpenDocument::Cbz(document) => document
+            .render_transient_byte_len(page, scale)
+            .ok_or(BridgeError::BufferLimit),
+        OpenDocument::Pdf(_) => Ok(0),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }

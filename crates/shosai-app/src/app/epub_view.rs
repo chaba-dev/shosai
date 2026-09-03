@@ -238,6 +238,15 @@ pub(super) fn epub_image_byte_len(document: &EpubDoc, path: &str) -> Option<usiz
     .ok()
 }
 
+pub(super) fn epub_image_transient_byte_len(document: &EpubDoc, path: &str) -> Option<usize> {
+    let resource = document.resource(path)?;
+    if resource.media_type() == "image/svg+xml" {
+        Some(0)
+    } else {
+        usize::try_from(EPUB_IMAGE_MAX_BYTES).ok()
+    }
+}
+
 fn decode_epub_raster(data: &[u8]) -> Option<::image::RgbaImage> {
     let dimensions = ::image::ImageReader::new(Cursor::new(data))
         .with_guessed_format()

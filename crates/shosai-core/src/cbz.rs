@@ -263,7 +263,16 @@ impl CbzDoc {
             anyhow::bail!("scaled image dimensions must be positive");
         }
         self.validate_dimensions(new_width, new_height)?;
-        let img = image::load_from_memory(&bytes)
+        let mut reader = image::ImageReader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .with_context(|| format!("failed to identify image: {path}"))?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(self.limits.max_image_width);
+        limits.max_image_height = Some(self.limits.max_image_height);
+        limits.max_alloc = Some(self.limits.max_decoded_rgba_bytes);
+        reader.limits(limits);
+        let img = reader
+            .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
             img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
@@ -282,6 +291,32 @@ impl CbzDoc {
     pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
         let (width, height) = self.dimensions(index)?;
         Ok((width as f32, height as f32))
+    }
+
+    /// Conservative temporary allocation charge for decoding and resizing a page.
+    /// The final RGBA output is accounted separately by the caller.
+    pub fn render_transient_byte_len(&self, index: usize, scale: f32) -> Option<usize> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let (width, height) = self.cached_dimensions(index)?;
+        let target_width = (f64::from(width) * f64::from(scale)).floor();
+        let target_height = (f64::from(height) * f64::from(scale)).floor();
+        if !target_width.is_finite()
+            || !target_height.is_finite()
+            || target_width < 1.0
+            || target_height < 1.0
+            || target_width > f64::from(u32::MAX)
+            || target_height > f64::from(u32::MAX)
+        {
+            return None;
+        }
+        let resized = (target_width as usize)
+            .checked_mul(target_height as usize)?
+            .checked_mul(4)?;
+        usize::try_from(self.limits.max_decoded_rgba_bytes)
+            .ok()?
+            .checked_add(resized)
     }
 
     /// Return dimensions already discovered by a prior size query or render.
