@@ -4,10 +4,98 @@
 //! returning a list of [`SearchMatch`] values that the GUI can use to navigate
 //! results and highlight matches.
 
+use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::document::Document;
 use crate::epub::EpubDoc;
 use crate::epub::render::{ContentNode, TextSpan};
 use crate::pdf::PdfDoc;
 use unicode_casefold::UnicodeCaseFold;
+
+const MIB: usize = 1024 * 1024;
+
+/// Resource limits for one in-document search.
+#[derive(Debug, Clone, Copy)]
+pub struct SearchLimits {
+    pub max_query_bytes: usize,
+    pub max_indexed_text_bytes: usize,
+    pub max_matches: usize,
+    pub max_result_bytes: usize,
+}
+
+impl Default for SearchLimits {
+    fn default() -> Self {
+        Self {
+            max_query_bytes: 4 * 1024,
+            max_indexed_text_bytes: 8 * MIB,
+            max_matches: 10_000,
+            max_result_bytes: 8 * MIB,
+        }
+    }
+}
+
+/// Cooperative cancellation shared with a background search worker.
+#[derive(Debug, Clone, Default)]
+pub struct SearchCancellation(Arc<AtomicBool>);
+
+impl SearchCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
+
+/// A structural search failure rather than a silently truncated result set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchError {
+    Cancelled,
+    QueryLimit { actual: usize, limit: usize },
+    TextLimit { actual: usize, limit: usize },
+    MatchLimit { limit: usize },
+    ResultLimit { actual: usize, limit: usize },
+    Document(String),
+}
+
+impl fmt::Display for SearchError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => formatter.write_str("document search was cancelled"),
+            Self::QueryLimit { actual, limit } => {
+                write!(
+                    formatter,
+                    "search query exceeds byte limit ({actual} > {limit})"
+                )
+            }
+            Self::TextLimit { actual, limit } => {
+                write!(
+                    formatter,
+                    "search text exceeds byte limit ({actual} > {limit})"
+                )
+            }
+            Self::MatchLimit { limit } => {
+                write!(formatter, "search result count exceeds limit ({limit})")
+            }
+            Self::ResultLimit { actual, limit } => {
+                write!(
+                    formatter,
+                    "search results exceed byte limit ({actual} > {limit})"
+                )
+            }
+            Self::Document(error) => write!(formatter, "failed to extract document text: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for SearchError {}
 
 /// A single search match within a document.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,53 +114,105 @@ pub struct SearchMatch {
 ///
 /// Returns matches across all pages. For large documents this may be slow;
 /// callers should consider running this on a background thread.
-pub fn search_pdf(doc: &PdfDoc, query: &str) -> Vec<SearchMatch> {
-    if query.is_empty() {
-        return Vec::new();
-    }
+pub fn search_pdf(doc: &PdfDoc, query: &str) -> Result<Vec<SearchMatch>, SearchError> {
+    search_pdf_with(
+        doc,
+        query,
+        SearchLimits::default(),
+        &SearchCancellation::new(),
+    )
+}
 
-    let mut results = Vec::new();
-    if let Ok(pages) = doc.page_texts() {
-        find_matches_in_pages(&pages, query, &mut results);
+pub fn search_pdf_with(
+    doc: &PdfDoc,
+    query: &str,
+    limits: SearchLimits,
+    cancellation: &SearchCancellation,
+) -> Result<Vec<SearchMatch>, SearchError> {
+    let mut search = Search::new(query, limits, cancellation)?;
+    if search.query_folded.is_empty() {
+        return Ok(Vec::new());
     }
-    results
+    for page in 0..doc.page_count() {
+        search.check_cancelled()?;
+        let text = doc
+            .page_text(page)
+            .map_err(|error| SearchError::Document(error.to_string()))?;
+        search.add_text(&text, page)?;
+    }
+    Ok(search.results)
 }
 
 /// Search all chapters of an EPUB document for the given query (case-insensitive).
 ///
 /// Extracts plain text from the chapter content nodes and searches within them.
-pub fn search_epub(doc: &EpubDoc, query: &str) -> Vec<SearchMatch> {
-    if query.is_empty() {
-        return Vec::new();
-    }
+pub fn search_epub(doc: &EpubDoc, query: &str) -> Result<Vec<SearchMatch>, SearchError> {
+    search_epub_with(
+        doc,
+        query,
+        SearchLimits::default(),
+        &SearchCancellation::new(),
+    )
+}
 
-    let mut results = Vec::new();
-    for (chapter, presentation) in doc.presentation().chapters().iter().enumerate() {
-        find_matches_in_text(presentation.search_text(), query, chapter, &mut results);
+pub fn search_epub_with(
+    doc: &EpubDoc,
+    query: &str,
+    limits: SearchLimits,
+    cancellation: &SearchCancellation,
+) -> Result<Vec<SearchMatch>, SearchError> {
+    let mut search = Search::new(query, limits, cancellation)?;
+    if search.query_folded.is_empty() {
+        return Ok(Vec::new());
     }
-    results
+    for (chapter, presentation) in doc.presentation().chapters().iter().enumerate() {
+        search.add_text(presentation.search_text(), chapter)?;
+    }
+    Ok(search.results)
 }
 
 /// Extract searchable plain text from every EPUB chapter.
-pub fn extract_epub_text(doc: &EpubDoc) -> Vec<String> {
-    doc.presentation()
-        .chapters()
-        .iter()
-        .map(|chapter| chapter.search_text().to_string())
-        .collect()
+pub fn extract_epub_text(doc: &EpubDoc) -> Result<Vec<String>, SearchError> {
+    let limits = SearchLimits::default();
+    let mut bytes = 0_usize;
+    let mut text = Vec::with_capacity(doc.presentation().chapters().len());
+    for chapter in doc.presentation().chapters() {
+        bytes = bytes.saturating_add(chapter.search_text().len());
+        if bytes > limits.max_indexed_text_bytes {
+            return Err(SearchError::TextLimit {
+                actual: bytes,
+                limit: limits.max_indexed_text_bytes,
+            });
+        }
+        text.push(chapter.search_text().to_owned());
+    }
+    Ok(text)
 }
 
 /// Search pre-extracted page or chapter text.
-pub fn search_pages(pages: &[String], query: &str) -> Vec<SearchMatch> {
-    let mut results = Vec::new();
-    find_matches_in_pages(pages, query, &mut results);
-    results
+pub fn search_pages(pages: &[String], query: &str) -> Result<Vec<SearchMatch>, SearchError> {
+    search_pages_with(
+        pages,
+        query,
+        SearchLimits::default(),
+        &SearchCancellation::new(),
+    )
 }
 
-fn find_matches_in_pages(pages: &[String], query: &str, results: &mut Vec<SearchMatch>) {
-    for (page, text) in pages.iter().enumerate() {
-        find_matches_in_text(text, query, page, results);
+pub fn search_pages_with(
+    pages: &[String],
+    query: &str,
+    limits: SearchLimits,
+    cancellation: &SearchCancellation,
+) -> Result<Vec<SearchMatch>, SearchError> {
+    let mut search = Search::new(query, limits, cancellation)?;
+    if search.query_folded.is_empty() {
+        return Ok(Vec::new());
     }
+    for (page, text) in pages.iter().enumerate() {
+        search.add_text(text, page)?;
+    }
+    Ok(search.results)
 }
 
 /// Extract plain text from a list of content nodes.
@@ -163,77 +303,189 @@ pub fn find_matches_in_text_pub(
     query: &str,
     page: usize,
     results: &mut Vec<SearchMatch>,
-) {
-    find_matches_in_text(text, query, page, results);
+) -> Result<(), SearchError> {
+    let cancellation = SearchCancellation::new();
+    let mut search = Search::new(query, SearchLimits::default(), &cancellation)?;
+    search.results = std::mem::take(results);
+    search.result_bytes = search
+        .results
+        .iter()
+        .map(search_match_byte_len)
+        .sum::<usize>();
+    let result = search.add_text(text, page);
+    *results = search.results;
+    result
 }
 
-/// Find all occurrences of `query` in `text` (case-insensitive) and append
-/// to `results`.
-fn find_matches_in_text(text: &str, query: &str, page: usize, results: &mut Vec<SearchMatch>) {
-    if query.is_empty() {
-        return;
-    }
+struct Search<'a> {
+    query_folded: String,
+    limits: SearchLimits,
+    cancellation: &'a SearchCancellation,
+    indexed_bytes: usize,
+    result_bytes: usize,
+    results: Vec<SearchMatch>,
+}
 
-    let query_folded: String = query.case_fold().collect();
-    if query_folded.is_empty() {
-        return;
-    }
-
-    let original: Vec<char> = text.chars().collect();
-    let mut text_folded = String::new();
-    let mut original_boundaries = vec![Some(0)];
-    for (original_index, character) in original.iter().copied().enumerate() {
-        let folded_start = text_folded.len();
-        for folded in character.case_fold() {
-            text_folded.push(folded);
+impl<'a> Search<'a> {
+    fn new(
+        query: &str,
+        limits: SearchLimits,
+        cancellation: &'a SearchCancellation,
+    ) -> Result<Self, SearchError> {
+        if query.len() > limits.max_query_bytes {
+            return Err(SearchError::QueryLimit {
+                actual: query.len(),
+                limit: limits.max_query_bytes,
+            });
         }
-        original_boundaries.resize(text_folded.len() + 1, None);
-        if text_folded.len() == folded_start {
-            original_boundaries[folded_start] = Some(original_index + 1);
+        Ok(Self {
+            query_folded: query.case_fold().collect(),
+            limits,
+            cancellation,
+            indexed_bytes: 0,
+            result_bytes: 0,
+            results: Vec::new(),
+        })
+    }
+
+    fn check_cancelled(&self) -> Result<(), SearchError> {
+        if self.cancellation.is_cancelled() {
+            Err(SearchError::Cancelled)
         } else {
-            original_boundaries[text_folded.len()] = Some(original_index + 1);
+            Ok(())
         }
     }
 
-    let mut start = 0;
-    while let Some(pos) = text_folded[start..].find(&query_folded) {
-        let absolute_pos = start + pos;
-        let folded_end = absolute_pos + query_folded.len();
-        match (
-            original_boundaries[absolute_pos],
-            original_boundaries[folded_end],
-        ) {
-            (Some(original_start), Some(original_end)) => {
-                // Build a context snippet (up to 40 chars before and after).
-                let ctx_start = original_start.saturating_sub(40);
-                let ctx_end = (original_end + 40).min(original.len());
-                let context: String = original[ctx_start..ctx_end].iter().collect();
-                let context = context.trim().replace('\n', " ");
+    fn add_text(&mut self, text: &str, page: usize) -> Result<(), SearchError> {
+        self.check_cancelled()?;
+        self.indexed_bytes = self.indexed_bytes.saturating_add(text.len());
+        if self.indexed_bytes > self.limits.max_indexed_text_bytes {
+            return Err(SearchError::TextLimit {
+                actual: self.indexed_bytes,
+                limit: self.limits.max_indexed_text_bytes,
+            });
+        }
+        if self.query_folded.is_empty() {
+            return Ok(());
+        }
 
-                results.push(SearchMatch {
-                    page,
-                    offset: original_start,
-                    length: original_end - original_start,
-                    context,
-                });
-
-                start = folded_end;
+        let original: Vec<char> = text.chars().collect();
+        let mut text_folded = String::new();
+        let mut original_boundaries = vec![(0_u32, 0_u32)];
+        for (original_index, character) in original.iter().copied().enumerate() {
+            self.check_cancelled()?;
+            let folded_start = text_folded.len();
+            for folded in character.case_fold() {
+                text_folded.push(folded);
             }
-            _ => {
-                start = absolute_pos
-                    + text_folded[absolute_pos..]
-                        .chars()
-                        .next()
-                        .map(char::len_utf8)
-                        .unwrap_or(1);
+            let boundary = (
+                u32::try_from(text_folded.len()).expect("bounded search text fits in u32"),
+                u32::try_from(original_index + 1).expect("bounded search text fits in u32"),
+            );
+            if text_folded.len() == folded_start {
+                *original_boundaries
+                    .last_mut()
+                    .expect("initial boundary exists") = boundary;
+            } else {
+                original_boundaries.push(boundary);
             }
         }
+
+        let mut start = 0;
+        while let Some(absolute_pos) = self.find_next(&text_folded, start)? {
+            let folded_end = absolute_pos + self.query_folded.len();
+            match (
+                search_original_boundary(&original_boundaries, absolute_pos),
+                search_original_boundary(&original_boundaries, folded_end),
+            ) {
+                (Some(original_start), Some(original_end)) => {
+                    if self.results.len() == self.limits.max_matches {
+                        return Err(SearchError::MatchLimit {
+                            limit: self.limits.max_matches,
+                        });
+                    }
+                    let ctx_start = original_start.saturating_sub(40);
+                    let ctx_end = (original_end + 40).min(original.len());
+                    let context: String = original[ctx_start..ctx_end].iter().collect();
+                    let context = context.trim().replace('\n', " ");
+                    let result = SearchMatch {
+                        page,
+                        offset: original_start,
+                        length: original_end - original_start,
+                        context,
+                    };
+                    self.result_bytes = self
+                        .result_bytes
+                        .saturating_add(search_match_byte_len(&result));
+                    if self.result_bytes > self.limits.max_result_bytes {
+                        return Err(SearchError::ResultLimit {
+                            actual: self.result_bytes,
+                            limit: self.limits.max_result_bytes,
+                        });
+                    }
+                    self.results.push(result);
+                    start = folded_end;
+                }
+                _ => {
+                    start = absolute_pos
+                        + text_folded[absolute_pos..]
+                            .chars()
+                            .next()
+                            .map(char::len_utf8)
+                            .unwrap_or(1);
+                }
+            }
+        }
+        Ok(())
     }
+
+    fn find_next(&self, text: &str, start: usize) -> Result<Option<usize>, SearchError> {
+        const CANCELLATION_CHUNK_BYTES: usize = 64 * 1024;
+
+        let mut cursor = start;
+        while cursor < text.len() {
+            self.check_cancelled()?;
+            let mut primary_end = cursor
+                .saturating_add(CANCELLATION_CHUNK_BYTES)
+                .min(text.len());
+            while primary_end > cursor && !text.is_char_boundary(primary_end) {
+                primary_end -= 1;
+            }
+            let mut search_end = primary_end
+                .saturating_add(self.query_folded.len())
+                .saturating_add(4)
+                .min(text.len());
+            while search_end > primary_end && !text.is_char_boundary(search_end) {
+                search_end -= 1;
+            }
+            if let Some(position) = text[cursor..search_end].find(&self.query_folded) {
+                return Ok(Some(cursor + position));
+            }
+            cursor = primary_end;
+        }
+        Ok(None)
+    }
+}
+
+fn search_original_boundary(boundaries: &[(u32, u32)], folded: usize) -> Option<usize> {
+    let folded = u32::try_from(folded).ok()?;
+    boundaries
+        .binary_search_by_key(&folded, |(boundary, _)| *boundary)
+        .ok()
+        .map(|index| boundaries[index].1 as usize)
+}
+
+fn search_match_byte_len(result: &SearchMatch) -> usize {
+    std::mem::size_of::<SearchMatch>().saturating_add(result.context.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn find_matches_in_text(text: &str, query: &str, page: usize, results: &mut Vec<SearchMatch>) {
+        find_matches_in_text_pub(text, query, page, results).unwrap();
+    }
 
     #[test]
     fn test_find_matches_basic() {
@@ -364,5 +616,78 @@ mod tests {
         find_matches_in_text(text, "target", 0, &mut results);
         assert_eq!(results.len(), 1);
         assert!(results[0].context.contains("target"));
+    }
+
+    #[test]
+    fn bounded_search_reports_query_text_match_and_result_limits() {
+        let cancellation = SearchCancellation::new();
+        let base = SearchLimits {
+            max_query_bytes: 2,
+            max_indexed_text_bytes: 5,
+            max_matches: 1,
+            max_result_bytes: usize::MAX,
+        };
+
+        assert_eq!(
+            search_pages_with(&["a".to_owned()], "abc", base, &cancellation),
+            Err(SearchError::QueryLimit {
+                actual: 3,
+                limit: 2
+            })
+        );
+        assert_eq!(
+            search_pages_with(
+                &["aaa".to_owned(), "aaa".to_owned()],
+                "z",
+                base,
+                &cancellation
+            ),
+            Err(SearchError::TextLimit {
+                actual: 6,
+                limit: 5
+            })
+        );
+        assert_eq!(
+            search_pages_with(&["a a".to_owned()], "a", base, &cancellation),
+            Err(SearchError::MatchLimit { limit: 1 })
+        );
+
+        let result_limit = SearchLimits {
+            max_query_bytes: 1,
+            max_indexed_text_bytes: 1,
+            max_matches: 1,
+            max_result_bytes: std::mem::size_of::<SearchMatch>(),
+        };
+        assert!(matches!(
+            search_pages_with(&["a".to_owned()], "a", result_limit, &cancellation),
+            Err(SearchError::ResultLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn bounded_search_observes_cancellation_before_indexing() {
+        let cancellation = SearchCancellation::new();
+        cancellation.cancel();
+
+        assert_eq!(
+            search_pages_with(
+                &["searchable".repeat(1024)],
+                "missing",
+                SearchLimits::default(),
+                &cancellation,
+            ),
+            Err(SearchError::Cancelled)
+        );
+    }
+
+    #[test]
+    fn chunked_search_finds_matches_across_cancellation_boundaries() {
+        let mut text = "x".repeat(64 * 1024 - 2);
+        text.push_str("target");
+
+        let results = search_pages(&[text], "target").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].offset, 64 * 1024 - 2);
     }
 }

@@ -22,13 +22,12 @@ use shosai_core::library::{
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::path_from_key;
-use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{
     BoundedCache, CacheBudget, CachePermit, ReaderLocation, ReaderPreferences, ReaderSession,
     ReadingMode, nearby_chapters, prioritized_pages,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
-use shosai_core::search::SearchMatch;
+use shosai_core::search::{SearchCancellation, SearchError, SearchLimits, SearchMatch};
 use shosai_core::state_writer::{
     StateSave as ReadingStateSave, StateWriter, StateWriterMessage as ReadingStateWriterMessage,
     StateWriterSendError, start_state_writer as start_reading_state_writer,
@@ -46,6 +45,8 @@ use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
 use crate::theme::ReaderTheme;
 use crate::{theme as app_theme, typography, widgets};
+#[cfg(test)]
+use shosai_core::pdf::PdfDoc;
 
 mod dispatch;
 mod epub_navigation;
@@ -386,6 +387,7 @@ const CBZ_DIMENSION_WORKERS: usize = 1;
 const RETAINED_DOCUMENT_COUNT_CAPACITY: usize = 16;
 const RETAINED_DOCUMENT_BYTE_CAPACITY: usize = 3 * 1024 * 1024 * 1024;
 const DOCUMENT_OPEN_WORKERS: usize = 2;
+const SEARCH_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -660,7 +662,6 @@ struct ReaderTab {
     search_query: String,
     search_results: Vec<SearchMatch>,
     search_current: usize,
-    search_text: Option<Arc<Vec<String>>>,
     document_permit: RetainedDocumentPermit,
 }
 
@@ -902,8 +903,10 @@ pub struct State {
     search_query: String,
     search_results: Vec<SearchMatch>,
     search_current: usize, // index into search_results
-    search_text: Option<Arc<Vec<String>>>,
     search_loading: bool,
+    search_waiting: bool,
+    search_cancellation: Option<SearchCancellation>,
+    search_admission: CacheBudget,
     search_document_generation: u64,
     search_query_generation: u64,
 
@@ -1065,8 +1068,10 @@ pub fn boot() -> (State, Task<Message>) {
         search_query: String::new(),
         search_results: Vec::new(),
         search_current: 0,
-        search_text: None,
         search_loading: false,
+        search_waiting: false,
+        search_cancellation: None,
+        search_admission: CacheBudget::new(SEARCH_WORKERS),
         search_document_generation: 0,
         search_query_generation: 0,
 
@@ -1393,12 +1398,12 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         search_query: state.search_query.clone(),
         search_results: state.search_results.clone(),
         search_current: state.search_current,
-        search_text: state.search_text.clone(),
         document_permit: state.document_permit.clone()?,
     })
 }
 
 fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
+    cancel_active_search(state);
     state.active_tab_id = Some(tab.id);
     state.book_id = tab.session.book_id;
     state.display_title = Some(tab.display_title);
@@ -1450,8 +1455,6 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.search_query = tab.search_query;
     state.search_results = tab.search_results;
     state.search_current = tab.search_current;
-    state.search_text = tab.search_text;
-    state.search_loading = false;
     state.render_generation = tab.render_generation;
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
@@ -1580,6 +1583,7 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.continuous_pages.clear();
         state.screen = Screen::Library;
         state.render_generation = state.render_generation.wrapping_add(1);
+        cancel_active_search(state);
         state.search_document_generation = state.search_document_generation.wrapping_add(1);
         return Task::done(Message::RefreshLibrary);
     }
@@ -1990,6 +1994,7 @@ fn install_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) {
+    cancel_active_search(state);
     state.display_title = book_title(book_id, &document, Some(&path), &state.library_books);
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
@@ -2036,8 +2041,6 @@ fn install_document(
     state.search_query.clear();
     state.search_results.clear();
     state.search_current = 0;
-    state.search_text = None;
-    state.search_loading = false;
 
     let saved = state.reading_state.as_ref().and_then(|store| {
         book_id
@@ -3766,78 +3769,63 @@ fn perform_search(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
-
-    if let Some(OpenDocument::Epub(document)) = &state.document {
-        let document = Arc::clone(document);
-        return Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    shosai_core::search::search_epub(&document, &query)
-                })
-                .await
-                .unwrap_or_default()
-            },
-            move |results| Message::SearchPerformed {
-                tab_id,
-                document_generation,
-                query_generation,
-                results,
-            },
-        );
-    }
-
-    let Some(path) = state.file_path.clone() else {
+    let Some(document) = state.document.clone() else {
         return Task::none();
     };
-
-    if let Some(text) = state.search_text.clone() {
-        return Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    shosai_core::search::search_pages(&text, &query)
-                })
-                .await
-                .unwrap_or_default()
-            },
-            move |results| Message::SearchPerformed {
-                tab_id,
-                document_generation,
-                query_generation,
-                results,
-            },
-        );
-    }
-
-    if state.search_loading {
+    if !matches!(document, OpenDocument::Pdf(_) | OpenDocument::Epub(_)) {
         return Task::none();
     }
+    let Some(worker) = state.search_admission.try_reserve(1) else {
+        state.search_waiting = true;
+        return Task::none();
+    };
+    let cancellation = SearchCancellation::new();
+    state.search_cancellation = Some(cancellation.clone());
     state.search_loading = true;
+    state.search_waiting = false;
 
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                let pages = match path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .map(str::to_ascii_lowercase)
-                    .as_deref()
-                {
-                    Some("pdf") => PdfDoc::open(&path)
-                        .and_then(|document| document.page_texts())
-                        .unwrap_or_default(),
-                    _ => Vec::new(),
-                };
-                Arc::new(pages)
+                let _worker = worker;
+                match document {
+                    OpenDocument::Pdf(document) => shosai_core::search::search_pdf_with(
+                        &document,
+                        &query,
+                        SearchLimits::default(),
+                        &cancellation,
+                    ),
+                    OpenDocument::Epub(document) => shosai_core::search::search_epub_with(
+                        &document,
+                        &query,
+                        SearchLimits::default(),
+                        &cancellation,
+                    ),
+                    OpenDocument::Cbz(_) => unreachable!("CBZ search is not scheduled"),
+                }
             })
             .await
-            .unwrap_or_else(|_| Arc::new(Vec::new()))
+            .unwrap_or_else(|error| {
+                Err(SearchError::Document(format!(
+                    "search worker stopped unexpectedly: {error}"
+                )))
+            })
         },
-        move |text| Message::SearchTextExtracted {
+        move |result| Message::SearchPerformed {
             tab_id,
             document_generation,
-            text,
+            query_generation,
+            result,
         },
     )
+}
+
+fn cancel_active_search(state: &mut State) {
+    if let Some(cancellation) = state.search_cancellation.take() {
+        cancellation.cancel();
+    }
+    state.search_loading = false;
+    state.search_waiting = false;
 }
 
 fn current_epub_offset(state: &State) -> Option<usize> {
@@ -10578,32 +10566,22 @@ mod tests {
         state.search_query_generation = 3;
         state.search_query = "same query again".to_string();
         state.search_loading = true;
-
-        let _ = update(
-            &mut state,
-            Message::SearchTextExtracted {
-                tab_id: 1,
-                document_generation: 1,
-                text: Arc::new(vec!["stale text".to_string()]),
-            },
-        );
         let _ = update(
             &mut state,
             Message::SearchPerformed {
                 tab_id: 1,
                 document_generation: 2,
                 query_generation: 1,
-                results: vec![SearchMatch {
+                result: Ok(vec![SearchMatch {
                     page: 0,
                     offset: 0,
                     length: 5,
                     context: "stale".to_string(),
-                }],
+                }]),
             },
         );
 
         assert!(state.search_loading);
-        assert!(state.search_text.is_none());
         assert!(state.search_results.is_empty());
     }
 
@@ -10619,8 +10597,60 @@ mod tests {
         let task = perform_search(&mut state);
 
         assert!(task.units() > 0);
-        assert!(state.search_text.is_none());
+        assert!(state.search_loading);
+    }
+
+    #[test]
+    fn superseding_search_cancels_the_active_worker() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.search_query = "first".to_owned();
+        let task = perform_search(&mut state);
+        let cancellation = state.search_cancellation.clone().unwrap();
+
+        let _ = update(&mut state, Message::SearchQueryChanged("second".to_owned()));
+
+        assert!(cancellation.is_cancelled());
         assert!(!state.search_loading);
+        assert_eq!(state.search_admission.used(), 1);
+        drop(task);
+        assert_eq!(state.search_admission.used(), 0);
+    }
+
+    #[test]
+    fn completed_search_worker_wakes_the_latest_waiting_query() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.search_admission = CacheBudget::new(1);
+        state.search_query = "latest".to_owned();
+        state.search_query_generation = 2;
+        let held = state.search_admission.try_reserve(1).unwrap();
+
+        assert_eq!(perform_search(&mut state).units(), 0);
+        assert!(state.search_waiting);
+        drop(held);
+        let tab_id = state.active_tab_id.unwrap();
+        let document_generation = state.search_document_generation;
+        let task = update(
+            &mut state,
+            Message::SearchPerformed {
+                tab_id,
+                document_generation,
+                query_generation: 1,
+                result: Err(SearchError::Cancelled),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(state.search_loading);
+        assert!(!state.search_waiting);
+        assert_eq!(state.search_admission.used(), 1);
     }
 
     #[test]

@@ -1663,6 +1663,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                    cancel_active_search(state);
                     if uses_paginated_raster_layout(state) {
                         return refresh_content(state);
                     }
@@ -1681,6 +1682,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::SearchQueryChanged(query) => {
             let previous_highlights = current_page_search_highlights(state);
+            cancel_active_search(state);
             state.search_query = query;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
             state.search_results.clear();
@@ -1724,37 +1726,32 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::SearchTextExtracted {
-            tab_id,
-            document_generation,
-            text,
-        } => {
-            if state.active_tab_id == Some(tab_id)
-                && document_generation == state.search_document_generation
-            {
-                state.search_loading = false;
-                state.search_text = Some(text);
-                if !state.search_query.is_empty() {
-                    return perform_search(state);
-                }
-            }
-        }
-
         Message::SearchPerformed {
             tab_id,
             document_generation,
             query_generation,
-            results,
+            result,
         } => {
             if state.active_tab_id == Some(tab_id)
                 && document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
             {
+                state.search_cancellation = None;
+                state.search_loading = false;
+                state.search_waiting = false;
                 let previous_highlights = current_page_search_highlights(state);
-                state.search_results = results;
-                state.search_current = 0;
-                // Navigate to first result if any.
-                return navigate_to_current_search_result(state, &previous_highlights);
+                match result {
+                    Ok(results) => {
+                        state.search_results = results;
+                        state.search_current = 0;
+                        // Navigate to first result if any.
+                        return navigate_to_current_search_result(state, &previous_highlights);
+                    }
+                    Err(SearchError::Cancelled) => {}
+                    Err(error) => state.error = Some(AppError::Render(error.to_string())),
+                }
+            } else if state.search_waiting && !state.search_query.is_empty() {
+                return perform_search(state);
             }
         }
 
@@ -1786,6 +1783,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            cancel_active_search(state);
             if uses_paginated_raster_layout(state) {
                 return refresh_content(state);
             }

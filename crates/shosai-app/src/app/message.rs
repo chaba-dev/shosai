@@ -8,7 +8,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::{
     Book, BookPage, ImportDiscovery, ImportFailure, ImportReport, PreparedManagedImport,
 };
-use shosai_core::search::SearchMatch;
+use shosai_core::search::{SearchError, SearchMatch};
 
 use super::{
     ContinuousRequest, DecodedEpubImage, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey,
@@ -214,16 +214,11 @@ pub enum Message {
         document_generation: u64,
         query_generation: u64,
     },
-    SearchTextExtracted {
-        tab_id: u64,
-        document_generation: u64,
-        text: Arc<Vec<String>>,
-    },
     SearchPerformed {
         tab_id: u64,
         document_generation: u64,
         query_generation: u64,
-        results: Vec<SearchMatch>,
+        result: Result<Vec<SearchMatch>, SearchError>,
     },
     SearchNext,
     SearchPrev,

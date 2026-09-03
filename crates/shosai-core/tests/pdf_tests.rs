@@ -50,6 +50,7 @@ fn generated_pdf(page_options: &str, content: &str) -> Vec<u8> {
 fn render_search_match(doc: &PdfDoc, query: &str) -> (RenderedPage, RenderedPage) {
     let page_text = doc.page_text(0).unwrap();
     let result = search_pages(&[page_text], query)
+        .unwrap()
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("generated PDF should contain {query:?}"));
@@ -257,6 +258,7 @@ fn test_search_offsets_survive_generated_line_breaks() {
     let doc = PdfDoc::from_bytes(pdf).unwrap();
     let searchable = doc.page_text(0).unwrap();
     let target = search_pages(std::slice::from_ref(&searchable), "TARGET")
+        .unwrap()
         .into_iter()
         .next()
         .unwrap();
