@@ -179,6 +179,7 @@ pub enum Message {
     ToggleBookmark,
     BookmarkToggled {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         page: usize,
@@ -188,6 +189,7 @@ pub enum Message {
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         bookmarks: Vec<Bookmark>,

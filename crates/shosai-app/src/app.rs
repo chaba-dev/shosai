@@ -652,6 +652,7 @@ struct ReaderTab {
     theme: ReaderTheme,
     reader_overrides: ReaderOverrides,
     bookmarks: Vec<Bookmark>,
+    bookmark_mutation_generation: u64,
     show_bookmarks_panel: bool,
     show_reader_settings: bool,
     show_reader_more: bool,
@@ -900,6 +901,7 @@ pub struct State {
 
     // -- Bookmarks --
     bookmarks: Vec<Bookmark>,
+    bookmark_mutation_generation: u64,
     show_bookmarks_panel: bool,
     current_page_bookmarked: bool,
     editing_note_id: Option<i64>,
@@ -1066,6 +1068,7 @@ pub fn boot() -> (State, Task<Message>) {
         library: None,
 
         bookmarks: Vec::new(),
+        bookmark_mutation_generation: 0,
         show_bookmarks_panel: false,
         current_page_bookmarked: false,
         editing_note_id: None,
@@ -1395,6 +1398,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         theme: state.theme,
         reader_overrides: state.reader_overrides,
         bookmarks: state.bookmarks.clone(),
+        bookmark_mutation_generation: state.bookmark_mutation_generation,
         show_bookmarks_panel: state.show_bookmarks_panel,
         show_reader_settings: state.show_reader_settings,
         show_reader_more: state.show_reader_more,
@@ -1452,6 +1456,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.reading_mode = tab.session.preferences.reading_mode;
     state.reader_overrides = tab.reader_overrides;
     state.bookmarks = tab.bookmarks;
+    state.bookmark_mutation_generation = tab.bookmark_mutation_generation;
     state.show_bookmarks_panel = tab.show_bookmarks_panel;
     state.show_reader_settings = tab.show_reader_settings;
     state.show_reader_more = tab.show_reader_more;
@@ -1549,11 +1554,7 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     } else {
         refresh_content(state)
     };
-    let bookmarks_task = if state.show_bookmarks_panel {
-        refresh_bookmarks(state)
-    } else {
-        Task::none()
-    };
+    let bookmarks_task = refresh_bookmarks(state);
     let image_task = load_epub_images_task(state);
     Task::batch([content_task, image_task, search_task, bookmarks_task])
 }
@@ -3840,6 +3841,7 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
         let store = store.clone();
         let path = path.clone();
         let book_id = state.book_id;
+        let generation = state.bookmark_mutation_generation;
         let result_path = path.clone();
         Task::perform(
             async move {
@@ -3851,6 +3853,7 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
             },
             move |bookmarks| Message::BookmarksLoaded {
                 tab_id,
+                generation,
                 file_path: result_path.clone(),
                 book_id,
                 bookmarks,
@@ -7263,8 +7266,10 @@ mod tests {
         state
     }
 
-    #[test]
-    fn worker_document_permit_keeps_admission_until_worker_finishes() {
+    #[tokio::test]
+    async fn search_worker_keeps_document_admission_until_completion() {
+        use iced::futures::StreamExt;
+
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -7273,12 +7278,16 @@ mod tests {
         state.document_admission.count = CacheBudget::new(1);
         state.document_permit.as_mut().unwrap()._count =
             state.document_admission.count.try_reserve(1).unwrap();
+        state.search_query = "chapter".to_owned();
 
-        let worker_permit = retain_document_for_worker(&state);
+        let task = perform_search(&mut state);
+        state.document = None;
         state.document_permit = None;
 
         assert!(state.document_admission.count.try_reserve(1).is_none());
-        drop(worker_permit);
+        let mut messages = iced_runtime::task::into_stream(task).expect("search task");
+        while !matches!(messages.next().await, Some(iced_runtime::Action::Output(_))) {}
+        drop(messages);
         assert!(state.document_admission.count.try_reserve(1).is_some());
     }
 
@@ -9087,6 +9096,7 @@ mod tests {
             &mut state,
             Message::BookmarksLoaded {
                 tab_id: 1,
+                generation: 0,
                 file_path: PathBuf::from("first.epub"),
                 book_id: None,
                 bookmarks: vec![Bookmark {
@@ -9107,6 +9117,56 @@ mod tests {
     }
 
     #[test]
+    fn out_of_order_bookmark_mutation_completion_cannot_restore_stale_state() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = PathBuf::from("book.epub");
+        state.file_path = Some(path.clone());
+        state.bookmark_mutation_generation = 2;
+
+        let _ = update(
+            &mut state,
+            Message::BookmarkToggled {
+                tab_id: 1,
+                generation: 2,
+                file_path: path.clone(),
+                book_id: None,
+                page: 0,
+                location_offset: None,
+                result: Ok(None),
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::BookmarkToggled {
+                tab_id: 1,
+                generation: 1,
+                file_path: path,
+                book_id: None,
+                page: 0,
+                location_offset: None,
+                result: Ok(Some(Bookmark {
+                    id: 1,
+                    file_path: "book.epub".to_owned(),
+                    book_id: None,
+                    page: 0,
+                    location_offset: None,
+                    title: None,
+                    note: None,
+                    color: "yellow".to_owned(),
+                    created_at: "now".to_owned(),
+                })),
+            },
+        );
+
+        assert!(state.bookmarks.is_empty());
+        assert!(!state.current_page_bookmarked);
+    }
+
+    #[test]
     fn bookmark_completion_with_a_removed_identity_is_rejected() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -9120,6 +9180,7 @@ mod tests {
             &mut state,
             Message::BookmarksLoaded {
                 tab_id: 1,
+                generation: 0,
                 file_path: PathBuf::from("removed.epub"),
                 book_id: Some(42),
                 bookmarks: vec![Bookmark {

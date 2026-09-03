@@ -1442,6 +1442,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 let book_id = state.book_id;
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
                 return Task::perform(
                     async move {
                         let result = if let Some(book_id) = book_id {
@@ -1463,6 +1466,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     },
                     move |result| Message::BookmarkToggled {
                         tab_id,
+                        generation,
                         file_path: path,
                         book_id,
                         page,
@@ -1475,6 +1479,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarkToggled {
             tab_id,
+            generation,
             file_path,
             book_id,
             page,
@@ -1482,6 +1487,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             result,
         } => {
             if state.active_tab_id != Some(tab_id)
+                || state.bookmark_mutation_generation != generation
                 || state.file_path.as_ref() != Some(&file_path)
                 || state.book_id != book_id
             {
@@ -1517,11 +1523,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarksLoaded {
             tab_id,
+            generation,
             file_path,
             book_id,
             bookmarks,
         } => {
             if state.active_tab_id != Some(tab_id)
+                || state.bookmark_mutation_generation != generation
                 || state.file_path.as_ref() != Some(&file_path)
                 || state.book_id != book_id
             {
