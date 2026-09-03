@@ -77,8 +77,9 @@ without maintaining two production feature paths.
 
 - [X] Move EPUB pagination and renderer-neutral geometry out of
   ~crates/shosai-app~, replacing ~iced::Size~ and widget types at the boundary.
-- [X] Extract reader-session policy: open/close, restore location, preferences,
-  relayout anchors, and document replacement.
+- [X] Extract reusable reader-session policy for open/close, restore location,
+  preferences, relayout anchors, and document replacement.  The Iced reference
+  retains its active compatibility mirror until frontend migration.
 - [X] Extract bounded rendered-page/resource caches, prefetch policy, and
   coalesced reading-state persistence without exposing Iced handles or tasks.
 - [X] Centralize format capabilities, import/open orchestration, and typed

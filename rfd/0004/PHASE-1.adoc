@@ -1,9 +1,10 @@
 = RFD 4 Phase 1 extraction evidence
 
 Phase 1 preserves the Iced application as an executable reference while moving
-application policy and renderer-neutral state behind ~shosai-core~ APIs.  The
-old frontend may hold transient mirrors needed to paint a frame, but it no
-longer owns the extracted policies.
+reusable application policy and renderer-neutral state behind ~shosai-core~
+APIs.  The old frontend remains a compatibility reference: it owns the active
+mutable reader mirror and synchronizes it with core sessions at document and
+tab boundaries until that presentation path is replaced.
 
 == Extracted boundaries
 
@@ -22,13 +23,16 @@ widget modules create Iced paragraphs, widgets, and paint commands only.  No
 
 |Reader sessions
 |~reader::{ReaderSession,ReaderLocation,ReaderPreferences,ReadingMode,ZoomMode}~
-owns document admission into a logical session, saved-location restoration and
-clamping, default preferences, relayout offsets, and document replacement while
-preserving/clamping the logical anchor.  Closing releases the owned session;
-bridge document handles provide the explicit foreign-frontend release path.
+provides document admission into a logical session, saved-location restoration
+and clamping, default preferences, relayout offsets, and document replacement
+while preserving/clamping the logical anchor.  Closing releases the owned
+session; bridge document handles provide the explicit foreign-frontend release
+path.
 |Tabs, active-index selection, panel visibility, measured scroll offsets, image
-handles, and current viewport remain frontend presentation state.  The Iced
-reference consumes the core reading mode, zoom mode, and restore policy.
+handles, current viewport, and the Iced reference's active mutable reader state
+remain frontend-owned.  The reference creates core sessions when documents are
+installed and transfers session state at tab boundaries; making a core session
+the continuously mutated source of truth belongs to the frontend migration.
 
 |Caches and prefetch
 |~reader::BoundedCache~ provides deterministic fixed-entry and shared weighted
@@ -96,9 +100,11 @@ of both frontends.
 
 == Ownership invariants
 
-* Core has no UI-framework dependency.  Its bridge-runtime dependency is used
-  only to validate generation. Public bridge DTOs own their strings, locators,
-  summaries, and byte buffers; handles are numeric opaque identities.
+* Core has no production UI-framework or bridge-runtime dependency.  The
+  code-generation smoke test supplies the bridge runtime only in its temporary
+  workspace and creates its own generated host. Public bridge DTOs own their
+  strings, locators, summaries, and byte buffers; handles are numeric opaque
+  identities.
 * Durable locations are a page/resource plus optional logical scalar offset.
   Viewport size, zoomed pixels, scroll position, widget IDs, and GPU handles are
   not persisted or exposed as document identity.
