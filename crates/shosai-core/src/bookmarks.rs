@@ -159,18 +159,25 @@ impl BookmarkStore {
     pub async fn toggle_for_book_at_async(
         &self,
         book_id: i64,
-        file_path: &Path,
+        _file_path: &Path,
         page: usize,
         location_offset: Option<usize>,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
-        let key = canonical_key(file_path);
-        validate_bookmark_fields(&key, title, None, "yellow")?;
+        validate_optional_bytes(title, MAX_BOOKMARK_TITLE_BYTES, "bookmark title")?;
         let page = i64::try_from(page).context("bookmark page exceeds database range")?;
         let location_offset = location_offset
             .map(i64::try_from)
             .transpose()
             .context("bookmark location exceeds database range")?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current_path: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
+            .bind(book_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .context("failed to resolve bookmark book")?
+            .with_context(|| format!("book {book_id} not found"))?;
+        validate_bookmark_path(&current_path)?;
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
              WHERE book_id = ? AND page = ?
@@ -179,38 +186,45 @@ impl BookmarkStore {
         .bind(book_id)
         .bind(page)
         .bind(location_offset)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .context("failed to check existing bookmark for book")?;
 
         if let Some(row) = existing {
-            self.remove_async(row.get("id")).await?;
+            sqlx::query("DELETE FROM bookmarks WHERE id = ?")
+                .bind(row.get::<i64, _>("id"))
+                .execute(&mut *transaction)
+                .await
+                .context("failed to remove bookmark")?;
+            transaction.commit().await?;
             Ok(None)
         } else {
-            let id = sqlx::query(
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE book_id = ?")
+                .bind(book_id)
+                .fetch_one(&mut *transaction)
+                .await
+                .context("failed to count bookmarks for book")?;
+            if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
+                anyhow::bail!("bookmark count limit exceeded");
+            }
+            let row = sqlx::query(
                 "INSERT INTO bookmarks
                     (file_path, book_id, page, location_offset, title, note, color)
-                 SELECT books.file_path, books.id, ?, ?, ?, NULL, 'yellow'
-                 FROM books WHERE books.id = ?
-                   AND (SELECT COUNT(*) FROM bookmarks WHERE book_id = ?) < ?
-                 RETURNING id",
+                 VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
+                 RETURNING id, file_path, book_id, page, location_offset, title, note, color,
+                           created_at",
             )
+            .bind(current_path)
+            .bind(book_id)
             .bind(page)
             .bind(location_offset)
             .bind(title)
-            .bind(book_id)
-            .bind(book_id)
-            .bind(MAX_BOOKMARKS_PER_BOOK as i64)
-            .fetch_optional(&self.pool)
+            .fetch_one(&mut *transaction)
             .await
-            .context("failed to add bookmark for book")?
-            .context("bookmark count limit exceeded")?
-            .get("id");
-            Ok(Some(
-                self.get_by_id_async(id)
-                    .await?
-                    .context("bookmark not found after insert")?,
-            ))
+            .context("failed to add bookmark for book")?;
+            let bookmark = row_to_bookmark(&row).context("invalid bookmark after insert")?;
+            transaction.commit().await?;
+            Ok(Some(bookmark))
         }
     }
 

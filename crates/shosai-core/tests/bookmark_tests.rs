@@ -379,3 +379,52 @@ async fn bookmark_markdown_export_has_an_aggregate_byte_limit() {
             .contains("export exceeds")
     );
 }
+
+#[tokio::test]
+async fn stable_book_toggle_reports_a_missing_book() {
+    let (store, _dir) = temp_store().await;
+
+    let error = store
+        .toggle_for_book_at_async(404, &PathBuf::from("/stale.epub"), 0, None, None)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("book 404 not found"));
+}
+
+#[tokio::test]
+async fn concurrent_stable_book_toggles_are_linearizable() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', '/book.epub')
+         RETURNING id",
+    )
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+    let first = store.clone();
+    let second = store.clone();
+    let path = PathBuf::from("/stale.epub");
+    let first_toggle = tokio::spawn({
+        let path = path.clone();
+        async move {
+            first
+                .toggle_for_book_at_async(book_id, &path, 1, None, None)
+                .await
+        }
+    });
+    let second_toggle = tokio::spawn(async move {
+        second
+            .toggle_for_book_at_async(book_id, &path, 1, None, None)
+            .await
+    });
+
+    first_toggle.await.unwrap().unwrap();
+    second_toggle.await.unwrap().unwrap();
+
+    assert!(store.list_for_book_async(book_id).await.unwrap().is_empty());
+}
