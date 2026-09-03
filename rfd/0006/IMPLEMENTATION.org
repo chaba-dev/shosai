@@ -5,9 +5,10 @@ Implements [[file:README.adoc][RFD 6: Cross-format text highlighting]].
 
 Phases 0 through 4 deliver the first release.  Phase 0 closes contracts and
 technical risk before the database schema becomes durable.  Phases 1 through 3
-build the shared core and one vertical slice per format.  Phase 4 integrates
-the common product experience and is the first-release gate.  Phases 5 and 6
-are independent post-MVP interoperability work.
+build the shared core and one Flutter vertical slice per format. Phase 4
+integrates the common product experience and is the first-release gate. Phases
+5 and 6 are independent post-MVP interoperability work. RFD 4 owns the Flutter
+bridge, platform gate, and retirement of the Iced reference frontend.
 
 * Phase 0 — Contracts and technical proof
 
@@ -52,44 +53,51 @@ Complete this phase before committing the first database migration.
 
 The versioned contracts, golden vectors, executable spikes, measurement command,
 and resulting limits are recorded in [[file:PHASE-0.adoc][the Phase 0 evidence]].
+The Iced spikes stop here: they remain executable evidence for logical endpoints
+and geometry, but production highlighting continues in core and Flutter.
 
 * Phase 1 — Annotation core and persistence
 
-- [ ] Introduce a renderer-independent annotation domain type in
+- [X] Introduce a renderer-independent annotation domain type in
   ~shosai-core~ with a portable record ID, content identity, lifecycle fields,
   color, optional body, and versioned target anchor.
-- [ ] Add an EPUB anchor containing spine occurrence, canonical resource path,
+- [X] Add an EPUB anchor containing spine occurrence, canonical resource path,
   chapter scalar range, quote context, and a versioned extension boundary.
-- [ ] Add a PDF anchor containing page index, ordered page-space geometry,
+- [X] Add a PDF anchor containing page index, ordered page-space geometry,
   PDFium character range, and available quote context.
-- [ ] Specify deterministic exact, recovered, ambiguous, and orphaned
+- [X] Specify deterministic exact, recovered, ambiguous, and orphaned
   resolution outcomes.  Never persist an automatic relocation from an
   ambiguous match.
-- [ ] Add a forward-only SQLite migration and annotation store with CRUD,
-  per-book listing, bounded values, and transaction tests.
-- [ ] Persist portable UUIDs, versioned fingerprints and anchors, original and
+- [X] Add the development SQLite annotation schema and store with CRUD, per-book
+  listing, bounded values, and transaction tests. Because Shōsai is unreleased,
+  replace prerelease migrations when that produces a cleaner schema instead of
+  adding compatibility-only tables or dual writes.
+- [X] Persist portable UUIDs, versioned fingerprints and anchors, original and
   normalized quotes, import provenance, lifecycle timestamps, and hidden
   tombstones while keeping paths and database book IDs device-local.
-- [ ] Implement and test version 1 normalization, grapheme-safe context
+- [X] Implement and test version 1 normalization, grapheme-safe context
   extraction, and explicit offset conversions.
 
-* Phase 2 — PDF selection vertical slice
+* Phase 2 — PDF Flutter selection vertical slice
 
 - [ ] Extract bounded PDF page text, mapping status, character endpoints, and
   ordered page-space geometry once per visible page.
-- [ ] Add the selectable PDF page widget and verify pointer movement does not
-  reopen PDFium or acquire its global lock.
+- [ ] Expose the owned PDF selection snapshot through the Dart/Rust bridge and
+  verify pointer movement in Flutter does not cross FFI, reopen PDFium, or
+  acquire its global lock.
 - [ ] Render temporary and saved PDF overlays in continuous, single-page, and
   spread modes across manual, fit-width, and fit-page zoom.
 - [ ] Preserve logical range order and correct page-space geometry for
   multiline, bidirectional, ligature, cropped, and rotated text.
 - [ ] Permit geometry-only highlights for incomplete Unicode mappings while
   disabling copy and quote recovery; explain pages without a text layer.
+- [ ] Verify equivalent mouse, keyboard, and touch endpoint behavior plus
+  screen-reader semantics on the RFD 4 platform matrix.
 
-* Phase 3 — EPUB selection vertical slice
+* Phase 3 — EPUB Flutter selection vertical slice
 
-- [ ] Expose grapheme-safe logical hit testing from ordinary Iced rich text and
-  custom native embedded-font text using the layout that paints each block.
+- [ ] Expose grapheme-safe logical hit testing from the renderer-neutral EPUB
+  layout/scene chosen by RFD 4, using the same geometry Flutter paints.
 - [ ] Coordinate drag selection across inline spans, block widgets, and visual
   page fragments within one spine item, stopping at the spine boundary.
 - [ ] Render temporary and saved EPUB highlights in continuous and paginated
@@ -100,20 +108,22 @@ and resulting limits are recorded in [[file:PHASE-0.adoc][the Phase 0 evidence]]
   ZWJ, CJK, ligature, and multiline fixtures.
 - [ ] Exclude hidden image alternative text and fallback strings as independent
   selection targets while retaining visibly presented text.
+- [ ] Verify responsive desktop, phone, and tablet layouts, touch handles,
+  keyboard extension, focus order, and screen-reader semantics.
 
 * Phase 4 — Shared annotation experience and first release
 
 - [ ] Load annotations outside the document-open critical path and preserve
   active-tab isolation when switching or closing reader tabs.
-- [ ] Add selection and annotation messages to the app dispatch boundary;
-  keep PDF/EPUB extraction and anchor logic in ~shosai-core~.
+- [ ] Add selection and annotation commands to the Dart/Rust application
+  boundary; keep PDF/EPUB extraction and anchor logic in ~shosai-core~.
 - [ ] Provide the shared selection action surface for copy, named color choice,
   optional note creation, and cancellation with equivalent behavior in both
   formats.
 - [ ] Add an annotation list with navigate, recolor, note edit, and delete
   behavior alongside, but independent from, bookmarks.
-- [ ] Keep existing bookmarks and notes backward compatible without migrating
-  or coupling their lifecycle to highlights.
+- [ ] Keep bookmarks and highlights as independent domain records without
+  compatibility adapters for the unreleased Iced UI or development schema.
 - [ ] Reopen unchanged documents and verify exact anchors survive restart,
   EPUB font-size/theme/viewport relayout, and PDF zoom/DPI changes.
 - [ ] Exercise bounded recovery against inserted, deleted, repeated, and
@@ -127,11 +137,11 @@ and resulting limits are recorded in [[file:PHASE-0.adoc][the Phase 0 evidence]]
 - [ ] Bound copied quote/context and exclude it from logs and diagnostics.
 - [ ] Verify database migration behavior, process interruption, unavailable
   files, malformed anchors, documents changed in place, and tab lifecycle.
-- [ ] Run ~cargo fmt --check~, targeted core/app tests, ~cargo clippy~ for the
-  changed crates, and ~make check-rfds~.
+- [ ] Run ~cargo fmt --check~, targeted core and Flutter tests, ~cargo clippy~
+  for changed Rust crates, Flutter analyze/test, and ~make check-rfds~.
 
 Phases 0 through 4 are complete only when all first-release acceptance criteria
-below pass on supported desktop platforms.
+below pass on RFD 4's selected desktop and physical-device platform matrix.
 
 * Phase 5 — Native PDF interoperability (post-MVP)
 
@@ -167,3 +177,5 @@ below pass on supported desktop platforms.
   document-open responsiveness retain their existing behavior.
 - The persisted schema and domain API do not depend on viewport coordinates,
   database-local IDs as portable identity, or one renderer's text offset model.
+- The feature passes RFD 4's desktop plus physical-device input, lifecycle,
+  memory, and accessibility gate before it is treated as proof of mobile support.

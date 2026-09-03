@@ -550,5 +550,8 @@ Working evidence: [[file:EVIDENCE.md][EPUB renderer decision evidence]].
   arbitrary external navigation inside the reader.
 - Full browser-level HTML/CSS compatibility, scripting-heavy EPUBs, EPUB fixed
   layout, media overlays, audio/video, or DRM-protected EPUB.
-- Replacing Iced for non-EPUB application UI.
+- Replacing Iced for non-EPUB application UI within this completed renderer
+  project.  A later cross-platform frontend may consume the renderer-neutral
+  core under RFD 4 without changing this RFD's EPUB security and fidelity
+  decisions.
 - Treating ~cosmic-text~ alone as a CSS, table, pagination, or MathML engine.
