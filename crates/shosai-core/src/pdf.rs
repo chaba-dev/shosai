@@ -167,7 +167,7 @@ mod tests {
 
     use super::{
         BoundedPageTextError, PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
-        validate_pdf_selection_endpoint_count,
+        validate_pdf_preflight, validate_pdf_selection_endpoint_count,
     };
     use std::cell::Cell;
     use std::path::{Path, PathBuf};
@@ -307,6 +307,13 @@ mod tests {
 
         assert!(document.retained_byte_len().unwrap() >= capacity);
     }
+
+    #[test]
+    fn native_page_count_and_metadata_lengths_are_preflighted() {
+        assert!(validate_pdf_preflight(u16::MAX as i32, &[1024]).is_ok());
+        assert!(validate_pdf_preflight(u16::MAX as i32 + 1, &[0]).is_err());
+        assert!(validate_pdf_preflight(1, &[super::MAX_PDF_METADATA_BYTES + 1]).is_err());
+    }
 }
 
 /// A PDF document backed by pdfium-render.
@@ -372,6 +379,7 @@ impl PdfDoc {
             crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
         let pdfium = create_pdfium()?;
+        preflight_pdf(pdfium.bindings(), &data)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF: {e}"))?;
@@ -430,6 +438,51 @@ impl PdfDoc {
             data,
         })
     }
+}
+
+fn preflight_pdf(bindings: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<()> {
+    let document = bindings.FPDF_LoadMemDocument64(data, None);
+    if document.is_null() {
+        anyhow::bail!("failed to load PDF for resource preflight");
+    }
+    struct DocumentGuard<'a> {
+        bindings: &'a dyn PdfiumLibraryBindings,
+        document: FPDF_DOCUMENT,
+    }
+    impl Drop for DocumentGuard<'_> {
+        fn drop(&mut self) {
+            self.bindings.FPDF_CloseDocument(self.document);
+        }
+    }
+    let guard = DocumentGuard { bindings, document };
+    let metadata_lengths = [
+        "Title",
+        "Author",
+        "Subject",
+        "Keywords",
+        "Creator",
+        "Producer",
+        "CreationDate",
+        "ModificationDate",
+    ]
+    .map(|tag| bindings.FPDF_GetMetaText(document, tag, std::ptr::null_mut(), 0) as usize);
+    validate_pdf_preflight(bindings.FPDF_GetPageCount(document), &metadata_lengths)?;
+    drop(guard);
+    Ok(())
+}
+
+fn validate_pdf_preflight(page_count: i32, metadata_lengths: &[usize]) -> Result<()> {
+    if !(0..=u16::MAX as i32).contains(&page_count) {
+        crate::resource_limit!("PDF page count is outside the supported range");
+    }
+    let metadata_bytes = metadata_lengths
+        .iter()
+        .try_fold(0_usize, |total, bytes| total.checked_add(*bytes))
+        .filter(|total| *total <= MAX_PDF_METADATA_BYTES);
+    if metadata_bytes.is_none() {
+        crate::resource_limit!("PDF metadata exceeds retained byte limit");
+    }
+    Ok(())
 }
 
 impl PdfDoc {
