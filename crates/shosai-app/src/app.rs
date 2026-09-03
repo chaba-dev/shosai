@@ -2029,6 +2029,8 @@ fn install_document(
     state.epub_image_decode_active = false;
     state.epub_pages = Arc::new(Vec::new());
     state.epub_layout_key = None;
+    state.epub_layout_pending = None;
+    state.epub_layout_requested = None;
     state.epub_page = 0;
     state.epub_offset = 0;
     state.continuous_pages.clear();
@@ -10866,6 +10868,52 @@ mod tests {
         );
 
         assert!(Arc::ptr_eq(&state.epub_pages, &complete_pages));
+    }
+
+    #[test]
+    fn installing_epub_clears_stale_layout_state_and_resumes_after_old_job() {
+        let first = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(first)));
+        state.file_path = Some(PathBuf::from("first.epub"));
+        assert!(refresh_content(&mut state).units() > 0);
+        let old_job = *state.epub_jobs.iter().next().unwrap();
+        assert!(state.epub_layout_pending.is_some());
+
+        let second = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        install_document(
+            &mut state,
+            PathBuf::from("second.epub"),
+            None,
+            OpenDocument::Epub(Arc::new(second)),
+        );
+        assert_eq!(state.epub_layout_pending, None);
+        assert_eq!(state.epub_layout_requested, None);
+        assert_eq!(refresh_content(&mut state).units(), 0);
+        let requested = state.epub_layout_requested.unwrap();
+
+        let task = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: old_job.tab_id,
+                generation: old_job.generation,
+                layout_key: old_job.layout_key,
+                complete: true,
+                pages: Arc::new(Vec::new()),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert_eq!(state.epub_layout_pending, Some(requested));
+        assert!(state.epub_pages.is_empty());
+        assert!(state.epub_jobs.iter().any(|job| {
+            job.layout_key == requested && job.generation == state.render_generation
+        }));
     }
 
     #[test]
