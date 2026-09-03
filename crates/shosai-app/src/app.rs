@@ -1709,14 +1709,22 @@ fn finish_open_document_with_permit(
         return Task::none();
     };
     let (_, byte_budget, _) = retained_document_budgets();
-    let Some(resized) =
-        byte_budget.try_reserve_replacing(retained_bytes, std::iter::once(&document_permit._bytes))
-    else {
-        state.open_error = Some(AppError::Open {
-            format: "document",
-            detail: "retained document byte limit exceeded".to_owned(),
-        });
-        return Task::none();
+    let placeholder = byte_budget
+        .try_reserve(0)
+        .expect("zero-byte document reservation must fit");
+    let previous = std::mem::replace(&mut document_permit._bytes, placeholder);
+    let resized = match byte_budget.try_reserve_replacing(retained_bytes, vec![previous]) {
+        Ok(resized) => resized,
+        Err(mut previous) => {
+            document_permit._bytes = previous
+                .pop()
+                .expect("document reservation must be returned");
+            state.open_error = Some(AppError::Open {
+                format: "document",
+                detail: "retained document byte limit exceeded".to_owned(),
+            });
+            return Task::none();
+        }
     };
     document_permit._bytes = resized;
     document_permit.open_worker = None;
