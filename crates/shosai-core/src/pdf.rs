@@ -165,9 +165,10 @@ mod tests {
     use crate::document::Document;
 
     use super::{
-        PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
+        BoundedPageTextError, PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
         validate_pdf_selection_endpoint_count,
     };
+    use std::cell::Cell;
     use std::path::{Path, PathBuf};
 
     fn selectable_pdf(text: &str) -> Vec<u8> {
@@ -267,6 +268,30 @@ mod tests {
                 .downcast_ref::<crate::application::ResourceLimitError>()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn bounded_page_text_stops_during_character_extraction() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+        let checks = Cell::new(0);
+
+        let result = document.page_text_bounded(0, usize::MAX, || {
+            checks.set(checks.get() + 1);
+            checks.get() > 3
+        });
+
+        assert!(matches!(result, Err(BoundedPageTextError::Cancelled)));
+        assert_eq!(checks.get(), 4);
+    }
+
+    #[test]
+    fn bounded_page_text_rejects_text_that_cannot_fit() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+
+        assert!(matches!(
+            document.page_text_bounded(0, 1, || false),
+            Err(BoundedPageTextError::Limit { actual }) if actual > 1
+        ));
     }
 }
 
@@ -418,6 +443,52 @@ impl PdfDoc {
             .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
 
         Ok(searchable_page_text(&page, &text))
+    }
+
+    pub(crate) fn page_text_bounded(
+        &self,
+        index: usize,
+        max_bytes: usize,
+        is_cancelled: impl Fn() -> bool,
+    ) -> std::result::Result<String, BoundedPageTextError> {
+        if index >= self.page_count {
+            return Err(BoundedPageTextError::Document(anyhow::anyhow!(
+                "page index {index} out of range (total: {})",
+                self.page_count
+            )));
+        }
+        if is_cancelled() {
+            return Err(BoundedPageTextError::Cancelled);
+        }
+
+        let pdfium = create_pdfium().map_err(BoundedPageTextError::Document)?;
+        let document = pdfium
+            .load_pdf_from_byte_slice(&self.data, None)
+            .map_err(|error| {
+                BoundedPageTextError::Document(anyhow::anyhow!(
+                    "failed to load PDF for text extraction: {error}"
+                ))
+            })?;
+        let page = document.pages().get(index as u16).map_err(|error| {
+            BoundedPageTextError::Document(anyhow::anyhow!("failed to get page {index}: {error}"))
+        })?;
+        let text = page.text().map_err(|error| {
+            BoundedPageTextError::Document(anyhow::anyhow!(
+                "failed to load text for page {index}: {error}"
+            ))
+        })?;
+
+        // Each PDFium character produces at least one UTF-8 byte. Rejecting on
+        // the character count avoids allocating PdfPageTextChars for a page
+        // that cannot fit in the caller's remaining text budget.
+        let character_count = usize::try_from(text.len()).unwrap_or(usize::MAX);
+        if character_count > max_bytes {
+            return Err(BoundedPageTextError::Limit {
+                actual: character_count,
+            });
+        }
+
+        searchable_page_text_bounded(&page, &text, max_bytes, is_cancelled)
     }
 
     /// Extracts a bounded owned hit-test snapshot for a page rendered at `scale`.
@@ -614,6 +685,13 @@ impl PdfDoc {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum BoundedPageTextError {
+    Cancelled,
+    Limit { actual: usize },
+    Document(anyhow::Error),
+}
+
 fn validate_pdf_selection_endpoint_count(count: usize) -> Result<()> {
     if count > PDF_SELECTION_MAX_ENDPOINTS {
         crate::resource_limit!(
@@ -669,31 +747,50 @@ fn pdf_selection_rows(mut zones: Vec<PdfSelectionZone>) -> Vec<PdfSelectionRow> 
 }
 
 fn searchable_page_text(page: &PdfPage<'_>, text: &PdfPageText<'_>) -> String {
+    searchable_page_text_bounded(page, text, usize::MAX, || false)
+        .expect("an unlimited, non-cancellable extraction cannot fail")
+}
+
+fn searchable_page_text_bounded(
+    page: &PdfPage<'_>,
+    text: &PdfPageText<'_>,
+    max_bytes: usize,
+    is_cancelled: impl Fn() -> bool,
+) -> std::result::Result<String, BoundedPageTextError> {
     let page_bounds = page
         .boundaries()
         .bounding()
         .ok()
         .map(|boundary| boundary.bounds);
-    let mut result = String::with_capacity(text.chars().len());
+    let chars = text.chars();
+    let mut result = String::with_capacity(chars.len().min(max_bytes));
 
-    for character in text.chars().iter() {
+    for character in chars.iter() {
+        if is_cancelled() {
+            return Err(BoundedPageTextError::Cancelled);
+        }
         // Generated whitespace and line breaks must remain to preserve PDFium
         // character indexes even though they often have no visible bounds.
         let visible = character.is_generated().unwrap_or(false)
             || character.loose_bounds().is_ok_and(|bounds| {
                 page_bounds.is_some_and(|page_bounds| bounds.does_overlap(&page_bounds))
             });
-        result.push(if visible {
+        let character = if visible {
             character
                 .unicode_char()
                 .filter(|character| *character != '\0')
                 .unwrap_or('\u{FFFD}')
         } else {
             '\u{FFFD}'
-        });
+        };
+        let actual = result.len().saturating_add(character.len_utf8());
+        if actual > max_bytes {
+            return Err(BoundedPageTextError::Limit { actual });
+        }
+        result.push(character);
     }
 
-    result
+    Ok(result)
 }
 
 fn rect_to_pixels(

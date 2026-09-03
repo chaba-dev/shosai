@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use crate::document::Document;
 use crate::epub::EpubDoc;
 use crate::epub::render::{ContentNode, TextSpan};
-use crate::pdf::PdfDoc;
+use crate::pdf::{BoundedPageTextError, PdfDoc};
 use unicode_casefold::UnicodeCaseFold;
 
 const MIB: usize = 1024 * 1024;
@@ -135,9 +135,20 @@ pub fn search_pdf_with(
     }
     for page in 0..doc.page_count() {
         search.check_cancelled()?;
+        let remaining = search
+            .limits
+            .max_indexed_text_bytes
+            .saturating_sub(search.indexed_bytes);
         let text = doc
-            .page_text(page)
-            .map_err(|error| SearchError::Document(error.to_string()))?;
+            .page_text_bounded(page, remaining, || cancellation.is_cancelled())
+            .map_err(|error| match error {
+                BoundedPageTextError::Cancelled => SearchError::Cancelled,
+                BoundedPageTextError::Limit { actual } => SearchError::TextLimit {
+                    actual: search.indexed_bytes.saturating_add(actual),
+                    limit: search.limits.max_indexed_text_bytes,
+                },
+                BoundedPageTextError::Document(error) => SearchError::Document(error.to_string()),
+            })?;
         search.add_text(&text, page)?;
     }
     Ok(search.results)
@@ -306,12 +317,23 @@ pub fn find_matches_in_text_pub(
 ) -> Result<(), SearchError> {
     let cancellation = SearchCancellation::new();
     let mut search = Search::new(query, SearchLimits::default(), &cancellation)?;
-    search.results = std::mem::take(results);
-    search.result_bytes = search
-        .results
+    let result_bytes = results
         .iter()
         .map(search_match_byte_len)
-        .sum::<usize>();
+        .fold(0_usize, usize::saturating_add);
+    if results.len() > search.limits.max_matches {
+        return Err(SearchError::MatchLimit {
+            limit: search.limits.max_matches,
+        });
+    }
+    if result_bytes > search.limits.max_result_bytes {
+        return Err(SearchError::ResultLimit {
+            actual: result_bytes,
+            limit: search.limits.max_result_bytes,
+        });
+    }
+    search.results = std::mem::take(results);
+    search.result_bytes = result_bytes;
     let result = search.add_text(text, page);
     *results = search.results;
     result
@@ -399,7 +421,7 @@ impl<'a> Search<'a> {
                 search_original_boundary(&original_boundaries, folded_end),
             ) {
                 (Some(original_start), Some(original_end)) => {
-                    if self.results.len() == self.limits.max_matches {
+                    if self.results.len() >= self.limits.max_matches {
                         return Err(SearchError::MatchLimit {
                             limit: self.limits.max_matches,
                         });
@@ -678,6 +700,26 @@ mod tests {
             ),
             Err(SearchError::Cancelled)
         );
+    }
+
+    #[test]
+    fn public_accumulator_rejects_oversized_seed_without_mutating_it() {
+        let seed = SearchMatch {
+            page: 0,
+            offset: 0,
+            length: 1,
+            context: String::new(),
+        };
+        let mut results = vec![seed; SearchLimits::default().max_matches + 1];
+        let original = results.clone();
+
+        assert_eq!(
+            find_matches_in_text_pub("a", "a", 0, &mut results),
+            Err(SearchError::MatchLimit {
+                limit: SearchLimits::default().max_matches,
+            })
+        );
+        assert_eq!(results, original);
     }
 
     #[test]
