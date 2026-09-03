@@ -58,7 +58,10 @@ loop or pass Iced commands/tasks into persistence.
 |~application::{format_capabilities,OpenDocument,OpenDocumentError}~ is the one
 document admission path.  ~library~ owns recursive discovery, fingerprints,
 duplicate classification, cancellation, ~ImportDiscoveryProgressSnapshot~,
-preparation, import/link execution, and typed reports/failures.
+preparation, import/link execution, and typed reports/failures. Supported input
+ceilings are shared by opening, pre-hash discovery, fingerprinting, and bounded
+managed-file staging. Discovery retains at most 10,000 candidate/failure results
+and reports truncation as an explicit partial failure.
 |Pickers, staged-review widgets, progress display, delayed-open notice, and
 generation IDs remain frontend concerns.  The Iced loader delegates format
 admission to core.
@@ -79,7 +82,12 @@ request/summary/buffer DTOs, opaque document and buffer handles, atomic
 cancellation, typed errors, panic containment, and explicit take/release.
 Buffers are admitted before rendering, capped at 160 MiB individually and 320
 MiB across retained and in-flight work, and transferred as generated Dart byte
-lists. Cancellation and release form publication barriers.
+lists. Admission is process-global across bridge facades and also caps 64
+in-flight requests, 64 retained documents, 256 retained buffers, two open
+workers, two render workers, 3 GiB of conservatively derived retained-document
+memory, and 512 MiB of CBZ probe/decode work. Documents are parsed from one
+bounded file snapshot, so path replacement or growth cannot invalidate the
+admission decision. Cancellation and release form publication barriers.
 |A disposable ~flutter_rust_bridge~ smoke test generates Rust and Dart bindings
 from the public module.  Checking in bindings and Flutter image/scene
 materialization belong to M2. No borrowed Rust value, frontend type, or durable
@@ -110,7 +118,9 @@ of both frontends.
   not persisted or exposed as document identity.
 * CPU/blocking document open, pagination, decode, and raster work executes off
   the frontend event loop.  Cancellation is checked before and after worker
-  operations; deterministic release reclaims registry ownership.
+  operations; deterministic release reclaims registry ownership. EPUB, CBZ, and
+  PDF image/render peaks share a 320 MiB transient decode budget in the Iced
+  reference, while bridge render/probe peaks are admitted before worker launch.
 * Cache admission is bounded by bytes and count before work is scheduled.
   Relayout and raster workers are globally capped; rapid changes retain only
   the latest requested key. Stale generations cannot replace the active
