@@ -8,6 +8,7 @@ use shosai_core::epub::render::ContentNode;
 use shosai_core::epub::{
     EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextRequest, EpubTextRun,
 };
+use shosai_core::reader::CachePermit;
 
 use super::{
     BOOKMARKS_PANEL_WIDTH, DecodedEpubImage, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE,
@@ -190,14 +191,17 @@ pub(super) fn epub_image_paths<'a>(
 
 pub(super) fn decode_epub_images(
     document: &EpubDoc,
-    paths: impl IntoIterator<Item = String>,
+    paths: impl IntoIterator<Item = (String, CachePermit)>,
 ) -> Vec<(String, Option<DecodedEpubImage>)> {
     paths
         .into_iter()
-        .map(|path| {
+        .map(|(path, permit)| {
             let image = document.resource(&path).and_then(|resource| {
                 if resource.media_type() == "image/svg+xml" {
-                    return Some(DecodedEpubImage::Svg(resource.bytes().to_vec()));
+                    return Some(DecodedEpubImage::Svg {
+                        data: resource.bytes().to_vec(),
+                        permit,
+                    });
                 }
                 let rgba = decode_epub_raster(resource.bytes())?;
                 let (width, height) = rgba.dimensions();
@@ -205,11 +209,33 @@ pub(super) fn decode_epub_images(
                     width,
                     height,
                     pixels: rgba.into_raw(),
+                    permit,
                 })
             });
             (path, image)
         })
         .collect()
+}
+
+pub(super) fn epub_image_byte_len(document: &EpubDoc, path: &str) -> Option<usize> {
+    let resource = document.resource(path)?;
+    if resource.media_type() == "image/svg+xml" {
+        return Some(resource.bytes().len());
+    }
+    let (width, height) = ::image::ImageReader::new(Cursor::new(resource.bytes()))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if width > EPUB_IMAGE_MAX_DIMENSION || height > EPUB_IMAGE_MAX_DIMENSION {
+        return None;
+    }
+    usize::try_from(
+        u64::from(width)
+            .checked_mul(u64::from(height))?
+            .checked_mul(4)?,
+    )
+    .ok()
 }
 
 fn decode_epub_raster(data: &[u8]) -> Option<::image::RgbaImage> {
@@ -254,7 +280,12 @@ pub(super) fn cache_epub_image_handles<'a, F>(
             continue;
         };
         let handle = if data.starts_with(b"<svg") {
-            EpubImageHandle::Svg(svg::Handle::from_memory(data.to_vec()))
+            EpubImageHandle::Svg {
+                handle: svg::Handle::from_memory(data.to_vec()),
+                _permit: shosai_core::reader::CacheBudget::new(data.len())
+                    .try_reserve(data.len())
+                    .unwrap(),
+            }
         } else {
             let Ok(rgba) = ::image::load_from_memory(data).map(|decoded| decoded.to_rgba8()) else {
                 continue;
@@ -1016,7 +1047,7 @@ fn render_epub_image<'a>(
                 .width(Length::Fixed(layout.width))
                 .height(Length::Fixed(layout.height))
                 .into(),
-            EpubImageHandle::Svg(handle) => svg(handle.clone())
+            EpubImageHandle::Svg { handle, .. } => svg(handle.clone())
                 .content_fit(iced::ContentFit::Fill)
                 .width(Length::Fixed(layout.width))
                 .height(Length::Fixed(layout.height))
@@ -2006,7 +2037,7 @@ mod tests {
         });
         assert!(matches!(
             handles.get("figure.svg"),
-            Some(EpubImageHandle::Svg(_))
+            Some(EpubImageHandle::Svg { .. })
         ));
         let layout =
             crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, Some(300.0), Some(300.0), None)

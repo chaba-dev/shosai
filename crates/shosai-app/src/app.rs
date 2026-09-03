@@ -55,7 +55,8 @@ mod perf;
 pub use dispatch::update;
 use epub_navigation::*;
 use epub_view::{
-    continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_paths,
+    continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_byte_len,
+    epub_image_paths,
 };
 pub use message::Message;
 
@@ -196,7 +197,10 @@ impl std::fmt::Debug for RasterImageHandle {
 #[derive(Clone)]
 enum EpubImageHandle {
     Raster(image::Handle),
-    Svg(iced::widget::svg::Handle),
+    Svg {
+        handle: iced::widget::svg::Handle,
+        _permit: CachePermit,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -205,8 +209,12 @@ pub(crate) enum DecodedEpubImage {
         width: u32,
         height: u32,
         pixels: Vec<u8>,
+        permit: CachePermit,
     },
-    Svg(Vec<u8>),
+    Svg {
+        data: Vec<u8>,
+        permit: CachePermit,
+    },
 }
 
 impl DecodedEpubImage {
@@ -216,8 +224,19 @@ impl DecodedEpubImage {
                 width,
                 height,
                 pixels,
-            } => EpubImageHandle::Raster(image::Handle::from_rgba(width, height, pixels)),
-            Self::Svg(data) => EpubImageHandle::Svg(iced::widget::svg::Handle::from_memory(data)),
+                permit,
+            } => EpubImageHandle::Raster(image::Handle::from_rgba(
+                width,
+                height,
+                bytes::Bytes::from_owner(PermittedPixels {
+                    pixels: pixels.into(),
+                    _permit: permit,
+                }),
+            )),
+            Self::Svg { data, permit } => EpubImageHandle::Svg {
+                handle: iced::widget::svg::Handle::from_memory(data),
+                _permit: permit,
+            },
         }
     }
 }
@@ -228,7 +247,7 @@ impl std::fmt::Debug for EpubImageHandle {
             .debug_tuple("EpubImageHandle")
             .field(&match self {
                 Self::Raster(handle) => format!("raster:{:?}", handle.id()),
-                Self::Svg(_) => "svg".to_owned(),
+                Self::Svg { .. } => "svg".to_owned(),
             })
             .finish()
     }
@@ -354,6 +373,7 @@ const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
 const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
 const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
 const RASTER_RENDER_WORKERS: usize = 2;
@@ -728,6 +748,7 @@ pub struct State {
     epub_images_failed: HashSet<String>,
     epub_image_decode_active: bool,
     epub_image_generation: u64,
+    epub_image_budget: CacheBudget,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_layout_pending: Option<EpubLayoutKey>,
@@ -884,6 +905,7 @@ pub fn boot() -> (State, Task<Message>) {
         epub_images_failed: HashSet::new(),
         epub_image_decode_active: false,
         epub_image_generation: 0,
+        epub_image_budget: CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY),
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
         epub_layout_pending: None,
@@ -2152,24 +2174,26 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         return Task::none();
     }
 
-    let paths = state
-        .epub_images_desired
-        .iter()
-        .take(1)
-        .cloned()
-        .collect::<Vec<_>>();
-    if paths.is_empty() {
+    let Some(path) = state.epub_images_desired.iter().next().cloned() else {
         return Task::none();
-    }
+    };
+    let Some(byte_len) = epub_image_byte_len(document, &path) else {
+        state.epub_images_desired.remove(&path);
+        state.epub_images_failed.insert(path);
+        return load_epub_images_task(state);
+    };
+    let Some(permit) = state.epub_image_budget.try_reserve(byte_len) else {
+        return Task::none();
+    };
 
-    state.epub_images_pending = paths.iter().cloned().collect();
+    state.epub_images_pending = [path.clone()].into_iter().collect();
     state.epub_image_decode_active = true;
     let document = Arc::clone(document);
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.epub_image_generation;
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || decode_epub_images(&document, paths))
+            tokio::task::spawn_blocking(move || decode_epub_images(&document, [(path, permit)]))
                 .await
                 .unwrap_or_default()
         },
@@ -10487,6 +10511,7 @@ mod tests {
         let path = state.epub_images_pending.iter().next().unwrap().clone();
         let generation = state.epub_image_generation;
         state.render_generation = state.render_generation.wrapping_add(1);
+        let permit = state.epub_image_budget.try_reserve(4).unwrap();
 
         let _ = update(
             &mut state,
@@ -10499,6 +10524,7 @@ mod tests {
                         width: 1,
                         height: 1,
                         pixels: vec![1, 2, 3, 255],
+                        permit,
                     }),
                 )],
             },
@@ -10506,6 +10532,20 @@ mod tests {
 
         assert!(!state.epub_images_pending.contains(&path));
         assert!(state.epub_image_handles.contains_key(&path));
+        assert_eq!(state.epub_image_budget.used(), 4);
+        state.epub_image_handles.clear();
+        assert_eq!(state.epub_image_budget.used(), 0);
+    }
+
+    #[test]
+    fn epub_image_decode_waits_for_aggregate_memory_admission() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.epub_image_budget = CacheBudget::new(0);
+
+        assert_eq!(load_epub_images_task(&mut state).units(), 0);
+        assert!(!state.epub_image_decode_active);
+        assert!(state.epub_images_pending.is_empty());
     }
 
     #[test]
@@ -10524,6 +10564,7 @@ mod tests {
         assert!(state.epub_image_decode_active);
         assert_eq!(state.epub_images_desired.len(), 2);
 
+        let budget = state.epub_image_budget.clone();
         let next = update(
             &mut state,
             Message::EpubImagesDecoded {
@@ -10538,6 +10579,7 @@ mod tests {
                                 width: 1,
                                 height: 1,
                                 pixels: vec![1, 2, 3, 255],
+                                permit: budget.try_reserve(4).unwrap(),
                             }),
                         )
                     })
