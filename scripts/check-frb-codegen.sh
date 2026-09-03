@@ -11,7 +11,8 @@ mkdir -p "$rust_root"
 cp "$root/Cargo.lock" "$temporary/rust/Cargo.lock"
 sed 's/members = \["crates\/shosai-core", "crates\/shosai-app"\]/members = ["crates\/shosai-core"]/' \
   "$root/Cargo.toml" >"$temporary/rust/Cargo.toml"
-cp "$root/crates/shosai-core/Cargo.toml" "$rust_root/Cargo.toml"
+sed '/^\[dependencies\]$/a flutter_rust_bridge = "=2.11.1"' \
+  "$root/crates/shosai-core/Cargo.toml" >"$rust_root/Cargo.toml"
 cp -R "$root/crates/shosai-core/src" "$rust_root/src"
 
 mkdir -p "$temporary/dart/lib/generated"
