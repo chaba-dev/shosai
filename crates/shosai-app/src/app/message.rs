@@ -202,6 +202,7 @@ pub enum Message {
     DeleteBookmark(i64),
     BookmarkMutationFinished {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         result: Result<(), String>,

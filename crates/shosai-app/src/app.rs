@@ -667,6 +667,40 @@ struct ReaderTab {
 }
 
 #[derive(Debug, Clone)]
+enum BookmarkMutation {
+    Toggle {
+        generation: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        page: usize,
+        location_offset: Option<usize>,
+    },
+    UpdateNote {
+        generation: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        id: i64,
+        note: Option<String>,
+    },
+    Delete {
+        generation: u64,
+        file_path: PathBuf,
+        book_id: Option<i64>,
+        id: i64,
+    },
+}
+
+impl BookmarkMutation {
+    fn generation(&self) -> u64 {
+        match self {
+            Self::Toggle { generation, .. }
+            | Self::UpdateNote { generation, .. }
+            | Self::Delete { generation, .. } => *generation,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct RetainedDocumentPermit {
     _count: CachePermit,
     _bytes: CachePermit,
@@ -902,6 +936,8 @@ pub struct State {
     // -- Bookmarks --
     bookmarks: Vec<Bookmark>,
     bookmark_mutation_generation: u64,
+    bookmark_mutation_queues: HashMap<u64, VecDeque<BookmarkMutation>>,
+    bookmark_mutations_active: HashSet<u64>,
     show_bookmarks_panel: bool,
     current_page_bookmarked: bool,
     editing_note_id: Option<i64>,
@@ -1069,6 +1105,8 @@ pub fn boot() -> (State, Task<Message>) {
 
         bookmarks: Vec::new(),
         bookmark_mutation_generation: 0,
+        bookmark_mutation_queues: HashMap::new(),
+        bookmark_mutations_active: HashSet::new(),
         show_bookmarks_panel: false,
         current_page_bookmarked: false,
         editing_note_id: None,
@@ -3834,10 +3872,166 @@ fn displayed_paginated_raster_pages(state: &State) -> Vec<usize> {
     pages
 }
 
+fn queue_bookmark_mutation(
+    state: &mut State,
+    tab_id: u64,
+    mutation: BookmarkMutation,
+) -> Task<Message> {
+    state
+        .bookmark_mutation_queues
+        .entry(tab_id)
+        .or_default()
+        .push_back(mutation);
+    continue_bookmark_mutations(state, tab_id)
+}
+
+fn continue_bookmark_mutations(state: &mut State, tab_id: u64) -> Task<Message> {
+    if state.bookmark_mutations_active.contains(&tab_id) {
+        return Task::none();
+    }
+    let Some(mutation) = state
+        .bookmark_mutation_queues
+        .get(&tab_id)
+        .and_then(|queue| queue.front())
+        .cloned()
+    else {
+        return Task::none();
+    };
+    let Some(store) = state.bookmark_store.clone() else {
+        return Task::none();
+    };
+    state.bookmark_mutations_active.insert(tab_id);
+    match mutation {
+        BookmarkMutation::Toggle {
+            generation,
+            file_path,
+            book_id,
+            page,
+            location_offset,
+        } => {
+            let task_path = file_path.clone();
+            Task::perform(
+                async move {
+                    let result = if let Some(book_id) = book_id {
+                        store
+                            .toggle_for_book_at_async(
+                                book_id,
+                                &task_path,
+                                page,
+                                location_offset,
+                                None,
+                            )
+                            .await
+                    } else {
+                        store
+                            .toggle_at_async(&task_path, page, location_offset, None)
+                            .await
+                    };
+                    result.map_err(|error| format!("{error:#}"))
+                },
+                move |result| Message::BookmarkToggled {
+                    tab_id,
+                    generation,
+                    file_path,
+                    book_id,
+                    page,
+                    location_offset,
+                    result,
+                },
+            )
+        }
+        BookmarkMutation::UpdateNote {
+            generation,
+            file_path,
+            book_id,
+            id,
+            note,
+        } => Task::perform(
+            async move {
+                store
+                    .update_note_async(id, note.as_deref())
+                    .await
+                    .map_err(|error| format!("{error:#}"))
+            },
+            move |result| Message::BookmarkMutationFinished {
+                tab_id,
+                generation,
+                file_path,
+                book_id,
+                result,
+            },
+        ),
+        BookmarkMutation::Delete {
+            generation,
+            file_path,
+            book_id,
+            id,
+        } => Task::perform(
+            async move {
+                store
+                    .remove_async(id)
+                    .await
+                    .map_err(|error| format!("{error:#}"))
+            },
+            move |result| Message::BookmarkMutationFinished {
+                tab_id,
+                generation,
+                file_path,
+                book_id,
+                result,
+            },
+        ),
+    }
+}
+
+fn finish_bookmark_mutation(
+    state: &mut State,
+    tab_id: u64,
+    generation: u64,
+    file_path: &Path,
+    book_id: Option<i64>,
+) -> Task<Message> {
+    if state
+        .bookmark_mutation_queues
+        .get(&tab_id)
+        .and_then(|queue| queue.front())
+        .map(BookmarkMutation::generation)
+        != Some(generation)
+    {
+        return Task::none();
+    }
+    state.bookmark_mutations_active.remove(&tab_id);
+    let mut has_more = false;
+    if let Some(queue) = state.bookmark_mutation_queues.get_mut(&tab_id) {
+        queue.pop_front();
+        has_more = !queue.is_empty();
+    }
+    if has_more {
+        return continue_bookmark_mutations(state, tab_id);
+    }
+    state.bookmark_mutation_queues.remove(&tab_id);
+    if state.active_tab_id == Some(tab_id)
+        && state.file_path.as_deref() == Some(file_path)
+        && state.book_id == book_id
+    {
+        refresh_bookmarks(state)
+    } else {
+        Task::none()
+    }
+}
+
 fn refresh_bookmarks(state: &State) -> Task<Message> {
     if let (Some(tab_id), Some(path), Some(store)) =
         (state.active_tab_id, &state.file_path, &state.bookmark_store)
     {
+        if state.bookmark_mutations_active.contains(&tab_id)
+            || state
+                .bookmark_mutation_queues
+                .get(&tab_id)
+                .is_some_and(|queue| !queue.is_empty())
+        {
+            return Task::none();
+        }
         let store = store.clone();
         let path = path.clone();
         let book_id = state.book_id;
@@ -9166,6 +9360,69 @@ mod tests {
         assert!(!state.current_page_bookmarked);
     }
 
+    #[tokio::test]
+    async fn bookmark_mutations_are_launched_in_message_order() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let directory = tempfile::tempdir().unwrap();
+        let reading_state = ReadingStateStore::open_at_async(&directory.path().join("shosai.db"))
+            .await
+            .unwrap();
+        state.bookmark_store = Some(BookmarkStore::new(reading_state.pool().clone()));
+        let path = PathBuf::from("book.epub");
+        state.file_path = Some(path.clone());
+        state.editing_note_id = Some(10);
+        state.editing_note_text = "note".to_owned();
+
+        let _first = update(&mut state, Message::ToggleBookmark);
+        let _second = update(&mut state, Message::SaveNote);
+        let _third = update(&mut state, Message::DeleteBookmark(11));
+
+        let queued = state.bookmark_mutation_queues.get(&1).unwrap();
+        assert_eq!(queued.len(), 3);
+        assert!(matches!(queued[0], BookmarkMutation::Toggle { .. }));
+        assert!(matches!(queued[1], BookmarkMutation::UpdateNote { .. }));
+        assert!(matches!(queued[2], BookmarkMutation::Delete { .. }));
+        assert!(state.bookmark_mutations_active.contains(&1));
+
+        let next = update(
+            &mut state,
+            Message::BookmarkToggled {
+                tab_id: 1,
+                generation: 1,
+                file_path: path,
+                book_id: None,
+                page: 0,
+                location_offset: None,
+                result: Ok(None),
+            },
+        );
+        assert_eq!(next.units(), 1);
+        let queued = state.bookmark_mutation_queues.get(&1).unwrap();
+        assert_eq!(queued.len(), 2);
+        assert!(matches!(queued[0], BookmarkMutation::UpdateNote { .. }));
+        assert!(state.bookmark_mutations_active.contains(&1));
+
+        let duplicate = update(
+            &mut state,
+            Message::BookmarkToggled {
+                tab_id: 1,
+                generation: 1,
+                file_path: PathBuf::from("book.epub"),
+                book_id: None,
+                page: 0,
+                location_offset: None,
+                result: Ok(None),
+            },
+        );
+        assert_eq!(duplicate.units(), 0);
+        assert_eq!(state.bookmark_mutation_queues.get(&1).unwrap().len(), 2);
+        assert!(state.bookmark_mutations_active.contains(&1));
+    }
+
     #[test]
     fn bookmark_completion_with_a_removed_identity_is_rejected() {
         let epub = EpubDoc::from_bytes(
@@ -13187,6 +13444,13 @@ mod tests {
             messages.next().await.expect("bookmark completion")
         else {
             panic!("bookmark task should produce a message");
+        };
+        let refresh = update(&mut state, message);
+        let mut messages = iced_runtime::task::into_stream(refresh).expect("bookmark refresh task");
+        let iced_runtime::Action::Output(message) =
+            messages.next().await.expect("bookmark refresh completion")
+        else {
+            panic!("bookmark refresh should produce a message");
         };
         let _ = update(&mut state, message);
 

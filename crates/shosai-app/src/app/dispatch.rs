@@ -1433,45 +1433,25 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Bookmarks
         Message::ToggleBookmark => {
-            if let (Some(tab_id), Some(path), Some(store)) =
+            if let (Some(tab_id), Some(path), Some(_store)) =
                 (state.active_tab_id, &state.file_path, &state.bookmark_store)
             {
                 let path = path.clone();
-                let task_path = path.clone();
-                let store = store.clone();
                 let book_id = state.book_id;
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
                 state.bookmark_mutation_generation =
                     state.bookmark_mutation_generation.wrapping_add(1);
                 let generation = state.bookmark_mutation_generation;
-                return Task::perform(
-                    async move {
-                        let result = if let Some(book_id) = book_id {
-                            store
-                                .toggle_for_book_at_async(
-                                    book_id,
-                                    &task_path,
-                                    page,
-                                    location_offset,
-                                    None,
-                                )
-                                .await
-                        } else {
-                            store
-                                .toggle_at_async(&task_path, page, location_offset, None)
-                                .await
-                        };
-                        result.map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkToggled {
-                        tab_id,
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::Toggle {
                         generation,
                         file_path: path,
                         book_id,
                         page,
                         location_offset,
-                        result,
                     },
                 );
             }
@@ -1486,28 +1466,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             location_offset,
             result,
         } => {
-            if state.active_tab_id != Some(tab_id)
-                || state.bookmark_mutation_generation != generation
-                || state.file_path.as_ref() != Some(&file_path)
-                || state.book_id != book_id
-            {
-                return Task::none();
+            let _ = (page, location_offset);
+            if let Err(error) = result {
+                eprintln!("warning: failed to toggle bookmark: {error}");
             }
-            match result {
-                Ok(Some(bookmark)) => {
-                    state.bookmarks.push(bookmark);
-                    state.current_page_bookmarked = true;
-                }
-                Ok(None) => {
-                    state.bookmarks.retain(|bookmark| {
-                        bookmark.page != page
-                            || bookmark.location_offset != location_offset
-                            || bookmark.note.is_some()
-                    });
-                    state.current_page_bookmarked = false;
-                }
-                Err(error) => eprintln!("warning: failed to toggle bookmark: {error}"),
-            }
+            return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
 
         Message::ToggleBookmarksPanel => {
@@ -1553,7 +1516,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SaveNote => {
-            if let (Some(tab_id), Some(path), Some(id), Some(store)) = (
+            if let (Some(tab_id), Some(path), Some(id), Some(_store)) = (
                 state.active_tab_id,
                 &state.file_path,
                 state.editing_note_id,
@@ -1564,23 +1527,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 } else {
                     Some(state.editing_note_text.clone())
                 };
-                let store = store.clone();
                 let file_path = path.clone();
                 let book_id = state.book_id;
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
                 state.editing_note_id = None;
                 state.editing_note_text = String::new();
-                return Task::perform(
-                    async move {
-                        store
-                            .update_note_async(id, note.as_deref())
-                            .await
-                            .map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkMutationFinished {
-                        tab_id,
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::UpdateNote {
+                        generation,
                         file_path,
                         book_id,
-                        result,
+                        id,
+                        note,
                     },
                 );
             }
@@ -1594,24 +1556,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::DeleteBookmark(id) => {
-            if let (Some(tab_id), Some(path), Some(store)) =
+            if let (Some(tab_id), Some(path), Some(_store)) =
                 (state.active_tab_id, &state.file_path, &state.bookmark_store)
             {
-                let store = store.clone();
                 let file_path = path.clone();
                 let book_id = state.book_id;
-                return Task::perform(
-                    async move {
-                        store
-                            .remove_async(id)
-                            .await
-                            .map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkMutationFinished {
-                        tab_id,
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::Delete {
+                        generation,
                         file_path,
                         book_id,
-                        result,
+                        id,
                     },
                 );
             }
@@ -1619,20 +1579,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarkMutationFinished {
             tab_id,
+            generation,
             file_path,
             book_id,
             result,
         } => {
             if let Err(error) = result {
                 eprintln!("warning: failed to update bookmark: {error}");
-                return Task::none();
             }
-            if state.active_tab_id == Some(tab_id)
-                && state.file_path.as_ref() == Some(&file_path)
-                && state.book_id == book_id
-            {
-                return refresh_bookmarks(state);
-            }
+            return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
 
         Message::ExportBookmarks => {
