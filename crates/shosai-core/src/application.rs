@@ -360,6 +360,34 @@ mod tests {
     }
 
     #[test]
+    fn malformed_cbz_bytes_have_a_structural_open_category() {
+        let error =
+            OpenDocument::from_bytes(BookFormat::Cbz, b"not a zip".to_vec(), None).unwrap_err();
+
+        assert!(matches!(
+            error,
+            OpenDocumentError::Open {
+                format: BookFormat::Cbz,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn malformed_pdf_bytes_have_a_structural_open_category() {
+        let error =
+            OpenDocument::from_bytes(BookFormat::Pdf, b"not a pdf".to_vec(), None).unwrap_err();
+
+        assert!(matches!(
+            error,
+            OpenDocumentError::Open {
+                format: BookFormat::Pdf,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn pdf_backend_failures_have_a_structural_category() {
         let error = anyhow::Error::new(crate::pdf::PdfBackendUnavailable(
             "missing PDFium".to_owned(),
