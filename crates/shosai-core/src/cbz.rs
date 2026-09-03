@@ -64,7 +64,7 @@ impl CbzDoc {
         let metadata = std::fs::metadata(path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.len() > limits.max_archive_bytes {
-            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+            crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
         let data =
             std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -86,12 +86,12 @@ impl CbzDoc {
         limits: CbzLimits,
     ) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
-            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+            crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
         let mut archive =
             ZipArchive::new(Cursor::new(&data)).context("failed to open CBZ as ZIP archive")?;
         if archive.len() > limits.max_entries {
-            anyhow::bail!("CBZ archive exceeds entry count limit");
+            crate::resource_limit!("CBZ archive exceeds entry count limit");
         }
 
         let mut total = 0_u64;
@@ -100,20 +100,26 @@ impl CbzDoc {
             let file = archive.by_index(i).context("failed to inspect CBZ entry")?;
             let size = file.size();
             if size > limits.max_entry_bytes {
-                anyhow::bail!("CBZ entry exceeds uncompressed byte limit: {}", file.name());
+                crate::resource_limit!(
+                    "CBZ entry exceeds uncompressed byte limit: {}",
+                    file.name()
+                );
             }
             total = total
                 .checked_add(size)
                 .context("CBZ declared size overflow")?;
             if total > limits.max_total_uncompressed_bytes {
-                anyhow::bail!("CBZ archive exceeds aggregate uncompressed byte limit");
+                crate::resource_limit!("CBZ archive exceeds aggregate uncompressed byte limit");
             }
             let compressed = file.compressed_size();
             if size > 0
                 && (compressed == 0
                     || size > compressed.saturating_mul(limits.max_compression_ratio))
             {
-                anyhow::bail!("CBZ entry exceeds compression ratio limit: {}", file.name());
+                crate::resource_limit!(
+                    "CBZ entry exceeds compression ratio limit: {}",
+                    file.name()
+                );
             }
             let name = file.name();
             if name.ends_with('/') || name.contains("/__MACOSX") || name.contains("/.") {
@@ -165,7 +171,7 @@ impl CbzDoc {
         if declared > self.limits.max_entry_bytes
             || declared > self.limits.max_total_uncompressed_bytes
         {
-            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+            crate::resource_limit!("CBZ entry exceeds streamed byte limit: {path}");
         }
         let capacity = usize::try_from(declared.min(self.limits.max_entry_bytes)).unwrap_or(0);
         let mut bytes = Vec::with_capacity(capacity);
@@ -177,7 +183,7 @@ impl CbzDoc {
         if streamed > self.limits.max_entry_bytes
             || streamed > self.limits.max_total_uncompressed_bytes
         {
-            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+            crate::resource_limit!("CBZ entry exceeds streamed byte limit: {path}");
         }
         if streamed != declared {
             anyhow::bail!("CBZ entry declared {declared} bytes but streamed {streamed}: {path}");
@@ -228,7 +234,7 @@ impl CbzDoc {
             || pixels > self.limits.max_image_pixels
             || rgba > self.limits.max_decoded_rgba_bytes
         {
-            anyhow::bail!("CBZ image exceeds decoded image limits");
+            crate::resource_limit!("CBZ image exceeds decoded image limits");
         }
         Ok(())
     }

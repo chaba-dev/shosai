@@ -233,10 +233,10 @@ struct ProcessingBudget {
 
 impl ProcessingBudget {
     fn step(&mut self) -> Result<()> {
-        self.remaining = self
-            .remaining
-            .checked_sub(1)
-            .context("EPUB document exceeds CSS processing step limit")?;
+        if self.remaining == 0 {
+            crate::resource_limit!("EPUB document exceeds CSS processing step limit");
+        }
+        self.remaining -= 1;
         Ok(())
     }
 }
@@ -260,14 +260,14 @@ pub(crate) fn compute_parsed_document_styles(
         || !(limits.max_css_computed_font_size_px / limits.min_css_computed_font_size_px)
             .is_finite()
     {
-        anyhow::bail!("EPUB computed font size limits are invalid");
+        crate::resource_limit!("EPUB computed font size limits are invalid");
     }
     if !limits.max_css_computed_length_px.is_finite()
         || limits.max_css_computed_length_px <= 0.0
         || !limits.max_css_computed_percentage_ratio.is_finite()
         || limits.max_css_computed_percentage_ratio <= 0.0
     {
-        anyhow::bail!("EPUB computed geometry limits are invalid");
+        crate::resource_limit!("EPUB computed geometry limits are invalid");
     }
     let sheet = StyleSheet::parse(css, ParserOptions::default())
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -348,7 +348,7 @@ fn walk_element(
         || style.font_size_px < limits.min_css_computed_font_size_px
         || style.font_size_px > limits.max_css_computed_font_size_px
     {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB document computed font size is outside limits ({}px, min {}px, max {}px)",
             style.font_size_px,
             limits.min_css_computed_font_size_px,
@@ -366,7 +366,7 @@ fn walk_element(
         .flatten()
         .any(|value| !value.is_finite() || value.abs() > limits.max_css_computed_length_px)
     {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB document computed CSS length is outside limits (max {}px)",
             limits.max_css_computed_length_px
         );
@@ -380,7 +380,7 @@ fn walk_element(
             ComputedWidth::Percent(value) => (value, limits.max_css_computed_percentage_ratio),
         };
         if !value.is_finite() || value.abs() > maximum {
-            anyhow::bail!("EPUB document computed CSS dimension is outside limits");
+            crate::resource_limit!("EPUB document computed CSS dimension is outside limits");
         }
     }
     let root_font_size = root_font_size.unwrap_or(style.font_size_px);
@@ -824,7 +824,7 @@ pub(crate) fn validate_stylesheet_complexity(
                 .checked_add(1)
                 .context("EPUB CSS rule count overflowed")?;
             if complexity.rules > limits.max_css_rules_per_document {
-                anyhow::bail!(
+                crate::resource_limit!(
                     "EPUB document exceeds CSS rule limit ({} > {})",
                     complexity.rules,
                     limits.max_css_rules_per_document
@@ -839,7 +839,7 @@ pub(crate) fn validate_stylesheet_complexity(
                         .checked_add(rule.selectors.0.len())
                         .context("EPUB CSS selector count overflowed")?;
                     if complexity.selectors > limits.max_css_selectors_per_document {
-                        anyhow::bail!(
+                        crate::resource_limit!(
                             "EPUB document exceeds CSS selector limit ({} > {})",
                             complexity.selectors,
                             limits.max_css_selectors_per_document
@@ -853,7 +853,7 @@ pub(crate) fn validate_stylesheet_complexity(
                         if complexity.selector_components
                             > limits.max_css_selector_components_per_document
                         {
-                            anyhow::bail!(
+                            crate::resource_limit!(
                                 "EPUB document exceeds CSS selector component limit ({} > {})",
                                 complexity.selector_components,
                                 limits.max_css_selector_components_per_document
@@ -912,13 +912,13 @@ fn validate_font_families(families: &[FontFamily<'_>], limits: &EpubLimits) -> R
             .context("EPUB CSS font family byte count overflowed")?;
     }
     if count > limits.max_css_font_families_per_declaration {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB CSS font family declaration exceeds name limit ({count} > {})",
             limits.max_css_font_families_per_declaration
         );
     }
     if bytes > limits.max_css_font_family_bytes_per_declaration {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB CSS font family declaration exceeds byte limit ({bytes} > {})",
             limits.max_css_font_family_bytes_per_declaration
         );
@@ -930,7 +930,7 @@ fn validate_family_name(name: &FamilyName<'_>, limits: &EpubLimits) -> Result<St
     let name =
         decoded_family_name(name).context("EPUB CSS font family name could not be decoded")?;
     if name.len() > limits.max_css_font_family_name_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB CSS font family name exceeds byte limit ({} > {})",
             name.len(),
             limits.max_css_font_family_name_bytes

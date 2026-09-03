@@ -118,6 +118,10 @@ pub enum OpenDocumentError {
     Open { format: BookFormat, detail: String },
 }
 
+#[derive(Debug, Error)]
+#[error("{0}")]
+pub(crate) struct ResourceLimitError(pub(crate) String);
+
 #[derive(Debug, Clone)]
 pub enum OpenDocument {
     Pdf(Arc<PdfDoc>),
@@ -199,6 +203,12 @@ impl OpenDocument {
 
 fn classify_open_error(format: BookFormat, error: anyhow::Error) -> OpenDocumentError {
     let detail = format!("{error:#}");
+    if error
+        .chain()
+        .any(|cause| cause.downcast_ref::<ResourceLimitError>().is_some())
+    {
+        return OpenDocumentError::LimitExceeded { format, detail };
+    }
     if format == BookFormat::Pdf && crate::pdf::is_backend_unavailable(&error) {
         return OpenDocumentError::BackendUnavailable { format, detail };
     }
@@ -267,6 +277,27 @@ mod tests {
             error,
             OpenDocumentError::LimitExceeded {
                 format: BookFormat::Pdf,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parser_limits_have_a_structural_limit_category() {
+        let limits = CbzLimits {
+            max_entries: 0,
+            ..CbzLimits::default()
+        };
+        let error = CbzDoc::from_bytes_with_limits(
+            include_bytes!("../tests/fixtures/sample.cbz").to_vec(),
+            limits,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            classify_open_error(BookFormat::Cbz, error),
+            OpenDocumentError::LimitExceeded {
+                format: BookFormat::Cbz,
                 ..
             }
         ));

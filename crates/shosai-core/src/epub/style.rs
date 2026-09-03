@@ -76,7 +76,7 @@ impl EpubStyles {
             .into_iter()
             .map(|(path, css)| -> Result<Option<_>> {
                 if css.len() as u64 > limits.max_css_resource_bytes {
-                    anyhow::bail!(
+                    crate::resource_limit!(
                         "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
                         css.len(),
                         limits.max_css_resource_bytes
@@ -186,7 +186,7 @@ impl EpubStyles {
             return Ok(None);
         };
         if depth > limits.max_css_import_depth {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB stylesheet import depth limit exceeded ({depth} > {})",
                 limits.max_css_import_depth
             );
@@ -276,7 +276,7 @@ fn reserve_stylesheet_application(applications: &mut usize, limits: &EpubLimits)
         .checked_add(1)
         .context("EPUB stylesheet application count overflowed")?;
     if next_applications > limits.max_css_stylesheets_per_document {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB document exceeds stylesheet application limit ({next_applications} > {})",
             limits.max_css_stylesheets_per_document
         );
@@ -307,7 +307,7 @@ fn append_stylesheet_content(
         .and_then(|bytes| bytes.checked_add(wrapper_bytes))
         .context("EPUB selected CSS byte count overflowed")?;
     if next_bytes as u64 > limits.max_css_bytes_per_document {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB document exceeds selected CSS byte limit ({next_bytes} > {})",
             limits.max_css_bytes_per_document
         );
@@ -471,7 +471,7 @@ fn append_selected_css(target: &mut String, source: &str, limits: &EpubLimits) -
         .checked_add(source.len())
         .context("EPUB selected CSS byte count overflowed")?;
     if next_bytes as u64 > limits.max_css_bytes_per_document {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB document exceeds selected CSS byte limit ({next_bytes} > {})",
             limits.max_css_bytes_per_document
         );

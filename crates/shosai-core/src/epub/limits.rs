@@ -133,7 +133,7 @@ impl Default for EpubLimits {
 
 pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> Result<u64> {
     if xml.len() as u64 > limits.max_xml_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB XML entry exceeds byte limit: {path} ({} > {})",
             xml.len(),
             limits.max_xml_bytes
@@ -157,7 +157,7 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                     .checked_add(1)
                     .context("EPUB XML depth overflowed")?;
                 if depth > limits.max_xml_depth {
-                    anyhow::bail!(
+                    crate::resource_limit!(
                         "EPUB XML entry exceeds depth limit: {path} ({depth} > {})",
                         limits.max_xml_depth
                     );
@@ -173,7 +173,7 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
                     .checked_add(1)
                     .context("EPUB XML depth overflowed")?;
                 if empty_depth > limits.max_xml_depth {
-                    anyhow::bail!(
+                    crate::resource_limit!(
                         "EPUB XML entry exceeds depth limit: {path} ({empty_depth} > {})",
                         limits.max_xml_depth
                     );
@@ -219,13 +219,13 @@ pub(crate) fn validate_xml_shape(xml: &str, path: &str, limits: &EpubLimits) -> 
             }
         }
         if text_bytes > limits.max_xml_text_bytes {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB XML entry exceeds text limit: {path} ({text_bytes} > {})",
                 limits.max_xml_text_bytes
             );
         }
         if nodes > limits.max_xml_nodes {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB XML entry exceeds node limit: {path} ({nodes} > {})",
                 limits.max_xml_nodes
             );
@@ -243,7 +243,7 @@ pub(crate) fn validate_resource(
 ) -> Result<()> {
     let media_type_essence = mime_essence(media_type);
     if media_type_essence == "text/css" && bytes.len() as u64 > limits.max_css_resource_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
             bytes.len(),
             limits.max_css_resource_bytes
@@ -252,7 +252,7 @@ pub(crate) fn validate_resource(
     if (is_font(&media_type_essence) || has_font_signature(bytes))
         && bytes.len() as u64 > limits.max_font_bytes
     {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB font resource exceeds byte limit: {path} ({} > {})",
             bytes.len(),
             limits.max_font_bytes
@@ -263,7 +263,7 @@ pub(crate) fn validate_resource(
     let mut xml_text = None;
     if is_xml(&media_type_essence) || svg {
         if bytes.len() as u64 > limits.max_xml_bytes {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB XML resource exceeds byte limit: {path} ({} > {})",
                 bytes.len(),
                 limits.max_xml_bytes
@@ -325,19 +325,19 @@ pub(crate) fn validate_declared_resource_size(
     limits: &EpubLimits,
 ) -> Result<()> {
     if mime_essence(media_type) == "text/css" && bytes > limits.max_css_resource_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB CSS resource exceeds byte limit: {path} ({bytes} > {})",
             limits.max_css_resource_bytes
         );
     }
     if is_font(media_type) && bytes > limits.max_font_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB font resource exceeds byte limit: {path} ({bytes} > {})",
             limits.max_font_bytes
         );
     }
     if is_xml(media_type) && bytes > limits.max_xml_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB XML resource exceeds byte limit: {path} ({bytes} > {})",
             limits.max_xml_bytes
         );
@@ -364,7 +364,7 @@ fn validate_image_dimensions(
     limits: &EpubLimits,
 ) -> Result<()> {
     if width > limits.max_image_dimension || height > limits.max_image_dimension {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB image resource exceeds dimension limit: {path} ({width}x{height}, max {})",
             limits.max_image_dimension
         );
@@ -373,7 +373,7 @@ fn validate_image_dimensions(
         .checked_mul(u64::from(height))
         .context("EPUB image pixel count overflowed")?;
     if pixels > limits.max_image_pixels {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB image resource exceeds pixel limit: {path} ({pixels} > {})",
             limits.max_image_pixels
         );
@@ -382,7 +382,7 @@ fn validate_image_dimensions(
         .checked_mul(4)
         .context("EPUB decoded image byte count overflowed")?;
     if decoded_bytes > limits.max_decoded_image_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB image resource exceeds decoded byte limit: {path} ({decoded_bytes} > {})",
             limits.max_decoded_image_bytes
         );
