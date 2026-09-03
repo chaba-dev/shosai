@@ -273,6 +273,9 @@ pub enum Message {
     },
     PersistWindowGeometry(u64),
     WindowGeometryPersisted,
-    ReadingStateFlushed(window::Id),
+    ReadingStateFlushed {
+        id: window::Id,
+        result: Result<(), String>,
+    },
     PerfFramePresented,
 }

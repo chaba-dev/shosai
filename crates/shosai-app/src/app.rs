@@ -9,7 +9,7 @@ use iced::widget::{
     responsive, row, scrollable, sensor, text_input,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
@@ -28,7 +28,7 @@ use shosai_core::reader::{
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 use shosai_core::state_writer::{
-    StateSave as ReadingStateSave, StateWriterMessage as ReadingStateWriterMessage,
+    StateSave as ReadingStateSave, StateWriter, StateWriterMessage as ReadingStateWriterMessage,
     start_state_writer as start_reading_state_writer,
 };
 
@@ -726,7 +726,7 @@ pub struct State {
 
     // -- Shared --
     reading_state: Option<ReadingStateStore>,
-    reading_state_saves: Option<mpsc::UnboundedSender<ReadingStateWriterMessage>>,
+    reading_state_saves: Option<StateWriter>,
     library: Option<Library>,
     bookmark_store: Option<BookmarkStore>,
 
@@ -2871,10 +2871,12 @@ fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Messa
     }
     Task::perform(
         async move {
-            let _ = wait_for_flush.await;
-            id
+            wait_for_flush
+                .await
+                .map_err(|_| "state writer stopped before shutdown".to_owned())?
+                .map_err(|error| error.to_string())
         },
-        Message::ReadingStateFlushed,
+        move |result| Message::ReadingStateFlushed { id, result },
     )
 }
 
@@ -8202,7 +8204,7 @@ mod tests {
             .unwrap()
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait.await.unwrap();
+        wait.await.unwrap().unwrap();
 
         assert_eq!(state.reading_mode, ReadingMode::Continuous);
         assert_eq!(state.theme, ReaderTheme::Sepia);
@@ -8366,8 +8368,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn successful_book_removal_detaches_matching_reader_tabs() {
+    #[tokio::test]
+    async fn successful_book_removal_detaches_matching_reader_tabs() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -8378,8 +8384,7 @@ mod tests {
         state.library_books = vec![test_book(42), test_book(7)];
         state.current_page = 3;
         state.epub_offset = 17;
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         let matching = capture_reader_tab(&state).unwrap();
         let mut unrelated = matching.clone();
         unrelated.id = 2;
@@ -8408,17 +8413,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![7]
         );
-        let ReadingStateWriterMessage::Save(save) = queued_saves
-            .try_recv()
-            .expect("removal should queue path-backed reading state")
-        else {
-            panic!("removal queued a non-save message");
-        };
-        assert_eq!(save.book_id, None);
-        assert_eq!(save.path, PathBuf::from("removed.epub"));
-        assert_eq!(save.reading.page, 3);
-        assert_eq!(save.reading.location_offset, Some(17));
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        let save = store
+            .get_async(Path::new("removed.epub"))
+            .await
+            .expect("removal should persist path-backed reading state");
+        assert_eq!(save.page, 3);
+        assert_eq!(save.location_offset, Some(17));
     }
 
     #[test]
@@ -10186,16 +10194,19 @@ mod tests {
         assert_eq!(state.epub_pages[state.epub_page].chapter, 1);
     }
 
-    #[test]
-    fn warm_paginated_epub_turn_reuses_layout_resources_and_queues_persistence() {
+    #[tokio::test]
+    async fn warm_paginated_epub_turn_reuses_layout_resources_and_queues_persistence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
         state.file_path = Some(PathBuf::from("book.epub"));
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         state.window_size.width = 900.0;
         state.epub_pages = Arc::new(vec![
             EpubPage {
@@ -10252,28 +10263,32 @@ mod tests {
         assert_eq!(state.current_page, 2);
         assert_eq!(epub_visible_pages(&state), vec![2]);
         assert!(state.current_page_bookmarked);
-        let ReadingStateWriterMessage::Save(save) = queued_saves
-            .try_recv()
-            .expect("page turn should queue persistence")
-        else {
-            panic!("page turn queued a flush instead of a save");
-        };
-        assert_eq!(save.path, PathBuf::from("book.epub"));
-        assert_eq!(save.reading.page, 2);
-        assert_eq!(save.reading.location_offset, Some(0));
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        let save = store.get_async(Path::new("book.epub")).await.unwrap();
+        assert_eq!(save.page, 2);
+        assert_eq!(save.location_offset, Some(0));
     }
 
-    #[test]
-    fn repeated_epub_chapter_turns_retain_per_book_resources() {
+    #[tokio::test]
+    async fn repeated_epub_chapter_turns_retain_per_book_resources() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
         state.file_path = Some(PathBuf::from("book.epub"));
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         state.window_size.width = 500.0;
         state.epub_pages = Arc::new(vec![
             EpubPage {
@@ -10307,13 +10322,20 @@ mod tests {
             let forward = turn % 2 == 0;
             let _ = turn_epub_page(&mut state, forward);
             assert_eq!(state.current_page, usize::from(forward));
-            assert!(matches!(
-                queued_saves.try_recv(),
-                Ok(ReadingStateWriterMessage::Save(_))
-            ));
         }
 
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        assert_eq!(
+            store.get_async(Path::new("book.epub")).await.unwrap().page,
+            state.current_page
+        );
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
         assert_eq!(state.epub_layout_key, layout_key);
         assert_eq!(state.render_generation, render_generation);
@@ -10435,7 +10457,7 @@ mod tests {
         saves
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait_for_flush.await.unwrap();
+        wait_for_flush.await.unwrap().unwrap();
 
         let saved = store
             .get_async(&path)
@@ -10470,7 +10492,7 @@ mod tests {
         saves
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait_for_flush.await.unwrap();
+        wait_for_flush.await.unwrap().unwrap();
 
         assert_eq!(
             store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await,

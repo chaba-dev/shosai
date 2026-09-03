@@ -1394,7 +1394,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             .send(ReadingStateWriterMessage::Flush(flushed))
                             .is_ok()
                         {
-                            let _ = wait.await;
+                            wait.await
+                                .map_err(|_| "state writer stopped before relocation".to_owned())?
+                                .map_err(|error| error.to_string())?;
                         }
                     }
                     shosai_core::reading_state::prepare_managed_library_directory(
@@ -2091,7 +2093,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::ReadingStateFlushed(id) => return window::close(id),
+        Message::ReadingStateFlushed { id, result: Ok(()) } => return window::close(id),
+
+        Message::ReadingStateFlushed {
+            result: Err(error), ..
+        } => state.open_error = Some(AppError::Storage(error)),
 
         Message::PerfFramePresented => return perf::frame_presented(state),
     }
