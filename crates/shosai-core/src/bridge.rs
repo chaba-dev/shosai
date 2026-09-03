@@ -22,6 +22,8 @@ pub const MAX_BRIDGE_DOCUMENTS: usize = 64;
 pub const MAX_BRIDGE_BUFFERS: usize = 256;
 pub const MAX_BRIDGE_RETAINED_DOCUMENT_BYTES: usize = 3 * 1024 * 1024 * 1024;
 pub const MAX_BRIDGE_PROBE_BYTES: usize = 512 * 1024 * 1024;
+pub const MAX_BRIDGE_LOCAL_ID_BYTES: usize = 4 * 1024;
+pub const MAX_BRIDGE_PATH_KEY_BYTES: usize = 64 * 1024;
 
 const EPUB_RETAINED_SOURCE_COPIES: usize = 4;
 const EPUB_PRESENTATION_NODE_BYTES: usize = 256;
@@ -304,6 +306,16 @@ impl Bridge {
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
         )?;
+        if request.local_id.len() > MAX_BRIDGE_LOCAL_ID_BYTES {
+            return Err(BridgeError::InvalidRequest(format!(
+                "local_id exceeds {MAX_BRIDGE_LOCAL_ID_BYTES} bytes"
+            )));
+        }
+        if request.path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
+            return Err(BridgeError::InvalidRequest(format!(
+                "path_key exceeds {MAX_BRIDGE_PATH_KEY_BYTES} bytes"
+            )));
+        }
         let path = crate::path_key::try_path_from_key(&request.path_key).map_err(|_| {
             BridgeError::InvalidRequest("path_key uses an invalid reserved encoding".to_owned())
         })?;
@@ -1120,6 +1132,23 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), BridgeErrorKind::InvalidRequest);
+    }
+
+    #[tokio::test]
+    async fn oversized_request_strings_are_rejected_before_document_admission() {
+        let bridge = Bridge::new();
+        let mut local_id = cbz_request();
+        local_id.local_id = "x".repeat(MAX_BRIDGE_LOCAL_ID_BYTES + 1);
+        let mut path_key = cbz_request();
+        path_key.path_key = "x".repeat(MAX_BRIDGE_PATH_KEY_BYTES + 1);
+
+        for request in [local_id, path_key] {
+            assert!(matches!(
+                bridge.open_document(request, Cancellation::new()).await,
+                Err(BridgeError::InvalidRequest(_))
+            ));
+        }
+        assert!(bridge.registry.lock().unwrap().documents.is_empty());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]

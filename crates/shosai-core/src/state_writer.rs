@@ -14,6 +14,9 @@ use crate::reading_state::{FileReadingState, ReadingStateStore};
 
 pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
 pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
+pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
+pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
+pub const MAX_PENDING_STATE_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
 #[derive(Debug, Clone)]
@@ -133,19 +136,33 @@ impl Pending {
 struct WriterState {
     pending: Pending,
     admitted: HashSet<WriteKey>,
+    admitted_bytes: HashMap<WriteKey, usize>,
+    total_admitted_bytes: usize,
 }
 
 impl WriterState {
     fn insert(&mut self, message: StateWriterMessage) -> Result<(), StateWriterSendError> {
         let key = message_key(&message);
+        let byte_len = message_byte_len(&message)?;
         if let Some(key) = &key
             && !self.admitted.contains(key)
             && self.admitted.len() >= MAX_PENDING_STATE_WRITES
         {
             return Err(StateWriterSendError::Full);
         }
+        if let Some(key) = &key {
+            let previous = self.admitted_bytes.get(key).copied().unwrap_or(0);
+            let next_total = self
+                .total_admitted_bytes
+                .checked_sub(previous)
+                .and_then(|total| total.checked_add(byte_len))
+                .filter(|total| *total <= MAX_PENDING_STATE_WRITE_BYTES)
+                .ok_or(StateWriterSendError::Full)?;
+            self.total_admitted_bytes = next_total;
+        }
         if let Some(key) = key {
-            self.admitted.insert(key);
+            self.admitted.insert(key.clone());
+            self.admitted_bytes.insert(key, byte_len);
         }
         self.pending.insert(message);
         Ok(())
@@ -255,6 +272,10 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 for key in attempted {
                     if !failed_keys.contains(&key) && !state.pending.contains(&key) {
                         state.admitted.remove(&key);
+                        if let Some(bytes) = state.admitted_bytes.remove(&key) {
+                            state.total_admitted_bytes =
+                                state.total_admitted_bytes.saturating_sub(bytes);
+                        }
                     }
                 }
             }
@@ -280,6 +301,23 @@ fn message_key(message: &StateWriterMessage) -> Option<WriteKey> {
         StateWriterMessage::Progress { book_id, .. } => Some(WriteKey::Progress(*book_id)),
         StateWriterMessage::Preference(key, _) => Some(WriteKey::Preference(key.clone())),
         StateWriterMessage::Flush(_) => None,
+    }
+}
+
+fn message_byte_len(message: &StateWriterMessage) -> Result<usize, StateWriterSendError> {
+    match message {
+        StateWriterMessage::Preference(key, value)
+            if key.len() > MAX_PREFERENCE_KEY_BYTES || value.len() > MAX_PREFERENCE_VALUE_BYTES =>
+        {
+            Err(StateWriterSendError::Full)
+        }
+        StateWriterMessage::Preference(key, value) => key
+            .len()
+            .checked_add(value.len())
+            .ok_or(StateWriterSendError::Full),
+        StateWriterMessage::Save(_)
+        | StateWriterMessage::Progress { .. }
+        | StateWriterMessage::Flush(_) => Ok(0),
     }
 }
 
@@ -384,6 +422,46 @@ mod tests {
             Err(StateWriterSendError::Full)
         );
         assert_eq!(state.pending.preferences["key-0"], "new");
+    }
+
+    #[test]
+    fn preference_strings_and_their_aggregate_retention_are_bounded() {
+        let mut state = WriterState::default();
+        assert_eq!(
+            state.insert(StateWriterMessage::Preference(
+                "k".repeat(MAX_PREFERENCE_KEY_BYTES + 1),
+                String::new(),
+            )),
+            Err(StateWriterSendError::Full)
+        );
+        assert_eq!(
+            state.insert(StateWriterMessage::Preference(
+                "key".to_owned(),
+                "v".repeat(MAX_PREFERENCE_VALUE_BYTES + 1),
+            )),
+            Err(StateWriterSendError::Full)
+        );
+
+        let value = "v".repeat(MAX_PREFERENCE_VALUE_BYTES);
+        let mut accepted = 0;
+        while state
+            .insert(StateWriterMessage::Preference(
+                format!("key-{accepted}"),
+                value.clone(),
+            ))
+            .is_ok()
+        {
+            accepted += 1;
+        }
+        assert!(accepted < MAX_PENDING_STATE_WRITES);
+        assert!(state.total_admitted_bytes <= MAX_PENDING_STATE_WRITE_BYTES);
+
+        state
+            .insert(StateWriterMessage::Preference(
+                "key-0".to_owned(),
+                "small".to_owned(),
+            ))
+            .expect("coalescing a smaller value must release aggregate admission");
     }
 
     #[test]
