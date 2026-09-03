@@ -54,6 +54,17 @@ impl DeviceFileLocator {
     pub fn format_hint(&self) -> Option<BookFormat> {
         self.format_hint
     }
+
+    pub fn format(&self) -> Result<BookFormat, OpenDocumentError> {
+        let extension = self
+            .path()
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        self.format_hint()
+            .or_else(|| BookFormat::from_extension(&extension))
+            .ok_or(OpenDocumentError::UnsupportedFormat(extension))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,15 +127,7 @@ pub enum OpenDocument {
 
 impl OpenDocument {
     pub fn open(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
-        let extension = locator
-            .path()
-            .extension()
-            .map(|extension| extension.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let format = locator
-            .format_hint()
-            .or_else(|| BookFormat::from_extension(&extension))
-            .ok_or(OpenDocumentError::UnsupportedFormat(extension))?;
+        let format = locator.format()?;
         let metadata = std::fs::metadata(locator.path()).map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
             _ => OpenDocumentError::Inaccessible(error.to_string()),
