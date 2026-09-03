@@ -241,14 +241,15 @@ impl Bridge {
         self.store_buffer(request.document, rendered, buffer_bytes)
     }
 
-    pub fn take_buffer(&self, handle: BufferHandle) -> Result<Bytes, BridgeError> {
+    /// Transfer a retained raster into the bridge generator's `Uint8List` representation.
+    pub fn take_buffer(&self, handle: BufferHandle) -> Result<Vec<u8>, BridgeError> {
         self.ensure_buffer_handle(handle)?;
         self.registry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .buffers
             .remove(&handle)
-            .map(|buffer| buffer.pixels)
+            .map(|buffer| buffer.pixels.to_vec())
             .ok_or(BridgeError::InvalidBufferHandle)
     }
 

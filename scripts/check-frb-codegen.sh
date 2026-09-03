@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+temporary="$(mktemp -d)"
+rust_output="$root/crates/shosai-core/src/frb_codegen_smoke_generated.rs"
+trap 'rm -rf "$temporary"; rm -f "$rust_output"' EXIT
+test ! -e "$rust_output"
+
+mkdir -p "$temporary/dart/lib/generated"
+cat >"$temporary/dart/pubspec.yaml" <<'YAML'
+name: shosai_bridge_codegen_check
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+dependencies:
+  flutter_rust_bridge: any
+  freezed_annotation: any
+dev_dependencies:
+  build_runner: any
+  freezed: any
+YAML
+cat >"$temporary/dart/pubspec.lock" <<'YAML'
+packages:
+  build_runner:
+    dependency: "direct dev"
+    description: {name: build_runner, url: "https://pub.dev"}
+    source: hosted
+    version: "2.4.0"
+  flutter_rust_bridge:
+    dependency: "direct main"
+    description: {name: flutter_rust_bridge, url: "https://pub.dev"}
+    source: hosted
+    version: "2.11.1"
+  freezed:
+    dependency: "direct dev"
+    description: {name: freezed, url: "https://pub.dev"}
+    source: hosted
+    version: "2.5.0"
+  freezed_annotation:
+    dependency: "direct main"
+    description: {name: freezed_annotation, url: "https://pub.dev"}
+    source: hosted
+    version: "2.4.0"
+sdks:
+  dart: ">=3.0.0 <4.0.0"
+YAML
+
+flutter_rust_bridge_codegen generate \
+  --rust-root "$root/crates/shosai-core" \
+  --rust-input crate::bridge \
+  --dart-root "$temporary/dart" \
+  --dart-output "$temporary/dart/lib/generated" \
+  --rust-output "$rust_output" \
+  --no-deps-check \
+  --no-auto-upgrade-dependency \
+  --no-build-runner \
+  --no-web \
+  --no-dart-format \
+  --no-dart-fix \
+  --no-add-mod-to-lib \
+  --stop-on-error
+
+test -s "$rust_output"
+test -n "$(find "$temporary/dart/lib/generated" -type f -print -quit)"
