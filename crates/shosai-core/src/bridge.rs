@@ -12,6 +12,7 @@ use crate::document::{Document, RenderedPage};
 use crate::library::BookFormat;
 
 pub const MAX_BRIDGE_BUFFER_BYTES: usize = 160 * 1024 * 1024;
+pub const MAX_BRIDGE_RETAINED_BUFFER_BYTES: usize = 320 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct OpenRequest {
@@ -90,6 +91,7 @@ pub enum BridgeError {
 struct Registry {
     documents: HashMap<DocumentHandle, (Option<i64>, OpenDocument)>,
     buffers: HashMap<BufferHandle, Vec<u8>>,
+    retained_buffer_bytes: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -158,12 +160,16 @@ impl Bridge {
     }
 
     pub fn take_buffer(&self, handle: BufferHandle) -> Result<Vec<u8>, BridgeError> {
-        self.registry
+        let mut registry = self
+            .registry
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let buffer = registry
             .buffers
             .remove(&handle)
-            .ok_or(BridgeError::InvalidBufferHandle)
+            .ok_or(BridgeError::InvalidBufferHandle)?;
+        registry.retained_buffer_bytes -= buffer.len();
+        Ok(buffer)
     }
 
     pub fn release_document(&self, handle: DocumentHandle) -> bool {
@@ -176,12 +182,15 @@ impl Bridge {
     }
 
     pub fn release_buffer(&self, handle: BufferHandle) -> bool {
-        self.registry
+        let mut registry = self
+            .registry
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .buffers
-            .remove(&handle)
-            .is_some()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(buffer) = registry.buffers.remove(&handle) else {
+            return false;
+        };
+        registry.retained_buffer_bytes -= buffer.len();
+        true
     }
 
     fn next_id(&self) -> u64 {
@@ -189,8 +198,27 @@ impl Bridge {
     }
 
     fn store_buffer(&self, rendered: RenderedPage) -> Result<RenderedBuffer, BridgeError> {
+        self.store_buffer_with_limit(rendered, MAX_BRIDGE_RETAINED_BUFFER_BYTES)
+    }
+
+    fn store_buffer_with_limit(
+        &self,
+        rendered: RenderedPage,
+        retained_limit: usize,
+    ) -> Result<RenderedBuffer, BridgeError> {
         let pixels = rendered.pixels.to_vec();
         if pixels.len() > MAX_BRIDGE_BUFFER_BYTES {
+            return Err(BridgeError::BufferLimit);
+        }
+        let mut registry = self
+            .registry
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(retained_buffer_bytes) = registry.retained_buffer_bytes.checked_add(pixels.len())
+        else {
+            return Err(BridgeError::BufferLimit);
+        };
+        if retained_buffer_bytes > retained_limit {
             return Err(BridgeError::BufferLimit);
         }
         let handle = BufferHandle(self.next_id());
@@ -200,11 +228,8 @@ impl Bridge {
             height: rendered.height,
             byte_len: pixels.len(),
         };
-        self.registry
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .buffers
-            .insert(handle, pixels);
+        registry.retained_buffer_bytes = retained_buffer_bytes;
+        registry.buffers.insert(handle, pixels);
         Ok(result)
     }
 }
@@ -298,5 +323,23 @@ mod tests {
         );
         assert!(bridge.release_document(document.handle));
         assert!(!bridge.release_document(document.handle));
+    }
+
+    #[test]
+    fn retained_buffers_have_an_aggregate_limit_and_release_their_budget() {
+        let bridge = Bridge::default();
+        let rendered = || RenderedPage {
+            width: 1,
+            height: 1,
+            pixels: vec![0; 4].into(),
+        };
+
+        let first = bridge.store_buffer_with_limit(rendered(), 4).unwrap();
+        assert_eq!(
+            bridge.store_buffer_with_limit(rendered(), 4),
+            Err(BridgeError::BufferLimit)
+        );
+        assert!(bridge.release_buffer(first.handle));
+        assert!(bridge.store_buffer_with_limit(rendered(), 4).is_ok());
     }
 }
