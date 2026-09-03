@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -9,8 +10,9 @@ use crate::document::{Document, DocumentMetadata, RenderedPage};
 pub const PDF_SELECTION_MAX_ENDPOINTS: usize = 65_536;
 /// Maximum owned hit-test geometry retained for one selectable PDF page.
 pub const PDF_SELECTION_MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
-const PDF_SELECTION_MAX_BITMAP_DIMENSION: u32 = 16_384;
-const PDF_SELECTION_MAX_BITMAP_PIXELS: u64 = 40_000_000;
+pub const MAX_PDF_INPUT_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_PDF_BITMAP_DIMENSION: u32 = 16_384;
+pub const MAX_PDF_BITMAP_PIXELS: u64 = 40_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PdfSelectionRect {
@@ -151,8 +153,10 @@ fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use crate::document::Document;
+
     use super::{
-        PdfDoc, bundled_pdfium_path, validate_pdf_selection_bitmap_size,
+        PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
         validate_pdf_selection_endpoint_count,
     };
     use std::path::{Path, PathBuf};
@@ -240,7 +244,15 @@ mod tests {
         assert!(document.selection_snapshot(0, f32::NAN).is_err());
         assert!(document.selection_snapshot(0, 0.0).is_err());
         assert!(document.selection_snapshot(0, -1.0).is_err());
-        assert!(validate_pdf_selection_bitmap_size(300.0, 200.0, 100_000.0).is_err());
+        assert!(validate_pdf_bitmap_size(300.0, 200.0, 100_000.0).is_err());
+        assert!(document.render_page(0, 100_000.0).is_err());
+    }
+
+    #[test]
+    fn pdf_input_is_rejected_before_parsing_when_it_exceeds_the_limit() {
+        let error = PdfDoc::from_bytes_with_limit(vec![0; 5], 4).unwrap_err();
+
+        assert!(error.to_string().contains("4-byte input limit"));
     }
 }
 
@@ -257,14 +269,34 @@ pub struct PdfDoc {
 impl PdfDoc {
     /// Open a PDF file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_limit(path, MAX_PDF_INPUT_BYTES)
+    }
+
+    pub fn open_with_limit(path: impl AsRef<Path>, max_input_bytes: u64) -> Result<Self> {
         let path = path.as_ref();
-        let data =
-            std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-        Self::from_bytes(data)
+        let metadata = std::fs::metadata(path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        if metadata.len() > max_input_bytes {
+            anyhow::bail!("PDF exceeds the {max_input_bytes}-byte input limit");
+        }
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let mut data = Vec::with_capacity(metadata.len().min(max_input_bytes) as usize);
+        file.take(max_input_bytes.saturating_add(1))
+            .read_to_end(&mut data)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        Self::from_bytes_with_limit(data, max_input_bytes)
     }
 
     /// Open a PDF from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
+        Self::from_bytes_with_limit(data, MAX_PDF_INPUT_BYTES)
+    }
+
+    pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
+        if u64::try_from(data.len()).unwrap_or(u64::MAX) > max_input_bytes {
+            anyhow::bail!("PDF exceeds the {max_input_bytes}-byte input limit");
+        }
         let pdfium = create_pdfium()?;
         let document = pdfium
             .load_pdf_from_byte_slice(&data, None)
@@ -368,7 +400,7 @@ impl PdfDoc {
         validate_pdf_selection_endpoint_count(text.chars().len())?;
 
         let (pt_w, pt_h) = self.page_sizes[index];
-        let (pixel_w, pixel_h) = validate_pdf_selection_bitmap_size(pt_w, pt_h, scale)?;
+        let (pixel_w, pixel_h) = validate_pdf_bitmap_size(pt_w, pt_h, scale)?;
         let config = PdfRenderConfig::new()
             .set_target_width(pixel_w)
             .set_maximum_height(pixel_h)
@@ -453,18 +485,31 @@ impl PdfDoc {
         self.render_page_impl(index, scale, highlights)
     }
 
+    pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
+        let (width, height) = self.render_dimensions(index, scale)?;
+        (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .context("PDF raster byte size overflow")
+    }
+
+    fn render_dimensions(&self, index: usize, scale: f32) -> Result<(i32, i32)> {
+        let &(width, height) = self.page_sizes.get(index).with_context(|| {
+            format!(
+                "page index {index} out of range (total: {})",
+                self.page_count
+            )
+        })?;
+        validate_pdf_bitmap_size(width, height, scale)
+    }
+
     fn render_page_impl(
         &self,
         index: usize,
         scale: f32,
         highlights: &[(usize, usize, bool)],
     ) -> Result<RenderedPage> {
-        if index >= self.page_count {
-            anyhow::bail!(
-                "page index {index} out of range (total: {})",
-                self.page_count
-            );
-        }
+        let (pixel_w, pixel_h) = self.render_dimensions(index, scale)?;
 
         let pdfium = create_pdfium()?;
         let document = pdfium
@@ -475,9 +520,6 @@ impl PdfDoc {
             .get(index as u16)
             .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
 
-        let (pt_w, pt_h) = self.page_sizes[index];
-        let pixel_w = (pt_w * scale).ceil() as i32;
-        let pixel_h = (pt_h * scale).ceil() as i32;
         let config = PdfRenderConfig::new()
             .set_target_width(pixel_w)
             .set_maximum_height(pixel_h)
@@ -528,18 +570,18 @@ fn validate_pdf_selection_endpoint_count(count: usize) -> Result<()> {
     Ok(())
 }
 
-fn validate_pdf_selection_bitmap_size(width: f32, height: f32, scale: f32) -> Result<(i32, i32)> {
+fn validate_pdf_bitmap_size(width: f32, height: f32, scale: f32) -> Result<(i32, i32)> {
     let width = (f64::from(width) * f64::from(scale)).ceil();
     let height = (f64::from(height) * f64::from(scale)).ceil();
     if !width.is_finite()
         || !height.is_finite()
         || width < 1.0
         || height < 1.0
-        || width > f64::from(PDF_SELECTION_MAX_BITMAP_DIMENSION)
-        || height > f64::from(PDF_SELECTION_MAX_BITMAP_DIMENSION)
-        || width * height > PDF_SELECTION_MAX_BITMAP_PIXELS as f64
+        || width > f64::from(MAX_PDF_BITMAP_DIMENSION)
+        || height > f64::from(MAX_PDF_BITMAP_DIMENSION)
+        || width * height > MAX_PDF_BITMAP_PIXELS as f64
     {
-        anyhow::bail!("PDF selection bitmap exceeds decoded image limits");
+        anyhow::bail!("PDF bitmap exceeds decoded image limits");
     }
     Ok((width as i32, height as i32))
 }

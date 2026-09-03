@@ -19,6 +19,7 @@ use crate::pdf::PdfDoc;
 pub struct DeviceFileLocator {
     local_id: String,
     path: PathBuf,
+    format_hint: Option<BookFormat>,
 }
 
 impl DeviceFileLocator {
@@ -26,7 +27,13 @@ impl DeviceFileLocator {
         Self {
             local_id: local_id.into(),
             path: path.into(),
+            format_hint: None,
         }
+    }
+
+    pub fn with_format_hint(mut self, format: BookFormat) -> Self {
+        self.format_hint = Some(format);
+        self
     }
 
     pub fn from_path(path: impl Into<PathBuf>) -> Self {
@@ -40,6 +47,10 @@ impl DeviceFileLocator {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn format_hint(&self) -> Option<BookFormat> {
+        self.format_hint
     }
 }
 
@@ -100,7 +111,9 @@ impl OpenDocument {
             .extension()
             .map(|extension| extension.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        let format = BookFormat::from_extension(&extension)
+        let format = locator
+            .format_hint()
+            .or_else(|| BookFormat::from_extension(&extension))
             .ok_or(OpenDocumentError::UnsupportedFormat(extension))?;
 
         match format {
@@ -181,5 +194,20 @@ mod tests {
             error,
             OpenDocumentError::UnsupportedFormat("txt".to_owned())
         );
+    }
+
+    #[test]
+    fn platform_format_hint_admits_extensionless_staged_paths() {
+        let locator = DeviceFileLocator::new("content:42", "missing-provider-file")
+            .with_format_hint(BookFormat::Epub);
+        let error = OpenDocument::open(&locator).unwrap_err();
+
+        assert!(matches!(
+            error,
+            OpenDocumentError::Open {
+                format: BookFormat::Epub,
+                ..
+            }
+        ));
     }
 }
