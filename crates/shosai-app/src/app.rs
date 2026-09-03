@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use iced::advanced::widget::{Id as WidgetId, operation};
 use iced::keyboard;
@@ -385,6 +385,7 @@ const RASTER_RENDER_WORKERS: usize = 2;
 const CBZ_DIMENSION_WORKERS: usize = 1;
 const RETAINED_DOCUMENT_COUNT_CAPACITY: usize = 16;
 const RETAINED_DOCUMENT_BYTE_CAPACITY: usize = 3 * 1024 * 1024 * 1024;
+const DOCUMENT_OPEN_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -670,23 +671,31 @@ struct RetainedDocumentPermit {
     open_worker: Option<CachePermit>,
 }
 
-fn retained_document_budgets() -> &'static (CacheBudget, CacheBudget, CacheBudget) {
-    static BUDGETS: OnceLock<(CacheBudget, CacheBudget, CacheBudget)> = OnceLock::new();
-    BUDGETS.get_or_init(|| {
-        (
-            CacheBudget::new(if cfg!(test) {
-                1024
-            } else {
-                RETAINED_DOCUMENT_COUNT_CAPACITY
-            }),
-            CacheBudget::new(if cfg!(test) {
-                RETAINED_DOCUMENT_BYTE_CAPACITY * 1024
-            } else {
-                RETAINED_DOCUMENT_BYTE_CAPACITY
-            }),
-            CacheBudget::new(if cfg!(test) { 1024 } else { 2 }),
+#[derive(Debug, Clone)]
+struct DocumentAdmission {
+    count: CacheBudget,
+    bytes: CacheBudget,
+    open_workers: CacheBudget,
+}
+
+impl DocumentAdmission {
+    fn new(count: usize, bytes: usize, open_workers: usize) -> Self {
+        Self {
+            count: CacheBudget::new(count),
+            bytes: CacheBudget::new(bytes),
+            open_workers: CacheBudget::new(open_workers),
+        }
+    }
+}
+
+impl Default for DocumentAdmission {
+    fn default() -> Self {
+        Self::new(
+            RETAINED_DOCUMENT_COUNT_CAPACITY,
+            RETAINED_DOCUMENT_BYTE_CAPACITY,
+            DOCUMENT_OPEN_WORKERS,
         )
-    })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -871,6 +880,7 @@ pub struct State {
     document_open_notice_visible: bool,
     document_open_preview: Option<DocumentOpenPreview>,
     missing_book_id: Option<i64>,
+    document_admission: DocumentAdmission,
     show_reader_settings: bool,
     show_reader_more: bool,
 
@@ -1035,6 +1045,7 @@ pub fn boot() -> (State, Task<Message>) {
         document_open_notice_visible: false,
         document_open_preview: None,
         missing_book_id: None,
+        document_admission: DocumentAdmission::default(),
         show_reader_settings: false,
         show_reader_more: false,
 
@@ -1611,22 +1622,21 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
 
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
-    let (count_budget, byte_budget, open_worker_budget) = retained_document_budgets();
-    let Some(count) = count_budget.try_reserve(1) else {
+    let Some(count) = state.document_admission.count.try_reserve(1) else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "retained document count limit exceeded".to_owned(),
         });
         return Task::none();
     };
-    let Some(bytes) = byte_budget.try_reserve(0) else {
+    let Some(bytes) = state.document_admission.bytes.try_reserve(0) else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "retained document byte limit exceeded".to_owned(),
         });
         return Task::none();
     };
-    let Some(open_worker) = open_worker_budget.try_reserve(1) else {
+    let Some(open_worker) = state.document_admission.open_workers.try_reserve(1) else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "document open worker limit exceeded".to_owned(),
@@ -1701,15 +1711,14 @@ fn finish_open_document(
             .ok()
             .and_then(|metadata| usize::try_from(metadata.len()).ok())
             .unwrap_or_default();
-        let (count_budget, byte_budget, _) = retained_document_budgets();
-        let Some(count) = count_budget.try_reserve(1) else {
+        let Some(count) = state.document_admission.count.try_reserve(1) else {
             state.open_error = Some(AppError::Open {
                 format: "document",
                 detail: "retained document count limit exceeded".to_owned(),
             });
             return Task::none();
         };
-        let Some(bytes) = byte_budget.try_reserve(retained_bytes) else {
+        let Some(bytes) = state.document_admission.bytes.try_reserve(retained_bytes) else {
             state.open_error = Some(AppError::Open {
                 format: "document",
                 detail: "retained document byte limit exceeded".to_owned(),
@@ -1745,12 +1754,17 @@ fn finish_open_document_with_permit(
         });
         return Task::none();
     };
-    let (_, byte_budget, _) = retained_document_budgets();
-    let placeholder = byte_budget
+    let placeholder = state
+        .document_admission
+        .bytes
         .try_reserve(0)
         .expect("zero-byte document reservation must fit");
     let previous = std::mem::replace(&mut document_permit._bytes, placeholder);
-    let resized = match byte_budget.try_reserve_replacing(retained_bytes, vec![previous]) {
+    let resized = match state
+        .document_admission
+        .bytes
+        .try_reserve_replacing(retained_bytes, vec![previous])
+    {
         Ok(resized) => resized,
         Err(mut previous) => {
             document_permit._bytes = previous
@@ -7035,10 +7049,9 @@ mod tests {
 
     fn state_with_document(document: OpenDocument) -> State {
         let (mut state, _) = boot();
-        let (count_budget, byte_budget, _) = retained_document_budgets();
         state.document_permit = Some(RetainedDocumentPermit {
-            _count: count_budget.try_reserve(1).unwrap(),
-            _bytes: byte_budget.try_reserve(0).unwrap(),
+            _count: state.document_admission.count.try_reserve(1).unwrap(),
+            _bytes: state.document_admission.bytes.try_reserve(0).unwrap(),
             open_worker: None,
         });
         state.screen = Screen::Reader;
@@ -11096,6 +11109,128 @@ mod tests {
             state.rendered_page.as_ref().map(|page| page.width),
             Some(10)
         );
+    }
+
+    #[test]
+    fn document_admission_uses_production_limits_in_tests() {
+        let admission = DocumentAdmission::default();
+
+        assert_eq!(admission.count.limit(), RETAINED_DOCUMENT_COUNT_CAPACITY);
+        assert_eq!(admission.bytes.limit(), RETAINED_DOCUMENT_BYTE_CAPACITY);
+        assert_eq!(admission.open_workers.limit(), DOCUMENT_OPEN_WORKERS);
+    }
+
+    #[test]
+    fn document_count_and_worker_admission_reject_without_replacing_the_reader() {
+        for (admission, expected) in [
+            (
+                DocumentAdmission::new(1, RETAINED_DOCUMENT_BYTE_CAPACITY, 1),
+                "retained document count limit exceeded",
+            ),
+            (
+                DocumentAdmission::new(2, RETAINED_DOCUMENT_BYTE_CAPACITY, 1),
+                "document open worker limit exceeded",
+            ),
+        ] {
+            let active = Arc::new(
+                PdfDoc::from_bytes(
+                    include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+                )
+                .unwrap(),
+            );
+            let mut state = state_with_document(OpenDocument::Pdf(Arc::clone(&active)));
+            state.file_path = Some(PathBuf::from("active.pdf"));
+            let held = if expected.starts_with("retained") {
+                admission.count.try_reserve(1).unwrap()
+            } else {
+                admission.open_workers.try_reserve(1).unwrap()
+            };
+            state.document_admission = admission;
+
+            assert_eq!(
+                open_document(&mut state, PathBuf::from("other.pdf"), None).units(),
+                0
+            );
+            assert!(matches!(
+                &state.open_error,
+                Some(AppError::Open { detail, .. }) if detail == expected
+            ));
+            assert!(matches!(
+                &state.document,
+                Some(OpenDocument::Pdf(document)) if Arc::ptr_eq(document, &active)
+            ));
+            assert_eq!(state.file_path.as_deref(), Some(Path::new("active.pdf")));
+            drop(held);
+        }
+    }
+
+    #[test]
+    fn retained_document_byte_admission_rejects_parsed_replacement() {
+        let active = Arc::new(
+            PdfDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+            )
+            .unwrap(),
+        );
+        let replacement = OpenDocument::Pdf(Arc::new(
+            PdfDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+            )
+            .unwrap(),
+        ));
+        let retained_bytes = replacement.retained_byte_len().unwrap();
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::clone(&active)));
+        state.file_path = Some(PathBuf::from("active.pdf"));
+        state.document_admission = DocumentAdmission::new(2, retained_bytes - 1, 1);
+
+        assert!(open_document(&mut state, PathBuf::from("other.pdf"), None).units() > 0);
+        assert_eq!(state.document_admission.open_workers.used(), 1);
+        assert_eq!(
+            finish_open_document(&mut state, PathBuf::from("other.pdf"), None, replacement).units(),
+            0
+        );
+
+        assert!(matches!(
+            state.open_error,
+            Some(AppError::Open { ref detail, .. }) if detail == "retained document byte limit exceeded"
+        ));
+        assert!(matches!(
+            &state.document,
+            Some(OpenDocument::Pdf(document)) if Arc::ptr_eq(document, &active)
+        ));
+        assert_eq!(state.file_path.as_deref(), Some(Path::new("active.pdf")));
+        assert_eq!(state.document_admission.count.used(), 0);
+        assert_eq!(state.document_admission.bytes.used(), 0);
+        assert_eq!(state.document_admission.open_workers.used(), 0);
+    }
+
+    #[test]
+    fn failed_document_open_releases_all_admission_for_retry() {
+        let (mut state, _) = boot();
+        state.document_admission = DocumentAdmission::new(1, 1, 1);
+        let path = PathBuf::from("missing.pdf");
+
+        assert!(open_document(&mut state, path.clone(), None).units() > 0);
+        assert_eq!(state.document_admission.count.used(), 1);
+        assert_eq!(state.document_admission.open_workers.used(), 1);
+        let generation = state.document_open_generation;
+        let _ = update(
+            &mut state,
+            Message::DocumentOpened {
+                generation,
+                path: path.clone(),
+                book_id: None,
+                result: Err(AppError::Open {
+                    format: "PDF",
+                    detail: "test failure".to_owned(),
+                }),
+            },
+        );
+
+        assert_eq!(state.document_admission.count.used(), 0);
+        assert_eq!(state.document_admission.bytes.used(), 0);
+        assert_eq!(state.document_admission.open_workers.used(), 0);
+        assert!(open_document(&mut state, path, None).units() > 0);
     }
 
     #[test]
