@@ -334,12 +334,13 @@ impl Bridge {
         let maximum_retained_bytes = retained_document_byte_len(format, admitted_input_bytes)?;
         let open_slot =
             acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
-        let document = tokio::task::spawn_blocking(move || {
-            let _open_slot = open_slot;
-            guarded(|| OpenDocument::open(&locator).map_err(map_open_error))
+        let (document, open_slot) = tokio::task::spawn_blocking(move || {
+            let document = guarded(|| OpenDocument::open(&locator).map_err(map_open_error));
+            (document, open_slot)
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let document = document?;
         let actual_retained_bytes = document
             .retained_byte_len()
             .ok_or(BridgeError::DocumentLimit)?;
@@ -354,6 +355,7 @@ impl Bridge {
             &cancellation,
         )
         .await?;
+        drop(open_slot);
         let _publication = cancellation
             .0
             .publication
@@ -1080,6 +1082,39 @@ mod tests {
             admission.document_bytes.available_permits(),
             MAX_BRIDGE_RETAINED_DOCUMENT_BYTES
         );
+    }
+
+    #[tokio::test]
+    async fn parsed_documents_keep_open_worker_admission_until_byte_admission() {
+        let mut configured = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        configured.open_slots = Arc::new(Semaphore::new(2));
+        configured.document_bytes = Arc::new(Semaphore::new(0));
+        let admission = Arc::new(configured);
+        let bridge = Bridge::with_admission(Arc::clone(&admission));
+        let cancellation = Cancellation::new();
+        let mut opens = Vec::new();
+        for _ in 0..3 {
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            opens.push(tokio::spawn(async move {
+                bridge.open_document(epub_request(), cancellation).await
+            }));
+        }
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while admission.open_slots.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("two parsed documents should retain both open-worker slots");
+        assert_eq!(admission.open_slots.available_permits(), 0);
+
+        cancellation.cancel();
+        for open in opens {
+            assert_eq!(open.await.unwrap(), Err(BridgeError::Cancelled));
+        }
+        assert_eq!(admission.open_slots.available_permits(), 2);
     }
 
     #[tokio::test]
