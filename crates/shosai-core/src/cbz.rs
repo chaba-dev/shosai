@@ -80,6 +80,10 @@ impl CbzDoc {
         Self::from_bytes_with_title(data, None, limits)
     }
 
+    pub(crate) fn from_bytes_with_title_hint(data: Vec<u8>, title: Option<String>) -> Result<Self> {
+        Self::from_bytes_with_title(data, title, CbzLimits::default())
+    }
+
     fn from_bytes_with_title(
         data: Vec<u8>,
         title: Option<String>,

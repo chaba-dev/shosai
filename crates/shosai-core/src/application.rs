@@ -1,5 +1,6 @@
 //! Platform-neutral document admission and format capabilities.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -132,30 +133,68 @@ pub enum OpenDocument {
 impl OpenDocument {
     pub fn open(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
         let format = locator.format()?;
-        let metadata = std::fs::metadata(locator.path()).map_err(|error| match error.kind() {
+        let mut file = std::fs::File::open(locator.path()).map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
             _ => OpenDocumentError::Inaccessible(error.to_string()),
         })?;
-        let max_input_bytes = match format {
-            BookFormat::Pdf => MAX_PDF_INPUT_BYTES,
-            BookFormat::Epub => EpubLimits::default().max_input_bytes,
-            BookFormat::Cbz => CbzLimits::default().max_archive_bytes,
-        };
-        if metadata.len() > max_input_bytes {
+        let max_input_bytes = Self::max_input_bytes(format);
+        if file
+            .metadata()
+            .map_err(|error| OpenDocumentError::Inaccessible(error.to_string()))?
+            .len()
+            > max_input_bytes
+        {
             return Err(OpenDocumentError::LimitExceeded {
                 format,
                 detail: format!("input is larger than {max_input_bytes} bytes"),
             });
         }
+        let read_limit =
+            max_input_bytes
+                .checked_add(1)
+                .ok_or_else(|| OpenDocumentError::LimitExceeded {
+                    format,
+                    detail: "input byte limit cannot be represented".to_owned(),
+                })?;
+        let mut data = Vec::new();
+        file.by_ref()
+            .take(read_limit)
+            .read_to_end(&mut data)
+            .map_err(|error| classify_open_error(format, error.into()))?;
+        if data.len() as u64 > max_input_bytes {
+            return Err(OpenDocumentError::LimitExceeded {
+                format,
+                detail: format!("input is larger than {max_input_bytes} bytes"),
+            });
+        }
+        let title_hint = locator
+            .path()
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned());
+        Self::from_bytes(format, data, title_hint)
+    }
 
+    pub(crate) fn max_input_bytes(format: BookFormat) -> u64 {
         match format {
-            BookFormat::Pdf => PdfDoc::open(locator.path())
+            BookFormat::Pdf => MAX_PDF_INPUT_BYTES,
+            BookFormat::Epub => EpubLimits::default().max_input_bytes,
+            BookFormat::Cbz => CbzLimits::default().max_archive_bytes,
+        }
+    }
+
+    pub(crate) fn from_bytes(
+        format: BookFormat,
+        data: Vec<u8>,
+        title_hint: Option<String>,
+    ) -> Result<Self, OpenDocumentError> {
+        match format {
+            BookFormat::Pdf => PdfDoc::from_bytes(data)
                 .map(|document| Self::Pdf(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
-            BookFormat::Epub => EpubDoc::open(locator.path())
+            BookFormat::Epub => EpubDoc::from_bytes(data)
                 .map(|document| Self::Epub(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
-            BookFormat::Cbz => CbzDoc::open(locator.path())
+            BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint(data, title_hint)
                 .map(|document| Self::Cbz(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
         }

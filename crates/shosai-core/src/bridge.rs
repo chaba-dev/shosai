@@ -312,19 +312,12 @@ impl Bridge {
         let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
-        let metadata_path = locator.path().to_owned();
-        let metadata = {
-            let open_slot =
-                acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
-            tokio::task::spawn_blocking(move || {
-                let _open_slot = open_slot;
-                guarded(|| document_metadata(&metadata_path))
-            })
-            .await
-            .map_err(|_| BridgeError::Worker)??
-        };
-        let document_byte_len = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
-        let retained_byte_len = retained_document_byte_len(format, document_byte_len)?;
+        // Reserve against the format ceiling rather than path metadata: the file is opened and
+        // parsed from one bounded snapshot below, so replacement or growth cannot invalidate the
+        // retained-memory admission decision.
+        let admitted_input_bytes = usize::try_from(OpenDocument::max_input_bytes(format))
+            .map_err(|_| BridgeError::DocumentLimit)?;
+        let retained_byte_len = retained_document_byte_len(format, admitted_input_bytes)?;
         let document_byte_permits =
             u32::try_from(retained_byte_len).map_err(|_| BridgeError::DocumentLimit)?;
         let document_bytes = acquire_permits(
@@ -615,13 +608,6 @@ fn check_cancelled(cancellation: &Cancellation) -> Result<(), BridgeError> {
     } else {
         Ok(())
     }
-}
-
-fn document_metadata(path: &std::path::Path) -> Result<std::fs::Metadata, BridgeError> {
-    std::fs::metadata(path).map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => BridgeError::DocumentNotFound,
-        _ => BridgeError::DocumentInaccessible,
-    })
 }
 
 fn retained_document_byte_len(
