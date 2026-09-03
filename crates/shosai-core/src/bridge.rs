@@ -5,7 +5,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use bytes::Bytes;
 use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
@@ -143,7 +142,7 @@ pub enum BridgeError {
 
 #[derive(Debug)]
 struct RetainedBuffer {
-    pixels: Bytes,
+    pixels: Vec<u8>,
     _bytes: OwnedSemaphorePermit,
 }
 
@@ -243,7 +242,8 @@ impl Bridge {
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
-        let byte_permits = u32::try_from(byte_len).map_err(|_| BridgeError::BufferLimit)?;
+        let transfer_peak = byte_len.checked_mul(2).ok_or(BridgeError::BufferLimit)?;
+        let byte_permits = u32::try_from(transfer_peak).map_err(|_| BridgeError::BufferLimit)?;
         let render_slot = acquire_permits(Arc::clone(&self.render_slots), 1, &cancellation).await?;
         let buffer_bytes =
             acquire_permits(Arc::clone(&self.buffer_bytes), byte_permits, &cancellation).await?;
@@ -271,7 +271,7 @@ impl Bridge {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .buffers
             .remove(&handle)
-            .map(|buffer| buffer.pixels.to_vec())
+            .map(|buffer| buffer.pixels)
             .ok_or(BridgeError::InvalidBufferHandle)
     }
 
@@ -340,13 +340,19 @@ impl Bridge {
         &self,
         document: DocumentHandle,
         rendered: RenderedPage,
-        bytes: OwnedSemaphorePermit,
+        mut bytes: OwnedSemaphorePermit,
     ) -> Result<RenderedBuffer, BridgeError> {
-        if rendered.pixels.len() > bytes.num_permits()
+        let byte_len = rendered.pixels.len();
+        if byte_len
+            .checked_mul(2)
+            .is_none_or(|peak| peak > bytes.num_permits())
             || rendered.pixels.len() > MAX_BRIDGE_BUFFER_BYTES
         {
             return Err(BridgeError::BufferLimit);
         }
+        let pixels = rendered.pixels.to_vec();
+        let retained_bytes = bytes.split(byte_len).ok_or(BridgeError::BufferLimit)?;
+        drop(bytes);
         let mut registry = self
             .registry
             .lock()
@@ -359,13 +365,13 @@ impl Bridge {
             handle,
             width: rendered.width,
             height: rendered.height,
-            byte_len: rendered.pixels.len(),
+            byte_len,
         };
         registry.buffers.insert(
             handle,
             RetainedBuffer {
-                pixels: rendered.pixels,
-                _bytes: bytes,
+                pixels,
+                _bytes: retained_bytes,
             },
         );
         Ok(result)
@@ -529,13 +535,13 @@ mod tests {
 
     #[tokio::test]
     async fn retained_and_in_flight_buffers_share_one_budget() {
-        let bridge = Bridge::with_limits(4, 1);
+        let bridge = Bridge::with_limits(8, 1);
         let document = bridge
             .open_document(cbz_request(), Cancellation::new())
             .await
             .unwrap();
         let permit = Arc::clone(&bridge.buffer_bytes)
-            .acquire_many_owned(4)
+            .acquire_many_owned(8)
             .await
             .unwrap();
         let buffer = bridge
@@ -549,20 +555,24 @@ mod tests {
                 permit,
             )
             .unwrap();
-        assert_eq!(bridge.buffer_bytes.available_permits(), 0);
-        assert!(bridge.release_buffer(buffer.handle));
         assert_eq!(bridge.buffer_bytes.available_permits(), 4);
+        let retained_pointer = bridge.registry.lock().unwrap().buffers[&buffer.handle]
+            .pixels
+            .as_ptr();
+        let transferred = bridge.take_buffer(buffer.handle).unwrap();
+        assert_eq!(transferred.as_ptr(), retained_pointer);
+        assert_eq!(bridge.buffer_bytes.available_permits(), 8);
     }
 
     #[tokio::test]
     async fn released_document_cannot_publish_an_in_flight_result() {
-        let bridge = Bridge::with_limits(4, 1);
+        let bridge = Bridge::with_limits(8, 1);
         let document = bridge
             .open_document(cbz_request(), Cancellation::new())
             .await
             .unwrap();
         let permit = Arc::clone(&bridge.buffer_bytes)
-            .acquire_many_owned(4)
+            .acquire_many_owned(8)
             .await
             .unwrap();
         assert!(bridge.release_document(document.handle));
