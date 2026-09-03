@@ -1617,6 +1617,9 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         state.rendered_page_handle = None;
         state.rendered_facing_page = None;
         state.rendered_facing_page_handle = None;
+        state.page_cache.clear();
+        state.paginated_pending.clear();
+        state.paginated_requested.clear();
         state.epub_image_handles.clear();
         state.epub_images_pending.clear();
         state.epub_images_desired.clear();
@@ -8530,6 +8533,41 @@ mod tests {
             state.file_path.as_deref(),
             Some(std::path::Path::new("second.epub"))
         );
+    }
+
+    #[test]
+    fn closing_the_final_tab_releases_paginated_raster_cache() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.file_path = Some(PathBuf::from("book.cbz"));
+        let permit = state.raster_budget.try_reserve(4).unwrap();
+        let page = attach_raster_permit(
+            RenderedPage {
+                width: 1,
+                height: 1,
+                pixels: bytes::Bytes::from(vec![0; 4]),
+            },
+            permit,
+        )
+        .unwrap();
+        state.page_cache.insert(
+            PageCacheKey {
+                page: 0,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+            page,
+        );
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.active_tab = Some(0);
+
+        let _ = update(&mut state, Message::CloseTab(0));
+
+        assert!(state.page_cache.is_empty());
+        assert_eq!(state.raster_budget.used(), 0);
     }
 
     #[test]
