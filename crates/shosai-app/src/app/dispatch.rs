@@ -1906,7 +1906,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.epub_image_jobs.remove(&job);
                     state.epub_image_decode_active = false;
                     state.epub_images_pending.remove(&path);
-                    return Task::none();
+                    state.epub_images_desired.remove(&path);
+                    state.epub_images_failed.insert(path);
+                    return load_epub_images_task(state);
                 }
                 state.epub_image_jobs.remove(&job);
                 state.epub_image_decode_active = false;

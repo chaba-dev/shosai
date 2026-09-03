@@ -2234,6 +2234,9 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     state
         .epub_image_handles
         .retain(|path, _| nearby.contains(path));
+    state
+        .epub_images_failed
+        .retain(|path| nearby.contains(path));
     state.epub_images_desired = nearby
         .into_iter()
         .filter(|path| {
@@ -2284,12 +2287,23 @@ fn decode_epub_image_task(
     let Some(OpenDocument::Epub(document)) = &state.document else {
         return None;
     };
-    let permit = state.epub_image_budget.try_reserve(byte_len)?;
-    let transient_byte_len = epub_image_transient_byte_len(document, &job.path)?;
-    let transient_permit = state
-        .transient_decode_budget
-        .try_reserve(transient_byte_len)?;
     let document = Arc::clone(document);
+    let transient_byte_len = epub_image_transient_byte_len(&document, &job.path)?;
+    let reserve = |state: &State| {
+        let permit = state.epub_image_budget.try_reserve(byte_len)?;
+        let transient = state
+            .transient_decode_budget
+            .try_reserve(transient_byte_len)?;
+        Some((permit, transient))
+    };
+    let (permit, transient_permit) = if let Some(permits) = reserve(state) {
+        permits
+    } else {
+        for tab in &mut state.tabs {
+            tab.epub_image_handles.clear();
+        }
+        reserve(state)?
+    };
     let path = job.path.clone();
     Some(Task::perform(
         async move {
@@ -11017,6 +11031,30 @@ mod tests {
         assert!(!state.epub_image_decode_active);
         assert!(state.epub_images_pending.is_empty());
         assert!(state.epub_image_jobs.is_empty());
+        assert_eq!(state.epub_images_failed.len(), 1);
+    }
+
+    #[test]
+    fn unadmittable_epub_image_pumps_the_next_resource() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(2)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.epub_image_budget = CacheBudget::new(0);
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 1);
+        assert_eq!(state.epub_images_failed.len(), 1);
+        assert_eq!(state.epub_image_jobs.len(), 1);
     }
 
     #[test]
