@@ -710,6 +710,39 @@ enum RasterJob {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RasterFailure {
+    Paginated {
+        tab_id: u64,
+        key: PageCacheKey,
+    },
+    Continuous {
+        tab_id: u64,
+        page: usize,
+        byte_len: usize,
+    },
+}
+
+impl RasterJob {
+    fn failure(&self) -> RasterFailure {
+        match self {
+            Self::Paginated { tab_id, key, .. } => RasterFailure::Paginated {
+                tab_id: *tab_id,
+                key: key.clone(),
+            },
+            Self::Continuous {
+                tab_id,
+                request,
+                page,
+            } => RasterFailure::Continuous {
+                tab_id: *tab_id,
+                page: *page,
+                byte_len: request.byte_len,
+            },
+        }
+    }
+}
+
 struct PermittedPixels {
     pixels: bytes::Bytes,
     _permit: CachePermit,
@@ -817,7 +850,9 @@ pub struct State {
     next_continuous_request_id: u64,
     raster_budget: CacheBudget,
     raster_jobs: HashMap<RasterJob, CachePermit>,
+    raster_failures: HashSet<RasterFailure>,
     cbz_dimension_jobs: HashMap<CbzDimensionJob, CachePermit>,
+    cbz_dimension_failures: HashSet<CbzDimensionJob>,
     epub_jobs: HashSet<EpubJob>,
     page_input: String,
     error: Option<AppError>,
@@ -979,7 +1014,9 @@ pub fn boot() -> (State, Task<Message>) {
         next_continuous_request_id: 1,
         raster_budget: CacheBudget::new(PAGE_CACHE_BYTE_CAPACITY),
         raster_jobs: HashMap::new(),
+        raster_failures: HashSet::new(),
         cbz_dimension_jobs: HashMap::new(),
+        cbz_dimension_failures: HashSet::new(),
         epub_jobs: HashSet::new(),
         page_input: String::new(),
         error: None,
@@ -1950,6 +1987,21 @@ fn install_document(
     state.rendered_facing_page = None;
     state.rendered_facing_page_handle = None;
     state.page_cache.clear();
+    state.paginated_pending.clear();
+    state.paginated_requested.clear();
+    if let Some(tab_id) = state.active_tab_id {
+        state.raster_failures.retain(|failure| match failure {
+            RasterFailure::Paginated {
+                tab_id: failed_tab, ..
+            }
+            | RasterFailure::Continuous {
+                tab_id: failed_tab, ..
+            } => *failed_tab != tab_id,
+        });
+        state
+            .cbz_dimension_failures
+            .retain(|failure| failure.tab_id != tab_id);
+    }
     state.epub_image_generation = state.epub_image_generation.wrapping_add(1);
     state.epub_image_handles.clear();
     state.epub_images_pending.clear();
@@ -2105,6 +2157,7 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
 
 /// Refresh the visible content for the current page/chapter.
 fn refresh_content(state: &mut State) -> Task<Message> {
+    retain_relevant_raster_failures(state);
     update_bookmark_status(state);
 
     if state.reading_mode == ReadingMode::Continuous {
@@ -2181,6 +2234,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 }
                 if !is_page_cached(state, &key) {
                     let page = key.page;
+                    let job = RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key: key.clone(),
+                    };
+                    if state.raster_failures.contains(&job.failure()) {
+                        continue;
+                    }
                     let highlights = key.highlights.clone();
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
@@ -2202,14 +2263,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page_with_highlights(page, scale, &highlights),
                     ));
                     state.paginated_pending.push(key.clone());
-                    state.raster_jobs.insert(
-                        RasterJob::Paginated {
-                            tab_id,
-                            generation,
-                            key,
-                        },
-                        permit,
-                    );
+                    state.raster_jobs.insert(job, permit);
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -2277,6 +2331,14 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 }
                 if !is_page_cached(state, &key) {
                     let page = key.page;
+                    let job = RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key: key.clone(),
+                    };
+                    if state.raster_failures.contains(&job.failure()) {
+                        continue;
+                    }
                     let Some(permit) = reserve_raster(state, page, scale) else {
                         continue;
                     };
@@ -2297,14 +2359,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         move || doc.render_page(page, scale),
                     ));
                     state.paginated_pending.push(key.clone());
-                    state.raster_jobs.insert(
-                        RasterJob::Paginated {
-                            tab_id,
-                            generation,
-                            key,
-                        },
-                        permit,
-                    );
+                    state.raster_jobs.insert(job, permit);
                 }
             }
             if tasks.is_empty() && spread_changed {
@@ -2329,12 +2384,17 @@ fn schedule_cbz_dimension(
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.render_generation;
     let Some(page) = pages.into_iter().find(|page| {
+        let job = CbzDimensionJob {
+            tab_id,
+            generation,
+            page: *page,
+        };
         document.cached_page_size(*page).is_none()
-            && !state.cbz_dimension_jobs.contains_key(&CbzDimensionJob {
-                tab_id,
-                generation,
-                page: *page,
-            })
+            && !state.cbz_dimension_jobs.contains_key(&job)
+            && !state
+                .cbz_dimension_failures
+                .iter()
+                .any(|failed| failed.tab_id == tab_id && failed.page == *page)
     }) else {
         return Task::none();
     };
@@ -2844,6 +2904,14 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
                 generation: state.render_generation,
                 byte_len,
             };
+            let job = RasterJob::Continuous {
+                tab_id,
+                request,
+                page,
+            };
+            if state.raster_failures.contains(&job.failure()) {
+                continue;
+            }
             let Some(permit) = reserve_raster_bytes(state, byte_len) else {
                 continue;
             };
@@ -2861,14 +2929,7 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
-            state.raster_jobs.insert(
-                RasterJob::Continuous {
-                    tab_id,
-                    request,
-                    page,
-                },
-                permit,
-            );
+            state.raster_jobs.insert(job, permit);
             occupied += 1;
             occupied_bytes = next_occupied_bytes;
             tasks.push(start_continuous_page_task(
@@ -2910,6 +2971,7 @@ fn start_continuous_page_task(
 }
 
 fn pump_raster_queue(state: &mut State) -> Task<Message> {
+    retain_relevant_raster_failures(state);
     if state.reading_mode == ReadingMode::Continuous
         && matches!(
             state.document,
@@ -2932,6 +2994,40 @@ fn pump_raster_queue(state: &mut State) -> Task<Message> {
         return refresh_content(state);
     }
     Task::none()
+}
+
+fn retain_relevant_raster_failures(state: &mut State) {
+    state.raster_failures.retain(|failure| match failure {
+        RasterFailure::Paginated { tab_id, key } => {
+            if state.active_tab_id == Some(*tab_id) {
+                state.paginated_requested.contains(key)
+            } else {
+                state
+                    .tabs
+                    .iter()
+                    .any(|tab| tab.id == *tab_id && tab.paginated_requested.contains(key))
+            }
+        }
+        RasterFailure::Continuous { tab_id, page, .. } => {
+            if state.active_tab_id == Some(*tab_id) {
+                state.reading_mode == ReadingMode::Continuous
+                    && (*page == state.current_page || state.continuous_visible.contains(page))
+            } else {
+                state
+                    .tabs
+                    .iter()
+                    .any(|tab| tab.id == *tab_id && tab.continuous_visible.contains(page))
+            }
+        }
+    });
+
+    state.cbz_dimension_failures.retain(|failure| {
+        if state.active_tab_id == Some(failure.tab_id) {
+            true
+        } else {
+            state.tabs.iter().any(|tab| tab.id == failure.tab_id)
+        }
+    });
 }
 
 fn retained_continuous_raster_bytes(state: &State) -> usize {
@@ -3371,6 +3467,14 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
         if is_page_cached(state, &key) {
             continue;
         }
+        let job = RasterJob::Paginated {
+            tab_id,
+            generation,
+            key: key.clone(),
+        };
+        if state.raster_failures.contains(&job.failure()) {
+            continue;
+        }
         match &state.document {
             Some(OpenDocument::Pdf(document)) => {
                 let document = Arc::clone(document);
@@ -3393,14 +3497,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page_with_highlights(page, scale, &highlights),
                 ));
                 state.paginated_pending.push(key.clone());
-                state.raster_jobs.insert(
-                    RasterJob::Paginated {
-                        tab_id,
-                        generation,
-                        key,
-                    },
-                    permit,
-                );
+                state.raster_jobs.insert(job, permit);
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
@@ -3423,14 +3520,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                     move || document.render_page(page, scale),
                 ));
                 state.paginated_pending.push(key.clone());
-                state.raster_jobs.insert(
-                    RasterJob::Paginated {
-                        tab_id,
-                        generation,
-                        key,
-                    },
-                    permit,
-                );
+                state.raster_jobs.insert(job, permit);
             }
             _ => return Task::none(),
         }
@@ -11475,8 +11565,24 @@ mod tests {
                 },
             );
 
-            assert!(task.units() > 0, "stale={stale}");
-            assert!(!state.raster_jobs.is_empty(), "stale={stale}");
+            if stale {
+                assert!(task.units() > 0);
+                assert!(!state.raster_jobs.is_empty());
+            } else {
+                let failed = RasterFailure::Paginated {
+                    tab_id,
+                    key: PageCacheKey {
+                        page,
+                        scale_bits: scale.to_bits(),
+                        highlights: Vec::new(),
+                    },
+                };
+                assert!(state.raster_failures.contains(&failed));
+                assert!(
+                    state.raster_jobs.keys().all(|job| job.failure() != failed),
+                    "a terminal failure must not immediately retry"
+                );
+            }
         }
     }
 

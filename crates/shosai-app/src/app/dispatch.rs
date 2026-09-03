@@ -2016,22 +2016,21 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             page,
             result,
         } => {
-            if state
-                .cbz_dimension_jobs
-                .remove(&CbzDimensionJob {
-                    tab_id,
-                    generation,
-                    page,
-                })
-                .is_none()
-            {
+            let job = CbzDimensionJob {
+                tab_id,
+                generation,
+                page,
+            };
+            if state.cbz_dimension_jobs.remove(&job).is_none() {
                 return Task::none();
             }
             if state.active_tab_id == Some(tab_id) {
                 match result {
                     Ok(()) => return refresh_content(state),
                     Err(error) if generation == state.render_generation => {
+                        state.cbz_dimension_failures.insert(job);
                         state.error = Some(AppError::Render(error));
+                        return pump_background_work(state);
                     }
                     Err(_) => return refresh_content(state),
                 }
@@ -2089,6 +2088,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(page) => {
                     let Some(page) = attach_raster_permit(page, permit) else {
+                        state.raster_failures.insert(job.failure());
                         state.error = Some(AppError::Render(
                             "rendered page exceeds its admitted raster budget".to_owned(),
                         ));
@@ -2107,6 +2107,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 Err(error) => {
                     drop(permit);
+                    state.raster_failures.insert(job.failure());
                     state.rendered_page = None;
                     state.rendered_page_index = None;
                     state.rendered_page_handle = None;
@@ -2168,15 +2169,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     (true, Err(error)) => {
                         drop(permit);
+                        state.raster_failures.insert(job.failure());
                         if page == state.current_page {
                             state.error = Some(AppError::Render(error));
-                            return load_epub_images_task(state);
+                            return pump_background_work(state);
                         }
                         state.continuous_visible.remove(&page);
                         return pump_background_work(state);
                     }
                     (true, Ok(_)) => {
                         drop(permit);
+                        state.raster_failures.insert(job.failure());
                         if page == state.current_page {
                             state.error = Some(AppError::Render(
                                 "rendered page exceeds the continuous raster budget".to_owned(),
