@@ -16,7 +16,7 @@ use crate::path_key::path_key;
 use crate::pdf::PdfDoc;
 
 const EPUB_RETAINED_SOURCE_COPIES: usize = 4;
-const EPUB_PRESENTATION_NODE_BYTES: usize = 256;
+const EPUB_PRESENTATION_UNIT_BYTES: usize = 256;
 const EPUB_CONTAINER_OVERHEAD_BYTES: usize = 64 * 1024 * 1024;
 const PDF_RETAINED_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
 
@@ -250,7 +250,7 @@ impl OpenDocument {
                     .checked_add(
                         limits
                             .max_total_presentation_nodes
-                            .checked_mul(EPUB_PRESENTATION_NODE_BYTES)?,
+                            .checked_mul(EPUB_PRESENTATION_UNIT_BYTES)?,
                     )?
                     .checked_add(EPUB_CONTAINER_OVERHEAD_BYTES)?
             }

@@ -69,7 +69,7 @@ impl EpubPresentation {
             })
             .collect::<HashMap<_, _>>();
         let mut presentations = Vec::with_capacity(chapters.len());
-        let mut total_nodes = 0_usize;
+        let mut total_units = 0_usize;
         for chapter in chapters.iter() {
             let mut parsed = super::render::parse_chapter_content_at_path_with_limits(
                 &chapter.content,
@@ -78,14 +78,17 @@ impl EpubPresentation {
                 fonts,
                 limits,
             )?;
-            total_nodes = total_nodes
-                .checked_add(presentation_unit_count(&parsed.nodes))
+            total_units = total_units
+                .checked_add(chapter_presentation_unit_count(
+                    &parsed.nodes,
+                    parsed.anchor_offsets.len(),
+                ))
                 .ok_or_else(|| {
                     crate::application::ResourceLimitError(
-                        "EPUB aggregate presentation node count overflowed".to_owned(),
+                        "EPUB aggregate presentation unit count overflowed".to_owned(),
                     )
                 })?;
-            if total_nodes > limits.max_total_presentation_nodes {
+            if total_units > limits.max_total_presentation_nodes {
                 crate::resource_limit!("EPUB exceeds aggregate presentation node limit");
             }
             populate_image_sizes(&mut parsed.nodes, &image_sizes);
@@ -114,13 +117,23 @@ impl EpubPresentation {
     pub(crate) fn retained_presentation_unit_count(&self) -> usize {
         self.chapters
             .iter()
-            .map(|chapter| presentation_unit_count(&chapter.nodes))
+            .map(|chapter| {
+                chapter_presentation_unit_count(&chapter.nodes, chapter.anchor_offsets.len())
+            })
             .sum()
     }
 }
 
 /// Count heap-backed presentation structures using the same unit that gates
 /// aggregate admission and charges retained memory.
+fn chapter_presentation_unit_count(nodes: &[ContentNode], anchor_count: usize) -> usize {
+    // Charge the chapter presentation object itself as well as every retained
+    // anchor-map entry, including anchors on elements that produce no nodes.
+    1_usize
+        .saturating_add(anchor_count)
+        .saturating_add(presentation_unit_count(nodes))
+}
+
 fn presentation_unit_count(nodes: &[ContentNode]) -> usize {
     nodes.iter().fold(0_usize, |count, node| {
         let retained = match node {

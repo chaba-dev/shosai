@@ -28,7 +28,8 @@ pub struct EpubLimits {
     pub max_xml_depth: usize,
     /// Maximum presentation nodes admitted from an XML document.
     pub max_xml_nodes: usize,
-    /// Maximum native presentation nodes retained across all spine documents.
+    /// Maximum presentation units retained across all spine documents, including
+    /// content structures, anchor-map entries, and chapter presentation objects.
     pub max_total_presentation_nodes: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
