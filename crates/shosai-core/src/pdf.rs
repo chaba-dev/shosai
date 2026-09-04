@@ -341,6 +341,7 @@ pub struct PdfDoc {
     metadata: DocumentMetadata,
     /// Raw PDF bytes, kept for re-opening during render calls.
     data: Vec<u8>,
+    _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
 impl PdfDoc {
@@ -389,9 +390,16 @@ impl PdfDoc {
     ) -> Result<Self> {
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
+        let retained_ceiling = crate::document_admission::pdf_retained_ceiling(
+            usize::try_from(max_input_bytes).unwrap_or(usize::MAX),
+        )
+        .context("PDF retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         let data = read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, is_cancelled)?;
         check_cancelled(is_cancelled)?;
-        let document = Self::from_bytes_with_limit_inner(data, max_input_bytes, is_cancelled)?;
+        let document =
+            Self::from_bytes_with_limit_admitted(data, max_input_bytes, is_cancelled, admission)?;
         check_cancelled(is_cancelled)?;
         Ok(document)
     }
@@ -399,6 +407,13 @@ impl PdfDoc {
     /// Open a PDF from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
         Self::from_bytes_with_limit(data, MAX_PDF_INPUT_BYTES)
+    }
+
+    pub(crate) fn from_bytes_admitted(
+        data: Vec<u8>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+    ) -> Result<Self> {
+        Self::from_bytes_with_limit_admitted(data, MAX_PDF_INPUT_BYTES, None, admission)
     }
 
     pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
@@ -409,6 +424,19 @@ impl PdfDoc {
         data: Vec<u8>,
         max_input_bytes: u64,
         is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        let retained_ceiling = crate::document_admission::pdf_retained_ceiling(data.capacity())
+            .context("PDF retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        Self::from_bytes_with_limit_admitted(data, max_input_bytes, is_cancelled, admission)
+    }
+
+    fn from_bytes_with_limit_admitted(
+        data: Vec<u8>,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
     ) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > max_input_bytes {
             crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
@@ -471,12 +499,18 @@ impl PdfDoc {
         drop(document);
         drop(pdfium);
 
-        Ok(Self {
+        let mut parsed = Self {
             page_count,
             page_sizes,
             metadata,
             data,
-        })
+            _admission: None,
+        };
+        let retained_bytes = parsed
+            .retained_byte_len()
+            .context("PDF retained-memory charge overflowed")?;
+        parsed._admission = Some(admission.finish(retained_bytes)?);
+        Ok(parsed)
     }
 }
 

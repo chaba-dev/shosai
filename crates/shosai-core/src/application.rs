@@ -144,6 +144,13 @@ pub struct OpenDocumentPlan {
     title_hint: Option<String>,
 }
 
+pub(crate) struct AdmittedDocumentBytes {
+    pub(crate) format: BookFormat,
+    pub(crate) data: Vec<u8>,
+    pub(crate) title_hint: Option<String>,
+    admission: crate::document_admission::ProvisionalDocumentAdmission,
+}
+
 impl OpenDocumentPlan {
     pub fn prepare(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
         let format = locator.format()?;
@@ -186,9 +193,17 @@ impl OpenDocumentPlan {
         OpenDocument::retained_admission_byte_len(self.format, self.encoded_byte_len)
     }
 
-    pub(crate) fn read_bytes(
-        mut self,
-    ) -> Result<(BookFormat, Vec<u8>, Option<String>), OpenDocumentError> {
+    pub(crate) fn read_bytes(mut self) -> Result<AdmittedDocumentBytes, OpenDocumentError> {
+        let retained_bytes =
+            OpenDocument::maximum_retained_byte_len(self.format).ok_or_else(|| {
+                OpenDocumentError::LimitExceeded {
+                    format: self.format,
+                    detail: "retained-memory admission cannot be represented".to_owned(),
+                }
+            })?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_bytes)
+                .map_err(|error| classify_open_error(self.format, error))?;
         let max_input_bytes = OpenDocument::max_input_bytes(self.format);
         let read_limit =
             max_input_bytes
@@ -209,19 +224,23 @@ impl OpenDocumentPlan {
                 detail: format!("input is larger than {max_input_bytes} bytes"),
             });
         }
-        Ok((self.format, data, self.title_hint))
+        Ok(AdmittedDocumentBytes {
+            format: self.format,
+            data,
+            title_hint: self.title_hint,
+            admission,
+        })
     }
 
     pub fn open(self) -> Result<OpenDocument, OpenDocumentError> {
-        let (format, data, title_hint) = self.read_bytes()?;
-        OpenDocument::from_bytes(format, data, title_hint)
+        OpenDocument::from_admitted_bytes(self.read_bytes()?)
     }
 
     #[doc(hidden)]
     pub fn open_with_content_hash(self) -> Result<(OpenDocument, String), OpenDocumentError> {
-        let (format, data, title_hint) = self.read_bytes()?;
-        let content_hash = format!("{:x}", Sha256::digest(&data));
-        let document = OpenDocument::from_bytes(format, data, title_hint)?;
+        let admitted = self.read_bytes()?;
+        let content_hash = format!("{:x}", Sha256::digest(&admitted.data));
+        let document = OpenDocument::from_admitted_bytes(admitted)?;
         Ok((document, content_hash))
     }
 }
@@ -287,6 +306,7 @@ impl OpenDocument {
         format.max_input_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn from_bytes(
         format: BookFormat,
         data: Vec<u8>,
@@ -302,6 +322,30 @@ impl OpenDocument {
             BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint(data, title_hint)
                 .map(|document| Self::Cbz(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
+        }
+    }
+
+    pub(crate) fn from_admitted_bytes(
+        admitted: AdmittedDocumentBytes,
+    ) -> Result<Self, OpenDocumentError> {
+        let AdmittedDocumentBytes {
+            format,
+            data,
+            title_hint,
+            admission,
+        } = admitted;
+        match format {
+            BookFormat::Pdf => PdfDoc::from_bytes_admitted(data, admission)
+                .map(|document| Self::Pdf(Arc::new(document)))
+                .map_err(|error| classify_open_error(format, error)),
+            BookFormat::Epub => EpubDoc::from_bytes_admitted(data, admission)
+                .map(|document| Self::Epub(Arc::new(document)))
+                .map_err(|error| classify_open_error(format, error)),
+            BookFormat::Cbz => {
+                CbzDoc::from_bytes_with_title_hint_admitted(data, title_hint, admission)
+                    .map(|document| Self::Cbz(Arc::new(document)))
+                    .map_err(|error| classify_open_error(format, error))
+            }
         }
     }
 

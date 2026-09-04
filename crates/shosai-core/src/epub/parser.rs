@@ -39,6 +39,20 @@ pub struct EpubDoc {
     fonts: super::font::EpubFontBook,
     presentation: EpubPresentation,
     chapter_index: HashMap<CanonicalEpubPath, usize>,
+    _admission: Option<crate::document_admission::DocumentAdmission>,
+}
+
+#[derive(Debug)]
+pub struct AdmittedEpubContent {
+    document: EpubDoc,
+}
+
+impl std::ops::Deref for AdmittedEpubContent {
+    type Target = EpubContent;
+
+    fn deref(&self) -> &Self::Target {
+        &self.document.content
+    }
 }
 
 /// Metadata and the referenced cover admitted without constructing reading content.
@@ -61,39 +75,33 @@ impl EpubInspection {
 impl EpubDoc {
     /// Conservative retained-memory charge derived from this parsed document.
     pub(crate) fn retained_byte_len(&self) -> Option<usize> {
-        const SOURCE_DERIVED_COPIES: usize = 4;
+        const CHAPTER_DERIVED_COPIES: usize = 3;
         const PRESENTATION_UNIT_BYTES: usize = 256;
-        const CONTAINER_OVERHEAD_BYTES: usize = 1024 * 1024;
+        const CONTAINER_OVERHEAD_BYTES: usize = 64 * 1024 * 1024;
 
-        let chapter_bytes = self
+        let chapter_payload_bytes = self
             .content
             .chapters
             .iter()
             .try_fold(0_usize, |total, chapter| {
-                total
-                    .checked_add(chapter.path.len())?
-                    .checked_add(chapter.title.as_ref().map_or(0, String::len))?
-                    .checked_add(chapter.content.len())
+                total.checked_add(chapter.content.capacity())
             })?;
-        let resource_bytes =
-            self.content
-                .resources
-                .iter()
-                .try_fold(0_usize, |total, (path, resource)| {
-                    total
-                        .checked_add(path.as_str().len())?
-                        .checked_add(resource.media_type.len())?
-                        .checked_add(resource.bytes.len())
-                })?;
-        chapter_bytes
-            .checked_add(resource_bytes)?
-            .checked_mul(SOURCE_DERIVED_COPIES)?
+        let chapter_index = self.chapter_index.iter().try_fold(
+            self.chapter_index.capacity().checked_mul(
+                std::mem::size_of::<CanonicalEpubPath>() + std::mem::size_of::<usize>(),
+            )?,
+            |total, (path, _)| total.checked_add(path.as_str().len()),
+        )?;
+        self.content
+            .retained_byte_len()?
+            .checked_add(chapter_payload_bytes.checked_mul(CHAPTER_DERIVED_COPIES)?)?
             .checked_add(self.fonts.retained_decoded_bytes())?
             .checked_add(
                 self.presentation
                     .retained_presentation_unit_count()
                     .checked_mul(PRESENTATION_UNIT_BYTES)?,
             )?
+            .checked_add(chapter_index)?
             .checked_add(CONTAINER_OVERHEAD_BYTES)
     }
 
@@ -127,13 +135,26 @@ impl EpubDoc {
 
     /// Open an EPUB file with explicit resource admission limits.
     pub fn open_with_limits(path: impl AsRef<Path>, limits: EpubLimits) -> Result<Self> {
+        let retained_ceiling = epub_admission_ceiling(
+            usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX),
+            &limits,
+        )?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         let data = read_epub_file(path.as_ref(), &limits)?;
-        Self::from_bytes_with_limits(data, limits)
+        Self::from_bytes_inner_admitted(data, false, limits, admission)
     }
 
     /// Open an EPUB from raw bytes.
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
         Self::from_bytes_with_limits(data, EpubLimits::default())
+    }
+
+    pub(crate) fn from_bytes_admitted(
+        data: Vec<u8>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+    ) -> Result<Self> {
+        Self::from_bytes_inner_admitted(data, false, EpubLimits::default(), admission)
     }
 
     /// Open an EPUB from raw bytes with explicit resource admission limits.
@@ -151,6 +172,18 @@ impl EpubDoc {
         data: Vec<u8>,
         include_non_spine_content: bool,
         limits: EpubLimits,
+    ) -> Result<Self> {
+        let retained_ceiling = epub_admission_ceiling(data.capacity(), &limits)?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        Self::from_bytes_inner_admitted(data, include_non_spine_content, limits, admission)
+    }
+
+    fn from_bytes_inner_admitted(
+        data: Vec<u8>,
+        include_non_spine_content: bool,
+        limits: EpubLimits,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
     ) -> Result<Self> {
         let mut archive = validated_archive(data, &limits)?;
 
@@ -207,7 +240,7 @@ impl EpubDoc {
         let presentation =
             EpubPresentation::parse(&chapters, &styles, &fonts, &resources, &limits)?;
 
-        Ok(Self {
+        let mut parsed = Self {
             content: EpubContent {
                 metadata,
                 chapters,
@@ -219,7 +252,13 @@ impl EpubDoc {
             fonts,
             presentation,
             chapter_index,
-        })
+            _admission: None,
+        };
+        let retained_bytes = parsed
+            .retained_byte_len()
+            .context("EPUB retained-memory charge overflowed")?;
+        parsed._admission = Some(admission.finish(retained_bytes)?);
+        Ok(parsed)
     }
 
     /// Number of chapters.
@@ -240,8 +279,8 @@ impl EpubDoc {
 
     /// Consume the document and return its parsed source content.
     #[doc(hidden)]
-    pub fn into_content(self) -> EpubContent {
-        self.content
+    pub fn into_content(self) -> AdmittedEpubContent {
+        AdmittedEpubContent { document: self }
     }
 
     /// Parsed chapter content shared by rendering, pagination, and search.
@@ -331,6 +370,17 @@ impl EpubDoc {
 // ---------------------------------------------------------------------------
 // Internal parsing functions
 // ---------------------------------------------------------------------------
+
+fn epub_admission_ceiling(encoded_bytes: usize, limits: &EpubLimits) -> Result<usize> {
+    crate::document_admission::epub_retained_ceiling(
+        encoded_bytes,
+        usize::try_from(limits.max_total_uncompressed_bytes)
+            .context("EPUB uncompressed-byte admission cannot be represented")?,
+        limits.max_total_decoded_font_bytes,
+        limits.max_total_presentation_nodes,
+    )
+    .context("EPUB retained-memory admission overflowed")
+}
 
 fn read_epub_file(path: &Path, limits: &EpubLimits) -> Result<Vec<u8>> {
     read_epub_file_cancellable(path, limits, None)
@@ -1301,6 +1351,78 @@ mod tests {
                 .downcast_ref::<crate::application::ResourceLimitError>()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn retained_charge_covers_source_derived_presentation_text() {
+        let repeated_text = "retained presentation text ".repeat(8 * 1024);
+        let first = format!(
+            r#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>{repeated_text}</p></body></html>"#
+        );
+        let second = format!(
+            r#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>{repeated_text}</p></body></html>"#
+        );
+        let bytes = archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfile full-path="book.opf"/></container>"#,
+            ),
+            (
+                "book.opf",
+                br#"<package><metadata><title>Retained text</title></metadata><manifest><item id="first" href="first.xhtml" media-type="application/xhtml+xml"/><item id="second" href="second.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="first"/><itemref idref="second"/></spine></package>"#,
+            ),
+            ("first.xhtml", first.as_bytes()),
+            ("second.xhtml", second.as_bytes()),
+        ]);
+
+        let document = EpubDoc::from_bytes(bytes.clone()).unwrap();
+        let source_bytes = document
+            .content
+            .chapters
+            .iter()
+            .map(|chapter| chapter.content.capacity())
+            .sum::<usize>();
+        let retained_bytes = document.retained_byte_len().unwrap();
+        let ceiling = super::epub_admission_ceiling(bytes.capacity(), &EpubLimits::default())
+            .expect("default ceiling should be representable");
+
+        assert!(retained_bytes >= source_bytes * 4);
+        assert!(retained_bytes <= ceiling);
+    }
+
+    #[test]
+    fn css_heavy_retained_charge_stays_within_custom_ceiling() {
+        let css = "a{top:0}".repeat(120_000);
+        let chapter =
+            br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Styled</p></body></html>"#;
+        let bytes = archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfile full-path="book.opf"/></container>"#,
+            ),
+            (
+                "book.opf",
+                br#"<package><metadata><title>CSS</title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/><item id="style" href="style.css" media-type="text/css"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            ("chapter.xhtml", chapter),
+            ("style.css", css.as_bytes()),
+        ]);
+        let limits = EpubLimits {
+            max_input_bytes: bytes.len() as u64,
+            max_total_uncompressed_bytes: 1024 * 1024,
+            max_total_decoded_font_bytes: 0,
+            max_total_presentation_nodes: 16,
+            ..EpubLimits::default()
+        };
+
+        let document = EpubDoc::from_bytes_with_limits(bytes.clone(), limits).unwrap();
+        let retained_bytes = document.retained_byte_len().unwrap();
+        let ceiling = super::epub_admission_ceiling(bytes.capacity(), &limits)
+            .expect("custom ceiling should be representable");
+
+        assert!(retained_bytes <= ceiling);
     }
 
     #[test]

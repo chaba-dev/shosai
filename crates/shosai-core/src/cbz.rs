@@ -52,6 +52,7 @@ pub struct CbzDoc {
     title: Option<String>,
     limits: CbzLimits,
     dimensions: Mutex<Vec<Option<(u32, u32)>>>,
+    _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
 impl CbzDoc {
@@ -111,6 +112,13 @@ impl CbzDoc {
         if metadata.len() > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
+        let retained_ceiling = crate::document_admission::cbz_retained_ceiling(
+            usize::try_from(limits.max_archive_bytes).unwrap_or(usize::MAX),
+            limits.max_entries,
+        )
+        .context("CBZ retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         let data = read_cbz_snapshot_cancellable(
             &mut file,
             metadata.len(),
@@ -119,7 +127,13 @@ impl CbzDoc {
         )
         .with_context(|| format!("failed to read {}", path.display()))?;
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        Self::from_bytes_with_title_cancellable(data, title, limits, is_cancelled)
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            limits,
+            is_cancelled,
+            admission,
+        )
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
@@ -130,8 +144,23 @@ impl CbzDoc {
         Self::from_bytes_with_title(data, None, limits)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_bytes_with_title_hint(data: Vec<u8>, title: Option<String>) -> Result<Self> {
         Self::from_bytes_with_title(data, title, CbzLimits::default())
+    }
+
+    pub(crate) fn from_bytes_with_title_hint_admitted(
+        data: Vec<u8>,
+        title: Option<String>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+    ) -> Result<Self> {
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            CbzLimits::default(),
+            None,
+            admission,
+        )
     }
 
     fn from_bytes_with_title(
@@ -147,6 +176,27 @@ impl CbzDoc {
         title: Option<String>,
         limits: CbzLimits,
         is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        let retained_ceiling =
+            crate::document_admission::cbz_retained_ceiling(data.capacity(), limits.max_entries)
+                .context("CBZ retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            limits,
+            is_cancelled,
+            admission,
+        )
+    }
+
+    fn from_bytes_with_title_cancellable_admitted(
+        data: Vec<u8>,
+        title: Option<String>,
+        limits: CbzLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
     ) -> Result<Self> {
         check_cancelled(is_cancelled)?;
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
@@ -204,14 +254,20 @@ impl CbzDoc {
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
         let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
-        Ok(Self {
+        let mut parsed = Self {
             page_paths,
             page_byte_lengths,
             data,
             title,
             limits,
             dimensions,
-        })
+            _admission: None,
+        };
+        let retained_bytes = parsed
+            .retained_byte_len()
+            .context("CBZ retained-memory charge overflowed")?;
+        parsed._admission = Some(admission.finish(retained_bytes)?);
+        Ok(parsed)
     }
 
     pub fn page_count(&self) -> usize {

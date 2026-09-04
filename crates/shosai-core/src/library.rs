@@ -2075,12 +2075,12 @@ impl Library {
             bail!("book format no longer matches the library identity");
         }
         tokio::task::spawn_blocking(move || {
-            let (format, data, title_hint) = plan.read_bytes()?;
-            let actual_hash = format!("{:x}", Sha256::digest(&data));
+            let admitted = plan.read_bytes()?;
+            let actual_hash = format!("{:x}", Sha256::digest(&admitted.data));
             if actual_hash != expected_hash {
                 bail!("book contents no longer match the library identity");
             }
-            let document = OpenDocument::from_bytes(format, data, title_hint)?;
+            let document = OpenDocument::from_admitted_bytes(admitted)?;
             Ok((document, actual_hash))
         })
         .await
