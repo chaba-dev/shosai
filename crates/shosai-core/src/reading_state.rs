@@ -19,6 +19,14 @@ use sqlx::{Row, Transaction};
 
 use crate::path_key::canonical_path_key;
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CurrentBookPathSaveError {
+    #[error("book {0} no longer exists")]
+    MissingBook(i64),
+    #[error(transparent)]
+    Persistence(#[from] anyhow::Error),
+}
+
 async fn next_reading_state_revision(transaction: &mut Transaction<'_, Sqlite>) -> Result<i64> {
     sqlx::query_scalar(
         "UPDATE reading_state_revision SET value = value + 1 WHERE singleton = 1
@@ -419,14 +427,19 @@ impl ReadingStateStore {
         &self,
         book_id: i64,
         state: &FileReadingState,
-    ) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
+    ) -> std::result::Result<(), CurrentBookPathSaveError> {
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin reading state transaction")?;
         let revision = next_reading_state_revision(&mut transaction).await?;
-        let key: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
+        let key: Option<String> = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
             .bind(book_id)
-            .fetch_one(&mut *transaction)
+            .fetch_optional(&mut *transaction)
             .await
             .context("failed to resolve current book path for reading state")?;
+        let key = key.ok_or(CurrentBookPathSaveError::MissingBook(book_id))?;
         sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
             .bind(book_id)
             .bind(&key)
@@ -447,7 +460,10 @@ impl ReadingStateStore {
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state for current book path")?;
-        transaction.commit().await?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit reading state transaction")?;
         Ok(())
     }
 

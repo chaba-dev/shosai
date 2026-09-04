@@ -10,7 +10,7 @@ use tokio::sync::{Notify, oneshot};
 
 use crate::library::Library;
 use crate::path_key::canonical_path_key;
-use crate::reading_state::{FileReadingState, ReadingStateStore};
+use crate::reading_state::{CurrentBookPathSaveError, FileReadingState, ReadingStateStore};
 
 pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
 pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
@@ -532,9 +532,18 @@ async fn persist_batch(
     let mut errors = Vec::new();
     for (key, pending) in batch.saves.drain() {
         let result = if let Some(book_id) = pending.save.book_id {
-            store
+            match store
                 .set_for_book_current_path_async(book_id, &pending.save.reading)
                 .await
+            {
+                Ok(()) => Ok(()),
+                Err(CurrentBookPathSaveError::MissingBook(_)) => {
+                    store
+                        .set_key_async(&pending.normalized_path, &pending.save.reading)
+                        .await
+                }
+                Err(CurrentBookPathSaveError::Persistence(error)) => Err(error),
+            }
         } else {
             store
                 .set_key_async(&pending.normalized_path, &pending.save.reading)
@@ -1158,5 +1167,50 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row, (relocated_key, 9));
+    }
+
+    #[tokio::test]
+    async fn removed_tracked_save_falls_back_to_admitted_path_and_releases_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: Some(book.id),
+                path: source.clone(),
+                reading: FileReadingState {
+                    page: 11,
+                    location_offset: Some(4),
+                    zoom: 1.25,
+                },
+            }))
+            .unwrap();
+        let (batch, batch_bytes) = writer_state.take_batch();
+
+        library.remove(book.id).await.unwrap();
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+        assert!(
+            error.is_none(),
+            "fallback save should make the flush succeed"
+        );
+        writer_state.finish_batch(failed, batch_bytes);
+
+        assert!(writer_state.admitted.is_empty());
+        assert!(writer_state.pending.saves.is_empty());
+        let saved = store.get_async(&source).await.unwrap();
+        assert_eq!(saved.page, 11);
+        assert_eq!(saved.location_offset, Some(4));
+        let book_id: Option<i64> =
+            sqlx::query_scalar("SELECT book_id FROM reading_state WHERE file_path = ?")
+                .bind(canonical_path_key(&source))
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(book_id, None);
     }
 }
