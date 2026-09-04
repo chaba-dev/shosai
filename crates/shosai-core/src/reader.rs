@@ -232,6 +232,12 @@ impl CacheBudget {
         weight: usize,
         replaced: Vec<CachePermit>,
     ) -> Result<CachePermit, Vec<CachePermit>> {
+        if replaced
+            .iter()
+            .any(|permit| !Arc::ptr_eq(&permit.0.budget, &self.0))
+        {
+            return Err(replaced);
+        }
         let mut seen = std::collections::HashSet::new();
         let releasable_reservations = replaced
             .iter()
@@ -551,6 +557,24 @@ mod tests {
         assert_eq!(budget.used(), 12);
         drop(replacement);
         assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn owned_replacement_rejects_permits_from_another_budget() {
+        let first_budget = CacheBudget::new(12);
+        let second_budget = CacheBudget::new(12);
+        let first_permit = first_budget.try_reserve(4).unwrap();
+        let second_permit = second_budget.try_reserve(5).unwrap();
+
+        let returned = first_budget
+            .try_reserve_replacing(6, vec![first_permit, second_permit])
+            .expect_err("permits from another budget must be rejected");
+
+        assert_eq!(first_budget.used(), 4);
+        assert_eq!(second_budget.used(), 5);
+        drop(returned);
+        assert_eq!(first_budget.used(), 0);
+        assert_eq!(second_budget.used(), 0);
     }
 
     #[test]
