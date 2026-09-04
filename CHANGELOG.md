@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - *(app)* Add staged book imports (#69)
 - *(reader)* Prove cross-format selection contracts (#75)
 - *(core)* Prepare annotation core for Flutter migration (#76)
+- *(core)* Add bounded application bridge and resource admission (#79)
 
 ### 🐛 Bug Fixes
 
