@@ -9,7 +9,7 @@ use iced::widget::{
     responsive, row, scrollable, sensor, text_input,
 };
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
@@ -21,15 +21,17 @@ use shosai_core::library::{
     ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, Library,
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
+use shosai_core::path_from_key;
 use shosai_core::pdf::PdfDoc;
 use shosai_core::reader::{
-    BoundedCache, ReaderLocation, ReadingMode, nearby_chapters, prioritized_pages,
+    BoundedCache, CacheBudget, CachePermit, ReaderLocation, ReaderPreferences, ReaderSession,
+    ReadingMode, nearby_chapters, prioritized_pages,
 };
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
 use shosai_core::state_writer::{
-    StateSave as ReadingStateSave, StateWriterMessage as ReadingStateWriterMessage,
-    start_state_writer as start_reading_state_writer,
+    StateSave as ReadingStateSave, StateWriter, StateWriterMessage as ReadingStateWriterMessage,
+    StateWriterSendError, start_state_writer as start_reading_state_writer,
 };
 
 #[cfg(test)]
@@ -54,7 +56,8 @@ mod perf;
 pub use dispatch::update;
 use epub_navigation::*;
 use epub_view::{
-    continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_paths,
+    continuous_epub_content_view, decode_epub_images, epub_chapter_view, epub_image_byte_len,
+    epub_image_paths, epub_image_transient_byte_len,
 };
 pub use message::Message;
 
@@ -195,7 +198,10 @@ impl std::fmt::Debug for RasterImageHandle {
 #[derive(Clone)]
 enum EpubImageHandle {
     Raster(image::Handle),
-    Svg(iced::widget::svg::Handle),
+    Svg {
+        handle: iced::widget::svg::Handle,
+        _permit: CachePermit,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -204,8 +210,12 @@ pub(crate) enum DecodedEpubImage {
         width: u32,
         height: u32,
         pixels: Vec<u8>,
+        permit: CachePermit,
     },
-    Svg(Vec<u8>),
+    Svg {
+        data: Vec<u8>,
+        permit: CachePermit,
+    },
 }
 
 impl DecodedEpubImage {
@@ -215,8 +225,19 @@ impl DecodedEpubImage {
                 width,
                 height,
                 pixels,
-            } => EpubImageHandle::Raster(image::Handle::from_rgba(width, height, pixels)),
-            Self::Svg(data) => EpubImageHandle::Svg(iced::widget::svg::Handle::from_memory(data)),
+                permit,
+            } => EpubImageHandle::Raster(image::Handle::from_rgba(
+                width,
+                height,
+                bytes::Bytes::from_owner(PermittedPixels {
+                    pixels: pixels.into(),
+                    _permit: permit,
+                }),
+            )),
+            Self::Svg { data, permit } => EpubImageHandle::Svg {
+                handle: iced::widget::svg::Handle::from_memory(data),
+                _permit: permit,
+            },
         }
     }
 }
@@ -227,7 +248,7 @@ impl std::fmt::Debug for EpubImageHandle {
             .debug_tuple("EpubImageHandle")
             .field(&match self {
                 Self::Raster(handle) => format!("raster:{:?}", handle.id()),
-                Self::Svg(_) => "svg".to_owned(),
+                Self::Svg { .. } => "svg".to_owned(),
             })
             .finish()
     }
@@ -352,7 +373,14 @@ const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_mil
 const LIBRARY_ACTIVITY_STEP: f32 = 16.0 / 300.0;
 const LIBRARY_ACTIVITY_FADE_STEP: f32 = 16.0 / 300.0;
 const PAGE_CACHE_CAPACITY: usize = 8;
+const PAGE_CACHE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const EPUB_IMAGE_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const EPUB_IMAGE_WORKERS: usize = 1;
+const TRANSIENT_DECODE_BYTE_CAPACITY: usize = 320 * 1024 * 1024;
 const CONTINUOUS_PAGE_CACHE_CAPACITY: usize = 8;
+const CONTINUOUS_RASTER_BYTE_CAPACITY: usize = 128 * 1024 * 1024;
+const RASTER_RENDER_WORKERS: usize = 2;
+const CBZ_DIMENSION_WORKERS: usize = 1;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
 const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
 const READER_HORIZONTAL_PADDING: f32 = 112.0;
@@ -563,7 +591,7 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct EpubLayoutKey {
     width: u32,
     height: u32,
@@ -585,19 +613,17 @@ impl EpubLayoutKey {
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
-    book_id: Option<i64>,
+    session: ReaderSession,
     display_title: String,
-    file_path: PathBuf,
-    document: OpenDocument,
-    current_page: usize,
     total_pages: usize,
-    zoom: ZoomMode,
     rendered_page: Option<RenderedPage>,
     rendered_page_index: Option<usize>,
     rendered_page_handle: Option<RasterImageHandle>,
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: BoundedCache<PageCacheKey, RenderedPage>,
+    paginated_pending: Vec<PageCacheKey>,
+    paginated_requested: Vec<PageCacheKey>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
     epub_images_desired: HashSet<String>,
@@ -606,8 +632,9 @@ struct ReaderTab {
     epub_image_generation: u64,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
+    epub_layout_pending: Option<EpubLayoutKey>,
+    epub_layout_requested: Option<EpubLayoutKey>,
     epub_page: usize,
-    epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
     continuous_pending: BTreeMap<usize, ContinuousRequest>,
     continuous_visible: BTreeSet<usize>,
@@ -615,10 +642,7 @@ struct ReaderTab {
     render_generation: u64,
     page_input: String,
     error: Option<AppError>,
-    font_size: f32,
-    line_spacing: f32,
     theme: ReaderTheme,
-    reading_mode: ReadingMode,
     reader_overrides: ReaderOverrides,
     bookmarks: Vec<Bookmark>,
     show_bookmarks_panel: bool,
@@ -634,10 +658,57 @@ struct ReaderTab {
     search_text: Option<Arc<Vec<String>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContinuousRequest {
     id: u64,
     generation: u64,
+    byte_len: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RasterJob {
+    Paginated {
+        tab_id: u64,
+        generation: u64,
+        key: PageCacheKey,
+    },
+    Continuous {
+        tab_id: u64,
+        request: ContinuousRequest,
+        page: usize,
+    },
+}
+
+struct PermittedPixels {
+    pixels: bytes::Bytes,
+    _permit: CachePermit,
+}
+
+impl AsRef<[u8]> for PermittedPixels {
+    fn as_ref(&self) -> &[u8] {
+        &self.pixels
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct EpubJob {
+    tab_id: u64,
+    generation: u64,
+    layout_key: EpubLayoutKey,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CbzDimensionJob {
+    tab_id: u64,
+    generation: u64,
+    page: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EpubImageJob {
+    tab_id: u64,
+    generation: u64,
+    path: String,
 }
 
 #[derive(Debug, Clone)]
@@ -650,7 +721,7 @@ pub struct InitializedState {
     reader_defaults: ReaderDefaults,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PageCacheKey {
     page: usize,
     scale_bits: u32,
@@ -686,6 +757,8 @@ pub struct State {
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
     page_cache: BoundedCache<PageCacheKey, RenderedPage>,
+    paginated_pending: Vec<PageCacheKey>,
+    paginated_requested: Vec<PageCacheKey>,
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
@@ -693,8 +766,13 @@ pub struct State {
     epub_images_failed: HashSet<String>,
     epub_image_decode_active: bool,
     epub_image_generation: u64,
+    epub_image_budget: CacheBudget,
+    transient_decode_budget: CacheBudget,
+    epub_image_jobs: HashSet<EpubImageJob>,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
+    epub_layout_pending: Option<EpubLayoutKey>,
+    epub_layout_requested: Option<EpubLayoutKey>,
     epub_page: usize,
     epub_offset: usize,
     continuous_pages: Vec<Option<RenderedPage>>,
@@ -704,6 +782,10 @@ pub struct State {
     continuous_activation: u64,
     continuous_measurement_index: Option<Arc<ContinuousMeasurementIndex>>,
     next_continuous_request_id: u64,
+    raster_budget: CacheBudget,
+    raster_jobs: HashMap<RasterJob, CachePermit>,
+    cbz_dimension_jobs: HashMap<CbzDimensionJob, CachePermit>,
+    epub_jobs: HashSet<EpubJob>,
     page_input: String,
     error: Option<AppError>,
     font_size: f32,
@@ -726,7 +808,7 @@ pub struct State {
 
     // -- Shared --
     reading_state: Option<ReadingStateStore>,
-    reading_state_saves: Option<mpsc::UnboundedSender<ReadingStateWriterMessage>>,
+    reading_state_saves: Option<StateWriter>,
     library: Option<Library>,
     bookmark_store: Option<BookmarkStore>,
 
@@ -835,6 +917,8 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
         page_cache: BoundedCache::new(PAGE_CACHE_CAPACITY),
+        paginated_pending: Vec::new(),
+        paginated_requested: Vec::new(),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
@@ -842,8 +926,13 @@ pub fn boot() -> (State, Task<Message>) {
         epub_images_failed: HashSet::new(),
         epub_image_decode_active: false,
         epub_image_generation: 0,
+        epub_image_budget: CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY),
+        transient_decode_budget: CacheBudget::new(TRANSIENT_DECODE_BYTE_CAPACITY),
+        epub_image_jobs: HashSet::new(),
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
+        epub_layout_pending: None,
+        epub_layout_requested: None,
         epub_page: 0,
         epub_offset: 0,
         continuous_pages: Vec::new(),
@@ -853,6 +942,10 @@ pub fn boot() -> (State, Task<Message>) {
         continuous_activation: 0,
         continuous_measurement_index: None,
         next_continuous_request_id: 1,
+        raster_budget: CacheBudget::new(PAGE_CACHE_BYTE_CAPACITY),
+        raster_jobs: HashMap::new(),
+        cbz_dimension_jobs: HashMap::new(),
+        epub_jobs: HashSet::new(),
         page_input: String::new(),
         error: None,
         font_size: 16.0,
@@ -985,8 +1078,7 @@ pub fn boot() -> (State, Task<Message>) {
             );
             let managed_books_dir = preferences
                 .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
-                .cloned()
-                .map(PathBuf::from)
+                .map(|path| path_from_key(path))
                 .unwrap_or_else(|| store.managed_books_dir());
             if managed_books_dir != store.managed_books_dir() {
                 shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)
@@ -1155,24 +1247,38 @@ fn library_activity_active(state: &State) -> bool {
 }
 
 fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
+    let file_path = state.file_path.clone()?;
+    let document = state.document.clone()?;
     Some(ReaderTab {
         id: state.active_tab_id?,
-        book_id: state.book_id,
+        session: ReaderSession {
+            book_id: state.book_id,
+            locator: DeviceFileLocator::from_path(&file_path),
+            document,
+            location: ReaderLocation {
+                page: state.current_page,
+                offset: current_epub_offset(state),
+            },
+            preferences: ReaderPreferences {
+                reading_mode: state.reading_mode,
+                epub_font_size: state.font_size,
+                epub_line_spacing: state.line_spacing,
+                pdf_zoom: state.zoom,
+            },
+        },
         display_title: state
             .display_title
             .clone()
             .or_else(|| current_book_title(state))?,
-        file_path: state.file_path.clone()?,
-        document: state.document.clone()?,
-        current_page: state.current_page,
         total_pages: state.total_pages,
-        zoom: state.zoom,
         rendered_page: state.rendered_page.clone(),
         rendered_page_index: state.rendered_page_index,
         rendered_page_handle: state.rendered_page_handle.clone(),
         rendered_facing_page: state.rendered_facing_page.clone(),
         rendered_facing_page_handle: state.rendered_facing_page_handle.clone(),
         page_cache: state.page_cache.clone(),
+        paginated_pending: state.paginated_pending.clone(),
+        paginated_requested: state.paginated_requested.clone(),
         epub_image_handles: state.epub_image_handles.clone(),
         epub_images_pending: state.epub_images_pending.clone(),
         epub_images_desired: state.epub_images_desired.clone(),
@@ -1181,8 +1287,9 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         epub_image_generation: state.epub_image_generation,
         epub_pages: state.epub_pages.clone(),
         epub_layout_key: state.epub_layout_key,
+        epub_layout_pending: state.epub_layout_pending,
+        epub_layout_requested: state.epub_layout_requested,
         epub_page: state.epub_page,
-        epub_offset: state.epub_offset,
         continuous_pages: state.continuous_pages.clone(),
         continuous_pending: state.continuous_pending.clone(),
         continuous_visible: BTreeSet::new(),
@@ -1190,10 +1297,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         render_generation: state.render_generation,
         page_input: state.page_input.clone(),
         error: state.error.clone(),
-        font_size: state.font_size,
-        line_spacing: state.line_spacing,
         theme: state.theme,
-        reading_mode: state.reading_mode,
         reader_overrides: state.reader_overrides,
         bookmarks: state.bookmarks.clone(),
         show_bookmarks_panel: state.show_bookmarks_panel,
@@ -1212,19 +1316,21 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
 
 fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.active_tab_id = Some(tab.id);
-    state.book_id = tab.book_id;
+    state.book_id = tab.session.book_id;
     state.display_title = Some(tab.display_title);
-    state.file_path = Some(tab.file_path);
-    state.document = Some(tab.document);
-    state.current_page = tab.current_page;
+    state.file_path = Some(tab.session.locator.path().to_path_buf());
+    state.document = Some(tab.session.document);
+    state.current_page = tab.session.location.page;
     state.total_pages = tab.total_pages;
-    state.zoom = tab.zoom;
+    state.zoom = tab.session.preferences.pdf_zoom;
     state.rendered_page = tab.rendered_page;
     state.rendered_page_index = tab.rendered_page_index;
     state.rendered_page_handle = tab.rendered_page_handle;
     state.rendered_facing_page = tab.rendered_facing_page;
     state.rendered_facing_page_handle = tab.rendered_facing_page_handle;
     state.page_cache = tab.page_cache;
+    state.paginated_pending = tab.paginated_pending;
+    state.paginated_requested = tab.paginated_requested;
     state.epub_image_handles = tab.epub_image_handles;
     state.epub_images_pending = tab.epub_images_pending;
     state.epub_images_desired = tab.epub_images_desired;
@@ -1233,18 +1339,20 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.epub_image_generation = tab.epub_image_generation;
     state.epub_pages = tab.epub_pages;
     state.epub_layout_key = tab.epub_layout_key;
+    state.epub_layout_pending = tab.epub_layout_pending;
+    state.epub_layout_requested = tab.epub_layout_requested;
     state.epub_page = tab.epub_page;
-    state.epub_offset = tab.epub_offset;
+    state.epub_offset = tab.session.location.offset.unwrap_or_default();
     state.continuous_pages = tab.continuous_pages;
     state.continuous_pending = tab.continuous_pending;
     state.continuous_visible = tab.continuous_visible;
     state.continuous_tail_extent = tab.continuous_tail_extent;
     state.page_input = tab.page_input;
     state.error = tab.error;
-    state.font_size = tab.font_size;
-    state.line_spacing = tab.line_spacing;
+    state.font_size = tab.session.preferences.epub_font_size;
+    state.line_spacing = tab.session.preferences.epub_line_spacing;
     state.theme = tab.theme;
-    state.reading_mode = tab.reading_mode;
+    state.reading_mode = tab.session.preferences.reading_mode;
     state.reader_overrides = tab.reader_overrides;
     state.bookmarks = tab.bookmarks;
     state.show_bookmarks_panel = tab.show_bookmarks_panel;
@@ -1274,17 +1382,20 @@ fn save_active_tab(state: &mut State) {
 
 fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) {
     for change in changes {
+        let path_key = DeviceFileLocator::from_path(&change.new_path)
+            .local_id()
+            .to_owned();
         if state.book_id == Some(change.book_id) {
             state.file_path = Some(change.new_path.clone());
             for bookmark in &mut state.bookmarks {
-                bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+                bookmark.file_path = path_key.clone();
             }
         }
         for tab in &mut state.tabs {
-            if tab.book_id == Some(change.book_id) {
-                tab.file_path = change.new_path.clone();
+            if tab.session.book_id == Some(change.book_id) {
+                tab.session.locator = DeviceFileLocator::from_path(&change.new_path);
                 for bookmark in &mut tab.bookmarks {
-                    bookmark.file_path = change.new_path.to_string_lossy().into_owned();
+                    bookmark.file_path = path_key.clone();
                 }
             }
         }
@@ -1293,7 +1404,7 @@ fn apply_managed_path_changes(state: &mut State, changes: &[ManagedPathChange]) 
             .iter_mut()
             .find(|book| book.id == change.book_id)
         {
-            book.file_path = change.new_path.to_string_lossy().into_owned();
+            book.file_path = path_key;
         }
     }
 }
@@ -1319,13 +1430,15 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
         Task::none()
     };
     let content_task = if state.reading_mode == ReadingMode::Continuous {
-        let pdf_needs_render = matches!(state.document, Some(OpenDocument::Pdf(_)))
-            && state
-                .continuous_pages
-                .get(state.current_page)
-                .and_then(Option::as_ref)
-                .is_none();
-        if pdf_needs_render {
+        let raster_needs_render = matches!(
+            state.document,
+            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+        ) && state
+            .continuous_pages
+            .get(state.current_page)
+            .and_then(Option::as_ref)
+            .is_none();
+        if raster_needs_render {
             refresh_content(state)
         } else {
             scroll_to_current_page(state)
@@ -1394,18 +1507,16 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
 }
 
 fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
-    if let Some(index) = state
-        .tabs
-        .iter()
-        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
-        && state.tabs[index].file_path == path
+    if let Some(index) = state.tabs.iter().position(|tab| {
+        book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
+    }) && state.tabs[index].session.locator.path() == path
     {
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
         state.document_open_notice_visible = false;
         state.document_open_preview = None;
         if let Some(book_id) = book_id {
-            state.tabs[index].book_id = Some(book_id);
+            state.tabs[index].session.book_id = Some(book_id);
             if let Some(title) = state
                 .library_books
                 .iter()
@@ -1475,11 +1586,9 @@ fn finish_open_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) -> Task<Message> {
-    if let Some(index) = state
-        .tabs
-        .iter()
-        .position(|tab| book_id.is_some() && tab.book_id == book_id || tab.file_path == path)
-    {
+    if let Some(index) = state.tabs.iter().position(|tab| {
+        book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
+    }) {
         let retained_display_title = state.tabs[index].display_title.clone();
         let display_title = relocated_book_title(
             book_id,
@@ -1489,19 +1598,27 @@ fn finish_open_document(
             &retained_display_title,
         );
         save_active_tab(state);
+        state.tabs[index].session.book_id = book_id;
+        state.tabs[index]
+            .session
+            .replace_document(DeviceFileLocator::from_path(&path), document.clone());
         let relocated_tab = state.tabs[index].clone();
         restore_reader_tab(state, relocated_tab);
-        let retained_zoom = state.zoom;
-        let retained_page = state.current_page;
-        let retained_epub_offset = state.epub_offset;
+        let retained_preferences = state.tabs[index].session.preferences;
+        let retained_location = state.tabs[index].session.location;
         state.active_tab = Some(index);
         state.continuous_activation = state.continuous_activation.wrapping_add(1);
         state.open_error = None;
         state.missing_book_id = None;
         install_document(state, path, book_id, document);
-        state.zoom = retained_zoom;
-        state.current_page = retained_page.min(state.total_pages.saturating_sub(1));
-        state.epub_offset = retained_epub_offset;
+        state.zoom = retained_preferences.pdf_zoom;
+        state.font_size = retained_preferences.epub_font_size;
+        state.line_spacing = retained_preferences.epub_line_spacing;
+        state.reading_mode = retained_preferences.reading_mode;
+        state.current_page = retained_location
+            .page
+            .min(state.total_pages.saturating_sub(1));
+        state.epub_offset = retained_location.offset.unwrap_or_default();
         state.page_input = format!("{}", state.current_page + 1);
         state.display_title = display_title;
         let task = refresh_content(state);
@@ -1581,8 +1698,10 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
     }
 
     for tab in &mut state.tabs {
-        if !tab.reader_overrides.reading_mode && tab.reading_mode != defaults.reading_mode {
-            tab.reading_mode = defaults.reading_mode;
+        if !tab.reader_overrides.reading_mode
+            && tab.session.preferences.reading_mode != defaults.reading_mode
+        {
+            tab.session.preferences.reading_mode = defaults.reading_mode;
             tab.continuous_pages.clear();
             tab.continuous_pending.clear();
             tab.continuous_visible.clear();
@@ -1591,17 +1710,17 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
         if !tab.reader_overrides.theme {
             tab.theme = defaults.theme;
         }
-        if matches!(tab.document, OpenDocument::Epub(_)) {
+        if matches!(tab.session.document, OpenDocument::Epub(_)) {
             if !tab.reader_overrides.epub_font_size {
-                tab.font_size = defaults.epub_font_size;
+                tab.session.preferences.epub_font_size = defaults.epub_font_size;
             }
-            tab.line_spacing = defaults.epub_line_spacing;
+            tab.session.preferences.epub_line_spacing = defaults.epub_line_spacing;
         }
-        if matches!(tab.document, OpenDocument::Pdf(_))
+        if matches!(tab.session.document, OpenDocument::Pdf(_))
             && !tab.reader_overrides.pdf_zoom
-            && tab.zoom != defaults.pdf_zoom
+            && tab.session.preferences.pdf_zoom != defaults.pdf_zoom
         {
-            tab.zoom = defaults.pdf_zoom;
+            tab.session.preferences.pdf_zoom = defaults.pdf_zoom;
             tab.rendered_page = None;
             tab.rendered_page_index = None;
             tab.rendered_page_handle = None;
@@ -1653,7 +1772,16 @@ fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
         Err(OpenDocumentError::UnsupportedFormat(extension)) => {
             Err(AppError::UnsupportedFormat(extension))
         }
-        Err(OpenDocumentError::Open { format, detail }) => Err(AppError::Open {
+        Err(OpenDocumentError::NotFound) => Err(AppError::MissingBook),
+        Err(OpenDocumentError::Inaccessible(detail)) => Err(AppError::Open {
+            format: "document",
+            detail,
+        }),
+        Err(
+            OpenDocumentError::Open { format, detail }
+            | OpenDocumentError::LimitExceeded { format, detail }
+            | OpenDocumentError::BackendUnavailable { format, detail },
+        ) => Err(AppError::Open {
             format: format.display_name(),
             detail,
         }),
@@ -1700,22 +1828,32 @@ fn install_document(
     state.search_text = None;
     state.search_loading = false;
 
-    state.total_pages = document.page_count();
-    state.document = Some(document);
-
     let saved = state.reading_state.as_ref().and_then(|store| {
         book_id
             .and_then(|id| store.get_for_book(id))
             .or_else(|| store.get(&path))
     });
-    let location = ReaderLocation::restored(saved.as_ref(), state.total_pages);
-    state.current_page = location.page;
-    state.epub_offset = location.offset.unwrap_or(0);
-    state.zoom = ZoomMode::FitPage;
+    let session = ReaderSession::new(
+        book_id,
+        DeviceFileLocator::from_path(&path),
+        document,
+        saved.as_ref(),
+        ReaderPreferences {
+            pdf_zoom: ZoomMode::FitPage,
+            reading_mode: state.reading_mode,
+            epub_font_size: state.font_size,
+            epub_line_spacing: state.line_spacing,
+        },
+    );
+    state.total_pages = session.document.page_count();
+    state.current_page = session.location.page;
+    state.epub_offset = session.location.offset.unwrap_or_default();
+    state.zoom = session.preferences.pdf_zoom;
+    state.book_id = session.book_id;
+    state.file_path = Some(session.locator.path().to_path_buf());
+    state.document = Some(session.document);
 
     state.page_input = format!("{}", state.current_page + 1);
-    state.book_id = book_id;
-    state.file_path = Some(path);
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
         state.bookmarks = book_id
             .map(|id| store.list_for_book(id))
@@ -1879,22 +2017,52 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             let pages = paginated_raster_pages(state);
             let scale = raster_render_scale(state, paginated_raster_scale(state, &pages));
             state.error = None;
-            let mut tasks = Vec::new();
-            for page in pages {
-                let highlights = search_highlights_for_page(state, page);
-                let key = PageCacheKey {
-                    page,
+            state.paginated_requested = pages
+                .iter()
+                .map(|page| PageCacheKey {
+                    page: *page,
                     scale_bits: scale.to_bits(),
-                    highlights: highlights.clone(),
-                };
+                    highlights: search_highlights_for_page(state, *page),
+                })
+                .collect();
+            let spread_changed = show_cached_paginated_spread(state);
+            if !state.paginated_pending.is_empty() {
+                return Task::none();
+            }
+            let mut tasks = Vec::new();
+            for key in state.paginated_requested.clone() {
+                if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
+                    break;
+                }
                 if !is_page_cached(state, &key) {
+                    let page = key.page;
+                    let highlights = key.highlights.clone();
+                    let Some(permit) = reserve_raster(state, page, scale) else {
+                        continue;
+                    };
+                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
+                    else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
-                    tasks.push(render_page_task(tab_id, generation, key, move || {
-                        doc.render_page_with_highlights(page, scale, &highlights)
-                    }));
+                    tasks.push(render_page_task(
+                        tab_id,
+                        generation,
+                        key.clone(),
+                        Some(transient_permit),
+                        move || doc.render_page_with_highlights(page, scale, &highlights),
+                    ));
+                    state.paginated_pending.push(key.clone());
+                    state.raster_jobs.insert(
+                        RasterJob::Paginated {
+                            tab_id,
+                            generation,
+                            key,
+                        },
+                        permit,
+                    );
                 }
             }
-            let spread_changed = show_cached_paginated_spread(state);
             if tasks.is_empty() && spread_changed {
                 tasks.push(prefetch_next_paginated_spread(state));
             }
@@ -1903,12 +2071,27 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         Some(OpenDocument::Epub(doc)) => {
             let doc = Arc::clone(doc);
             let layout_key = epub_layout_key(state);
+            state.epub_layout_requested = Some(layout_key);
             state.rendered_page = None;
             state.rendered_page_index = None;
             state.rendered_page_handle = None;
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
             state.error = None;
+            if state.epub_layout_pending.is_some()
+                || (state.epub_layout_key == Some(layout_key) && !state.epub_pages.is_empty())
+            {
+                return load_epub_images_task(state);
+            }
+            if !state.epub_jobs.is_empty() {
+                return load_epub_images_task(state);
+            }
+            state.epub_layout_pending = Some(layout_key);
+            state.epub_jobs.insert(EpubJob {
+                tab_id,
+                generation,
+                layout_key,
+            });
             return Task::batch([
                 paginate_epub_task(tab_id, generation, doc, layout_key, state.current_page),
                 load_epub_images_task(state),
@@ -1922,25 +2105,55 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                 .any(|page| doc.cached_page_size(*page).is_none())
             {
                 state.error = None;
-                return load_cbz_dimensions_task(tab_id, generation, doc, pages);
+                return schedule_cbz_dimension(state, doc, pages);
             }
             let scale = paginated_raster_scale(state, &pages);
             state.error = None;
-            let mut tasks = Vec::new();
-            for page in pages {
-                let key = PageCacheKey {
-                    page,
+            state.paginated_requested = pages
+                .iter()
+                .map(|page| PageCacheKey {
+                    page: *page,
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
-                };
+                })
+                .collect();
+            let spread_changed = show_cached_paginated_spread(state);
+            if !state.paginated_pending.is_empty() {
+                return Task::none();
+            }
+            let mut tasks = Vec::new();
+            for key in state.paginated_requested.clone() {
+                if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
+                    break;
+                }
                 if !is_page_cached(state, &key) {
+                    let page = key.page;
+                    let Some(permit) = reserve_raster(state, page, scale) else {
+                        continue;
+                    };
+                    let Some(transient_permit) = reserve_render_transient(state, page, scale)
+                    else {
+                        continue;
+                    };
                     let doc = Arc::clone(&doc);
-                    tasks.push(render_page_task(tab_id, generation, key, move || {
-                        doc.render_page(page, scale)
-                    }));
+                    tasks.push(render_page_task(
+                        tab_id,
+                        generation,
+                        key.clone(),
+                        Some(transient_permit),
+                        move || doc.render_page(page, scale),
+                    ));
+                    state.paginated_pending.push(key.clone());
+                    state.raster_jobs.insert(
+                        RasterJob::Paginated {
+                            tab_id,
+                            generation,
+                            key,
+                        },
+                        permit,
+                    );
                 }
             }
-            let spread_changed = show_cached_paginated_spread(state);
             if tasks.is_empty() && spread_changed {
                 tasks.push(prefetch_next_paginated_spread(state));
             }
@@ -1952,20 +2165,46 @@ fn refresh_content(state: &mut State) -> Task<Message> {
     Task::none()
 }
 
-fn load_cbz_dimensions_task(
-    tab_id: u64,
-    generation: u64,
+fn schedule_cbz_dimension(
+    state: &mut State,
     document: Arc<CbzDoc>,
     pages: Vec<usize>,
 ) -> Task<Message> {
+    if state.cbz_dimension_jobs.len() >= CBZ_DIMENSION_WORKERS {
+        return Task::none();
+    }
+    let tab_id = state.active_tab_id.unwrap_or(0);
+    let generation = state.render_generation;
+    let Some(page) = pages.into_iter().find(|page| {
+        document.cached_page_size(*page).is_none()
+            && !state.cbz_dimension_jobs.contains_key(&CbzDimensionJob {
+                tab_id,
+                generation,
+                page: *page,
+            })
+    }) else {
+        return Task::none();
+    };
+    let Some(byte_len) = document.page_source_byte_len(page) else {
+        return Task::none();
+    };
+    let Some(permit) = reserve_raster_bytes(state, byte_len) else {
+        return Task::none();
+    };
+    state.cbz_dimension_jobs.insert(
+        CbzDimensionJob {
+            tab_id,
+            generation,
+            page,
+        },
+        permit,
+    );
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                for page in pages {
-                    document
-                        .page_size(page)
-                        .map_err(|error| error.to_string())?;
-                }
+                document
+                    .page_size(page)
+                    .map_err(|error| error.to_string())?;
                 Ok(())
             })
             .await
@@ -1974,6 +2213,7 @@ fn load_cbz_dimensions_task(
         move |result| Message::CbzDimensionsLoaded {
             tab_id,
             generation,
+            page,
             result,
         },
     )
@@ -1996,6 +2236,9 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     state
         .epub_image_handles
         .retain(|path, _| nearby.contains(path));
+    state
+        .epub_images_failed
+        .retain(|path| nearby.contains(path));
     state.epub_images_desired = nearby
         .into_iter()
         .filter(|path| {
@@ -2005,33 +2248,81 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     if state.epub_image_decode_active {
         return Task::none();
     }
-
-    let paths = state
-        .epub_images_desired
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
-    if paths.is_empty() {
+    if state.epub_image_jobs.len() >= EPUB_IMAGE_WORKERS {
         return Task::none();
     }
 
-    state.epub_images_pending = paths.iter().cloned().collect();
+    let Some(path) = state.epub_images_desired.iter().next().cloned() else {
+        return Task::none();
+    };
+    state.epub_images_pending = [path.clone()].into_iter().collect();
     state.epub_image_decode_active = true;
     let document = Arc::clone(document);
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.epub_image_generation;
+    state.epub_image_jobs.insert(EpubImageJob {
+        tab_id,
+        generation,
+        path: path.clone(),
+    });
+    let probe_path = path.clone();
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || decode_epub_images(&document, paths))
+            tokio::task::spawn_blocking(move || epub_image_byte_len(&document, &probe_path))
                 .await
                 .unwrap_or_default()
         },
-        move |images| Message::EpubImagesDecoded {
+        move |byte_len| Message::EpubImageSizeLoaded {
             tab_id,
             generation,
-            images,
+            path,
+            byte_len,
         },
     )
+}
+
+fn decode_epub_image_task(
+    state: &mut State,
+    job: EpubImageJob,
+    byte_len: usize,
+) -> Option<Task<Message>> {
+    let Some(OpenDocument::Epub(document)) = &state.document else {
+        return None;
+    };
+    let document = Arc::clone(document);
+    let transient_byte_len = epub_image_transient_byte_len(&document, &job.path)?;
+    let reserve = |state: &State| {
+        let permit = state.epub_image_budget.try_reserve(byte_len)?;
+        let transient = state
+            .transient_decode_budget
+            .try_reserve(transient_byte_len)?;
+        Some((permit, transient))
+    };
+    let (permit, transient_permit) = if let Some(permits) = reserve(state) {
+        permits
+    } else {
+        for tab in &mut state.tabs {
+            tab.epub_image_handles.clear();
+        }
+        reserve(state)?
+    };
+    let path = job.path.clone();
+    Some(Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                decode_epub_images(&document, [(path, permit)])
+            })
+            .await
+            .unwrap_or_default()
+        },
+        move |images| Message::EpubImagesDecoded {
+            tab_id: job.tab_id,
+            generation: job.generation,
+            path: job.path,
+            images,
+        },
+    ))
 }
 
 fn epub_uses_spread(state: &State) -> bool {
@@ -2064,20 +2355,20 @@ fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
         tab.show_reader_settings,
         tab.show_reader_more,
     );
-    let uses_spread = tab.reading_mode == ReadingMode::Paginated
-        && matches!(tab.document, OpenDocument::Epub(_))
+    let uses_spread = tab.session.preferences.reading_mode == ReadingMode::Paginated
+        && matches!(tab.session.document, OpenDocument::Epub(_))
         && available_size.width >= MIN_TWO_PAGE_WIDTH;
     let page_size = crate::epub::page_size(
         crate::epub::LayoutSize::new(available_size.width, available_size.height),
         uses_spread,
         PAGE_GUTTER,
-        tab.font_size,
-        tab.line_spacing,
+        tab.session.preferences.epub_font_size,
+        tab.session.preferences.epub_line_spacing,
     );
     EpubLayoutKey::new(
         Size::new(page_size.width, page_size.height),
-        tab.font_size,
-        tab.line_spacing,
+        tab.session.preferences.epub_font_size,
+        tab.session.preferences.epub_line_spacing,
     )
 }
 
@@ -2107,14 +2398,18 @@ fn render_continuous_page_task(
     tab_id: u64,
     request: ContinuousRequest,
     page: usize,
+    transient_permit: Option<CachePermit>,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(render)
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()))
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                render()
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
         },
         move |result| Message::ContinuousPageRendered {
             tab_id,
@@ -2315,6 +2610,17 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
         }
     }
 
+    if let Some(OpenDocument::Cbz(document)) = &state.document {
+        let document = Arc::clone(document);
+        let pages = desired.iter().copied().collect::<Vec<_>>();
+        if pages
+            .iter()
+            .any(|page| document.cached_page_size(*page).is_none())
+        {
+            return schedule_cbz_dimension(state, document, pages);
+        }
+    }
+    let available_worker_slots = RASTER_RENDER_WORKERS.saturating_sub(state.raster_jobs.len());
     let active_ready = state
         .continuous_pages
         .iter()
@@ -2327,54 +2633,200 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             .filter(|tab| Some(tab.id) != state.active_tab_id)
             .map(|tab| tab.continuous_pending.len())
             .sum::<usize>();
-    let missing_desired = desired
-        .iter()
-        .filter(|page| {
-            state.continuous_pages[**page].is_none() && !state.continuous_pending.contains_key(page)
-        })
-        .count();
-    let mut inactive_ready_budget =
-        CONTINUOUS_PAGE_CACHE_CAPACITY.saturating_sub(active_ready + pending + missing_desired);
     for tab in state
         .tabs
         .iter_mut()
         .filter(|tab| Some(tab.id) != state.active_tab_id)
     {
-        for rendered in &mut tab.continuous_pages {
-            if rendered.is_some() {
-                if inactive_ready_budget == 0 {
-                    *rendered = None;
-                } else {
-                    inactive_ready_budget -= 1;
-                }
-            }
-        }
+        tab.continuous_pages.fill(None);
     }
-    let inactive_ready = state
-        .tabs
-        .iter()
-        .filter(|tab| Some(tab.id) != state.active_tab_id)
-        .flat_map(|tab| &tab.continuous_pages)
-        .filter(|page| page.is_some())
-        .count();
-    let mut occupied = active_ready + inactive_ready + pending;
+    let mut occupied = active_ready + pending;
+    let mut occupied_bytes = retained_continuous_raster_bytes(state)
+        + state
+            .continuous_pending
+            .values()
+            .chain(
+                state
+                    .tabs
+                    .iter()
+                    .filter(|tab| Some(tab.id) != state.active_tab_id)
+                    .flat_map(|tab| tab.continuous_pending.values()),
+            )
+            .map(|request| request.byte_len)
+            .sum::<usize>();
     let mut tasks = Vec::new();
     for page in desired {
-        if occupied >= CONTINUOUS_PAGE_CACHE_CAPACITY {
+        if occupied >= CONTINUOUS_PAGE_CACHE_CAPACITY || tasks.len() >= available_worker_slots {
             break;
         }
         if state.continuous_pages[page].is_none() && !state.continuous_pending.contains_key(&page) {
+            let Some(byte_len) = raster_request_byte_len(state, page) else {
+                continue;
+            };
+            let Some(next_occupied_bytes) = occupied_bytes.checked_add(byte_len) else {
+                continue;
+            };
+            if next_occupied_bytes > CONTINUOUS_RASTER_BYTE_CAPACITY {
+                continue;
+            }
             let request = ContinuousRequest {
                 id: state.next_continuous_request_id,
                 generation: state.render_generation,
+                byte_len,
+            };
+            let Some(permit) = reserve_raster_bytes(state, byte_len) else {
+                continue;
+            };
+            let Some(transient_permit) = reserve_render_transient(
+                state,
+                page,
+                raster_render_scale(state, state.zoom.scale()),
+            ) else {
+                continue;
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
+            state.raster_jobs.insert(
+                RasterJob::Continuous {
+                    tab_id,
+                    request,
+                    page,
+                },
+                permit,
+            );
             occupied += 1;
-            tasks.push(Task::done(Message::RenderContinuousPage { tab_id, page }));
+            occupied_bytes = next_occupied_bytes;
+            tasks.push(start_continuous_page_task(
+                state,
+                tab_id,
+                request,
+                page,
+                Some(transient_permit),
+            ));
         }
     }
     Task::batch(tasks)
+}
+
+fn start_continuous_page_task(
+    state: &State,
+    tab_id: u64,
+    request: ContinuousRequest,
+    page: usize,
+    transient_permit: Option<CachePermit>,
+) -> Task<Message> {
+    let scale = raster_render_scale(state, state.zoom.scale());
+    match &state.document {
+        Some(OpenDocument::Pdf(document)) => {
+            let document = Arc::clone(document);
+            let highlights = search_highlights_for_page(state, page);
+            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
+                document.render_page_with_highlights(page, scale, &highlights)
+            })
+        }
+        Some(OpenDocument::Cbz(document)) => {
+            let document = Arc::clone(document);
+            render_continuous_page_task(tab_id, request, page, transient_permit, move || {
+                document.render_page(page, scale)
+            })
+        }
+        _ => Task::none(),
+    }
+}
+
+fn pump_raster_queue(state: &mut State) -> Task<Message> {
+    if state.reading_mode == ReadingMode::Continuous
+        && matches!(
+            state.document,
+            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+        )
+    {
+        return reconcile_continuous_rasters(state);
+    }
+    if state.reading_mode == ReadingMode::Paginated
+        && matches!(
+            state.document,
+            Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
+        )
+        && state.paginated_pending.is_empty()
+        && state
+            .paginated_requested
+            .iter()
+            .any(|requested| !is_page_cached(state, requested))
+    {
+        return refresh_content(state);
+    }
+    Task::none()
+}
+
+fn retained_continuous_raster_bytes(state: &State) -> usize {
+    state
+        .continuous_pages
+        .iter()
+        .chain(
+            state
+                .tabs
+                .iter()
+                .filter(|tab| Some(tab.id) != state.active_tab_id)
+                .flat_map(|tab| tab.continuous_pages.iter()),
+        )
+        .filter_map(|page| page.as_ref())
+        .map(|page| page.pixels.len())
+        .sum()
+}
+
+fn raster_request_byte_len(state: &State, page: usize) -> Option<usize> {
+    raster_byte_len(state, page, raster_render_scale(state, state.zoom.scale()))
+}
+
+fn raster_byte_len(state: &State, page: usize, scale: f32) -> Option<usize> {
+    match state.document.as_ref()? {
+        OpenDocument::Pdf(document) => document.rendered_byte_len(page, scale).ok(),
+        OpenDocument::Cbz(document) => {
+            let (width, height) = document.page_size(page).ok()?;
+            let width = (f64::from(width) * f64::from(scale)).floor() as usize;
+            let height = (f64::from(height) * f64::from(scale)).floor() as usize;
+            width.checked_mul(height)?.checked_mul(4)
+        }
+        OpenDocument::Epub(_) => None,
+    }
+}
+
+fn reserve_raster(state: &mut State, page: usize, scale: f32) -> Option<CachePermit> {
+    let byte_len = raster_byte_len(state, page, scale)?;
+    reserve_raster_bytes(state, byte_len)
+}
+
+fn reserve_render_transient(state: &State, page: usize, scale: f32) -> Option<CachePermit> {
+    let byte_len = match state.document.as_ref()? {
+        OpenDocument::Pdf(document) => document.render_transient_byte_len(page, scale).ok()?,
+        OpenDocument::Cbz(document) => document.render_transient_byte_len(page, scale)?,
+        OpenDocument::Epub(_) => return None,
+    };
+    state.transient_decode_budget.try_reserve(byte_len)
+}
+
+fn reserve_raster_bytes(state: &mut State, byte_len: usize) -> Option<CachePermit> {
+    loop {
+        if let Some(permit) = state.raster_budget.try_reserve(byte_len) {
+            return Some(permit);
+        }
+        state.page_cache.pop_oldest()?;
+    }
+}
+
+fn attach_raster_permit(page: RenderedPage, permit: CachePermit) -> Option<RenderedPage> {
+    if page.pixels.len() > permit.weight() {
+        return None;
+    }
+    Some(RenderedPage {
+        width: page.width,
+        height: page.height,
+        pixels: bytes::Bytes::from_owner(PermittedPixels {
+            pixels: page.pixels,
+            _permit: permit,
+        }),
+    })
 }
 
 fn invalidate_continuous_rasters(state: &mut State) {
@@ -2392,7 +2844,7 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
     state.window_scale_factor = scale_factor;
 
     for tab in &mut state.tabs {
-        if matches!(tab.document, OpenDocument::Pdf(_)) {
+        if matches!(tab.session.document, OpenDocument::Pdf(_)) {
             tab.rendered_page = None;
             tab.rendered_page_index = None;
             tab.rendered_page_handle = None;
@@ -2630,14 +3082,18 @@ fn render_page_task(
     tab_id: u64,
     generation: u64,
     key: PageCacheKey,
+    transient_permit: Option<CachePermit>,
     render: impl FnOnce() -> anyhow::Result<RenderedPage> + Send + 'static,
 ) -> Task<Message> {
     Task::perform(
         async move {
-            tokio::task::spawn_blocking(render)
-                .await
-                .map_err(|error| error.to_string())
-                .and_then(|result| result.map_err(|error| error.to_string()))
+            tokio::task::spawn_blocking(move || {
+                let _transient_permit = transient_permit;
+                render()
+            })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result.map_err(|error| error.to_string()))
         },
         move |result| Message::PageRendered {
             tab_id,
@@ -2648,7 +3104,7 @@ fn render_page_task(
     )
 }
 
-fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
+fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
     let Some(next_page) = next_page_location(state) else {
         return Task::none();
     };
@@ -2659,6 +3115,9 @@ fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
     let mut tasks = Vec::new();
 
     for page in pages {
+        if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
+            break;
+        }
         let highlights = if matches!(state.document, Some(OpenDocument::Pdf(_))) {
             search_highlights_for_page(state, page)
         } else {
@@ -2675,15 +3134,53 @@ fn prefetch_next_paginated_spread(state: &State) -> Task<Message> {
         match &state.document {
             Some(OpenDocument::Pdf(document)) => {
                 let document = Arc::clone(document);
-                tasks.push(render_page_task(tab_id, generation, key, move || {
-                    document.render_page_with_highlights(page, scale, &highlights)
-                }));
+                let Some(permit) = reserve_raster(state, page, scale) else {
+                    continue;
+                };
+                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
+                    continue;
+                };
+                tasks.push(render_page_task(
+                    tab_id,
+                    generation,
+                    key.clone(),
+                    Some(transient_permit),
+                    move || document.render_page_with_highlights(page, scale, &highlights),
+                ));
+                state.paginated_pending.push(key.clone());
+                state.raster_jobs.insert(
+                    RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key,
+                    },
+                    permit,
+                );
             }
             Some(OpenDocument::Cbz(document)) => {
                 let document = Arc::clone(document);
-                tasks.push(render_page_task(tab_id, generation, key, move || {
-                    document.render_page(page, scale)
-                }));
+                let Some(permit) = reserve_raster(state, page, scale) else {
+                    continue;
+                };
+                let Some(transient_permit) = reserve_render_transient(state, page, scale) else {
+                    continue;
+                };
+                tasks.push(render_page_task(
+                    tab_id,
+                    generation,
+                    key.clone(),
+                    Some(transient_permit),
+                    move || document.render_page(page, scale),
+                ));
+                state.paginated_pending.push(key.clone());
+                state.raster_jobs.insert(
+                    RasterJob::Paginated {
+                        tab_id,
+                        generation,
+                        key,
+                    },
+                    permit,
+                );
             }
             _ => return Task::none(),
         }
@@ -2813,7 +3310,7 @@ fn update_bookmark_status(state: &mut State) {
     });
 }
 
-fn save_reading_state(state: &State) {
+fn save_reading_state(state: &mut State) {
     if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
         let save = ReadingStateSave {
             book_id: state.book_id,
@@ -2824,8 +3321,8 @@ fn save_reading_state(state: &State) {
                 zoom: state.zoom.scale(),
             },
         };
-        if saves.send(ReadingStateWriterMessage::Save(save)).is_err() {
-            eprintln!("warning: reading state writer stopped unexpectedly");
+        if let Err(error) = saves.send(ReadingStateWriterMessage::Save(save)) {
+            state.open_error = Some(state_writer_send_error(error));
         }
     }
 
@@ -2835,26 +3332,31 @@ fn save_reading_state(state: &State) {
     {
         let progress = (state.current_page + 1) as f64 / state.total_pages as f64;
         let progress = progress.clamp(0.0, 1.0);
-        if saves
-            .send(ReadingStateWriterMessage::Progress { book_id, progress })
-            .is_err()
-        {
-            eprintln!("warning: reading state writer stopped unexpectedly");
+        if let Err(error) = saves.send(ReadingStateWriterMessage::Progress { book_id, progress }) {
+            state.open_error = Some(state_writer_send_error(error));
         }
     }
 }
 
-fn save_preference(state: &State, key: &'static str, value: impl Into<String>) {
+fn save_preference(state: &mut State, key: &'static str, value: impl Into<String>) {
     if let Some(saves) = &state.reading_state_saves
-        && saves
-            .send(ReadingStateWriterMessage::Preference(
-                key.to_owned(),
-                value.into(),
-            ))
-            .is_err()
+        && let Err(error) = saves.send(ReadingStateWriterMessage::Preference(
+            key.to_owned(),
+            value.into(),
+        ))
     {
-        eprintln!("warning: state writer stopped unexpectedly");
+        state.open_error = Some(state_writer_send_error(error));
     }
+}
+
+fn state_writer_send_error(error: StateWriterSendError) -> AppError {
+    let detail = match error {
+        StateWriterSendError::Stopped => "state writer stopped unexpectedly",
+        StateWriterSendError::Full => {
+            "state persistence queue is full; latest change was not saved"
+        }
+    };
+    AppError::Storage(detail.to_owned())
 }
 
 fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Message> {
@@ -2871,10 +3373,12 @@ fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Messa
     }
     Task::perform(
         async move {
-            let _ = wait_for_flush.await;
-            id
+            wait_for_flush
+                .await
+                .map_err(|_| "state writer stopped before shutdown".to_owned())?
+                .map_err(|error| error.to_string())
         },
-        Message::ReadingStateFlushed,
+        move |result| Message::ReadingStateFlushed { id, result },
     )
 }
 
@@ -3386,11 +3890,9 @@ fn reader_control_button(
 }
 
 fn reader_settings(state: &State, compact: bool) -> Element<'_, Message> {
-    let is_pdf_or_cbz = matches!(
-        state.document,
-        Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_))
-    );
-    let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+    let capabilities = state.document.as_ref().map(OpenDocument::capabilities);
+    let is_pdf_or_cbz = capabilities.is_some_and(|capabilities| !capabilities.reflowable);
+    let is_epub = capabilities.is_some_and(|capabilities| capabilities.reflowable);
     let mut reading = row![].spacing(5).align_y(iced::Alignment::Center);
     let mode_label = match state.reading_mode {
         ReadingMode::Paginated => state.i18n.text("paginated"),
@@ -3492,6 +3994,7 @@ fn theme_label(state: &State) -> String {
 }
 
 fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
+    let capabilities = state.document.as_ref().map(OpenDocument::capabilities);
     let total = if uses_paginated_epub_layout(state) {
         state.epub_pages.len()
     } else {
@@ -3529,7 +4032,7 @@ fn reader_more_panel(state: &State, compact: bool) -> Element<'_, Message> {
     ]
     .spacing(5)
     .align_y(iced::Alignment::Center);
-    if state.document.is_some() && !matches!(state.document, Some(OpenDocument::Cbz(_))) {
+    if capabilities.is_some_and(|capabilities| capabilities.searchable) {
         actions = actions.push(reader_control_button(
             state.i18n.text("search"),
             Some(Message::ToggleSearchBar),
@@ -6215,6 +6718,11 @@ mod tests {
         state
     }
 
+    fn admit_test_raster(state: &mut State, job: RasterJob, bytes: usize) {
+        let permit = state.raster_budget.try_reserve(bytes).unwrap();
+        state.raster_jobs.insert(job, permit);
+    }
+
     fn complete_epub_pagination(state: &mut State) {
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
@@ -6227,6 +6735,11 @@ mod tests {
             crate::epub::LayoutSize::new(page_size.width, page_size.height),
         );
         let layout_key = epub_layout_key(state);
+        state.epub_jobs.insert(EpubJob {
+            tab_id: state.active_tab_id.unwrap(),
+            generation: state.render_generation,
+            layout_key,
+        });
         let _ = update(
             state,
             Message::EpubPaginated {
@@ -6397,6 +6910,28 @@ mod tests {
     }
 
     #[test]
+    fn continuous_cbz_dimensions_are_coalesced_before_raster_work() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.total_pages = document.page_count();
+        state.continuous_pages = vec![None; state.total_pages];
+        state.continuous_visible.extend(0..state.total_pages);
+
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), CBZ_DIMENSION_WORKERS);
+        assert!(state.continuous_pending.is_empty());
+        assert!(state.raster_jobs.is_empty());
+    }
+
+    #[test]
     fn paginated_cbz_loads_dimensions_before_scheduling_a_render() {
         let document = Arc::new(
             CbzDoc::open(concat!(
@@ -6411,21 +6946,160 @@ mod tests {
         let dimensions = refresh_content(&mut state);
 
         assert_eq!(dimensions.units(), 1);
+        assert_eq!(refresh_content(&mut state).units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
         assert_eq!(document.cached_page_size(0), None);
         assert!(state.rendered_page.is_none());
 
-        document.page_size(0).unwrap();
-        let generation = state.render_generation;
+        let first_job = *state.cbz_dimension_jobs.keys().next().unwrap();
+        document.page_size(first_job.page).unwrap();
         let render = update(
             &mut state,
             Message::CbzDimensionsLoaded {
-                tab_id: 1,
-                generation,
+                tab_id: first_job.tab_id,
+                generation: first_job.generation,
+                page: first_job.page,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(render.units(), 1);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
+        let second_job = *state.cbz_dimension_jobs.keys().next().unwrap();
+        assert_ne!(second_job.page, first_job.page);
+        assert_eq!(document.cached_page_size(second_job.page), None);
+
+        document.page_size(second_job.page).unwrap();
+        let render = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: second_job.tab_id,
+                generation: second_job.generation,
+                page: second_job.page,
                 result: Ok(()),
             },
         );
 
         assert!(render.units() > 0);
+        assert!(state.cbz_dimension_jobs.is_empty());
+        assert!(!state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn cbz_render_waits_for_transient_decode_admission() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        document.page_size(0).unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(document));
+        state.transient_decode_budget = CacheBudget::new(0);
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.raster_jobs.is_empty());
+        assert!(state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn pdf_render_waits_for_transient_decode_admission() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.transient_decode_budget = CacheBudget::new(0);
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.raster_jobs.is_empty());
+        assert!(state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn unknown_cbz_dimension_completion_does_not_release_the_worker() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(document));
+
+        assert_eq!(refresh_content(&mut state).units(), 1);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
+        let generation = state.render_generation;
+
+        let task = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: 1,
+                generation,
+                page: 99,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), 1);
+    }
+
+    #[test]
+    fn inactive_cbz_dimension_completion_pumps_active_dimension_work() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.total_pages = document.page_count();
+        state.file_path = Some(PathBuf::from("first.cbz"));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None; state.total_pages];
+        state.continuous_visible.extend(0..2);
+        assert!(refresh_content(&mut state).units() > 0);
+        assert_eq!(state.cbz_dimension_jobs.len(), CBZ_DIMENSION_WORKERS);
+        let completed = *state.cbz_dimension_jobs.keys().next().unwrap();
+        document.page_size(completed.page).unwrap();
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.cbz"));
+        state.reading_mode = ReadingMode::Paginated;
+        state.current_page = 2;
+        state.continuous_visible.clear();
+        state.continuous_pending.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+        assert_eq!(refresh_content(&mut state).units(), 0);
+        assert!(!state.cbz_dimension_jobs.keys().any(|job| job.tab_id == 2));
+
+        let task = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: completed.tab_id,
+                generation: completed.generation,
+                page: completed.page,
+                result: Ok(()),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(
+            state
+                .cbz_dimension_jobs
+                .keys()
+                .any(|job| job.tab_id == 2 && job.page == 2)
+        );
     }
 
     #[test]
@@ -6488,6 +7162,7 @@ mod tests {
         let stale_request = ContinuousRequest {
             id: 1,
             generation: state.render_generation,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, stale_request);
         let first = capture_reader_tab(&state).unwrap();
@@ -6644,6 +7319,8 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
+        // This test isolates worker scheduling from transient-byte admission.
+        state.transient_decode_budget = CacheBudget::new(usize::MAX);
 
         let task = refresh_content(&mut state);
 
@@ -6665,6 +7342,16 @@ mod tests {
         state.zoom = ZoomMode::FitPage;
         let scale = paginated_raster_scale(&state, &[0, 1]);
         for page in [0, 1] {
+            let permit = reserve_raster_bytes(&mut state, 10 * 20 * 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+                permit,
+            )
+            .unwrap();
             cache_rendered_page(
                 &mut state,
                 PageCacheKey {
@@ -6672,16 +7359,12 @@ mod tests {
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
                 },
-                RenderedPage {
-                    width: 10,
-                    height: 20,
-                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
-                },
+                rendered,
             );
         }
 
         assert!(show_cached_paginated_spread(&mut state));
-        assert_eq!(prefetch_next_paginated_spread(&state).units(), 1);
+        assert_eq!(prefetch_next_paginated_spread(&mut state).units(), 1);
     }
 
     #[test]
@@ -6696,6 +7379,16 @@ mod tests {
         state.zoom = ZoomMode::FitPage;
         let scale = paginated_raster_scale(&state, &[0, 1]);
         for page in [0, 1] {
+            let permit = reserve_raster_bytes(&mut state, 10 * 20 * 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+                permit,
+            )
+            .unwrap();
             cache_rendered_page(
                 &mut state,
                 PageCacheKey {
@@ -6703,11 +7396,7 @@ mod tests {
                     scale_bits: scale.to_bits(),
                     highlights: Vec::new(),
                 },
-                RenderedPage {
-                    width: 10,
-                    height: 20,
-                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
-                },
+                rendered,
             );
         }
         assert!(show_cached_paginated_spread(&mut state));
@@ -6754,6 +7443,13 @@ mod tests {
             state.rendered_facing_page_handle.as_ref().unwrap().0.id(),
             facing_id
         );
+        state.page_cache.clear();
+        assert_eq!(state.raster_budget.used(), 2 * 10 * 20 * 4);
+        state.rendered_page = None;
+        state.rendered_page_handle = None;
+        state.rendered_facing_page = None;
+        state.rendered_facing_page_handle = None;
+        assert_eq!(state.raster_budget.used(), 0);
     }
 
     #[test]
@@ -6768,7 +7464,23 @@ mod tests {
         state.zoom = ZoomMode::FitPage;
         let _ = refresh_content(&mut state);
         let generation = state.render_generation;
-        let scale = paginated_raster_scale(&state, &[0, 1]);
+        let scale = raster_render_scale(&state, paginated_raster_scale(&state, &[0, 1]));
+        let keys = [0, 1].map(|page| PageCacheKey {
+            page,
+            scale_bits: scale.to_bits(),
+            highlights: Vec::new(),
+        });
+        for key in &keys {
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 1,
+                    generation,
+                    key: key.clone(),
+                },
+                20 * 20 * 4,
+            );
+        }
         let rendered = |width| RenderedPage {
             width,
             height: 20,
@@ -6780,11 +7492,7 @@ mod tests {
             Message::PageRendered {
                 tab_id: 1,
                 generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: scale.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key: keys.iter().find(|key| key.page == 0).unwrap().clone(),
                 result: Ok(rendered(10)),
             },
         );
@@ -6796,11 +7504,7 @@ mod tests {
             Message::PageRendered {
                 tab_id: 1,
                 generation,
-                key: PageCacheKey {
-                    page: 1,
-                    scale_bits: scale.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key: keys.iter().find(|key| key.page == 1).unwrap().clone(),
                 result: Ok(rendered(20)),
             },
         );
@@ -6845,21 +7549,31 @@ mod tests {
 
         let task = refresh_content(&mut state);
         let generation = state.render_generation;
+        let scale = raster_render_scale(&state, paginated_raster_scale(&state, &[2]));
+        let key = PageCacheKey {
+            page: 2,
+            scale_bits: scale.to_bits(),
+            highlights: Vec::new(),
+        };
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation,
+                key: key.clone(),
+            },
+            20 * 30 * 4,
+        );
 
         assert_eq!(task.units(), 1);
         assert_eq!(displayed_paginated_raster_pages(&state), vec![0, 1]);
 
-        let scale = paginated_raster_scale(&state, &[2]);
         let _ = update(
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
                 generation,
-                key: PageCacheKey {
-                    page: 2,
-                    scale_bits: scale.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key,
                 result: Ok(RenderedPage {
                     width: 20,
                     height: 30,
@@ -6907,6 +7621,45 @@ mod tests {
 
         assert_eq!(state.current_page, 1);
         assert_eq!(state.zoom, ZoomMode::FitPage);
+    }
+
+    #[test]
+    fn saved_epub_offset_is_clamped_when_the_document_is_installed() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let store = runtime
+            .block_on(ReadingStateStore::open_at_async(
+                &directory.path().join("state.db"),
+            ))
+            .unwrap();
+        let path = directory.path().join("book.epub");
+        runtime
+            .block_on(store.set_async(
+                &path,
+                &FileReadingState {
+                    page: 0,
+                    location_offset: Some(usize::MAX),
+                    zoom: 1.0,
+                },
+            ))
+            .unwrap();
+        let document = OpenDocument::Epub(Arc::new(
+            EpubDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+            )
+            .expect("fixture should be a valid EPUB"),
+        ));
+        let expected = document.max_location_offset(0).unwrap();
+        let (mut state, _) = boot();
+        state.reading_state = Some(store);
+
+        let _runtime = runtime.enter();
+        install_document(&mut state, path, None, document);
+
+        assert_eq!(state.epub_offset, expected);
     }
 
     fn test_book(id: i64) -> Book {
@@ -7062,17 +7815,180 @@ mod tests {
 
         let task = reconcile_continuous_rasters(&mut state);
 
-        assert_eq!(task.units(), CONTINUOUS_PAGE_CACHE_CAPACITY);
-        assert_eq!(
-            state.continuous_pending.len()
-                + state
-                    .continuous_pages
-                    .iter()
-                    .filter(|page| page.is_some())
-                    .count(),
-            CONTINUOUS_PAGE_CACHE_CAPACITY
+        assert!(task.units() > 0);
+        assert!(task.units() <= CONTINUOUS_PAGE_CACHE_CAPACITY);
+        assert!(
+            state
+                .continuous_pending
+                .values()
+                .map(|request| request.byte_len)
+                .sum::<usize>()
+                <= CONTINUOUS_RASTER_BYTE_CAPACITY
         );
         assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+    }
+
+    #[test]
+    fn continuous_scheduler_rejects_work_above_the_byte_budget() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        state.zoom = ZoomMode::Manual(10_000.0);
+
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+        assert!(state.continuous_pending.is_empty());
+    }
+
+    #[test]
+    fn continuous_render_waits_for_a_global_worker_slot() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        for page in 0..RASTER_RENDER_WORKERS {
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 2,
+                    generation: 1,
+                    key: PageCacheKey {
+                        page,
+                        scale_bits: 1.0_f32.to_bits(),
+                        highlights: Vec::new(),
+                    },
+                },
+                4,
+            );
+        }
+
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 0);
+        assert!(state.continuous_pending.is_empty());
+        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
+
+        let completed = state.raster_jobs.keys().next().unwrap().clone();
+        let RasterJob::Paginated {
+            tab_id,
+            generation,
+            key,
+        } = completed
+        else {
+            unreachable!();
+        };
+        let task = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id,
+                generation,
+                key,
+                result: Err("obsolete render".to_owned()),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(state.continuous_pending.contains_key(&0));
+        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
+        assert!(
+            state
+                .raster_jobs
+                .keys()
+                .any(|job| matches!(job, RasterJob::Continuous { page: 0, .. }))
+        );
+    }
+
+    #[test]
+    fn unknown_and_duplicate_completions_do_not_release_live_raster_jobs() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        for page in 0..RASTER_RENDER_WORKERS {
+            admit_test_raster(
+                &mut state,
+                RasterJob::Paginated {
+                    tab_id: 1,
+                    generation: 1,
+                    key: PageCacheKey {
+                        page,
+                        scale_bits: 1.0_f32.to_bits(),
+                        highlights: Vec::new(),
+                    },
+                },
+                4,
+            );
+        }
+        let unknown = Message::PageRendered {
+            tab_id: 1,
+            generation: 1,
+            key: PageCacheKey {
+                page: 99,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+            result: Err("duplicate".to_owned()),
+        };
+
+        let _ = update(&mut state, unknown.clone());
+        let _ = update(&mut state, unknown);
+
+        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
+    }
+
+    #[test]
+    fn in_flight_continuous_render_is_rescheduled_after_tab_reactivation() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let document = OpenDocument::Pdf(Arc::new(pdf));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.pdf"));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
+        let first = capture_reader_tab(&state).unwrap();
+
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.pdf"));
+        state.document = Some(document);
+        state.continuous_pending.clear();
+        state.continuous_visible.clear();
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+
+        assert!(
+            update(
+                &mut state,
+                Message::ContinuousPageRendered {
+                    tab_id: 1,
+                    request,
+                    page: 0,
+                    result: Err("inactive render".to_owned()),
+                }
+            )
+            .units()
+                > 0
+        );
+        assert!(state.tabs[0].continuous_pending.is_empty());
+
+        let task = update(&mut state, Message::SelectTab(0));
+
+        assert!(task.units() > 0);
+        assert!(state.continuous_pending.contains_key(&0));
     }
 
     #[test]
@@ -7081,6 +7997,7 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).expect("fixture page should decode");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.reading_mode = ReadingMode::Continuous;
         state.continuous_pages = vec![None];
@@ -7088,8 +8005,18 @@ mod tests {
         let request = ContinuousRequest {
             id: 1,
             generation: 1,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request,
+                page: 0,
+            },
+            4,
+        );
         state.render_generation = 2;
 
         let task = update(
@@ -7116,25 +8043,152 @@ mod tests {
     }
 
     #[test]
+    fn mode_change_releases_an_in_flight_continuous_job() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
+        let generation = state.render_generation;
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: ContinuousRequest {
+                    id: 99,
+                    generation,
+                    byte_len: 4,
+                },
+                page: 99,
+            },
+            4,
+        );
+        assert_eq!(state.raster_jobs.len(), RASTER_RENDER_WORKERS);
+        state.reading_mode = ReadingMode::Paginated;
+        state.continuous_pages.clear();
+        state.render_generation = state.render_generation.wrapping_add(1);
+        assert_eq!(refresh_content(&mut state).units(), 0);
+
+        let task = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Err("obsolete render".to_owned()),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(
+            state
+                .raster_jobs
+                .keys()
+                .any(|job| matches!(job, RasterJob::Paginated { .. }))
+        );
+        assert!(!state.raster_jobs.keys().any(|job| matches!(
+            job,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: admitted,
+                page: 0,
+            } if *admitted == request
+        )));
+        assert!(state.continuous_pending.is_empty());
+    }
+
+    #[test]
+    fn completion_from_a_closed_tab_releases_its_continuous_job() {
+        let pdf = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .expect("fixture should be a valid PDF");
+        let mut state = state_with_document(OpenDocument::Pdf(Arc::new(pdf)));
+        state.reading_mode = ReadingMode::Continuous;
+        state.continuous_pages = vec![None];
+        state.continuous_visible.insert(0);
+        assert_eq!(reconcile_continuous_rasters(&mut state).units(), 1);
+        let request = state.continuous_pending[&0];
+        state.active_tab_id = Some(2);
+        state.continuous_pending.clear();
+
+        let _ = update(
+            &mut state,
+            Message::ContinuousPageRendered {
+                tab_id: 1,
+                request,
+                page: 0,
+                result: Err("closed tab render".to_owned()),
+            },
+        );
+
+        assert!(!state.raster_jobs.keys().any(|job| matches!(
+            job,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: admitted,
+                page: 0,
+            } if *admitted == request
+        )));
+    }
+
+    #[test]
     fn old_continuous_completion_cannot_remove_a_newer_request() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        for page in 0..cbz.page_count() {
+            cbz.page_size(page).unwrap();
+        }
+        let page_count = cbz.page_count();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = page_count;
         state.reading_mode = ReadingMode::Continuous;
-        state.continuous_pages = vec![None];
+        state.continuous_pages = vec![None; state.total_pages];
+        state.continuous_visible.extend(0..state.total_pages);
         let old_request = ContinuousRequest {
             id: 1,
             generation: 1,
+            byte_len: 4,
         };
         let new_request = ContinuousRequest {
             id: 2,
             generation: 1,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, new_request);
+        let blocker_request = ContinuousRequest {
+            id: 3,
+            generation: 1,
+            byte_len: 4,
+        };
+        state.continuous_pending.insert(1, blocker_request);
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: old_request,
+                page: 0,
+            },
+            4,
+        );
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request: blocker_request,
+                page: 1,
+            },
+            4,
+        );
 
-        let _ = update(
+        let task = update(
             &mut state,
             Message::ContinuousPageRendered {
                 tab_id: 1,
@@ -7148,12 +8202,19 @@ mod tests {
             },
         );
 
+        assert!(task.units() > 0);
         assert_eq!(state.continuous_pending.get(&0), Some(&new_request));
         assert!(state.continuous_pages[0].is_none());
+        assert!(
+            state
+                .raster_jobs
+                .keys()
+                .any(|job| matches!(job, RasterJob::Continuous { page: 2, .. }))
+        );
     }
 
     #[test]
-    fn continuous_completion_is_saved_while_its_tab_is_inactive() {
+    fn continuous_completion_is_dropped_while_its_tab_is_inactive() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
@@ -7165,8 +8226,18 @@ mod tests {
         let request = ContinuousRequest {
             id: 1,
             generation: state.render_generation,
+            byte_len: 4,
         };
         state.continuous_pending.insert(0, request);
+        admit_test_raster(
+            &mut state,
+            RasterJob::Continuous {
+                tab_id: 1,
+                request,
+                page: 0,
+            },
+            4,
+        );
         let first = capture_reader_tab(&state).unwrap();
         state.active_tab_id = Some(2);
         state.file_path = Some(PathBuf::from("second.cbz"));
@@ -7190,12 +8261,7 @@ mod tests {
         );
 
         assert!(state.tabs[0].continuous_pending.is_empty());
-        assert_eq!(
-            state.tabs[0].continuous_pages[0]
-                .as_ref()
-                .map(|page| page.width),
-            Some(7)
-        );
+        assert!(state.tabs[0].continuous_pages[0].is_none());
     }
 
     #[test]
@@ -8202,7 +9268,7 @@ mod tests {
             .unwrap()
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait.await.unwrap();
+        wait.await.unwrap().unwrap();
 
         assert_eq!(state.reading_mode, ReadingMode::Continuous);
         assert_eq!(state.theme, ReaderTheme::Sepia);
@@ -8366,8 +9432,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn successful_book_removal_detaches_matching_reader_tabs() {
+    #[tokio::test]
+    async fn successful_book_removal_detaches_matching_reader_tabs() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -8378,13 +9448,12 @@ mod tests {
         state.library_books = vec![test_book(42), test_book(7)];
         state.current_page = 3;
         state.epub_offset = 17;
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         let matching = capture_reader_tab(&state).unwrap();
         let mut unrelated = matching.clone();
         unrelated.id = 2;
-        unrelated.book_id = Some(7);
-        unrelated.file_path = PathBuf::from("other.epub");
+        unrelated.session.book_id = Some(7);
+        unrelated.session.locator = DeviceFileLocator::from_path("other.epub");
         state.tabs = vec![matching, unrelated];
         state.removing_book = Some(42);
 
@@ -8397,8 +9466,8 @@ mod tests {
         );
 
         assert_eq!(state.book_id, None);
-        assert_eq!(state.tabs[0].book_id, None);
-        assert_eq!(state.tabs[1].book_id, Some(7));
+        assert_eq!(state.tabs[0].session.book_id, None);
+        assert_eq!(state.tabs[1].session.book_id, Some(7));
         assert_eq!(state.removing_book, None);
         assert_eq!(
             state
@@ -8408,17 +9477,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![7]
         );
-        let ReadingStateWriterMessage::Save(save) = queued_saves
-            .try_recv()
-            .expect("removal should queue path-backed reading state")
-        else {
-            panic!("removal queued a non-save message");
-        };
-        assert_eq!(save.book_id, None);
-        assert_eq!(save.path, PathBuf::from("removed.epub"));
-        assert_eq!(save.reading.page, 3);
-        assert_eq!(save.reading.location_offset, Some(17));
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        let save = store
+            .get_async(Path::new("removed.epub"))
+            .await
+            .expect("removal should persist path-backed reading state");
+        assert_eq!(save.page, 3);
+        assert_eq!(save.location_offset, Some(17));
     }
 
     #[test]
@@ -8915,7 +9987,7 @@ mod tests {
         assert_eq!(state.active_tab, Some(0));
         assert_eq!(state.book_id, Some(42));
         assert_eq!(state.file_path.as_ref(), Some(&replacement));
-        assert_eq!(state.tabs[0].file_path, replacement);
+        assert_eq!(state.tabs[0].session.locator.path(), replacement);
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
         };
@@ -8989,7 +10061,10 @@ mod tests {
 
         assert_eq!(state.zoom, ZoomMode::FitWidth);
         assert!(state.reader_overrides.pdf_zoom);
-        assert_eq!(state.tabs[0].zoom, ZoomMode::FitWidth);
+        assert_eq!(
+            state.tabs[0].session.preferences.pdf_zoom,
+            ZoomMode::FitWidth
+        );
     }
 
     #[test]
@@ -9180,38 +10255,44 @@ mod tests {
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
         )
         .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        // Keep both synthetic generations admitted while their tasks remain
+        // unpolled so this test exercises supersession rather than budgeting.
+        state.transient_decode_budget = CacheBudget::new(usize::MAX);
 
         let first_task = refresh_content(&mut state);
         let first_generation = state.render_generation;
+        let first_key = state.paginated_pending[0].clone();
         state.zoom = ZoomMode::Manual(1.25);
         let second_task = refresh_content(&mut state);
         let second_generation = state.render_generation;
+        let latest_key = state.paginated_requested[0].clone();
 
         assert!(first_task.units() > 0);
-        assert!(second_task.units() > 0);
+        assert_eq!(second_task.units(), 0);
         assert!(second_generation > first_generation);
+        assert_eq!(state.paginated_pending, vec![first_key.clone()]);
 
         let stale_page = RenderedPage {
             width: 10,
             height: 10,
             pixels: bytes::Bytes::from(vec![0; 400]),
         };
-        let _ = update(
+        let latest_task = update(
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
                 generation: first_generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key: first_key,
                 result: Ok(stale_page),
             },
         );
 
         assert!(state.rendered_page.is_none());
+        assert!(latest_task.units() > 0);
+        assert_eq!(state.paginated_pending, vec![latest_key.clone()]);
+        let latest_generation = state.render_generation;
 
         let latest_page = RenderedPage {
             width: 20,
@@ -9222,12 +10303,8 @@ mod tests {
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
-                generation: second_generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.25_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                generation: latest_generation,
+                key: latest_key,
                 result: Ok(latest_page),
             },
         );
@@ -9268,6 +10345,41 @@ mod tests {
     }
 
     #[test]
+    fn epub_relayout_coalesces_to_one_in_flight_and_the_latest_request() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        let first = refresh_content(&mut state);
+        let first_generation = state.render_generation;
+        let first_key = state.epub_layout_pending.unwrap();
+        state.font_size = 24.0;
+        let coalesced = refresh_content(&mut state);
+        let requested_key = state.epub_layout_requested.unwrap();
+
+        assert!(first.units() > 0);
+        assert_eq!(coalesced.units(), 0);
+        assert_ne!(first_key, requested_key);
+        assert_eq!(state.epub_layout_pending, Some(first_key));
+
+        let latest = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: 1,
+                generation: first_generation,
+                layout_key: first_key,
+                complete: true,
+                pages: Arc::new(Vec::new()),
+            },
+        );
+
+        assert!(latest.units() > 0);
+        assert_eq!(state.epub_layout_pending, Some(requested_key));
+    }
+
+    #[test]
     fn epub_pagination_preserves_navigation_that_happened_while_it_ran() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -9278,6 +10390,11 @@ mod tests {
         state.current_page = 1;
         state.epub_offset = 25;
         let layout_key = epub_layout_key(&state);
+        state.epub_jobs.insert(EpubJob {
+            tab_id: 1,
+            generation: 2,
+            layout_key,
+        });
 
         let _ = update(
             &mut state,
@@ -9367,6 +10484,11 @@ mod tests {
         state.tabs = vec![first, second];
         state.active_tab = Some(1);
         let layout_key = epub_layout_key_for_tab(&state, &state.tabs[0]);
+        state.epub_jobs.insert(EpubJob {
+            tab_id: 1,
+            generation: 4,
+            layout_key,
+        });
 
         let _ = update(
             &mut state,
@@ -9551,6 +10673,20 @@ mod tests {
 
         let render_task = refresh_content(&mut state);
         let old_generation = state.render_generation;
+        let render_key = PageCacheKey {
+            page: 0,
+            scale_bits: 1.0_f32.to_bits(),
+            highlights: Vec::new(),
+        };
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation: old_generation,
+                key: render_key.clone(),
+            },
+            400,
+        );
         let old_document = state.document.clone();
         let path = PathBuf::from("unsupported.txt");
         let open_task = open_document(&mut state, path.clone(), None);
@@ -9586,11 +10722,7 @@ mod tests {
             Message::PageRendered {
                 tab_id: 1,
                 generation: old_generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key: render_key,
                 result: Ok(RenderedPage {
                     width: 10,
                     height: 10,
@@ -9845,7 +10977,7 @@ mod tests {
     }
 
     #[test]
-    fn epub_image_loading_is_off_thread_and_bounded_to_nearby_chapters() {
+    fn epub_image_loading_decodes_one_nearby_resource_at_a_time() {
         let epub = EpubDoc::from_bytes(epub_with_image_chapters(5)).unwrap();
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.current_page = 2;
@@ -9854,18 +10986,11 @@ mod tests {
 
         assert_eq!(task.units(), 1);
         assert!(state.epub_image_handles.is_empty());
-        assert_eq!(state.epub_images_pending.len(), 3);
-        for chapter in [1, 2, 3] {
-            assert!(
-                state
-                    .epub_images_pending
-                    .iter()
-                    .any(|path| path.ends_with(&format!("image-{chapter}.png")))
-            );
-        }
+        assert_eq!(state.epub_images_desired.len(), 3);
+        assert_eq!(state.epub_images_pending.len(), 1);
         assert!(
             state
-                .epub_images_pending
+                .epub_images_desired
                 .iter()
                 .all(|path| !path.ends_with("image-0.png") && !path.ends_with("image-4.png"))
         );
@@ -9879,18 +11004,21 @@ mod tests {
         let path = state.epub_images_pending.iter().next().unwrap().clone();
         let generation = state.epub_image_generation;
         state.render_generation = state.render_generation.wrapping_add(1);
+        let permit = state.epub_image_budget.try_reserve(4).unwrap();
 
         let _ = update(
             &mut state,
             Message::EpubImagesDecoded {
                 tab_id: 1,
                 generation,
+                path: path.clone(),
                 images: vec![(
                     path.clone(),
                     Some(DecodedEpubImage::Raster {
                         width: 1,
                         height: 1,
                         pixels: vec![1, 2, 3, 255],
+                        permit,
                     }),
                 )],
             },
@@ -9898,6 +11026,107 @@ mod tests {
 
         assert!(!state.epub_images_pending.contains(&path));
         assert!(state.epub_image_handles.contains_key(&path));
+        assert_eq!(state.epub_image_budget.used(), 4);
+        state.epub_image_handles.clear();
+        assert_eq!(state.epub_image_budget.used(), 0);
+    }
+
+    #[test]
+    fn epub_image_decode_waits_for_aggregate_memory_admission() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.epub_image_budget = CacheBudget::new(0);
+
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.epub_image_decode_active);
+        assert!(state.epub_images_pending.is_empty());
+        assert!(state.epub_image_jobs.is_empty());
+        assert_eq!(state.epub_images_failed.len(), 1);
+    }
+
+    #[test]
+    fn unadmittable_epub_image_pumps_the_next_resource() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(2)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.epub_image_budget = CacheBudget::new(0);
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 1);
+        assert_eq!(state.epub_images_failed.len(), 1);
+        assert_eq!(state.epub_image_jobs.len(), 1);
+    }
+
+    #[test]
+    fn epub_image_decode_holds_transient_memory_admission() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        let transient_budget = state.transient_decode_budget.clone();
+
+        let task = update(
+            &mut state,
+            Message::EpubImageSizeLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                path: job.path,
+                byte_len: Some(4),
+            },
+        );
+
+        assert_eq!(task.units(), 1);
+        assert!(transient_budget.used() > 0);
+        drop(task);
+        assert_eq!(transient_budget.used(), 0);
+    }
+
+    #[test]
+    fn epub_image_workers_are_bounded_globally_and_require_exact_completions() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        assert_eq!(load_epub_images_task(&mut state).units(), 1);
+        let job = state.epub_image_jobs.iter().next().unwrap().clone();
+        state.epub_image_decode_active = false;
+
+        assert_eq!(load_epub_images_task(&mut state).units(), 0);
+        assert_eq!(state.epub_image_jobs.len(), EPUB_IMAGE_WORKERS);
+        assert_eq!(
+            update(
+                &mut state,
+                Message::EpubImageSizeLoaded {
+                    tab_id: job.tab_id,
+                    generation: job.generation,
+                    path: "unknown.png".to_owned(),
+                    byte_len: Some(4),
+                },
+            )
+            .units(),
+            0
+        );
+        assert_eq!(state.epub_image_jobs.len(), EPUB_IMAGE_WORKERS);
     }
 
     #[test]
@@ -9910,17 +11139,20 @@ mod tests {
             .iter()
             .cloned()
             .collect::<Vec<_>>();
+        let obsolete_job = obsolete[0].clone();
 
         state.current_page = 4;
         assert_eq!(load_epub_images_task(&mut state).units(), 0);
         assert!(state.epub_image_decode_active);
         assert_eq!(state.epub_images_desired.len(), 2);
 
+        let budget = state.epub_image_budget.clone();
         let next = update(
             &mut state,
             Message::EpubImagesDecoded {
                 tab_id: 1,
                 generation: 0,
+                path: obsolete_job,
                 images: obsolete
                     .into_iter()
                     .map(|path| {
@@ -9930,6 +11162,7 @@ mod tests {
                                 width: 1,
                                 height: 1,
                                 pixels: vec![1, 2, 3, 255],
+                                permit: budget.try_reserve(4).unwrap(),
                             }),
                         )
                     })
@@ -9940,7 +11173,7 @@ mod tests {
         assert_eq!(next.units(), 1);
         assert!(state.epub_image_handles.is_empty());
         assert!(state.epub_image_decode_active);
-        assert_eq!(state.epub_images_pending.len(), 2);
+        assert_eq!(state.epub_images_pending.len(), 1);
         assert!(
             state
                 .epub_images_pending
@@ -10186,16 +11419,19 @@ mod tests {
         assert_eq!(state.epub_pages[state.epub_page].chapter, 1);
     }
 
-    #[test]
-    fn warm_paginated_epub_turn_reuses_layout_resources_and_queues_persistence() {
+    #[tokio::test]
+    async fn warm_paginated_epub_turn_reuses_layout_resources_and_queues_persistence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
         state.file_path = Some(PathBuf::from("book.epub"));
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         state.window_size.width = 900.0;
         state.epub_pages = Arc::new(vec![
             EpubPage {
@@ -10252,28 +11488,32 @@ mod tests {
         assert_eq!(state.current_page, 2);
         assert_eq!(epub_visible_pages(&state), vec![2]);
         assert!(state.current_page_bookmarked);
-        let ReadingStateWriterMessage::Save(save) = queued_saves
-            .try_recv()
-            .expect("page turn should queue persistence")
-        else {
-            panic!("page turn queued a flush instead of a save");
-        };
-        assert_eq!(save.path, PathBuf::from("book.epub"));
-        assert_eq!(save.reading.page, 2);
-        assert_eq!(save.reading.location_offset, Some(0));
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        let save = store.get_async(Path::new("book.epub")).await.unwrap();
+        assert_eq!(save.page, 2);
+        assert_eq!(save.location_offset, Some(0));
     }
 
-    #[test]
-    fn repeated_epub_chapter_turns_retain_per_book_resources() {
+    #[tokio::test]
+    async fn repeated_epub_chapter_turns_retain_per_book_resources() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
         .expect("fixture should be a valid EPUB");
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
-        let (saves, mut queued_saves) = mpsc::unbounded_channel();
         state.file_path = Some(PathBuf::from("book.epub"));
-        state.reading_state_saves = Some(saves);
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
         state.window_size.width = 500.0;
         state.epub_pages = Arc::new(vec![
             EpubPage {
@@ -10307,13 +11547,20 @@ mod tests {
             let forward = turn % 2 == 0;
             let _ = turn_epub_page(&mut state, forward);
             assert_eq!(state.current_page, usize::from(forward));
-            assert!(matches!(
-                queued_saves.try_recv(),
-                Ok(ReadingStateWriterMessage::Save(_))
-            ));
         }
 
-        assert!(queued_saves.try_recv().is_err());
+        let (flushed, wait) = oneshot::channel();
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .send(ReadingStateWriterMessage::Flush(flushed))
+            .unwrap();
+        wait.await.unwrap().unwrap();
+        assert_eq!(
+            store.get_async(Path::new("book.epub")).await.unwrap().page,
+            state.current_page
+        );
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
         assert_eq!(state.epub_layout_key, layout_key);
         assert_eq!(state.render_generation, render_generation);
@@ -10435,7 +11682,7 @@ mod tests {
         saves
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait_for_flush.await.unwrap();
+        wait_for_flush.await.unwrap().unwrap();
 
         let saved = store
             .get_async(&path)
@@ -10470,11 +11717,21 @@ mod tests {
         saves
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
-        wait_for_flush.await.unwrap();
+        wait_for_flush.await.unwrap().unwrap();
 
         assert_eq!(
             store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await,
             Some(LanguagePreference::English.stored().to_string())
+        );
+    }
+
+    #[test]
+    fn persistence_overload_is_reported_as_data_loss() {
+        assert_eq!(
+            state_writer_send_error(StateWriterSendError::Full),
+            AppError::Storage(
+                "state persistence queue is full; latest change was not saved".to_owned()
+            )
         );
     }
 
@@ -10627,6 +11884,43 @@ mod tests {
     }
 
     #[test]
+    fn page_cache_evicts_by_decoded_pixel_bytes() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.page_cache = BoundedCache::new(8);
+        state.raster_budget = CacheBudget::new(6);
+
+        for page in 0..2 {
+            let permit = reserve_raster_bytes(&mut state, 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 1,
+                    height: 1,
+                    pixels: bytes::Bytes::from(vec![0; 4]),
+                },
+                permit,
+            )
+            .unwrap();
+            cache_rendered_page(
+                &mut state,
+                PageCacheKey {
+                    page,
+                    scale_bits: 1.0_f32.to_bits(),
+                    highlights: Vec::new(),
+                },
+                rendered,
+            );
+        }
+
+        assert_eq!(state.raster_budget.used(), 4);
+        assert_eq!(state.page_cache.len(), 1);
+        assert_eq!(state.page_cache.iter().next().unwrap().0.page, 1);
+    }
+
+    #[test]
     fn changing_query_immediately_clears_previous_results() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -10753,17 +12047,27 @@ mod tests {
         .expect("fixture should be a valid CBZ");
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         let generation = state.render_generation;
+        let key = PageCacheKey {
+            page: 0,
+            scale_bits: 1.0_f32.to_bits(),
+            highlights: Vec::new(),
+        };
+        admit_test_raster(
+            &mut state,
+            RasterJob::Paginated {
+                tab_id: 1,
+                generation,
+                key: key.clone(),
+            },
+            4,
+        );
 
         let _ = update(
             &mut state,
             Message::PageRendered {
                 tab_id: 1,
                 generation,
-                key: PageCacheKey {
-                    page: 0,
-                    scale_bits: 1.0_f32.to_bits(),
-                    highlights: Vec::new(),
-                },
+                key,
                 result: Err("renderer detail".to_string()),
             },
         );

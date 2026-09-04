@@ -105,10 +105,13 @@ pub(super) fn navigate_to_current_search_result(
     state: &mut State,
     previous_highlights: &[SearchHighlight],
 ) -> Task<Message> {
-    let target = if let Some(result) = state.search_results.get(state.search_current) {
-        let target_page = result.page;
+    let target = state
+        .search_results
+        .get(state.search_current)
+        .map(|result| (result.page, result.offset));
+    if let Some((target_page, offset)) = target {
         if matches!(state.document, Some(OpenDocument::Epub(_))) {
-            state.epub_offset = result.offset;
+            state.epub_offset = offset;
         }
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
@@ -116,10 +119,7 @@ pub(super) fn navigate_to_current_search_result(
             state.page_input = format!("{}", state.current_page + 1);
             save_reading_state(state);
         }
-        Some((target_page, result.offset))
-    } else {
-        None
-    };
+    }
     if uses_paginated_epub_layout(state) {
         if let Some((chapter, offset)) = target {
             state.epub_page = epub_page_for_location(state, chapter, offset);

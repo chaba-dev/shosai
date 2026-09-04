@@ -78,8 +78,10 @@
           # tools
           androidJdk
           androidSdk
+          cargo-expand
           cargo-ndk
           flutter
+          flutter_rust_bridge_codegen
           git-cliff
           jujutsu
           hugo

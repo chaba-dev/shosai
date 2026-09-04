@@ -3,6 +3,7 @@ use shosai_core::library::{
     BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, Library,
     MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
+use shosai_core::path_from_key;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -53,6 +54,45 @@ async fn test_import_duplicate_returns_existing() {
     let book1 = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     let book2 = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
     assert_eq!(book1.id, book2.id);
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[tokio::test]
+async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    use shosai_core::application::{DeviceFileLocator, OpenDocument};
+
+    let (lib, _, dir) = temp_library().await;
+    let first = dir
+        .path()
+        .join(OsString::from_vec(b"book-\x80.epub".to_vec()));
+    let second = dir
+        .path()
+        .join(OsString::from_vec(b"book-\x81.epub".to_vec()));
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &second).unwrap();
+
+    let first_book = lib.import_file(&first).await.unwrap();
+    let second_book = lib.import_file(&second).await.unwrap();
+
+    assert_ne!(first_book.id, second_book.id);
+    assert_ne!(first_book.file_path, second_book.file_path);
+    assert_eq!(
+        path_from_key(&first_book.file_path),
+        first.canonicalize().unwrap()
+    );
+    assert_eq!(
+        path_from_key(&second_book.file_path),
+        second.canonicalize().unwrap()
+    );
+    for book in lib.list_all().await.unwrap() {
+        OpenDocument::open(&DeviceFileLocator::from_path(path_from_key(
+            &book.file_path,
+        )))
+        .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -289,6 +329,32 @@ async fn discovery_marks_books_already_in_the_library() {
     let book = lib.import_file(&fixture_path("sample.pdf")).await.unwrap();
 
     let discovery = lib.discover_files(&[fixture_path("sample.pdf")]).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(
+        discovery.candidates[0].duplicate,
+        Some(ImportDuplicate::ExistingBook {
+            book_id: book.id,
+            title: book.title,
+        })
+    );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[tokio::test]
+async fn discovery_matches_changed_content_by_non_unicode_path() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join(OsStr::from_bytes(b"changed-\x80.pdf"));
+    std::fs::copy(fixture_path("sample.pdf"), &path).unwrap();
+    let book = lib.import_file(&path).await.unwrap();
+    let mut changed = std::fs::read(&path).unwrap();
+    changed.push(b'\n');
+    std::fs::write(&path, changed).unwrap();
+
+    let discovery = lib.discover_files(&[path]).await;
 
     assert_eq!(discovery.candidates.len(), 1);
     assert_eq!(
@@ -681,15 +747,38 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
         .remove(0);
     assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
     assert_eq!(
-        store.get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE).await,
-        Some(
-            destination
-                .canonicalize()
+        path_from_key(
+            &store
+                .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
+                .await
                 .unwrap()
-                .to_string_lossy()
-                .into_owned()
-        )
+        ),
+        destination.canonicalize().unwrap()
     );
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[tokio::test]
+async fn non_unicode_managed_directory_survives_persistence() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    lib.import_managed_file(&source).await.unwrap();
+    let destination = dir
+        .path()
+        .join(OsStr::from_bytes(b"external-\x80"))
+        .join("Shosai");
+
+    lib.relocate_managed_books(&destination).await.unwrap();
+
+    let stored = store
+        .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
+        .await
+        .unwrap();
+    assert_eq!(path_from_key(&stored), destination.canonicalize().unwrap());
 }
 
 #[tokio::test]

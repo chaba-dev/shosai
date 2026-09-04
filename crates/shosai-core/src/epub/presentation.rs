@@ -68,26 +68,37 @@ impl EpubPresentation {
                 }
             })
             .collect::<HashMap<_, _>>();
-        let chapters = chapters
-            .iter()
-            .map(|chapter| -> Result<_> {
-                let mut parsed = super::render::parse_chapter_content_at_path_with_limits(
-                    &chapter.content,
-                    &chapter.path,
-                    styles,
-                    fonts,
-                    limits,
-                )?;
-                populate_image_sizes(&mut parsed.nodes, &image_sizes);
-                let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
-                Ok(EpubChapterPresentation {
-                    nodes: parsed.nodes,
-                    search_text,
-                    anchor_offsets: parsed.anchor_offsets,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self { chapters })
+        let mut presentations = Vec::with_capacity(chapters.len());
+        let mut total_nodes = 0_usize;
+        for chapter in chapters.iter() {
+            let mut parsed = super::render::parse_chapter_content_at_path_with_limits(
+                &chapter.content,
+                &chapter.path,
+                styles,
+                fonts,
+                limits,
+            )?;
+            total_nodes = total_nodes
+                .checked_add(content_node_count(&parsed.nodes))
+                .ok_or_else(|| {
+                    crate::application::ResourceLimitError(
+                        "EPUB aggregate presentation node count overflowed".to_owned(),
+                    )
+                })?;
+            if total_nodes > limits.max_total_presentation_nodes {
+                crate::resource_limit!("EPUB exceeds aggregate presentation node limit");
+            }
+            populate_image_sizes(&mut parsed.nodes, &image_sizes);
+            let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
+            presentations.push(EpubChapterPresentation {
+                nodes: parsed.nodes,
+                search_text,
+                anchor_offsets: parsed.anchor_offsets,
+            });
+        }
+        Ok(Self {
+            chapters: presentations,
+        })
     }
 
     /// Parsed chapters in spine order.
@@ -99,6 +110,24 @@ impl EpubPresentation {
     pub fn chapter(&self, index: usize) -> Option<&EpubChapterPresentation> {
         self.chapters.get(index)
     }
+}
+
+fn content_node_count(nodes: &[ContentNode]) -> usize {
+    nodes.iter().fold(0_usize, |count, node| {
+        let children = match node {
+            ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
+                content_node_count(children)
+            }
+            ContentNode::Table { row_groups, .. } => row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .flat_map(|row| &row.cells)
+                .map(|cell| content_node_count(&cell.children))
+                .sum(),
+            _ => 0,
+        };
+        count.saturating_add(1).saturating_add(children)
+    })
 }
 
 fn svg_intrinsic_size(bytes: &[u8]) -> Option<ImageSize> {

@@ -47,6 +47,7 @@ impl Default for CbzLimits {
 #[derive(Debug)]
 pub struct CbzDoc {
     page_paths: Vec<String>,
+    page_byte_lengths: Vec<usize>,
     data: Vec<u8>,
     title: Option<String>,
     limits: CbzLimits,
@@ -63,7 +64,7 @@ impl CbzDoc {
         let metadata = std::fs::metadata(path)
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.len() > limits.max_archive_bytes {
-            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+            crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
         let data =
             std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -79,18 +80,22 @@ impl CbzDoc {
         Self::from_bytes_with_title(data, None, limits)
     }
 
+    pub(crate) fn from_bytes_with_title_hint(data: Vec<u8>, title: Option<String>) -> Result<Self> {
+        Self::from_bytes_with_title(data, title, CbzLimits::default())
+    }
+
     fn from_bytes_with_title(
         data: Vec<u8>,
         title: Option<String>,
         limits: CbzLimits,
     ) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
-            anyhow::bail!("CBZ archive exceeds encoded byte limit");
+            crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
         let mut archive =
             ZipArchive::new(Cursor::new(&data)).context("failed to open CBZ as ZIP archive")?;
         if archive.len() > limits.max_entries {
-            anyhow::bail!("CBZ archive exceeds entry count limit");
+            crate::resource_limit!("CBZ archive exceeds entry count limit");
         }
 
         let mut total = 0_u64;
@@ -99,20 +104,26 @@ impl CbzDoc {
             let file = archive.by_index(i).context("failed to inspect CBZ entry")?;
             let size = file.size();
             if size > limits.max_entry_bytes {
-                anyhow::bail!("CBZ entry exceeds uncompressed byte limit: {}", file.name());
+                crate::resource_limit!(
+                    "CBZ entry exceeds uncompressed byte limit: {}",
+                    file.name()
+                );
             }
             total = total
                 .checked_add(size)
                 .context("CBZ declared size overflow")?;
             if total > limits.max_total_uncompressed_bytes {
-                anyhow::bail!("CBZ archive exceeds aggregate uncompressed byte limit");
+                crate::resource_limit!("CBZ archive exceeds aggregate uncompressed byte limit");
             }
             let compressed = file.compressed_size();
             if size > 0
                 && (compressed == 0
                     || size > compressed.saturating_mul(limits.max_compression_ratio))
             {
-                anyhow::bail!("CBZ entry exceeds compression ratio limit: {}", file.name());
+                crate::resource_limit!(
+                    "CBZ entry exceeds compression ratio limit: {}",
+                    file.name()
+                );
             }
             let name = file.name();
             if name.ends_with('/') || name.contains("/__MACOSX") || name.contains("/.") {
@@ -123,16 +134,18 @@ impl CbzDoc {
                     .iter()
                     .any(|known| ext.eq_ignore_ascii_case(known))
             }) {
-                page_paths.push(name.to_owned());
+                page_paths.push((name.to_owned(), usize::try_from(size).unwrap_or(usize::MAX)));
             }
         }
-        page_paths.sort_by(|a, b| natord::compare(a, b));
+        page_paths.sort_by(|a, b| natord::compare(&a.0, &b.0));
         if page_paths.is_empty() {
             anyhow::bail!("CBZ archive contains no image files");
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
+        let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
         Ok(Self {
             page_paths,
+            page_byte_lengths,
             data,
             title,
             limits,
@@ -142,6 +155,17 @@ impl CbzDoc {
 
     pub fn page_count(&self) -> usize {
         self.page_paths.len()
+    }
+
+    pub fn page_source_byte_len(&self, index: usize) -> Option<usize> {
+        self.page_byte_lengths.get(index).copied()
+    }
+
+    /// Worst-case compressed-source plus temporary decode/resize allocation.
+    pub fn render_admission_byte_len(&self, index: usize) -> Option<usize> {
+        let source = self.page_source_byte_len(index)?;
+        let decoded = usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?;
+        source.checked_add(decoded.checked_mul(2)?)
     }
 
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
@@ -158,7 +182,7 @@ impl CbzDoc {
         if declared > self.limits.max_entry_bytes
             || declared > self.limits.max_total_uncompressed_bytes
         {
-            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+            crate::resource_limit!("CBZ entry exceeds streamed byte limit: {path}");
         }
         let capacity = usize::try_from(declared.min(self.limits.max_entry_bytes)).unwrap_or(0);
         let mut bytes = Vec::with_capacity(capacity);
@@ -170,7 +194,7 @@ impl CbzDoc {
         if streamed > self.limits.max_entry_bytes
             || streamed > self.limits.max_total_uncompressed_bytes
         {
-            anyhow::bail!("CBZ entry exceeds streamed byte limit: {path}");
+            crate::resource_limit!("CBZ entry exceeds streamed byte limit: {path}");
         }
         if streamed != declared {
             anyhow::bail!("CBZ entry declared {declared} bytes but streamed {streamed}: {path}");
@@ -221,7 +245,7 @@ impl CbzDoc {
             || pixels > self.limits.max_image_pixels
             || rgba > self.limits.max_decoded_rgba_bytes
         {
-            anyhow::bail!("CBZ image exceeds decoded image limits");
+            crate::resource_limit!("CBZ image exceeds decoded image limits");
         }
         Ok(())
     }
@@ -250,7 +274,16 @@ impl CbzDoc {
             anyhow::bail!("scaled image dimensions must be positive");
         }
         self.validate_dimensions(new_width, new_height)?;
-        let img = image::load_from_memory(&bytes)
+        let mut reader = image::ImageReader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .with_context(|| format!("failed to identify image: {path}"))?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(self.limits.max_image_width);
+        limits.max_image_height = Some(self.limits.max_image_height);
+        limits.max_alloc = Some(self.limits.max_decoded_rgba_bytes);
+        reader.limits(limits);
+        let img = reader
+            .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
             img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
@@ -269,6 +302,32 @@ impl CbzDoc {
     pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
         let (width, height) = self.dimensions(index)?;
         Ok((width as f32, height as f32))
+    }
+
+    /// Conservative temporary allocation charge for decoding and resizing a page.
+    /// The final RGBA output is accounted separately by the caller.
+    pub fn render_transient_byte_len(&self, index: usize, scale: f32) -> Option<usize> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+        let (width, height) = self.cached_dimensions(index)?;
+        let target_width = (f64::from(width) * f64::from(scale)).floor();
+        let target_height = (f64::from(height) * f64::from(scale)).floor();
+        if !target_width.is_finite()
+            || !target_height.is_finite()
+            || target_width < 1.0
+            || target_height < 1.0
+            || target_width > f64::from(u32::MAX)
+            || target_height > f64::from(u32::MAX)
+        {
+            return None;
+        }
+        let resized = (target_width as usize)
+            .checked_mul(target_height as usize)?
+            .checked_mul(4)?;
+        usize::try_from(self.limits.max_decoded_rgba_bytes)
+            .ok()?
+            .checked_add(resized)
     }
 
     /// Return dimensions already discovered by a prior size query or render.

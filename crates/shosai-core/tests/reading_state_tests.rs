@@ -43,6 +43,46 @@ async fn test_get_nonexistent_returns_none() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn non_unicode_paths_have_distinct_reading_state_keys() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let (store, directory) = temp_store().await;
+    let first = directory
+        .path()
+        .join(OsString::from_vec(b"book-\x80.epub".to_vec()));
+    let second = directory
+        .path()
+        .join(OsString::from_vec(b"book-\x81.epub".to_vec()));
+    store
+        .set_async(
+            &first,
+            &FileReadingState {
+                page: 1,
+                location_offset: Some(10),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .set_async(
+            &second,
+            &FileReadingState {
+                page: 2,
+                location_offset: Some(20),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(store.get_async(&first).await.unwrap().page, 1);
+    assert_eq!(store.get_async(&second).await.unwrap().page, 2);
+}
+
 #[tokio::test]
 async fn test_set_then_get() {
     let (store, _dir) = temp_store().await;

@@ -978,7 +978,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
             state.book_menu = None;
             state.pending_remove_book = None;
-            let path = PathBuf::from(file_path);
+            let path = shosai_core::path_from_key(&file_path);
             if !path.exists() {
                 state.screen = Screen::Reader;
                 state.open_error = Some(AppError::MissingBook);
@@ -1106,23 +1106,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                     for tab in &mut state.tabs {
-                        if tab.book_id == Some(id) {
-                            if detached_paths.insert(tab.file_path.clone()) {
+                        if tab.session.book_id == Some(id) {
+                            let path = tab.session.locator.path().to_path_buf();
+                            if detached_paths.insert(path.clone()) {
                                 detached_saves.push(ReadingStateSave {
                                     book_id: None,
-                                    path: tab.file_path.clone(),
+                                    path,
                                     reading: FileReadingState {
-                                        page: tab.current_page,
-                                        location_offset: matches!(
-                                            &tab.document,
-                                            OpenDocument::Epub(_)
-                                        )
-                                        .then_some(tab.epub_offset),
-                                        zoom: tab.zoom.scale(),
+                                        page: tab.session.location.page,
+                                        location_offset: tab.session.location.offset,
+                                        zoom: tab.session.preferences.pdf_zoom.scale(),
                                     },
                                 });
                             }
-                            tab.book_id = None;
+                            tab.session.book_id = None;
                             for bookmark in &mut tab.bookmarks {
                                 bookmark.book_id = None;
                             }
@@ -1394,7 +1391,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             .send(ReadingStateWriterMessage::Flush(flushed))
                             .is_ok()
                         {
-                            let _ = wait.await;
+                            wait.await
+                                .map_err(|_| "state writer stopped before relocation".to_owned())?
+                                .map_err(|error| error.to_string())?;
                         }
                     }
                     shosai_core::reading_state::prepare_managed_library_directory(
@@ -1801,10 +1800,27 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             complete,
             pages,
         } => {
-            if state.active_tab_id == Some(tab_id)
+            let job = EpubJob {
+                tab_id,
+                generation,
+                layout_key,
+            };
+            if !state.epub_jobs.contains(&job) {
+                return Task::none();
+            }
+            if complete {
+                state.epub_jobs.remove(&job);
+            }
+            let active = state.active_tab_id == Some(tab_id);
+            let accepts_active_layout = active
                 && generation == state.render_generation
-                && layout_key == epub_layout_key(state)
-            {
+                && layout_key == epub_layout_key(state);
+            let active_request_completed =
+                active && complete && state.epub_layout_pending == Some(layout_key);
+            if active_request_completed {
+                state.epub_layout_pending = None;
+            }
+            if accepts_active_layout {
                 if !complete && state.epub_layout_key == Some(layout_key) {
                     return Task::none();
                 }
@@ -1824,6 +1840,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else if let Some(index) = state.tabs.iter().position(|tab| tab.id == tab_id) {
                 let accepts_layout = generation == state.tabs[index].render_generation
                     && layout_key == epub_layout_key_for_tab(state, &state.tabs[index]);
+                if complete && state.tabs[index].epub_layout_pending == Some(layout_key) {
+                    state.tabs[index].epub_layout_pending = None;
+                }
                 if accepts_layout {
                     let tab = &mut state.tabs[index];
                     if !complete && tab.epub_layout_key == Some(layout_key) {
@@ -1835,21 +1854,93 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         tab.epub_page = 0;
                         tab.error = Some(AppError::EpubEmpty);
                     } else {
-                        tab.epub_page =
-                            epub_page_for_pages(&tab.epub_pages, tab.current_page, tab.epub_offset)
-                                .min(tab.epub_pages.len() - 1);
+                        tab.epub_page = epub_page_for_pages(
+                            &tab.epub_pages,
+                            tab.session.location.page,
+                            tab.session.location.offset.unwrap_or_default(),
+                        )
+                        .min(tab.epub_pages.len() - 1);
                         tab.page_input = (tab.epub_page + 1).to_string();
                         tab.error = None;
                     }
                 }
             }
+            if active_request_completed
+                && (!accepts_active_layout || state.epub_layout_requested != Some(layout_key))
+            {
+                return refresh_content(state);
+            }
+            if complete
+                && state.epub_jobs.is_empty()
+                && matches!(state.document, Some(OpenDocument::Epub(_)))
+                && state.epub_layout_pending.is_none()
+                && state.epub_layout_requested.is_some()
+                && (state.epub_layout_key != state.epub_layout_requested
+                    || state.epub_pages.is_empty())
+            {
+                return refresh_content(state);
+            }
+        }
+
+        Message::EpubImageSizeLoaded {
+            tab_id,
+            generation,
+            path,
+            byte_len,
+        } => {
+            let job = EpubImageJob {
+                tab_id,
+                generation,
+                path: path.clone(),
+            };
+            if !state.epub_image_jobs.contains(&job) {
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
+                if let Some(byte_len) = byte_len
+                    && state.epub_images_desired.contains(&path)
+                {
+                    if let Some(task) = decode_epub_image_task(state, job.clone(), byte_len) {
+                        return task;
+                    }
+                    state.epub_image_jobs.remove(&job);
+                    state.epub_image_decode_active = false;
+                    state.epub_images_pending.remove(&path);
+                    state.epub_images_desired.remove(&path);
+                    state.epub_images_failed.insert(path);
+                    return load_epub_images_task(state);
+                }
+                state.epub_image_jobs.remove(&job);
+                state.epub_image_decode_active = false;
+                state.epub_images_pending.remove(&path);
+                if byte_len.is_none() && state.epub_images_desired.remove(&path) {
+                    state.epub_images_failed.insert(path);
+                }
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                && generation == tab.epub_image_generation
+            {
+                state.epub_image_jobs.remove(&job);
+                tab.epub_image_decode_active = false;
+                tab.epub_images_pending.remove(&path);
+            } else {
+                state.epub_image_jobs.remove(&job);
+            }
+            return load_epub_images_task(state);
         }
 
         Message::EpubImagesDecoded {
             tab_id,
             generation,
+            path,
             images,
         } => {
+            if !state.epub_image_jobs.remove(&EpubImageJob {
+                tab_id,
+                generation,
+                path,
+            }) {
+                return Task::none();
+            }
             if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
                 state.epub_image_decode_active = false;
                 for (path, decoded) in images {
@@ -1862,7 +1953,6 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                 }
-                return load_epub_images_task(state);
             } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                 && generation == tab.epub_image_generation
             {
@@ -1878,18 +1968,40 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
+            return load_epub_images_task(state);
         }
 
         Message::CbzDimensionsLoaded {
             tab_id,
             generation,
+            page,
             result,
         } => {
-            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+            if state
+                .cbz_dimension_jobs
+                .remove(&CbzDimensionJob {
+                    tab_id,
+                    generation,
+                    page,
+                })
+                .is_none()
+            {
+                return Task::none();
+            }
+            if state.active_tab_id == Some(tab_id) {
                 match result {
                     Ok(()) => return refresh_content(state),
-                    Err(error) => state.error = Some(AppError::Render(error)),
+                    Err(error) if generation == state.render_generation => {
+                        state.error = Some(AppError::Render(error));
+                    }
+                    Err(_) => return refresh_content(state),
                 }
+            } else {
+                return if matches!(state.document, Some(OpenDocument::Cbz(_))) {
+                    refresh_content(state)
+                } else {
+                    pump_raster_queue(state)
+                };
             }
         }
 
@@ -1899,9 +2011,44 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             key,
             result,
         } => {
-            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
+            let job = RasterJob::Paginated {
+                tab_id,
+                generation,
+                key: key.clone(),
+            };
+            let Some(permit) = state.raster_jobs.remove(&job) else {
+                return Task::none();
+            };
+            let active = state.active_tab_id == Some(tab_id);
+            let was_pending = if active {
+                state
+                    .paginated_pending
+                    .iter()
+                    .position(|pending| pending == &key)
+                    .map(|position| state.paginated_pending.remove(position))
+                    .is_some()
+            } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+                tab.paginated_pending
+                    .iter()
+                    .position(|pending| pending == &key)
+                    .map(|position| tab.paginated_pending.remove(position))
+                    .is_some()
+            } else {
+                false
+            };
+            let request_was_superseded = active
+                && was_pending
+                && state.paginated_pending.is_empty()
+                && generation != state.render_generation;
+            if active && generation == state.render_generation {
                 match result {
                     Ok(page) => {
+                        let Some(page) = attach_raster_permit(page, permit) else {
+                            state.error = Some(AppError::Render(
+                                "rendered page exceeds its admitted raster budget".to_owned(),
+                            ));
+                            return pump_raster_queue(state);
+                        };
                         let is_visible = paginated_raster_pages(state).contains(&key.page);
                         cache_rendered_page(state, key, page);
                         let spread_changed = is_visible && show_cached_paginated_spread(state);
@@ -1920,6 +2067,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
+            if request_was_superseded {
+                return refresh_content(state);
+            }
+            return pump_raster_queue(state);
         }
 
         Message::ContinuousPageRendered {
@@ -1928,31 +2079,38 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             page,
             result,
         } => {
+            let job = RasterJob::Continuous {
+                tab_id,
+                request,
+                page,
+            };
+            let Some(permit) = state.raster_jobs.remove(&job) else {
+                return Task::none();
+            };
             if state.active_tab_id != Some(tab_id) {
                 if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
                     && tab.continuous_pending.get(&page) == Some(&request)
                 {
                     tab.continuous_pending.remove(&page);
-                    if request.generation == tab.render_generation
-                        && let (Some(slot), Ok(rendered)) =
-                            (tab.continuous_pages.get_mut(page), result)
-                    {
-                        *slot = Some(rendered);
-                    }
                 }
-                return reconcile_continuous_rasters(state);
+                return pump_raster_queue(state);
             }
             if state.active_tab_id == Some(tab_id) {
                 if state.continuous_pending.get(&page) != Some(&request) {
-                    return Task::none();
+                    return pump_raster_queue(state);
                 }
                 state.continuous_pending.remove(&page);
                 if page >= state.continuous_pages.len() {
-                    return reconcile_continuous_rasters(state);
+                    return pump_raster_queue(state);
                 }
                 match (request.generation == state.render_generation, result) {
-                    (true, Ok(rendered)) => {
-                        state.continuous_pages[page] = Some(rendered);
+                    (true, Ok(rendered))
+                        if rendered.pixels.len() <= permit.weight()
+                            && retained_continuous_raster_bytes(state)
+                                .saturating_add(rendered.pixels.len())
+                                <= CONTINUOUS_RASTER_BYTE_CAPACITY =>
+                    {
+                        state.continuous_pages[page] = attach_raster_permit(rendered, permit);
                         if page == state.current_page {
                             return Task::batch([
                                 reconcile_continuous_rasters(state),
@@ -1966,42 +2124,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             return Task::none();
                         }
                         state.continuous_visible.remove(&page);
-                        return reconcile_continuous_rasters(state);
+                        return pump_raster_queue(state);
+                    }
+                    (true, Ok(_)) => {
+                        if page == state.current_page {
+                            state.error = Some(AppError::Render(
+                                "rendered page exceeds the continuous raster budget".to_owned(),
+                            ));
+                        }
+                        return pump_raster_queue(state);
                     }
                     (false, _) => {}
                 }
-                return reconcile_continuous_rasters(state);
-            }
-        }
-
-        Message::RenderContinuousPage { tab_id, page } => {
-            if state.reading_mode != ReadingMode::Continuous
-                || state.active_tab_id != Some(tab_id)
-                || page >= state.continuous_pages.len()
-                || state.continuous_pages[page].is_some()
-                || !state.continuous_pending.contains_key(&page)
-            {
-                return Task::none();
-            }
-            let Some(request) = state.continuous_pending.get(&page).copied() else {
-                return Task::none();
-            };
-            let scale = raster_render_scale(state, state.zoom.scale());
-            match &state.document {
-                Some(OpenDocument::Pdf(doc)) => {
-                    let doc = Arc::clone(doc);
-                    let highlights = search_highlights_for_page(state, page);
-                    return render_continuous_page_task(tab_id, request, page, move || {
-                        doc.render_page_with_highlights(page, scale, &highlights)
-                    });
-                }
-                Some(OpenDocument::Cbz(doc)) => {
-                    let doc = Arc::clone(doc);
-                    return render_continuous_page_task(tab_id, request, page, move || {
-                        doc.render_page(page, scale)
-                    });
-                }
-                _ => {}
+                return pump_raster_queue(state);
             }
         }
 
@@ -2091,7 +2226,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::ReadingStateFlushed(id) => return window::close(id),
+        Message::ReadingStateFlushed { id, result: Ok(()) } => return window::close(id),
+
+        Message::ReadingStateFlushed {
+            result: Err(error), ..
+        } => state.open_error = Some(AppError::Storage(error)),
 
         Message::PerfFramePresented => return perf::frame_presented(state),
     }

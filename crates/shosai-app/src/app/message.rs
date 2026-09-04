@@ -240,11 +240,19 @@ pub enum Message {
     EpubImagesDecoded {
         tab_id: u64,
         generation: u64,
+        path: String,
         images: Vec<(String, Option<DecodedEpubImage>)>,
+    },
+    EpubImageSizeLoaded {
+        tab_id: u64,
+        generation: u64,
+        path: String,
+        byte_len: Option<usize>,
     },
     CbzDimensionsLoaded {
         tab_id: u64,
         generation: u64,
+        page: usize,
         result: Result<(), String>,
     },
     PageRendered {
@@ -259,11 +267,6 @@ pub enum Message {
         page: usize,
         result: Result<RenderedPage, String>,
     },
-    RenderContinuousPage {
-        tab_id: u64,
-        page: usize,
-    },
-
     // Keyboard
     KeyPressed(keyboard::Event),
     WindowEvent(window::Id, window::Event),
@@ -273,6 +276,9 @@ pub enum Message {
     },
     PersistWindowGeometry(u64),
     WindowGeometryPersisted,
-    ReadingStateFlushed(window::Id),
+    ReadingStateFlushed {
+        id: window::Id,
+        result: Result<(), String>,
+    },
     PerfFramePresented,
 }

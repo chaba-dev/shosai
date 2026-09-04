@@ -1,4 +1,4 @@
-.PHONY: dev reset lint fmt test test-scripts check-rfds changelog next-version
+.PHONY: dev reset lint fmt test test-scripts check-frb check-rfds changelog next-version
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -22,6 +22,7 @@ fmt:
 test:
 	cargo test --workspace --no-fail-fast
 	$(MAKE) test-scripts
+	$(MAKE) check-frb
 
 ## Run tests for repository scripts
 test-scripts:
@@ -29,6 +30,10 @@ test-scripts:
 		-s benchmarks/epub-page-turn/2026-08-17/tests
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
 		-s scripts/tests
+
+## Verify that the core bridge API is accepted by flutter_rust_bridge codegen
+check-frb:
+	@./scripts/check-frb-codegen.sh
 
 ## Validate RFD sources and the checker regression fixtures
 check-rfds:

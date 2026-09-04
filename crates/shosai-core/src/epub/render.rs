@@ -399,7 +399,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
         depth: u8,
     ) -> Result<u64> {
         if depth >= 10 {
-            anyhow::bail!("EPUB XHTML entity nesting exceeds parser limit");
+            crate::resource_limit!("EPUB XHTML entity nesting exceeds parser limit");
         }
         let Some(value) = entities.get(name) else {
             return Ok(0);
@@ -438,7 +438,7 @@ fn validate_entity_expansion_budget(xhtml: &str, path: &str, limit: u64) -> Resu
             )?)
             .context("EPUB XHTML entity expansion byte count overflowed")?;
         if expanded > limit {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB XML entry exceeds expanded text limit: {path} ({expanded} > {limit})"
             );
         }
