@@ -993,6 +993,8 @@ pub struct State {
     book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
     removing_book: Option<i64>,
+    relink_generation: u64,
+    relinking_book: Option<(u64, i64)>,
     add_books_open: bool,
     add_books_source: Option<AddBooksSource>,
     add_books_discovering: bool,
@@ -1026,6 +1028,7 @@ pub struct State {
     reader_defaults: ReaderDefaults,
     pending_library_move: Option<LibraryMovePlan>,
     moving_library: bool,
+    managed_library_move_generation: u64,
     settings_error: Option<String>,
     storage_initializing: bool,
     storage_error: Option<AppError>,
@@ -1162,6 +1165,8 @@ pub fn boot() -> (State, Task<Message>) {
         book_menu: None,
         pending_remove_book: None,
         removing_book: None,
+        relink_generation: 0,
+        relinking_book: None,
         add_books_open: false,
         add_books_source: None,
         add_books_discovering: false,
@@ -1192,6 +1197,7 @@ pub fn boot() -> (State, Task<Message>) {
         reader_defaults: ReaderDefaults::default(),
         pending_library_move: None,
         moving_library: false,
+        managed_library_move_generation: 0,
         settings_error: None,
         storage_initializing: true,
         storage_error: None,
@@ -4622,19 +4628,20 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         if let Some(book_id) = state.missing_book_id {
-            let removing = state.removing_book == Some(book_id);
+            let busy = state.removing_book == Some(book_id)
+                || state.relinking_book.is_some_and(|(_, id)| id == book_id);
             alert = alert.push(widgets::primary_button(
                 state.i18n.text("locate-file"),
-                (!removing).then_some(Message::LocateBook(book_id)),
+                (!busy).then_some(Message::LocateBook(book_id)),
                 state.i18n.ui_font(),
             ));
             alert = alert.push(widgets::secondary_button(
-                state.i18n.text(if removing {
+                state.i18n.text(if busy {
                     "removing"
                 } else {
                     "remove-from-library"
                 }),
-                (!removing).then_some(Message::RemoveBook(book_id)),
+                (!busy).then_some(Message::RemoveBook(book_id)),
                 state.i18n.ui_font(),
             ));
         }
@@ -10840,6 +10847,58 @@ mod tests {
             state.add_books_source,
             Some(AddBooksSource::Folder(ref path)) if path == &PathBuf::from("newer")
         ));
+    }
+
+    #[tokio::test]
+    async fn active_relink_cannot_be_superseded_or_completed_by_a_stale_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.relink_generation = 2;
+        state.relinking_book = Some((2, 7));
+        state.missing_book_id = Some(7);
+
+        let locate = update(&mut state, Message::LocateBook(7));
+        assert_eq!(locate.units(), 0);
+        assert_eq!(state.relink_generation, 2);
+
+        let task = update(
+            &mut state,
+            Message::BookRelinked {
+                generation: 1,
+                result: Ok(test_book(7)),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.missing_book_id, Some(7));
+    }
+
+    #[test]
+    fn stale_managed_library_plan_cannot_replace_the_current_request() {
+        let (mut state, _) = boot();
+        state.managed_library_move_generation = 2;
+
+        let task = update(
+            &mut state,
+            Message::ManagedLibraryMovePlanned {
+                generation: 1,
+                destination: PathBuf::from("stale"),
+                result: Ok(ManagedStorageSummary {
+                    book_count: 1,
+                    total_bytes: 10,
+                }),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(state.pending_library_move.is_none());
     }
 
     #[test]
