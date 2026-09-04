@@ -1,5 +1,6 @@
 //! EPUB archive and retained-resource admission limits.
 
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
 use anyhow::{Context, Result};
@@ -27,7 +28,8 @@ pub struct EpubLimits {
     pub max_xml_depth: usize,
     /// Maximum presentation nodes admitted from an XML document.
     pub max_xml_nodes: usize,
-    /// Maximum native presentation nodes retained across all spine documents.
+    /// Maximum presentation units retained across all spine documents, including
+    /// content structures, anchor-map entries, and chapter presentation objects.
     pub max_total_presentation_nodes: usize,
     /// Maximum aggregate encoded text and CDATA bytes in an XML document.
     pub max_xml_text_bytes: u64,
@@ -85,6 +87,14 @@ pub struct EpubLimits {
     pub max_image_pixels: u64,
     /// Maximum estimated RGBA allocation for an admitted image.
     pub max_decoded_image_bytes: u64,
+    /// Maximum aggregate encoded path-data bytes in an SVG resource.
+    pub max_svg_path_data_bytes: usize,
+    /// Maximum aggregate path commands in an SVG resource.
+    pub max_svg_path_commands: usize,
+    /// Maximum number of SVG `<use>` references in one resource.
+    pub max_svg_use_references: usize,
+    /// Maximum number of SVG filter primitive elements in one resource.
+    pub max_svg_filter_primitives: usize,
 }
 
 impl Default for EpubLimits {
@@ -130,6 +140,10 @@ impl Default for EpubLimits {
             max_image_dimension: 16_384,
             max_image_pixels: 40_000_000,
             max_decoded_image_bytes: 160 * MIB,
+            max_svg_path_data_bytes: 4 * MIB as usize,
+            max_svg_path_commands: 500_000,
+            max_svg_use_references: 10_000,
+            max_svg_filter_primitives: 10_000,
         }
     }
 }
@@ -279,7 +293,7 @@ pub(crate) fn validate_resource(
     }
 
     if svg {
-        validate_svg_image_references(xml_text.expect("SVG was inspected as XML"), path)?;
+        validate_svg_complexity(xml_text.expect("SVG was inspected as XML"), path, limits)?;
         let (width, height) = svg_dimensions(bytes)
             .with_context(|| format!("EPUB SVG dimensions could not be bounded: {path}"))?;
         validate_image_dimensions(path, width, height, limits)?;
@@ -301,24 +315,281 @@ pub(crate) fn validate_resource(
     Ok(())
 }
 
-fn validate_svg_image_references(xml: &str, path: &str) -> Result<()> {
+fn validate_svg_complexity(xml: &str, path: &str, limits: &EpubLimits) -> Result<()> {
     let document = roxmltree::Document::parse(xml)
         .with_context(|| format!("failed to inspect EPUB SVG resource: {path}"))?;
+    let mut ids = HashMap::new();
     for element in document.descendants().filter(roxmltree::Node::is_element) {
-        if !matches!(element.tag_name().name(), "image" | "feImage") {
-            continue;
-        }
-        for href in element
-            .attributes()
-            .filter(|attribute| attribute.name() == "href")
+        let name = element.tag_name().name();
+        if let Some(id) = element.attribute("id")
+            && ids.insert(id.to_owned(), element).is_some()
         {
-            let reference = href.value();
-            if !reference.starts_with('#') || reference.len() == 1 {
-                anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
-            }
+            anyhow::bail!("EPUB SVG contains duplicate element ID: {path}");
+        }
+        if name == "use"
+            && let Some(reference) = svg_href(element)
+            && (!reference.starts_with('#') || reference.len() == 1)
+        {
+            anyhow::bail!("EPUB SVG contains unsafe external use reference: {path}");
+        }
+        if matches!(name, "image" | "feImage")
+            && let Some(reference) = svg_href(element)
+            && (!reference.starts_with('#') || reference.len() == 1)
+        {
+            anyhow::bail!("EPUB SVG contains unsafe external image reference: {path}");
+        }
+        if matches!(name, "feImage" | "textPath") && svg_href(element).is_some() {
+            anyhow::bail!("EPUB SVG contains unsupported indirect rendering reference: {path}");
+        }
+        if name == "style"
+            && element
+                .descendants()
+                .filter_map(|node| node.text())
+                .any(|css| css.to_ascii_lowercase().contains("url("))
+        {
+            anyhow::bail!("EPUB SVG contains unsupported stylesheet rendering reference: {path}");
+        }
+    }
+
+    let cost = expanded_svg_cost(
+        document.root_element(),
+        &ids,
+        &mut HashMap::new(),
+        &mut HashSet::new(),
+        path,
+    )?;
+    for (actual, limit, kind) in [
+        (
+            cost.geometry_bytes,
+            limits.max_svg_path_data_bytes,
+            "path data byte",
+        ),
+        (
+            cost.geometry_commands,
+            limits.max_svg_path_commands,
+            "path command",
+        ),
+        (
+            cost.use_references,
+            limits.max_svg_use_references,
+            "use reference",
+        ),
+        (
+            cost.filter_primitives,
+            limits.max_svg_filter_primitives,
+            "filter primitive",
+        ),
+    ] {
+        if actual > limit {
+            crate::resource_limit!(
+                "EPUB SVG resource exceeds {kind} limit: {path} ({actual} > {limit})"
+            );
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SvgCost {
+    geometry_bytes: usize,
+    geometry_commands: usize,
+    use_references: usize,
+    filter_primitives: usize,
+}
+
+impl SvgCost {
+    fn add(&mut self, other: Self) {
+        self.geometry_bytes = self.geometry_bytes.saturating_add(other.geometry_bytes);
+        self.geometry_commands = self
+            .geometry_commands
+            .saturating_add(other.geometry_commands);
+        self.use_references = self.use_references.saturating_add(other.use_references);
+        self.filter_primitives = self
+            .filter_primitives
+            .saturating_add(other.filter_primitives);
+    }
+}
+
+fn expanded_svg_cost<'a, 'input>(
+    element: roxmltree::Node<'a, 'input>,
+    ids: &HashMap<String, roxmltree::Node<'a, 'input>>,
+    memo: &mut HashMap<roxmltree::NodeId, SvgCost>,
+    visiting: &mut HashSet<roxmltree::NodeId>,
+    path: &str,
+) -> Result<SvgCost> {
+    if let Some(cost) = memo.get(&element.id()) {
+        return Ok(*cost);
+    }
+    if !visiting.insert(element.id()) {
+        crate::resource_limit!("EPUB SVG contains a cyclic rendering reference: {path}");
+    }
+
+    let name = element.tag_name().name();
+    let mut cost = SvgCost::default();
+    if name == "path" {
+        if let Some(data) = element.attribute("d") {
+            cost.geometry_bytes = data.len();
+            cost.geometry_commands = data
+                .bytes()
+                .filter(|byte| b"MmZzLlHhVvCcSsQqTtAa".contains(byte))
+                .count();
+        }
+    } else if matches!(name, "polygon" | "polyline") {
+        if let Some(points) = element.attribute("points") {
+            cost.geometry_bytes = points.len();
+            cost.geometry_commands = svg_number_count(points).div_ceil(2);
+        }
+    } else if name == "use" {
+        cost.use_references = 1;
+        if let Some(target) = svg_href(element)
+            .and_then(|reference| reference.strip_prefix('#'))
+            .and_then(|id| ids.get(id))
+        {
+            cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+        }
+    } else if name.starts_with("fe") {
+        cost.filter_primitives = 1;
+    }
+
+    for property in [
+        "filter",
+        "clip-path",
+        "mask",
+        "marker-start",
+        "marker-mid",
+        "marker-end",
+        "fill",
+        "stroke",
+    ] {
+        if let Some(value) = element.attribute(property) {
+            add_svg_rendering_reference(property, value, ids, memo, visiting, path, &mut cost)?;
+        }
+    }
+    if let Some(style) = element.attribute("style") {
+        for declaration in style.split(';') {
+            let Some((property, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            if matches!(
+                property.trim().to_ascii_lowercase().as_str(),
+                "filter"
+                    | "clip-path"
+                    | "mask"
+                    | "marker-start"
+                    | "marker-mid"
+                    | "marker-end"
+                    | "fill"
+                    | "stroke"
+            ) {
+                add_svg_rendering_reference(
+                    property.trim(),
+                    value,
+                    ids,
+                    memo,
+                    visiting,
+                    path,
+                    &mut cost,
+                )?;
+            }
+        }
+    }
+    if matches!(
+        name,
+        "filter" | "clipPath" | "mask" | "marker" | "pattern" | "linearGradient" | "radialGradient"
+    ) && let Some(reference) = svg_href(element)
+    {
+        let Some(id) = reference.strip_prefix('#').filter(|id| !id.is_empty()) else {
+            anyhow::bail!("EPUB SVG contains unsafe external rendering reference: {path}");
+        };
+        if let Some(target) = ids.get(id) {
+            cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+        }
+    }
+    for child in element.children().filter(roxmltree::Node::is_element) {
+        if svg_definition_container(child.tag_name().name()) {
+            continue;
+        }
+        cost.add(expanded_svg_cost(child, ids, memo, visiting, path)?);
+    }
+
+    visiting.remove(&element.id());
+    memo.insert(element.id(), cost);
+    Ok(cost)
+}
+
+fn svg_definition_container(name: &str) -> bool {
+    matches!(
+        name,
+        "defs"
+            | "symbol"
+            | "filter"
+            | "clipPath"
+            | "mask"
+            | "marker"
+            | "pattern"
+            | "linearGradient"
+            | "radialGradient"
+    )
+}
+
+fn add_svg_rendering_reference<'a, 'input>(
+    property: &str,
+    value: &str,
+    ids: &HashMap<String, roxmltree::Node<'a, 'input>>,
+    memo: &mut HashMap<roxmltree::NodeId, SvgCost>,
+    visiting: &mut HashSet<roxmltree::NodeId>,
+    path: &str,
+    cost: &mut SvgCost,
+) -> Result<()> {
+    let lowercase = value.to_ascii_lowercase();
+    let Some(start) = lowercase.find("url(") else {
+        return Ok(());
+    };
+    if matches!(
+        property.to_ascii_lowercase().as_str(),
+        "marker-start" | "marker-mid" | "marker-end"
+    ) {
+        anyhow::bail!("EPUB SVG contains unsupported marker rendering reference: {path}");
+    }
+    if lowercase[start + 4..].contains("url(") {
+        anyhow::bail!("EPUB SVG contains unsupported multiple rendering references: {path}");
+    }
+    let value = &value[start + 4..];
+    let Some(end) = value.find(')') else {
+        anyhow::bail!("EPUB SVG contains malformed rendering reference: {path}");
+    };
+    let reference = value[..end].trim().trim_matches(['\'', '"']);
+    let Some(id) = reference.strip_prefix('#').filter(|id| !id.is_empty()) else {
+        anyhow::bail!("EPUB SVG contains unsafe external rendering reference: {path}");
+    };
+    if let Some(target) = ids.get(id) {
+        cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+    }
+    Ok(())
+}
+
+fn svg_href<'a>(element: roxmltree::Node<'a, '_>) -> Option<&'a str> {
+    element
+        .attributes()
+        .find(|attribute| attribute.name() == "href")
+        .map(|attribute| attribute.value())
+}
+
+fn svg_number_count(value: &str) -> usize {
+    let mut count = 0_usize;
+    let mut previous: Option<u8> = None;
+    for byte in value.bytes() {
+        let starts_number = byte.is_ascii_digit() || byte == b'.';
+        if starts_number
+            && previous.is_none_or(|previous| {
+                !previous.is_ascii_digit() && !matches!(previous, b'.' | b'e' | b'E')
+            })
+        {
+            count = count.saturating_add(1);
+        }
+        previous = Some(byte);
+    }
+    count
 }
 
 pub(crate) fn validate_declared_resource_size(
@@ -786,5 +1057,220 @@ mod tests {
             &EpubLimits::default(),
         )
         .expect("internal fragment image references remain safe");
+    }
+
+    #[test]
+    fn svg_path_commands_are_bounded_even_in_one_node() {
+        let limits = EpubLimits {
+            max_svg_path_commands: 3,
+            ..EpubLimits::default()
+        };
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><path d="M0 0 L1 0 L1 1 L0 1 Z"/></svg>"#;
+
+        let error = validate_resource("Images/path.svg", "image/svg+xml", svg, &limits)
+            .expect_err("one path with excessive commands must be rejected before rendering");
+
+        assert!(error.is::<crate::application::ResourceLimitError>());
+        assert!(error.to_string().contains("path command limit"));
+    }
+
+    #[test]
+    fn svg_use_references_and_filter_primitives_have_independent_budgets() {
+        let cases = [
+            (
+                br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><g id="shape"/><use href="#shape"/><use href="#shape"/></svg>"##.as_slice(),
+                EpubLimits {
+                    max_svg_use_references: 1,
+                    ..EpubLimits::default()
+                },
+                "use reference limit",
+            ),
+            (
+                br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><filter id="fx"><feGaussianBlur/><feOffset/></filter></defs><rect filter="url(#fx)"/></svg>"##.as_slice(),
+                EpubLimits {
+                    max_svg_filter_primitives: 1,
+                    ..EpubLimits::default()
+                },
+                "filter primitive limit",
+            ),
+        ];
+
+        for (svg, limits, expected) in cases {
+            let error = validate_resource("Images/complex.svg", "image/svg+xml", svg, &limits)
+                .expect_err("excess SVG renderer work must be rejected");
+            assert!(error.is::<crate::application::ResourceLimitError>());
+            assert!(error.to_string().contains(expected), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn svg_polygon_points_count_as_renderer_geometry() {
+        let limits = EpubLimits {
+            max_svg_path_commands: 2,
+            ..EpubLimits::default()
+        };
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><polygon points="0,0 1,0 1,1"/></svg>"#;
+
+        let error = validate_resource("Images/polygon.svg", "image/svg+xml", svg, &limits)
+            .expect_err("polygon points must count toward renderer work");
+        assert!(error.to_string().contains("path command limit"));
+    }
+
+    #[test]
+    fn svg_use_expansion_counts_referenced_subtrees() {
+        let limits = EpubLimits {
+            max_svg_path_commands: 2,
+            ..EpubLimits::default()
+        };
+        let admitted = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><g id="shape"><path d="M0 0"/></g></defs><use href="#shape"/><use href="#shape"/></svg>"##;
+        validate_resource("Images/reused.svg", "image/svg+xml", admitted, &limits)
+            .expect("definition geometry must count only when each use renders it");
+
+        let rejected = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><g id="shape"><path d="M0 0"/></g></defs><use href="#shape"/><use href="#shape"/><use href="#shape"/></svg>"##;
+
+        let error = validate_resource("Images/reused.svg", "image/svg+xml", rejected, &limits)
+            .expect_err("repeated use references must charge expanded geometry");
+        assert!(error.to_string().contains("path command limit"));
+    }
+
+    #[test]
+    fn unused_svg_definitions_do_not_consume_render_work() {
+        let limits = EpubLimits {
+            max_svg_path_commands: 1,
+            max_svg_filter_primitives: 1,
+            ..EpubLimits::default()
+        };
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><path d="M0 0 L1 1 L2 2"/><filter><feGaussianBlur/><feOffset/></filter></defs><path d="M0 0"/></svg>"#;
+
+        validate_resource("Images/unused.svg", "image/svg+xml", svg, &limits)
+            .expect("unreferenced definition trees are not rendered");
+    }
+
+    #[test]
+    fn svg_use_cycles_are_rejected() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></defs><use href="#a"/></svg>"##;
+
+        let error = validate_resource(
+            "Images/cycle.svg",
+            "image/svg+xml",
+            svg,
+            &EpubLimits::default(),
+        )
+        .expect_err("cyclic use expansion must be rejected before rendering");
+        assert!(error.to_string().contains("cyclic rendering reference"));
+    }
+
+    #[test]
+    fn svg_filter_reuse_charges_each_application() {
+        let limits = EpubLimits {
+            max_svg_filter_primitives: 2,
+            ..EpubLimits::default()
+        };
+        let admitted = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><filter id="fx"><feGaussianBlur/></filter></defs><rect filter="url(#fx)"/><circle style="filter: url('#fx')"/></svg>"##;
+        validate_resource("Images/filter.svg", "image/svg+xml", admitted, &limits)
+            .expect("each filter application should consume exactly its expanded work");
+
+        let rejected = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><filter id="fx"><feGaussianBlur/></filter></defs><rect filter="url(#fx)"/><circle style="filter:url(#fx)"/><path filter="url(#fx)"/></svg>"##;
+
+        let error = validate_resource("Images/filter.svg", "image/svg+xml", rejected, &limits)
+            .expect_err("each filter application must charge its referenced primitives");
+        assert!(error.to_string().contains("filter primitive limit"));
+    }
+
+    #[test]
+    fn svg_clip_marker_and_pattern_reuse_charge_expanded_geometry() {
+        for (property, definition) in [
+            (
+                "clip-path",
+                r#"<clipPath id="resource"><path d="M0 0"/></clipPath>"#,
+            ),
+            (
+                "fill",
+                r#"<pattern id="resource"><path d="M0 0"/></pattern>"#,
+            ),
+        ] {
+            let limits = EpubLimits {
+                max_svg_path_commands: 2,
+                ..EpubLimits::default()
+            };
+            let svg = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs>{definition}</defs><rect style="{property}:url(#resource)"/><rect {property}="url(#resource)"/><rect {property}="url(#resource)"/></svg>"##
+            );
+
+            let error = validate_resource(
+                "Images/resource.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &limits,
+            )
+            .expect_err("each reusable paint resource must charge expanded geometry");
+            assert!(error.to_string().contains("path command limit"));
+        }
+    }
+
+    #[test]
+    fn svg_multiplicative_marker_references_are_rejected() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><marker id="resource"><path d="M0 0"/></marker></defs><path d="M0 0 L1 1 L2 2 L3 3" marker-mid="url(#resource)"/></svg>"##;
+
+        let error = validate_resource(
+            "Images/marker.svg",
+            "image/svg+xml",
+            svg,
+            &EpubLimits::default(),
+        )
+        .expect_err("per-vertex marker expansion must not bypass renderer-work admission");
+        assert!(error.to_string().contains("unsupported marker"));
+    }
+
+    #[test]
+    fn svg_multiple_filter_references_are_rejected() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><filter id="a"><feOffset/></filter><filter id="b"><feGaussianBlur/></filter></defs><rect filter="url(#a) url(#b)"/></svg>"##;
+
+        let error = validate_resource(
+            "Images/filters.svg",
+            "image/svg+xml",
+            svg,
+            &EpubLimits::default(),
+        )
+        .expect_err("filter lists must not bypass reference-graph accounting");
+        assert!(error.to_string().contains("unsupported multiple"));
+    }
+
+    #[test]
+    fn svg_indirect_image_and_text_path_references_are_rejected() {
+        for element in [
+            r##"<filter><feImage href="#resource"/></filter>"##,
+            r##"<text><textPath href="#resource">text</textPath></text>"##,
+        ] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs><path id="resource" d="M0 0 L1 1 L2 2"/></defs>{element}</svg>"#
+            );
+            let error = validate_resource(
+                "Images/indirect.svg",
+                "image/svg+xml",
+                svg.as_bytes(),
+                &EpubLimits::default(),
+            )
+            .expect_err("indirect renderer edges must not bypass geometry accounting");
+            assert!(error.to_string().contains("unsupported indirect"));
+        }
+    }
+
+    #[test]
+    fn svg_stylesheet_rendering_references_are_rejected() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><style>.painted { fill: url(#resource) }</style><defs><pattern id="resource"><path d="M0 0"/></pattern></defs><rect class="painted"/></svg>"##;
+
+        let error = validate_resource(
+            "Images/stylesheet.svg",
+            "image/svg+xml",
+            svg,
+            &EpubLimits::default(),
+        )
+        .expect_err("indirect stylesheet references cannot bypass render-work accounting");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported stylesheet rendering reference")
+        );
     }
 }

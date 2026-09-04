@@ -167,6 +167,10 @@ impl CacheBudget {
         self.0.used.load(Ordering::Acquire)
     }
 
+    pub fn limit(&self) -> usize {
+        self.0.limit
+    }
+
     pub fn try_reserve(&self, weight: usize) -> Option<CachePermit> {
         let result = self
             .0
@@ -184,12 +188,16 @@ impl CacheBudget {
         })
     }
 
-    fn try_reserve_replacing<'a>(
+    fn try_reserve_replacing_refs<'a>(
         &self,
         weight: usize,
         replaced: impl IntoIterator<Item = &'a CachePermit>,
     ) -> Option<CachePermit> {
-        let replaced = replaced.into_iter().collect::<Vec<_>>();
+        let mut seen = std::collections::HashSet::new();
+        let replaced = replaced
+            .into_iter()
+            .filter(|permit| seen.insert(Arc::as_ptr(&permit.0)))
+            .collect::<Vec<_>>();
         let releasable = replaced
             .iter()
             .filter(|permit| Arc::strong_count(&permit.0) == 1)
@@ -209,6 +217,59 @@ impl CacheBudget {
             }
         }
         Some(CachePermit(Arc::new(CacheReservation {
+            budget: Arc::clone(&self.0),
+            weight,
+            active: AtomicBool::new(true),
+        })))
+    }
+
+    /// Atomically exchange uniquely owned reservations for one new reservation.
+    ///
+    /// Ownership prevents another thread from cloning a reservation between
+    /// accounting and deactivation. On failure all original permits are returned.
+    pub fn try_reserve_replacing(
+        &self,
+        weight: usize,
+        replaced: Vec<CachePermit>,
+    ) -> Result<CachePermit, Vec<CachePermit>> {
+        if replaced
+            .iter()
+            .any(|permit| !Arc::ptr_eq(&permit.0.budget, &self.0))
+        {
+            return Err(replaced);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let releasable_reservations = replaced
+            .iter()
+            .filter(|permit| {
+                seen.insert(Arc::as_ptr(&permit.0)) && Arc::strong_count(&permit.0) == 1
+            })
+            .map(|permit| Arc::as_ptr(&permit.0))
+            .collect::<std::collections::HashSet<_>>();
+        let releasable = replaced
+            .iter()
+            .filter(|permit| releasable_reservations.contains(&Arc::as_ptr(&permit.0)))
+            .map(CachePermit::weight)
+            .sum::<usize>();
+        if self
+            .0
+            .used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_sub(releasable)?
+                    .checked_add(weight)
+                    .filter(|total| *total <= self.0.limit)
+            })
+            .is_err()
+        {
+            return Err(replaced);
+        }
+        for permit in &replaced {
+            if releasable_reservations.contains(&Arc::as_ptr(&permit.0)) {
+                permit.0.active.store(false, Ordering::Release);
+            }
+        }
+        drop(replaced);
+        Ok(CachePermit(Arc::new(CacheReservation {
             budget: Arc::clone(&self.0),
             weight,
             active: AtomicBool::new(true),
@@ -318,7 +379,7 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
             };
             remove[position] = true;
         }
-        let Some(reservation) = self.budget.try_reserve_replacing(
+        let Some(reservation) = self.budget.try_reserve_replacing_refs(
             weight,
             self.entries
                 .iter()
@@ -472,6 +533,48 @@ mod tests {
         );
         assert_eq!(cache.retained_weight(), 6);
         drop(clone);
+    }
+
+    #[test]
+    fn owned_replacement_cannot_double_count_duplicate_permits() {
+        let budget = CacheBudget::new(12);
+        let permit = budget.try_reserve(6).unwrap();
+        let duplicates = vec![permit.clone(), permit.clone()];
+
+        let returned = budget
+            .try_reserve_replacing(7, duplicates)
+            .expect_err("duplicate aliases must not count as two released reservations");
+        assert_eq!(budget.used(), 6);
+        drop(returned);
+        assert_eq!(budget.used(), 6);
+        drop(permit);
+        assert_eq!(budget.used(), 0);
+
+        let permit = budget.try_reserve(6).unwrap();
+        let replacement = budget
+            .try_reserve_replacing(12, vec![permit])
+            .expect("a uniquely owned permit can be transferred atomically");
+        assert_eq!(budget.used(), 12);
+        drop(replacement);
+        assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
+    fn owned_replacement_rejects_permits_from_another_budget() {
+        let first_budget = CacheBudget::new(12);
+        let second_budget = CacheBudget::new(12);
+        let first_permit = first_budget.try_reserve(4).unwrap();
+        let second_permit = second_budget.try_reserve(5).unwrap();
+
+        let returned = first_budget
+            .try_reserve_replacing(6, vec![first_permit, second_permit])
+            .expect_err("permits from another budget must be rejected");
+
+        assert_eq!(first_budget.used(), 4);
+        assert_eq!(second_budget.used(), 5);
+        drop(returned);
+        assert_eq!(first_budget.used(), 0);
+        assert_eq!(second_budget.used(), 0);
     }
 
     #[test]

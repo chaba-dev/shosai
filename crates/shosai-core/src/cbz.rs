@@ -55,19 +55,49 @@ pub struct CbzDoc {
 }
 
 impl CbzDoc {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        let names = self
+            .page_paths
+            .iter()
+            .try_fold(0_usize, |total, path| total.checked_add(path.capacity()))?;
+        self.data
+            .capacity()
+            .checked_add(names)?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<String>())?,
+            )?
+            .checked_add(
+                self.page_byte_lengths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<usize>())?,
+            )?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<Option<(u32, u32)>>())?,
+            )?
+            .checked_add(self.title.as_ref().map_or(0, String::capacity))
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limits(path, CbzLimits::default())
     }
 
     pub fn open_with_limits(path: impl AsRef<Path>, limits: CbzLimits) -> Result<Self> {
         let path = path.as_ref();
-        let metadata = std::fs::metadata(path)
+        let mut file = std::fs::File::open(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let metadata = file
+            .metadata()
             .with_context(|| format!("failed to inspect {}", path.display()))?;
         if metadata.len() > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
-        let data =
-            std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let data = read_cbz_snapshot(&mut file, metadata.len(), limits.max_archive_bytes)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
         Self::from_bytes_with_title(data, title, limits)
     }
@@ -161,11 +191,17 @@ impl CbzDoc {
         self.page_byte_lengths.get(index).copied()
     }
 
-    /// Worst-case compressed-source plus temporary decode/resize allocation.
+    /// Worst-case source and decode admission used by non-rendering callers.
     pub fn render_admission_byte_len(&self, index: usize) -> Option<usize> {
         let source = self.page_source_byte_len(index)?;
         let decoded = usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?;
         source.checked_add(decoded.checked_mul(2)?)
+    }
+
+    /// Compressed source plus conservative temporary decode/resize allocation.
+    pub fn render_admission_byte_len_at_scale(&self, index: usize, scale: f32) -> Option<usize> {
+        let source = self.page_source_byte_len(index)?;
+        source.checked_add(self.render_transient_byte_len(index, scale)?)
     }
 
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
@@ -263,16 +299,8 @@ impl CbzDoc {
             .cached_dimensions(index)
             .map(Ok)
             .unwrap_or_else(|| self.inspect_dimensions(index, &bytes))?;
-        let scaled_width = (width as f64 * f64::from(scale)).floor();
-        let scaled_height = (height as f64 * f64::from(scale)).floor();
-        if scaled_width > f64::from(u32::MAX) || scaled_height > f64::from(u32::MAX) {
-            anyhow::bail!("scaled image dimensions overflow");
-        }
-        let new_width = scaled_width as u32;
-        let new_height = scaled_height as u32;
-        if new_width == 0 || new_height == 0 {
-            anyhow::bail!("scaled image dimensions must be positive");
-        }
+        let (new_width, new_height) = scaled_dimensions(width, height, scale)
+            .context("scaled image dimensions must be finite, positive, and in range")?;
         self.validate_dimensions(new_width, new_height)?;
         let mut reader = image::ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
@@ -286,7 +314,7 @@ impl CbzDoc {
             .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
-            img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
+            img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
         } else {
             img
         };
@@ -304,6 +332,19 @@ impl CbzDoc {
         Ok((width as f32, height as f32))
     }
 
+    /// Exact byte length of the final RGBA render buffer.
+    pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
+        let (width, height) = self.dimensions(index)?;
+        let (width, height) = scaled_dimensions(width, height, scale)
+            .context("scaled image dimensions must be finite, positive, and in range")?;
+        self.validate_dimensions(width, height)?;
+        usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(usize::try_from(height).ok()?))
+            .and_then(|pixels| pixels.checked_mul(4))
+            .context("rendered image byte length overflow")
+    }
+
     /// Conservative temporary allocation charge for decoding and resizing a page.
     /// The final RGBA output is accounted separately by the caller.
     pub fn render_transient_byte_len(&self, index: usize, scale: f32) -> Option<usize> {
@@ -311,23 +352,16 @@ impl CbzDoc {
             return None;
         }
         let (width, height) = self.cached_dimensions(index)?;
-        let target_width = (f64::from(width) * f64::from(scale)).floor();
-        let target_height = (f64::from(height) * f64::from(scale)).floor();
-        if !target_width.is_finite()
-            || !target_height.is_finite()
-            || target_width < 1.0
-            || target_height < 1.0
-            || target_width > f64::from(u32::MAX)
-            || target_height > f64::from(u32::MAX)
-        {
-            return None;
-        }
-        let resized = (target_width as usize)
-            .checked_mul(target_height as usize)?
-            .checked_mul(4)?;
-        usize::try_from(self.limits.max_decoded_rgba_bytes)
+        let (target_width, target_height) = scaled_dimensions(width, height, scale)?;
+        let decoded = usize::try_from(width)
             .ok()?
-            .checked_add(resized)
+            .checked_mul(usize::try_from(height).ok()?)?
+            .checked_mul(4)?;
+        let resized = usize::try_from(target_width)
+            .ok()?
+            .checked_mul(usize::try_from(target_height).ok()?)?
+            .checked_mul(4)?;
+        decoded.checked_add(resized)
     }
 
     /// Return dimensions already discovered by a prior size query or render.
@@ -362,9 +396,66 @@ impl CbzDoc {
     }
 }
 
+fn scaled_dimensions(width: u32, height: u32, scale: f32) -> Option<(u32, u32)> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    if (scale - 1.0).abs() <= f32::EPSILON {
+        return Some((width, height));
+    }
+    let width = (f64::from(width) * f64::from(scale)).floor();
+    let height = (f64::from(height) * f64::from(scale)).floor();
+    if !width.is_finite()
+        || !height.is_finite()
+        || width < 1.0
+        || height < 1.0
+        || width > f64::from(u32::MAX)
+        || height > f64::from(u32::MAX)
+    {
+        return None;
+    }
+    Some((width as u32, height as u32))
+}
+
+fn read_cbz_snapshot(
+    reader: impl Read,
+    expected_bytes: u64,
+    max_archive_bytes: u64,
+) -> Result<Vec<u8>> {
+    let mut data = Vec::with_capacity(
+        usize::try_from(expected_bytes.min(max_archive_bytes)).unwrap_or_default(),
+    );
+    reader
+        .take(max_archive_bytes.saturating_add(1))
+        .read_to_end(&mut data)?;
+    let actual_bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
+    if actual_bytes > max_archive_bytes {
+        crate::resource_limit!("CBZ archive exceeds encoded byte limit");
+    }
+    if actual_bytes != expected_bytes {
+        anyhow::bail!(
+            "CBZ changed while reading (expected {expected_bytes} bytes, read {actual_bytes})"
+        );
+    }
+    Ok(data)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cbz_snapshot_rejects_growth_and_truncation() {
+        let growth = read_cbz_snapshot(&b"four"[..], 3, 3).unwrap_err();
+        assert!(
+            growth
+                .downcast_ref::<crate::application::ResourceLimitError>()
+                .is_some()
+        );
+
+        let truncation = read_cbz_snapshot(&b"two"[..], 4, 4).unwrap_err();
+        assert!(truncation.to_string().contains("changed while reading"));
+    }
 
     #[test]
     fn test_image_extensions() {

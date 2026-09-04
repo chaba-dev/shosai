@@ -1,5 +1,8 @@
 //! EPUB-specific pagination models and renderer-neutral page geometry helpers.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::render::{ContentNode, TableRow, TableRowGroup};
 use super::{
     EpubDoc, EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest,
@@ -25,10 +28,63 @@ const MIN_EPUB_TABLE_CELL_WIDTH: f32 = 120.0;
 const MAX_EPUB_TABLE_WIDTH: f32 = 4_096.0;
 const MAX_EPUB_TABLE_COLUMNS: usize = 256;
 const EPUB_PAGINATION_SHAPE_CHUNK: usize = 4 * 1024;
+const EPUB_PAGINATION_LOOP_CHUNK: usize = 64;
 
 #[cfg(test)]
 thread_local! {
     static TABLE_PLACEMENT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TABLE_CELL_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TABLE_CANCEL_AFTER_VISITS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static TABLE_CELL_INTERNAL_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static TABLE_CANCEL_AFTER_INTERNAL_VISITS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn table_cell_checkpoint(
+    cancellation: Option<&EpubPaginationCancellation>,
+    cell_index: usize,
+) -> bool {
+    #[cfg(test)]
+    TABLE_CELL_VISITS.with(|visits| {
+        let visited = visits.get() + 1;
+        visits.set(visited);
+        TABLE_CANCEL_AFTER_VISITS.with(|limit| {
+            if limit.get().is_some_and(|limit| visited >= limit)
+                && let Some(cancellation) = cancellation
+            {
+                cancellation.cancel();
+            }
+        });
+    });
+    !cell_index.is_multiple_of(EPUB_PAGINATION_LOOP_CHUNK)
+        || cancellation.is_none_or(|cancellation| !cancellation.is_cancelled())
+}
+
+fn table_row_checkpoint(
+    cancellation: Option<&EpubPaginationCancellation>,
+    row_index: usize,
+) -> bool {
+    !row_index.is_multiple_of(EPUB_PAGINATION_LOOP_CHUNK)
+        || cancellation.is_none_or(|cancellation| !cancellation.is_cancelled())
+}
+
+fn table_cell_internal_checkpoint(
+    cancellation: Option<&EpubPaginationCancellation>,
+    index: usize,
+) -> bool {
+    #[cfg(test)]
+    TABLE_CELL_INTERNAL_VISITS.with(|visits| {
+        let visited = visits.get() + 1;
+        visits.set(visited);
+        TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| {
+            if limit.get().is_some_and(|limit| visited >= limit)
+                && let Some(cancellation) = cancellation
+            {
+                cancellation.cancel();
+            }
+        });
+    });
+    !index.is_multiple_of(EPUB_PAGINATION_LOOP_CHUNK)
+        || cancellation.is_none_or(|cancellation| !cancellation.is_cancelled())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -47,12 +103,27 @@ type Size = LayoutSize;
 
 pub struct EpubPaginationBudget {
     remaining_page_breaks: usize,
+    cancellation: Option<EpubPaginationCancellation>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EpubPaginationCancellation(Arc<AtomicBool>);
+
+impl EpubPaginationCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 impl Default for EpubPaginationBudget {
     fn default() -> Self {
         Self {
             remaining_page_breaks: MAX_EPUB_PAGES - 1,
+            cancellation: None,
         }
     }
 }
@@ -61,7 +132,19 @@ impl EpubPaginationBudget {
     pub fn for_document(chapters: usize) -> Self {
         Self {
             remaining_page_breaks: MAX_EPUB_PAGES.saturating_sub(chapters),
+            cancellation: None,
         }
+    }
+
+    pub fn with_cancellation(mut self, cancellation: EpubPaginationCancellation) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(EpubPaginationCancellation::is_cancelled)
     }
 }
 
@@ -591,6 +674,9 @@ pub fn paginate_epub_chapter_with_budget(
     let mut text_offset = 0;
 
     for (node_index, node) in nodes.iter().enumerate() {
+        if budget.is_cancelled() {
+            return Vec::new();
+        }
         let block_before = if node_index == 0 {
             epub_node_boundary_spacing(nodes, 0, font_size, default_block_spacing)
         } else {
@@ -742,6 +828,9 @@ pub fn paginate_epub_chapter_with_budget(
                 .floor()
                 .max(1.0) as usize;
                 while cursor.remaining() > 0 {
+                    if budget.is_cancelled() {
+                        return Vec::new();
+                    }
                     let mut at_page_limit = false;
                     if remaining < text_line_height + block_spacing
                         && page_has_content(&pages, first_page_has_title)
@@ -768,9 +857,13 @@ pub fn paginate_epub_chapter_with_budget(
                         } else {
                             paragraph_chars_per_line * available_lines
                         };
-                        let take = cursor.split_length(available_chars);
+                        let Some(take) = cursor.split_length(available_chars, budget) else {
+                            return Vec::new();
+                        };
                         let mut preview = cursor.clone();
-                        let chunk = preview.take(take);
+                        let Some(chunk) = preview.take(take, budget) else {
+                            return Vec::new();
+                        };
                         let trailing_spacing = if take == cursor.remaining() {
                             block_spacing
                         } else {
@@ -806,7 +899,9 @@ pub fn paginate_epub_chapter_with_budget(
                         continue;
                     }
                     let consumed = cursor.consumed();
-                    let chunk = cursor.take(take);
+                    let Some(chunk) = cursor.take(take, budget) else {
+                        return Vec::new();
+                    };
                     let mut fragment_style = style.clone();
                     if consumed > 0 {
                         fragment_style.block_before_em = Some(0.0);
@@ -873,36 +968,44 @@ pub fn paginate_epub_chapter_with_budget(
                     consumed += chunk_len;
                 }
             }
-            ContentNode::UnorderedList(items) => paginate_epub_list(
-                items,
-                None,
-                text_offset,
-                chars_per_line,
-                font_size,
-                line_spacing,
-                page_size.height,
-                page_size.width,
-                fonts,
-                first_page_has_title,
-                &mut pages,
-                &mut remaining,
-                budget,
-            ),
-            ContentNode::OrderedList { items, start } => paginate_epub_list(
-                items,
-                Some(*start),
-                text_offset,
-                chars_per_line,
-                font_size,
-                line_spacing,
-                page_size.height,
-                page_size.width,
-                fonts,
-                first_page_has_title,
-                &mut pages,
-                &mut remaining,
-                budget,
-            ),
+            ContentNode::UnorderedList(items) => {
+                if !paginate_epub_list(
+                    items,
+                    None,
+                    text_offset,
+                    chars_per_line,
+                    font_size,
+                    line_spacing,
+                    page_size.height,
+                    page_size.width,
+                    fonts,
+                    first_page_has_title,
+                    &mut pages,
+                    &mut remaining,
+                    budget,
+                ) {
+                    return Vec::new();
+                }
+            }
+            ContentNode::OrderedList { items, start } => {
+                if !paginate_epub_list(
+                    items,
+                    Some(*start),
+                    text_offset,
+                    chars_per_line,
+                    font_size,
+                    line_spacing,
+                    page_size.height,
+                    page_size.width,
+                    fonts,
+                    first_page_has_title,
+                    &mut pages,
+                    &mut remaining,
+                    budget,
+                ) {
+                    return Vec::new();
+                }
+            }
             ContentNode::BlockQuote { children, style } => {
                 let node_height =
                     measured_epub_compact_node_height(fonts, node, font_size, page_size.width)
@@ -950,15 +1053,18 @@ pub fn paginate_epub_chapter_with_budget(
                         if !page_has_content(&pages, first_page_has_title) {
                             (Vec::new(), children.to_vec(), 0.0, 0)
                         } else {
-                            split_epub_blockquote_prefix(
+                            match split_epub_blockquote_prefix(
                                 children,
                                 available_height,
-                                chars_per_line,
                                 lines_per_page,
                                 font_size,
                                 blockquote_width(page_size.width, font_size, style),
                                 fonts,
-                            )
+                                budget,
+                            ) {
+                                Some(split) => split,
+                                None => return Vec::new(),
+                            }
                         };
                     if !prefix.is_empty() {
                         let mut fragment_style = style.clone();
@@ -1002,6 +1108,9 @@ pub fn paginate_epub_chapter_with_budget(
                                 fonts,
                                 budget,
                             );
+                            if budget.is_cancelled() {
+                                return Vec::new();
+                            }
                             let child_page_count = child_pages.len();
                             for (index, child_page) in child_pages.into_iter().enumerate() {
                                 if index > 0 {
@@ -1072,15 +1181,18 @@ pub fn paginate_epub_chapter_with_budget(
                         if !page_has_content(&pages, first_page_has_title) {
                             (Vec::new(), children.to_vec(), 0.0, 0)
                         } else {
-                            split_epub_blockquote_prefix(
+                            match split_epub_blockquote_prefix(
                                 children,
                                 available_height,
-                                chars_per_line,
                                 lines_per_page,
                                 font_size,
                                 figure_width,
                                 fonts,
-                            )
+                                budget,
+                            ) {
+                                Some(split) => split,
+                                None => return Vec::new(),
+                            }
                         };
                     if !prefix.is_empty() {
                         let mut fragment_style = style.clone();
@@ -1124,6 +1236,9 @@ pub fn paginate_epub_chapter_with_budget(
                                 fonts,
                                 budget,
                             );
+                            if budget.is_cancelled() {
+                                return Vec::new();
+                            }
                             let child_page_count = child_pages.len();
                             for (index, child_page) in child_pages.into_iter().enumerate() {
                                 if index > 0 {
@@ -1230,22 +1345,26 @@ pub fn paginate_epub_chapter_with_budget(
                 });
                 remaining = (remaining - node_height).max(0.0);
             }
-            ContentNode::Table { .. } => paginate_epub_table(
-                node,
-                text_offset,
-                chars_per_line,
-                lines_per_page,
-                font_size,
-                page_size.width,
-                page_size.height,
-                block_before,
-                block_spacing,
-                first_page_has_title,
-                &mut pages,
-                &mut remaining,
-                fonts,
-                budget,
-            ),
+            ContentNode::Table { .. } => {
+                if !paginate_epub_table(
+                    node,
+                    text_offset,
+                    chars_per_line,
+                    lines_per_page,
+                    font_size,
+                    page_size.width,
+                    page_size.height,
+                    block_before,
+                    block_spacing,
+                    first_page_has_title,
+                    &mut pages,
+                    &mut remaining,
+                    fonts,
+                    budget,
+                ) {
+                    return Vec::new();
+                }
+            }
             _ => {
                 let node_height = measured_epub_compact_node_height_bounded(
                     fonts,
@@ -1286,7 +1405,17 @@ pub fn paginate_epub_chapter_with_budget(
     if pages.len() > 1 && pages.last().is_some_and(Vec::is_empty) {
         pages.pop();
     }
-    assign_paginated_block_geometry(nodes, font_size, default_block_spacing, &mut pages);
+    if budget.is_cancelled()
+        || !assign_paginated_block_geometry(
+            nodes,
+            font_size,
+            default_block_spacing,
+            &mut pages,
+            budget,
+        )
+    {
+        return Vec::new();
+    }
     pages
 }
 
@@ -1301,6 +1430,33 @@ pub fn paginate_document(
     let mut budget = EpubPaginationBudget::for_document(chapters.len());
     for chapter in 0..chapters.len() {
         if pages.len() >= MAX_EPUB_PAGES {
+            break;
+        }
+        pages.extend(paginate_document_chapter(
+            document,
+            chapter,
+            font_size,
+            line_spacing,
+            page_size,
+            &mut budget,
+        ));
+    }
+    pages
+}
+
+pub fn paginate_document_cancellable(
+    document: &EpubDoc,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: LayoutSize,
+    cancellation: EpubPaginationCancellation,
+) -> Vec<Page> {
+    let mut pages = Vec::new();
+    let chapters = document.presentation().chapters();
+    let mut budget =
+        EpubPaginationBudget::for_document(chapters.len()).with_cancellation(cancellation);
+    for chapter in 0..chapters.len() {
+        if budget.is_cancelled() || pages.len() >= MAX_EPUB_PAGES {
             break;
         }
         pages.extend(paginate_document_chapter(
@@ -1362,16 +1518,23 @@ fn assign_paginated_block_geometry(
     font_size: f32,
     default_spacing: f32,
     pages: &mut [PageNodes],
-) {
+    budget: &EpubPaginationBudget,
+) -> bool {
     let mut starts = Vec::with_capacity(nodes.len());
     let mut offset = 0;
-    for node in nodes {
+    for (index, node) in nodes.iter().enumerate() {
+        if index % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+            return false;
+        }
         starts.push(offset);
         offset += content_node_text_len(node) + 1;
     }
     let mut fragments = vec![Vec::<(usize, usize)>::new(); nodes.len()];
     for (page_index, page) in pages.iter_mut().enumerate() {
         for (fragment_index, fragment) in page.iter_mut().enumerate() {
+            if fragment_index % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+                return false;
+            }
             fragment.block_before = 0.0;
             fragment.block_after = 0.0;
             let original = starts
@@ -1388,6 +1551,9 @@ fn assign_paginated_block_geometry(
             epub_node_boundary_spacing(nodes, 0, font_size, default_spacing);
     }
     for boundary in 1..nodes.len() {
+        if boundary % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+            return false;
+        }
         let Some(&(left_page, left_fragment)) = fragments[boundary - 1].last() else {
             continue;
         };
@@ -1403,6 +1569,7 @@ fn assign_paginated_block_geometry(
         pages[page][fragment].block_after =
             epub_node_boundary_spacing(nodes, nodes.len(), font_size, default_spacing);
     }
+    !budget.is_cancelled()
 }
 
 fn scaled_characters_per_line(chars_per_line: usize, scale: f32) -> usize {
@@ -1410,7 +1577,7 @@ fn scaled_characters_per_line(chars_per_line: usize, scale: f32) -> usize {
 }
 
 fn push_epub_page(pages: &mut Vec<PageNodes>, budget: &mut EpubPaginationBudget) -> bool {
-    if budget.remaining_page_breaks == 0 {
+    if budget.is_cancelled() || budget.remaining_page_breaks == 0 {
         return false;
     }
     budget.remaining_page_breaks -= 1;
@@ -1438,7 +1605,7 @@ fn paginate_epub_table(
     remaining: &mut f32,
     fonts: Option<&EpubFontBook>,
     budget: &mut EpubPaginationBudget,
-) {
+) -> bool {
     let ContentNode::Table {
         caption,
         caption_style,
@@ -1450,7 +1617,7 @@ fn paginate_epub_table(
     };
     if row_groups.is_empty() {
         if caption.is_empty() {
-            return;
+            return true;
         }
         if page_has_content(pages, first_page_has_title) && push_epub_page(pages, budget) {
             *remaining = (page_height - leading_spacing).max(0.0);
@@ -1491,7 +1658,7 @@ fn paginate_epub_table(
                 }));
         }
         *remaining = 0.0;
-        return;
+        return !budget.is_cancelled();
     }
     let mut fragment_offset = text_offset;
     let mut include_caption = !caption.is_empty();
@@ -1500,25 +1667,19 @@ fn paginate_epub_table(
     let mut pending_source_group = None;
     let mut fragment_capacity = *remaining;
     let mut page_budget_exhausted = false;
-    let bands = row_groups
-        .iter()
-        .enumerate()
-        .flat_map(|(group_index, group)| {
-            table_row_bands(&group.rows)
+    let mut bands = Vec::new();
+    for (group_index, group) in row_groups.iter().enumerate() {
+        let Some(group_bands) = table_row_bands(&group.rows, budget) else {
+            return false;
+        };
+        bands.extend(
+            group_bands
                 .into_iter()
-                .map(move |rows| (group_index, group.kind, rows))
-        })
-        .collect::<Vec<_>>();
-    let compact_height = |node: &ContentNode, maximum_height: f32| -> f32 {
-        let estimated = estimated_epub_compact_node_height_bounded(
-            node,
-            chars_per_line,
-            lines_per_page,
-            font_size,
-            page_width,
-            maximum_height,
-            Some(page_height),
+                .map(|rows| (group_index, group.kind, rows)),
         );
+    }
+    let cancellation = budget.cancellation.clone();
+    let compact_height = |node: &ContentNode, maximum_height: f32| -> Option<f32> {
         let ContentNode::Table {
             caption,
             caption_style,
@@ -1526,13 +1687,25 @@ fn paginate_epub_table(
             style,
         } = node
         else {
-            return estimated;
+            return Some(estimated_epub_compact_node_height_bounded(
+                node,
+                chars_per_line,
+                lines_per_page,
+                font_size,
+                page_width,
+                maximum_height,
+                Some(page_height),
+            ));
         };
         let table_width = epub_table_layout_width(row_groups, style, page_width);
         let content_width = epub_table_content_width(style, table_width, page_width, font_size);
-        let placements = epub_table_cell_placements(row_groups);
-        let column_widths =
-            epub_table_column_widths_from_placements(row_groups, content_width, &placements);
+        let placements = epub_table_cell_placements_cancellable(row_groups, cancellation.as_ref())?;
+        let column_widths = epub_table_column_widths_from_placements_cancellable(
+            row_groups,
+            content_width,
+            &placements,
+            cancellation.as_ref(),
+        )?;
         let caption_height = epub_table_caption_height(
             fonts,
             caption,
@@ -1543,7 +1716,7 @@ fn paginate_epub_table(
         );
         let caption_gap = EPUB_TABLE_ROW_SPACING
             * usize::from(!caption.is_empty() && !row_groups.is_empty()) as f32;
-        let geometry = epub_table_geometry_bounded_from_placements(
+        let geometry = epub_table_geometry_bounded_from_placements_cancellable(
             row_groups,
             &placements,
             &column_widths,
@@ -1551,8 +1724,9 @@ fn paginate_epub_table(
             font_size,
             (maximum_height - caption_height - caption_gap).max(1.0),
             fonts,
+            cancellation.as_ref(),
         );
-        caption_height + geometry.height + caption_gap
+        Some(caption_height + geometry?.height + caption_gap)
     };
 
     if !caption.is_empty() {
@@ -1566,7 +1740,7 @@ fn paginate_epub_table(
                 .unwrap_or(1.0)
             * spans_font_scale(caption)
             * TEXT_LINE_HEIGHT;
-        let row_height = bands.first().copied().map_or(0.0, |(_, kind, rows)| {
+        let row_height = if let Some((_, kind, rows)) = bands.first().copied() {
             let row = ContentNode::Table {
                 caption: Vec::new(),
                 caption_style: None,
@@ -1576,11 +1750,16 @@ fn paginate_epub_table(
                 }],
                 style: style.clone(),
             };
-            compact_height(
+            let Some(height) = compact_height(
                 &row,
                 (maximum_height - minimum_caption_height - EPUB_TABLE_ROW_SPACING).max(1.0),
-            )
-        });
+            ) else {
+                return false;
+            };
+            height
+        } else {
+            0.0
+        };
         let caption_gap = EPUB_TABLE_ROW_SPACING * usize::from(!bands.is_empty()) as f32;
         let maximum_caption_height = (maximum_height - row_height - caption_gap).max(1.0);
         if let Some((caption_prefix, caption_suffix)) = split_epub_caption_suffix(
@@ -1636,7 +1815,7 @@ fn paginate_epub_table(
             let suffix_offset = text_offset
                 + spans_text_len(&caption_prefix)
                 + usize::from(caption.is_empty() && !row_groups.is_empty());
-            paginate_epub_table(
+            let _ = paginate_epub_table(
                 &suffix_table,
                 suffix_offset,
                 chars_per_line,
@@ -1652,11 +1831,14 @@ fn paginate_epub_table(
                 fonts,
                 budget,
             );
-            return;
+            return !budget.is_cancelled();
         }
     }
 
     for (band_index, (group_index, kind, rows)) in bands.iter().copied().enumerate() {
+        if budget.is_cancelled() {
+            return false;
+        }
         let is_final_band = band_index + 1 == bands.len();
         let band = ContentNode::Table {
             caption: if include_caption {
@@ -1708,7 +1890,9 @@ fn paginate_epub_table(
             }
             - if is_final_band { trailing_spacing } else { 0.0 })
         .max(1.0);
-        let candidate_height = compact_height(&candidate, candidate_maximum_height);
+        let Some(candidate_height) = compact_height(&candidate, candidate_maximum_height) else {
+            return false;
+        };
         let required_height = candidate_height + if is_final_band { trailing_spacing } else { 0.0 };
 
         if pending.is_some() && required_height > fragment_capacity && !page_budget_exhausted {
@@ -1734,7 +1918,10 @@ fn paginate_epub_table(
             fragment_capacity = *remaining;
             let band_maximum_height =
                 (page_height - if is_final_band { trailing_spacing } else { 0.0 }).max(1.0);
-            pending_height = compact_height(&band, band_maximum_height);
+            let Some(height) = compact_height(&band, band_maximum_height) else {
+                return false;
+            };
+            pending_height = height;
             pending = Some(band);
             pending_source_group = Some(group_index);
             continue;
@@ -1763,7 +1950,10 @@ fn paginate_epub_table(
         *remaining = (fragment_capacity - pending_height - trailing_spacing).max(0.0);
     } else if !caption.is_empty() {
         let maximum_height = (page_height - leading_spacing - trailing_spacing).max(1.0);
-        let height = compact_height(table, maximum_height) + trailing_spacing;
+        let Some(compact_height) = compact_height(table, maximum_height) else {
+            return false;
+        };
+        let height = compact_height + trailing_spacing;
         if height > *remaining
             && page_has_content(pages, first_page_has_title)
             && push_epub_page(pages, budget)
@@ -1778,6 +1968,7 @@ fn paginate_epub_table(
         });
         *remaining = (*remaining - height).max(0.0);
     }
+    !budget.is_cancelled()
 }
 
 fn append_table_band(
@@ -1850,14 +2041,23 @@ fn split_epub_caption_suffix(
     ))
 }
 
-fn table_row_bands(rows: &[TableRow]) -> Vec<&[TableRow]> {
+fn table_row_bands<'a>(
+    rows: &'a [TableRow],
+    budget: &EpubPaginationBudget,
+) -> Option<Vec<&'a [TableRow]>> {
     let mut bands = Vec::new();
     let mut start = 0;
     while start < rows.len() {
+        if budget.is_cancelled() {
+            return None;
+        }
         let mut end = start + 1;
         let mut row_index = start;
         while row_index < end {
-            for cell in &rows[row_index].cells {
+            for (cell_index, cell) in rows[row_index].cells.iter().enumerate() {
+                if cell_index % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+                    return None;
+                }
                 let span = if cell.row_span == 0 {
                     rows.len() - row_index
                 } else {
@@ -1870,7 +2070,7 @@ fn table_row_bands(rows: &[TableRow]) -> Vec<&[TableRow]> {
         bands.push(&rows[start..end]);
         start = end;
     }
-    bands
+    Some(bands)
 }
 
 pub fn epub_table_layout_width(
@@ -1994,20 +2194,105 @@ pub struct EpubTableGeometry {
     pub height: f32,
 }
 
+/// Fenwick trees supporting ordered range additions and range sums in
+/// logarithmic time. Rowspan sizing uses both operations, so plain prefix
+/// sums would need rebuilding after every spanning cell.
+struct EpubTableRowHeights {
+    slope: Vec<f32>,
+    intercept: Vec<f32>,
+}
+
+impl EpubTableRowHeights {
+    fn new(len: usize, initial: f32) -> Self {
+        let mut heights = Self {
+            slope: vec![0.0; len + 1],
+            intercept: vec![0.0; len + 1],
+        };
+        heights.add_range(0, len, initial);
+        heights
+    }
+
+    fn add(tree: &mut [f32], mut index: usize, value: f32) {
+        while index < tree.len() {
+            tree[index] += value;
+            index += index & index.wrapping_neg();
+        }
+    }
+
+    fn sum(tree: &[f32], mut end: usize) -> f32 {
+        let mut total = 0.0;
+        while end > 0 {
+            total += tree[end];
+            end &= end - 1;
+        }
+        total
+    }
+
+    fn prefix_sum(&self, end: usize) -> f32 {
+        Self::sum(&self.slope, end) * end as f32 - Self::sum(&self.intercept, end)
+    }
+
+    fn range_sum(&self, start: usize, end: usize) -> f32 {
+        self.prefix_sum(end) - self.prefix_sum(start)
+    }
+
+    fn add_range(&mut self, start: usize, end: usize, value: f32) {
+        if start == end {
+            return;
+        }
+        Self::add(&mut self.slope, start + 1, value);
+        Self::add(&mut self.slope, end + 1, -value);
+        Self::add(&mut self.intercept, start + 1, value * start as f32);
+        Self::add(&mut self.intercept, end + 1, -value * end as f32);
+    }
+
+    fn into_values_cancellable(
+        self,
+        cancellation: Option<&EpubPaginationCancellation>,
+    ) -> Option<Vec<f32>> {
+        let mut values = Vec::with_capacity(self.slope.len() - 1);
+        for row in 0..self.slope.len() - 1 {
+            if !table_row_checkpoint(cancellation, row) {
+                return None;
+            }
+            values.push(self.range_sum(row, row + 1));
+        }
+        Some(values)
+    }
+}
+
 /// Builds the logical grid used by both measurement and painting. Row spans are
 /// scoped to their row group, as required by the table model's group semantics.
 pub fn epub_table_cell_placements(
     row_groups: &[TableRowGroup],
 ) -> Vec<Vec<EpubTableCellPlacement>> {
+    epub_table_cell_placements_cancellable(row_groups, None)
+        .expect("the no-cancellation table placement path cannot be interrupted")
+}
+
+fn epub_table_cell_placements_cancellable(
+    row_groups: &[TableRowGroup],
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<Vec<Vec<EpubTableCellPlacement>>> {
     #[cfg(test)]
     TABLE_PLACEMENT_PASSES.with(|passes| passes.set(passes.get() + 1));
     let mut placements = Vec::new();
+    let mut cell_index = 0;
+    let mut global_row = 0;
     for group in row_groups {
         let mut occupied_until = vec![0_usize; MAX_EPUB_TABLE_COLUMNS];
         for (row_index, row) in group.rows.iter().enumerate() {
+            if !table_row_checkpoint(cancellation, global_row) {
+                return None;
+            }
+            global_row += 1;
             let mut row_placements = Vec::with_capacity(row.cells.len());
             let mut column = 0_usize;
             for cell in &row.cells {
+                if !table_cell_checkpoint(cancellation, cell_index) {
+                    return None;
+                }
+                cell_index += 1;
                 let requested_span = usize::from(cell.column_span.max(1));
                 let span = requested_span.min(MAX_EPUB_TABLE_COLUMNS);
                 while column < MAX_EPUB_TABLE_COLUMNS
@@ -2034,7 +2319,9 @@ pub fn epub_table_cell_placements(
             placements.push(row_placements);
         }
     }
-    placements
+    cancellation
+        .is_none_or(|cancellation| !cancellation.is_cancelled())
+        .then_some(placements)
 }
 
 /// Measures the complete logical table once. Pagination and painting provide
@@ -2053,39 +2340,62 @@ pub fn epub_table_geometry_from_placements(
     row_groups: &[TableRowGroup],
     placements: &[Vec<EpubTableCellPlacement>],
     column_widths: &[f32],
-    mut measure_cell: impl FnMut(&shosai_core::epub::render::TableCell, f32) -> f32,
+    measure_cell: impl FnMut(&shosai_core::epub::render::TableCell, f32) -> f32,
 ) -> EpubTableGeometry {
+    let mut measure_cell = measure_cell;
+    epub_table_geometry_from_placements_cancellable(
+        row_groups,
+        placements,
+        column_widths,
+        |cell, width| Some(measure_cell(cell, width)),
+        None,
+    )
+    .expect("the no-cancellation table geometry path cannot be interrupted")
+}
+
+fn epub_table_geometry_from_placements_cancellable(
+    row_groups: &[TableRowGroup],
+    placements: &[Vec<EpubTableCellPlacement>],
+    column_widths: &[f32],
+    mut measure_cell: impl FnMut(&shosai_core::epub::render::TableCell, f32) -> Option<f32>,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<EpubTableGeometry> {
     let rows = row_groups
         .iter()
         .flat_map(|group| &group.rows)
         .collect::<Vec<_>>();
-    let mut row_heights = vec![2.0 * EPUB_TABLE_CELL_PADDING; rows.len()];
+    let mut row_heights = EpubTableRowHeights::new(rows.len(), 2.0 * EPUB_TABLE_CELL_PADDING);
     let mut intrinsic = Vec::with_capacity(rows.len());
     let mut global_row = 0;
+    let mut cell_index = 0;
     for group in row_groups {
         for (group_row, row) in group.rows.iter().enumerate() {
-            let measured = row
-                .cells
-                .iter()
-                .zip(&placements[global_row])
-                .map(|(cell, placement)| {
-                    let height = measure_cell(
-                        cell,
-                        epub_table_cell_content_width(*placement, column_widths),
-                    );
-                    let span = if cell.row_span == 0 {
-                        group.rows.len() - group_row
-                    } else {
-                        usize::from(cell.row_span)
-                    }
-                    .min(group.rows.len() - group_row)
-                    .max(1);
-                    (height, span)
-                })
-                .collect::<Vec<_>>();
+            if !table_row_checkpoint(cancellation, global_row) {
+                return None;
+            }
+            let mut measured = Vec::with_capacity(row.cells.len());
+            for (cell, placement) in row.cells.iter().zip(&placements[global_row]) {
+                if !table_cell_checkpoint(cancellation, cell_index) {
+                    return None;
+                }
+                cell_index += 1;
+                let height = measure_cell(
+                    cell,
+                    epub_table_cell_content_width(*placement, column_widths),
+                )?;
+                let span = if cell.row_span == 0 {
+                    group.rows.len() - group_row
+                } else {
+                    usize::from(cell.row_span)
+                }
+                .min(group.rows.len() - group_row)
+                .max(1);
+                measured.push((height, span));
+            }
             for &(height, span) in &measured {
                 if span == 1 {
-                    row_heights[global_row] = row_heights[global_row].max(height);
+                    let current = row_heights.range_sum(global_row, global_row + 1);
+                    row_heights.add_range(global_row, global_row + 1, (height - current).max(0.0));
                 }
             }
             intrinsic.push(measured);
@@ -2093,51 +2403,73 @@ pub fn epub_table_geometry_from_placements(
         }
     }
     for (row, measured) in intrinsic.iter().enumerate() {
-        for &(height, span) in measured {
+        if !table_row_checkpoint(cancellation, row) {
+            return None;
+        }
+        for (index, &(height, span)) in measured.iter().enumerate() {
+            if !table_row_checkpoint(cancellation, index) {
+                return None;
+            }
             if span > 1 {
-                let current = row_heights[row..row + span].iter().sum::<f32>()
+                let current = row_heights.range_sum(row, row + span)
                     + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
                 let deficit = (height - current).max(0.0) / span as f32;
-                for row_height in &mut row_heights[row..row + span] {
-                    *row_height += deficit;
-                }
+                row_heights.add_range(row, row + span, deficit);
             }
         }
     }
+    let row_heights = row_heights.into_values_cancellable(cancellation)?;
     let mut y = 0.0;
-    let row_y = row_heights
-        .iter()
-        .map(|height| {
-            let current = y;
-            y += *height + EPUB_TABLE_ROW_SPACING;
-            current
-        })
-        .collect::<Vec<_>>();
-    let cells = rows
-        .iter()
-        .enumerate()
-        .map(|(row_index, row)| {
-            row.cells
-                .iter()
-                .zip(&placements[row_index])
-                .zip(&intrinsic[row_index])
-                .map(|((_cell, placement), &(_, span))| {
-                    let x = column_widths[..placement.column].iter().sum::<f32>()
-                        + BLOCKQUOTE_SPACING * placement.column as f32;
-                    let height = row_heights[row_index..row_index + span].iter().sum::<f32>()
-                        + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
-                    EpubTableCellGeometry {
-                        placement: *placement,
-                        x,
-                        y: row_y[row_index],
-                        width: epub_table_cell_width(*placement, column_widths),
-                        height,
-                    }
-                })
-                .collect()
-        })
-        .collect();
-    EpubTableGeometry {
+    let mut row_y = Vec::with_capacity(row_heights.len());
+    let mut row_height_prefix = Vec::with_capacity(row_heights.len() + 1);
+    row_height_prefix.push(0.0);
+    for (row, height) in row_heights.iter().enumerate() {
+        if !table_row_checkpoint(cancellation, row) {
+            return None;
+        }
+        row_y.push(y);
+        y += *height + EPUB_TABLE_ROW_SPACING;
+        row_height_prefix.push(row_height_prefix[row] + height);
+    }
+    let mut column_width_prefix = Vec::with_capacity(column_widths.len() + 1);
+    column_width_prefix.push(0.0);
+    for (column, width) in column_widths.iter().enumerate() {
+        if !table_row_checkpoint(cancellation, column) {
+            return None;
+        }
+        column_width_prefix.push(column_width_prefix[column] + width);
+    }
+    let mut cells = Vec::with_capacity(rows.len());
+    for (row_index, row) in rows.iter().enumerate() {
+        if !table_row_checkpoint(cancellation, row_index) {
+            return None;
+        }
+        let mut row_cells = Vec::with_capacity(row.cells.len());
+        for ((_, placement), &(_, span)) in row
+            .cells
+            .iter()
+            .zip(&placements[row_index])
+            .zip(&intrinsic[row_index])
+        {
+            if !table_cell_checkpoint(cancellation, cell_index) {
+                return None;
+            }
+            cell_index += 1;
+            let x = column_width_prefix[placement.column]
+                + BLOCKQUOTE_SPACING * placement.column as f32;
+            let height = row_height_prefix[row_index + span] - row_height_prefix[row_index]
+                + EPUB_TABLE_ROW_SPACING * span.saturating_sub(1) as f32;
+            row_cells.push(EpubTableCellGeometry {
+                placement: *placement,
+                x,
+                y: row_y[row_index],
+                width: epub_table_cell_width(*placement, column_widths),
+                height,
+            });
+        }
+        cells.push(row_cells);
+    }
+    Some(EpubTableGeometry {
         row_heights,
         cells,
         height: y - if rows.is_empty() {
@@ -2145,7 +2477,7 @@ pub fn epub_table_geometry_from_placements(
         } else {
             EPUB_TABLE_ROW_SPACING
         },
-    }
+    })
 }
 
 #[cfg(test)]
@@ -2179,38 +2511,195 @@ pub fn epub_table_geometry_bounded_from_placements(
     height: f32,
     fonts: Option<&EpubFontBook>,
 ) -> EpubTableGeometry {
-    epub_table_geometry_from_placements(
+    epub_table_geometry_bounded_from_placements_cancellable(
+        row_groups,
+        placements,
+        column_widths,
+        lines_per_page,
+        font_size,
+        height,
+        fonts,
+        None,
+    )
+    .expect("the no-cancellation bounded table geometry path cannot be interrupted")
+}
+
+#[allow(clippy::too_many_arguments)]
+fn epub_table_geometry_bounded_from_placements_cancellable(
+    row_groups: &[TableRowGroup],
+    placements: &[Vec<EpubTableCellPlacement>],
+    column_widths: &[f32],
+    lines_per_page: usize,
+    font_size: f32,
+    height: f32,
+    fonts: Option<&EpubFontBook>,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<EpubTableGeometry> {
+    epub_table_geometry_from_placements_cancellable(
         row_groups,
         placements,
         column_widths,
         |cell, cell_width| {
+            if cancellation.is_some_and(EpubPaginationCancellation::is_cancelled) {
+                return None;
+            }
             let chars_per_line = (cell_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
                 .floor()
                 .max(1.0) as usize;
-            let spacing =
-                epub_node_list_spacing(&cell.children, font_size, EPUB_TABLE_CELL_SPACING);
-            let mut remaining_height =
-                epub_table_cell_content_height(&cell.children, font_size, height);
-            let content_height = cell
-                .children
-                .iter()
-                .map(|child| {
-                    let child_height = epub_bounded_node_height(
-                        fonts,
-                        child,
-                        font_size,
-                        cell_width,
-                        remaining_height,
-                        chars_per_line,
-                        lines_per_page,
-                    );
-                    remaining_height = (remaining_height - child_height).max(1.0);
-                    child_height
-                })
-                .sum::<f32>();
-            content_height + spacing + 2.0 * EPUB_TABLE_CELL_PADDING
+            let spacing = epub_node_list_spacing_cancellable(
+                &cell.children,
+                font_size,
+                EPUB_TABLE_CELL_SPACING,
+                cancellation,
+            )?;
+            let mut remaining_height = (height - spacing - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0);
+            let mut content_height = 0.0;
+            for (child_index, child) in cell.children.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, child_index) {
+                    return None;
+                }
+                let child_height = epub_bounded_node_height_cancellable(
+                    fonts,
+                    child,
+                    font_size,
+                    cell_width,
+                    remaining_height,
+                    chars_per_line,
+                    lines_per_page,
+                    cancellation,
+                )?;
+                remaining_height = (remaining_height - child_height).max(1.0);
+                content_height += child_height;
+            }
+            Some(content_height + spacing + 2.0 * EPUB_TABLE_CELL_PADDING)
         },
+        cancellation,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn epub_bounded_node_height_cancellable(
+    fonts: Option<&EpubFontBook>,
+    node: &ContentNode,
+    font_size: f32,
+    width: f32,
+    height: f32,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<f32> {
+    content_node_internal_checkpoints(node, cancellation)?;
+    Some(epub_bounded_node_height(
+        fonts,
+        node,
+        font_size,
+        width,
+        height,
+        chars_per_line,
+        lines_per_page,
+    ))
+}
+
+fn spans_internal_checkpoints(
+    spans: &[shosai_core::epub::render::TextSpan],
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<()> {
+    let mut characters = 0;
+    for span in spans {
+        for _ in span.text.chars() {
+            if !table_cell_internal_checkpoint(cancellation, characters) {
+                return None;
+            }
+            characters += 1;
+        }
+    }
+    Some(())
+}
+
+fn content_node_internal_checkpoints(
+    node: &ContentNode,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<()> {
+    match node {
+        ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => {
+            spans_internal_checkpoints(spans, cancellation)
+        }
+        ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
+            for (index, child) in children.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                content_node_internal_checkpoints(child, cancellation)?;
+            }
+            Some(())
+        }
+        ContentNode::Table { row_groups, .. } => {
+            for (index, cell) in row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .flat_map(|row| &row.cells)
+                .enumerate()
+            {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                for child in &cell.children {
+                    content_node_internal_checkpoints(child, cancellation)?;
+                }
+            }
+            Some(())
+        }
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
+            for (index, item) in items.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                spans_internal_checkpoints(item, cancellation)?;
+            }
+            Some(())
+        }
+        ContentNode::Image { alt, caption, .. } => {
+            for (index, _) in alt.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            spans_internal_checkpoints(caption, cancellation)
+        }
+        ContentNode::Math { content, .. } => {
+            for (index, _) in content.fallback.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            Some(())
+        }
+        ContentNode::CodeBlock { code, .. } | ContentNode::InlineCode(code) => {
+            for (index, _) in code.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            Some(())
+        }
+        ContentNode::HorizontalRule => Some(()),
+    }
+}
+
+fn epub_node_list_spacing_cancellable(
+    nodes: &[ContentNode],
+    font_size: f32,
+    default_spacing: f32,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<f32> {
+    let mut spacing = 0.0;
+    for boundary in 0..=nodes.len() {
+        if !table_cell_internal_checkpoint(cancellation, boundary) {
+            return None;
+        }
+        spacing += epub_node_boundary_spacing(nodes, boundary, font_size, default_spacing);
+    }
+    Some(spacing)
 }
 
 pub fn epub_table_cell_content_height(
@@ -2260,6 +2749,16 @@ pub fn epub_table_column_widths_from_placements(
     table_width: f32,
     placements: &[Vec<EpubTableCellPlacement>],
 ) -> Vec<f32> {
+    epub_table_column_widths_from_placements_cancellable(row_groups, table_width, placements, None)
+        .expect("the no-cancellation table width path cannot be interrupted")
+}
+
+fn epub_table_column_widths_from_placements_cancellable(
+    row_groups: &[TableRowGroup],
+    table_width: f32,
+    placements: &[Vec<EpubTableCellPlacement>],
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<Vec<f32>> {
     let column_count = epub_table_column_count_from_placements(placements);
     let gaps = BLOCKQUOTE_SPACING * column_count.saturating_sub(1) as f32;
     let available = (table_width - gaps).max(column_count as f32);
@@ -2267,18 +2766,29 @@ pub fn epub_table_column_widths_from_placements(
     let mut weights = vec![0.25_f32; column_count];
     let mut authored_widths = vec![None::<f32>; column_count];
 
-    for (row, row_placements) in row_groups
+    let mut cell_index = 0;
+    for (row_index, (row, row_placements)) in row_groups
         .iter()
         .flat_map(|group| &group.rows)
         .zip(placements)
+        .enumerate()
     {
+        if !table_row_checkpoint(cancellation, row_index) {
+            return None;
+        }
         for (cell, placement) in row.cells.iter().zip(row_placements) {
+            if !table_cell_checkpoint(cancellation, cell_index) {
+                return None;
+            }
+            cell_index += 1;
             let column = placement.column;
             let span = placement.span.min(column_count - column);
             if span == 0 {
                 break;
             }
-            let weight = table_cell_visual_characters(cell).max(1) as f32 / span as f32;
+            let weight = table_cell_visual_characters_cancellable(cell, cancellation)?.max(1)
+                as f32
+                / span as f32;
             for column_weight in &mut weights[column..column + span] {
                 *column_weight = column_weight.max(weight);
             }
@@ -2320,14 +2830,17 @@ pub fn epub_table_column_widths_from_placements(
         .filter_map(|(weight, width)| width.is_none().then_some(*weight))
         .sum::<f32>()
         .max(f32::EPSILON);
-    weights
+    let widths = weights
         .into_iter()
         .zip(authored_widths)
         .map(|(weight, width)| match width {
             Some(width) => width.max(minimum) * authored_scale,
             None => minimum + remaining * weight / unconstrained_weight,
         })
-        .collect()
+        .collect();
+    cancellation
+        .is_none_or(|cancellation| !cancellation.is_cancelled())
+        .then_some(widths)
 }
 
 pub fn epub_table_cell_width(placement: EpubTableCellPlacement, column_widths: &[f32]) -> f32 {
@@ -2348,63 +2861,112 @@ pub fn epub_table_cell_content_width(
     (epub_table_cell_width(placement, column_widths) - 2.0 * EPUB_TABLE_CELL_PADDING).max(1.0)
 }
 
-fn table_cell_visual_characters(cell: &shosai_core::epub::render::TableCell) -> usize {
-    cell.children
-        .iter()
-        .map(content_node_visual_characters)
-        .max()
-        .unwrap_or(0)
+fn table_cell_visual_characters_cancellable(
+    cell: &shosai_core::epub::render::TableCell,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<usize> {
+    let mut longest = 0;
+    for (index, child) in cell.children.iter().enumerate() {
+        if !table_cell_internal_checkpoint(cancellation, index) {
+            return None;
+        }
+        longest = longest.max(content_node_visual_characters_cancellable(
+            child,
+            cancellation,
+        )?);
+    }
+    Some(longest)
 }
 
-fn spans_visual_characters(spans: &[shosai_core::epub::render::TextSpan]) -> usize {
+fn spans_visual_characters_cancellable(
+    spans: &[shosai_core::epub::render::TextSpan],
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<usize> {
     let mut longest = 0;
     let mut current = 0;
-    for character in spans.iter().flat_map(|span| span.text.chars()) {
-        if character == '\n' {
-            longest = longest.max(current);
-            current = 0;
-        } else if !character.is_whitespace() && character != '\u{200b}' {
-            current += 1;
+    for (span_index, span) in spans.iter().enumerate() {
+        if !table_cell_internal_checkpoint(cancellation, span_index) {
+            return None;
+        }
+        for (character_index, character) in span.text.chars().enumerate() {
+            if !table_cell_internal_checkpoint(cancellation, character_index) {
+                return None;
+            }
+            if character == '\n' {
+                longest = longest.max(current);
+                current = 0;
+            } else if !character.is_whitespace() && character != '\u{200b}' {
+                current += 1;
+            }
         }
     }
-    longest.max(current)
+    Some(longest.max(current))
 }
 
-fn content_node_visual_characters(node: &ContentNode) -> usize {
+fn content_node_visual_characters_cancellable(
+    node: &ContentNode,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<usize> {
     match node {
         ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => {
-            spans_visual_characters(spans)
+            spans_visual_characters_cancellable(spans, cancellation)
         }
-        ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => children
-            .iter()
-            .map(content_node_visual_characters)
-            .max()
-            .unwrap_or(0),
-        ContentNode::Table { row_groups, .. } => row_groups
-            .iter()
-            .flat_map(|group| &group.rows)
-            .flat_map(|row| &row.cells)
-            .map(table_cell_visual_characters)
-            .max()
-            .unwrap_or(0),
-        ContentNode::Math { content, .. } => content.fallback.chars().count(),
-        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => items
-            .iter()
-            .map(|item| spans_visual_characters(item))
-            .max()
-            .unwrap_or(0),
-        ContentNode::Image { alt, caption, .. } => alt
-            .chars()
-            .count()
-            .max(spans_visual_characters(caption))
-            .max(8),
-        ContentNode::CodeBlock { code, .. } => code
-            .lines()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0),
-        ContentNode::InlineCode(code) => code.chars().count(),
-        ContentNode::HorizontalRule => 1,
+        ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
+            let mut longest = 0;
+            for (index, child) in children.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                longest = longest.max(content_node_visual_characters_cancellable(
+                    child,
+                    cancellation,
+                )?);
+            }
+            Some(longest)
+        }
+        ContentNode::Table { row_groups, .. } => {
+            let mut longest = 0;
+            for (index, cell) in row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .flat_map(|row| &row.cells)
+                .enumerate()
+            {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                longest = longest.max(table_cell_visual_characters_cancellable(
+                    cell,
+                    cancellation,
+                )?);
+            }
+            Some(longest)
+        }
+        ContentNode::Math { content, .. } => Some(content.fallback.chars().count()),
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
+            let mut longest = 0;
+            for (index, item) in items.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                longest = longest.max(spans_visual_characters_cancellable(item, cancellation)?);
+            }
+            Some(longest)
+        }
+        ContentNode::Image { alt, caption, .. } => Some(
+            alt.chars()
+                .count()
+                .max(spans_visual_characters_cancellable(caption, cancellation)?)
+                .max(8),
+        ),
+        ContentNode::CodeBlock { code, .. } => Some(
+            code.lines()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(0),
+        ),
+        ContentNode::InlineCode(code) => Some(code.chars().count()),
+        ContentNode::HorizontalRule => Some(1),
     }
 }
 
@@ -2551,6 +3113,9 @@ fn paginate_measured_paragraph(
         .saturating_mul(4)
         .saturating_add(EPUB_PAGINATION_SHAPE_CHUNK);
     while start < text_len {
+        if budget.is_cancelled() {
+            return false;
+        }
         let window_len = (text_len - start).min(shape_window);
         if shaping_work < window_len {
             return false;
@@ -2560,6 +3125,9 @@ fn paginate_measured_paragraph(
         let Some(layout) = measure(&remaining_spans) else {
             return false;
         };
+        if budget.is_cancelled() {
+            return false;
+        }
         let line_height = layout
             .lines
             .windows(2)
@@ -2594,7 +3162,13 @@ fn paginate_measured_paragraph(
         let Some(mut page_layout) = measure(&page_spans) else {
             return false;
         };
+        if budget.is_cancelled() {
+            return false;
+        }
         while !at_limit && page_layout.height > available && length > 1 {
+            if budget.is_cancelled() {
+                return false;
+            }
             let previous = page_layout
                 .lines
                 .iter()
@@ -2656,26 +3230,30 @@ fn paginate_epub_list(
     pages: &mut Vec<PageNodes>,
     remaining: &mut f32,
     budget: &mut EpubPaginationBudget,
-) {
-    let pagination_items = items
-        .iter()
-        .map(|item| {
-            pagination_inline_spans(
-                item,
-                font_size,
-                page_width,
-                page_height,
-                shosai_core::epub::style::TextDirection::Ltr,
-                None,
-            )
-        })
-        .collect::<Vec<_>>();
+) -> bool {
+    let mut pagination_items = Vec::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        if index % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+            return false;
+        }
+        pagination_items.push(pagination_inline_spans(
+            item,
+            font_size,
+            page_width,
+            page_height,
+            shosai_core::epub::style::TextDirection::Ltr,
+            None,
+        ));
+    }
     let items = pagination_items.as_slice();
     let mut consumed_items = 0;
     let mut consumed_text = 0;
     let block_spacing = font_size * line_spacing;
 
     while consumed_items < items.len() {
+        if budget.is_cancelled() {
+            return false;
+        }
         let first_scale = spans_font_scale(&items[consumed_items]);
         let first_line_height = font_size * TEXT_LINE_HEIGHT * first_scale;
         if *remaining < first_line_height + block_spacing
@@ -2693,7 +3271,7 @@ fn paginate_epub_list(
                     block_before: 0.0,
                     block_after: 0.0,
                 });
-                return;
+                return !budget.is_cancelled();
             }
         }
 
@@ -2701,6 +3279,9 @@ fn paginate_epub_list(
         let mut chunk_height = 0.0;
         let mut take = 0;
         for (chunk_index, item) in items[consumed_items..].iter().enumerate() {
+            if chunk_index % EPUB_PAGINATION_LOOP_CHUNK == 0 && budget.is_cancelled() {
+                return false;
+            }
             let scale = spans_font_scale(item);
             let item_chars_per_line = scaled_characters_per_line(chars_per_line, scale);
             let item_lines = (spans_text_len(item) + 4)
@@ -2753,7 +3334,7 @@ fn paginate_epub_list(
                     block_before: 0.0,
                     block_after: 0.0,
                 });
-                return;
+                return !budget.is_cancelled();
             }
             continue;
         }
@@ -2775,6 +3356,7 @@ fn paginate_epub_list(
             .sum::<usize>();
         consumed_items += take;
     }
+    !budget.is_cancelled()
 }
 
 fn epub_list_node(
@@ -2818,9 +3400,9 @@ impl<'a> EpubSpanCursor<'a> {
         self.remaining
     }
 
-    fn split_length(&self, maximum: usize) -> usize {
+    fn split_length(&self, maximum: usize, budget: &EpubPaginationBudget) -> Option<usize> {
         if self.remaining <= maximum {
-            return self.remaining;
+            return (!budget.is_cancelled()).then_some(self.remaining);
         }
         let mut length = 0;
         let mut last_whitespace = None;
@@ -2829,12 +3411,15 @@ impl<'a> EpubSpanCursor<'a> {
             if span.math.is_some() {
                 let span_len = span.text[start..].chars().count();
                 if length + span_len > maximum {
-                    return if length == 0 { span_len } else { length };
+                    return Some(if length == 0 { span_len } else { length });
                 }
                 length += span_len;
                 continue;
             }
             for character in span.text[start..].chars() {
+                if length % EPUB_PAGINATION_SHAPE_CHUNK == 0 && budget.is_cancelled() {
+                    return None;
+                }
                 if length == maximum {
                     break;
                 }
@@ -2847,12 +3432,18 @@ impl<'a> EpubSpanCursor<'a> {
                 break;
             }
         }
-        last_whitespace
-            .filter(|length| *length >= maximum / 2)
-            .unwrap_or(maximum)
+        Some(
+            last_whitespace
+                .filter(|length| *length >= maximum / 2)
+                .unwrap_or(maximum),
+        )
     }
 
-    fn take(&mut self, length: usize) -> Vec<shosai_core::epub::render::TextSpan> {
+    fn take(
+        &mut self,
+        length: usize,
+        budget: &EpubPaginationBudget,
+    ) -> Option<Vec<shosai_core::epub::render::TextSpan>> {
         let mut output = Vec::new();
         let mut remaining = length;
         while remaining > 0 && self.span_index < self.spans.len() {
@@ -2860,7 +3451,10 @@ impl<'a> EpubSpanCursor<'a> {
             let suffix = &source.text[self.byte_offset..];
             let mut bytes = 0;
             let mut characters = 0;
-            for character in suffix.chars().take(remaining) {
+            for (index, character) in suffix.chars().take(remaining).enumerate() {
+                if index % EPUB_PAGINATION_SHAPE_CHUNK == 0 && budget.is_cancelled() {
+                    return None;
+                }
                 bytes += character.len_utf8();
                 characters += 1;
             }
@@ -2878,7 +3472,7 @@ impl<'a> EpubSpanCursor<'a> {
                 self.byte_offset = 0;
             }
         }
-        output
+        (!budget.is_cancelled()).then_some(output)
     }
 }
 
@@ -2980,12 +3574,12 @@ fn estimated_epub_blockquote_height(
 fn split_epub_blockquote_prefix(
     children: &[ContentNode],
     available_height: f32,
-    _chars_per_line: usize,
     lines_per_page: usize,
     font_size: f32,
     page_width: f32,
     fonts: Option<&EpubFontBook>,
-) -> (Vec<ContentNode>, Vec<ContentNode>, f32, usize) {
+    budget: &EpubPaginationBudget,
+) -> Option<(Vec<ContentNode>, Vec<ContentNode>, f32, usize)> {
     let chars_per_line = (page_width / (font_size * AVERAGE_CHARACTER_WIDTH).max(1.0))
         .floor()
         .max(1.0) as usize;
@@ -2993,6 +3587,9 @@ fn split_epub_blockquote_prefix(
     let mut prefix_height = 0.0;
     let mut consumed_text = 0;
     for (index, child) in children.iter().enumerate() {
+        if budget.is_cancelled() {
+            return None;
+        }
         let spacing = epub_node_boundary_spacing(children, index, font_size, BLOCKQUOTE_SPACING);
         let trailing = if index + 1 == children.len() {
             epub_node_boundary_spacing(children, children.len(), font_size, BLOCKQUOTE_SPACING)
@@ -3032,12 +3629,12 @@ fn split_epub_blockquote_prefix(
                     split_epub_blockquote_prefix(
                         nested_children,
                         nested_available,
-                        chars_per_line,
                         lines_per_page,
                         font_size,
                         blockquote_width(page_width, font_size, style),
                         fonts,
-                    );
+                        budget,
+                    )?;
                 if !nested_prefix.is_empty() {
                     let mut prefix_style = style.clone();
                     prefix_style.fragment_after = !nested_remaining.is_empty();
@@ -3057,12 +3654,12 @@ fn split_epub_blockquote_prefix(
                     }
                     remaining.extend_from_slice(&children[index + 1..]);
                     suppress_epub_fragment_boundary(&mut prefix, &mut remaining);
-                    return (
+                    return Some((
                         prefix,
                         remaining,
                         prefix_height,
                         consumed_text + nested_consumed_text,
-                    );
+                    ));
                 }
             }
         }
@@ -3111,6 +3708,9 @@ fn split_epub_blockquote_prefix(
             );
             let mut reshaped = None;
             while measured.is_some() && take > 0 && take < text_len {
+                if budget.is_cancelled() {
+                    return None;
+                }
                 let candidate = slice_epub_spans(spans, 0, take);
                 let Some(layout) = measure_epub_spans(
                     fonts,
@@ -3158,16 +3758,16 @@ fn split_epub_blockquote_prefix(
                 let mut remaining = vec![ContentNode::Paragraph(remaining_spans, style.clone())];
                 remaining.extend_from_slice(&children[index + 1..]);
                 suppress_epub_fragment_boundary(&mut prefix, &mut remaining);
-                return (prefix, remaining, prefix_height, consumed_text + take);
+                return Some((prefix, remaining, prefix_height, consumed_text + take));
             }
         }
 
         let mut remaining = children[index..].to_vec();
         suppress_epub_fragment_boundary(&mut prefix, &mut remaining);
-        return (prefix, remaining, prefix_height, consumed_text);
+        return Some((prefix, remaining, prefix_height, consumed_text));
     }
 
-    (prefix, Vec::new(), prefix_height, consumed_text)
+    Some((prefix, Vec::new(), prefix_height, consumed_text))
 }
 
 fn suppress_epub_fragment_boundary(prefix: &mut [ContentNode], remaining: &mut [ContentNode]) {
@@ -3934,12 +4534,13 @@ mod tests {
         let (prefix, remaining, prefix_height, _) = split_epub_blockquote_prefix(
             std::slice::from_ref(&child),
             available_height,
-            27,
             20,
             16.0,
             208.0,
             None,
-        );
+            &EpubPaginationBudget::default(),
+        )
+        .unwrap();
         assert!(!prefix.is_empty());
         assert!(!remaining.is_empty());
         assert!(prefix_height <= available_height);
@@ -5208,6 +5809,7 @@ mod tests {
         let table = one_line_table(200);
         let mut budget = EpubPaginationBudget {
             remaining_page_breaks: 1,
+            ..Default::default()
         };
         let pages = paginate_epub_chapter_with_budget(
             std::slice::from_ref(&table),
@@ -5895,6 +6497,7 @@ mod tests {
         let second_chapter = vec![paragraph('c')];
         let mut budget = EpubPaginationBudget {
             remaining_page_breaks: 3,
+            ..Default::default()
         };
 
         let first_pages = paginate_epub_chapter_with_budget(
@@ -5939,6 +6542,209 @@ mod tests {
             text,
             format!("{}{}{}", "a".repeat(20), "b".repeat(20), "c".repeat(20))
         );
+    }
+
+    #[test]
+    fn cancelled_pagination_stops_before_processing_nodes() {
+        let cancellation = EpubPaginationCancellation::default();
+        cancellation.cancel();
+        let mut budget = EpubPaginationBudget::default().with_cancellation(cancellation);
+
+        let pages = paginate_epub_chapter_with_budget(
+            &[ContentNode::Paragraph(Vec::new(), Default::default())],
+            None,
+            16.0,
+            1.6,
+            Size::new(360.0, 600.0),
+            None,
+            &mut budget,
+        );
+
+        assert!(pages.is_empty());
+    }
+
+    #[test]
+    fn table_cancellation_interrupts_placement_and_geometry_without_publishing_pages() {
+        let table = one_line_table(256);
+        let total_cells = 256;
+
+        for (cancel_after, completed_passes) in [(8, 0), (total_cells * 2 + 8, 2)] {
+            TABLE_CELL_VISITS.with(|visits| visits.set(0));
+            TABLE_CANCEL_AFTER_VISITS.with(|limit| limit.set(Some(cancel_after)));
+            let cancellation = EpubPaginationCancellation::default();
+            let mut budget =
+                EpubPaginationBudget::default().with_cancellation(cancellation.clone());
+
+            let pages = paginate_epub_chapter_with_budget(
+                std::slice::from_ref(&table),
+                None,
+                16.0,
+                1.6,
+                Size::new(360.0, 600.0),
+                None,
+                &mut budget,
+            );
+            let visits = TABLE_CELL_VISITS.with(std::cell::Cell::get);
+            TABLE_CANCEL_AFTER_VISITS.with(|limit| limit.set(None));
+
+            assert!(cancellation.is_cancelled());
+            assert!(
+                pages.is_empty(),
+                "cancelled table pages must not be published"
+            );
+            assert!(
+                visits < (completed_passes + 1) * total_cells,
+                "cancelled pass traversed every cell: {visits} visits"
+            );
+        }
+    }
+
+    #[test]
+    fn table_cancellation_interrupts_one_large_cell_at_an_internal_checkpoint() {
+        let mut table = one_line_table(1);
+        let ContentNode::Table { row_groups, .. } = &mut table else {
+            unreachable!();
+        };
+        let child = row_groups[0].rows[0].cells[0].children[0].clone();
+        let total_children = EPUB_PAGINATION_LOOP_CHUNK * 2 + 1;
+        row_groups[0].rows[0].cells[0].children = vec![child; total_children];
+
+        TABLE_CELL_INTERNAL_VISITS.with(|visits| visits.set(0));
+        // Each retained paragraph visits its child and span. Cancel on child 64,
+        // where the bounded child traversal is required to poll.
+        TABLE_CANCEL_AFTER_INTERNAL_VISITS
+            .with(|limit| limit.set(Some(EPUB_PAGINATION_LOOP_CHUNK * 2 + 1)));
+        let cancellation = EpubPaginationCancellation::default();
+        let mut budget = EpubPaginationBudget::default().with_cancellation(cancellation.clone());
+
+        let pages = paginate_epub_chapter_with_budget(
+            &[table],
+            None,
+            16.0,
+            1.6,
+            Size::new(360.0, 600.0),
+            None,
+            &mut budget,
+        );
+        let visits = TABLE_CELL_INTERNAL_VISITS.with(std::cell::Cell::get);
+        TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| limit.set(None));
+
+        assert!(cancellation.is_cancelled());
+        assert!(
+            pages.is_empty(),
+            "cancelled table pages must not be published"
+        );
+        assert_eq!(visits, EPUB_PAGINATION_LOOP_CHUNK * 2 + 1);
+        assert!(visits < total_children * 2, "traversal did not stop early");
+    }
+
+    #[test]
+    fn table_cancellation_interrupts_each_oversized_nested_child() {
+        let oversized_paragraph = || {
+            let mut table = one_line_table(1);
+            let ContentNode::Table { row_groups, .. } = &mut table else {
+                unreachable!();
+            };
+            let ContentNode::Paragraph(spans, _) = &mut row_groups[0].rows[0].cells[0].children[0]
+            else {
+                unreachable!();
+            };
+            spans[0].text = "x".repeat(EPUB_PAGINATION_LOOP_CHUNK * 4);
+            row_groups[0].rows[0].cells[0].children.remove(0)
+        };
+        let paragraph = oversized_paragraph();
+        let mut nested_table = one_line_table(1);
+        let ContentNode::Table { row_groups, .. } = &mut nested_table else {
+            unreachable!();
+        };
+        row_groups[0].rows[0].cells[0].children = vec![oversized_paragraph()];
+        let children = [
+            paragraph.clone(),
+            ContentNode::Figure {
+                children: vec![paragraph.clone()],
+                style: Default::default(),
+            },
+            ContentNode::BlockQuote {
+                children: vec![paragraph],
+                style: Default::default(),
+            },
+            nested_table,
+        ];
+
+        for child in children {
+            let mut table = one_line_table(1);
+            let ContentNode::Table { row_groups, .. } = &mut table else {
+                unreachable!();
+            };
+            row_groups[0].rows[0].cells[0].children = vec![child];
+            TABLE_CELL_INTERNAL_VISITS.with(|visits| visits.set(0));
+            TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| limit.set(Some(16)));
+            let cancellation = EpubPaginationCancellation::default();
+            let mut budget =
+                EpubPaginationBudget::default().with_cancellation(cancellation.clone());
+
+            let pages = paginate_epub_chapter_with_budget(
+                &[table],
+                None,
+                16.0,
+                1.6,
+                Size::new(360.0, 600.0),
+                None,
+                &mut budget,
+            );
+            let visits = TABLE_CELL_INTERNAL_VISITS.with(std::cell::Cell::get);
+            TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| limit.set(None));
+
+            assert!(cancellation.is_cancelled());
+            assert!(pages.is_empty(), "cancelled table page was published");
+            assert!(
+                visits < EPUB_PAGINATION_LOOP_CHUNK * 4,
+                "oversized child traversal did not stop early: {visits}"
+            );
+        }
+    }
+
+    #[test]
+    fn measured_paragraph_observes_cancellation_between_shaping_chunks() {
+        let cancellation = EpubPaginationCancellation::default();
+        let signal = cancellation.clone();
+        let spans = vec![shosai_core::epub::render::TextSpan {
+            text: "x".repeat(EPUB_PAGINATION_SHAPE_CHUNK * 2),
+            math: None,
+            font_family: Some("Book".into()),
+            bold: false,
+            italic: false,
+            monospace: false,
+            font_size_multiplier: 1.0,
+            preserve_whitespace: false,
+            link: None,
+        }];
+        let measure = move |_: &[shosai_core::epub::render::TextSpan]| {
+            signal.cancel();
+            Some(EpubTextLayout {
+                width: 1.0,
+                height: 1.0,
+                lines: Vec::new(),
+                links: Vec::new(),
+            })
+        };
+        let mut pages = vec![Vec::new()];
+        let mut remaining = 100.0;
+        let mut budget = EpubPaginationBudget::default().with_cancellation(cancellation);
+
+        assert!(!paginate_measured_paragraph(
+            &spans,
+            &Default::default(),
+            &measure,
+            0,
+            0.0,
+            100.0,
+            false,
+            &mut pages,
+            &mut remaining,
+            &mut budget,
+        ));
+        assert!(pages.iter().all(Vec::is_empty));
     }
 
     #[test]
@@ -6290,8 +7096,16 @@ mod tests {
         };
         let children = vec![child("first"), child("second")];
         let first_height = estimated_epub_compact_node_height(&children[0], 40, 20, 16.0);
-        let (prefix, remaining, reserved, _) =
-            split_epub_blockquote_prefix(&children, 32.0 + first_height, 40, 20, 16.0, 400.0, None);
+        let (prefix, remaining, reserved, _) = split_epub_blockquote_prefix(
+            &children,
+            32.0 + first_height,
+            20,
+            16.0,
+            400.0,
+            None,
+            &EpubPaginationBudget::default(),
+        )
+        .unwrap();
 
         assert_eq!(prefix.len(), 1);
         assert_eq!(remaining.len(), 1);

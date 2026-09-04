@@ -1,6 +1,8 @@
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::pdf::PdfDoc;
-use shosai_core::search::search_pages;
+use shosai_core::search::{
+    SearchCancellation, SearchError, SearchLimits, search_pages, search_pdf_with,
+};
 use std::path::PathBuf;
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -50,6 +52,7 @@ fn generated_pdf(page_options: &str, content: &str) -> Vec<u8> {
 fn render_search_match(doc: &PdfDoc, query: &str) -> (RenderedPage, RenderedPage) {
     let page_text = doc.page_text(0).unwrap();
     let result = search_pages(&[page_text], query)
+        .unwrap()
         .into_iter()
         .next()
         .unwrap_or_else(|| panic!("generated PDF should contain {query:?}"));
@@ -58,6 +61,34 @@ fn render_search_match(doc: &PdfDoc, query: &str) -> (RenderedPage, RenderedPage
         .render_page_with_highlights(0, 1.0, &[(result.offset, result.length, true)])
         .unwrap();
     (plain, highlighted)
+}
+
+#[test]
+fn pdf_search_rejects_page_text_before_exceeding_its_byte_budget() {
+    let pdf = generated_pdf("", "BT /F1 20 Tf 1 0 0 1 40 120 Tm (VISIBLE TARGET) Tj ET");
+    let doc = PdfDoc::from_bytes(pdf).unwrap();
+    let limits = SearchLimits {
+        max_indexed_text_bytes: 1,
+        ..SearchLimits::default()
+    };
+
+    assert!(matches!(
+        search_pdf_with(&doc, "target", limits, &SearchCancellation::new()),
+        Err(SearchError::TextLimit { limit: 1, .. })
+    ));
+}
+
+#[test]
+fn pdf_search_observes_cancellation_before_page_text_extraction() {
+    let pdf = generated_pdf("", "BT /F1 20 Tf 1 0 0 1 40 120 Tm (TARGET) Tj ET");
+    let doc = PdfDoc::from_bytes(pdf).unwrap();
+    let cancellation = SearchCancellation::new();
+    cancellation.cancel();
+
+    assert_eq!(
+        search_pdf_with(&doc, "target", SearchLimits::default(), &cancellation),
+        Err(SearchError::Cancelled)
+    );
 }
 
 fn changed_pixel_bounds(plain: &RenderedPage, highlighted: &RenderedPage) -> (u32, u32, u32, u32) {
@@ -257,6 +288,7 @@ fn test_search_offsets_survive_generated_line_breaks() {
     let doc = PdfDoc::from_bytes(pdf).unwrap();
     let searchable = doc.page_text(0).unwrap();
     let target = search_pages(std::slice::from_ref(&searchable), "TARGET")
+        .unwrap()
         .into_iter()
         .next()
         .unwrap();

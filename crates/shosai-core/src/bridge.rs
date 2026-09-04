@@ -8,8 +8,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
-use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
+use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan};
 use crate::document::{Document, RenderedPage};
+#[cfg(test)]
 use crate::epub::EpubLimits;
 use crate::library::BookFormat;
 
@@ -22,11 +23,8 @@ pub const MAX_BRIDGE_DOCUMENTS: usize = 64;
 pub const MAX_BRIDGE_BUFFERS: usize = 256;
 pub const MAX_BRIDGE_RETAINED_DOCUMENT_BYTES: usize = 3 * 1024 * 1024 * 1024;
 pub const MAX_BRIDGE_PROBE_BYTES: usize = 512 * 1024 * 1024;
-
-const EPUB_RETAINED_SOURCE_COPIES: usize = 4;
-const EPUB_PRESENTATION_NODE_BYTES: usize = 256;
-const EPUB_CONTAINER_OVERHEAD_BYTES: usize = 64 * 1024 * 1024;
-const PDF_RETAINED_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_BRIDGE_LOCAL_ID_BYTES: usize = 4 * 1024;
+pub const MAX_BRIDGE_PATH_KEY_BYTES: usize = 64 * 1024;
 
 static NEXT_REGISTRY_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -304,6 +302,21 @@ impl Bridge {
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
         )?;
+        if request.local_id.len() > MAX_BRIDGE_LOCAL_ID_BYTES {
+            return Err(BridgeError::InvalidRequest(format!(
+                "local_id exceeds {MAX_BRIDGE_LOCAL_ID_BYTES} bytes"
+            )));
+        }
+        if request.path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
+            return Err(BridgeError::InvalidRequest(format!(
+                "path_key exceeds {MAX_BRIDGE_PATH_KEY_BYTES} bytes"
+            )));
+        }
+        if request.book_id.is_some() {
+            return Err(BridgeError::InvalidRequest(
+                "book_id requires a library-backed resolver; use an untracked locator".to_owned(),
+            ));
+        }
         let path = crate::path_key::try_path_from_key(&request.path_key).map_err(|_| {
             BridgeError::InvalidRequest("path_key uses an invalid reserved encoding".to_owned())
         })?;
@@ -311,31 +324,41 @@ impl Bridge {
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
-        let format = locator.format().map_err(map_open_error)?;
+        let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
+        let format = plan.format();
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
-        // Reserve against the format ceiling rather than path metadata: the file is opened and
-        // parsed from one bounded snapshot below, so replacement or growth cannot invalidate the
-        // retained-memory admission decision.
-        let admitted_input_bytes = usize::try_from(OpenDocument::max_input_bytes(format))
-            .map_err(|_| BridgeError::DocumentLimit)?;
-        let retained_byte_len = retained_document_byte_len(format, admitted_input_bytes)?;
-        let document_byte_permits =
-            u32::try_from(retained_byte_len).map_err(|_| BridgeError::DocumentLimit)?;
-        let document_bytes = acquire_permits(
+        // Reserve the parser's conservative retained ceiling before parsing so concurrently
+        // opening documents cannot allocate outside the process document budget.
+        let maximum_retained_bytes = OpenDocument::maximum_retained_byte_len(format)
+            .filter(|bytes| *bytes <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES)
+            .ok_or(BridgeError::DocumentLimit)?;
+        let maximum_byte_permits =
+            u32::try_from(maximum_retained_bytes).map_err(|_| BridgeError::DocumentLimit)?;
+        let mut document_bytes = acquire_permits(
             Arc::clone(&self.admission.document_bytes),
-            document_byte_permits,
+            maximum_byte_permits,
             &cancellation,
         )
         .await?;
         let open_slot =
             acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
-        let document = tokio::task::spawn_blocking(move || {
-            let _open_slot = open_slot;
-            guarded(|| OpenDocument::open(&locator).map_err(map_open_error))
+        let (document, open_slot) = tokio::task::spawn_blocking(move || {
+            let document = guarded(|| plan.open().map_err(map_open_error));
+            (document, open_slot)
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let document = document?;
+        let actual_retained_bytes = document
+            .retained_byte_len()
+            .ok_or(BridgeError::DocumentLimit)?;
+        if actual_retained_bytes > maximum_retained_bytes {
+            return Err(BridgeError::DocumentLimit);
+        }
+        let unused_bytes = maximum_retained_bytes - actual_retained_bytes;
+        drop(document_bytes.split(unused_bytes));
+        drop(open_slot);
         let _publication = cancellation
             .0
             .publication
@@ -612,52 +635,12 @@ fn check_cancelled(cancellation: &Cancellation) -> Result<(), BridgeError> {
     }
 }
 
+#[cfg(test)]
 fn retained_document_byte_len(
     format: BookFormat,
     encoded_byte_len: usize,
 ) -> Result<usize, BridgeError> {
-    let expansion = match format {
-        BookFormat::Epub => {
-            let limits = EpubLimits::default();
-            usize::try_from(limits.max_total_uncompressed_bytes)
-                .ok()
-                // Content/resources, parsed package/style strings, presentation strings, and
-                // search text can each retain source-derived bytes. The parser independently
-                // bounds aggregate presentation nodes and decoded font bytes.
-                .and_then(|bytes| bytes.checked_mul(EPUB_RETAINED_SOURCE_COPIES))
-                .and_then(|bytes| bytes.checked_add(limits.max_total_decoded_font_bytes))
-                .and_then(|bytes| {
-                    bytes.checked_add(
-                        limits
-                            .max_total_presentation_nodes
-                            .checked_mul(EPUB_PRESENTATION_NODE_BYTES)?,
-                    )
-                })
-                .and_then(|bytes| bytes.checked_add(EPUB_CONTAINER_OVERHEAD_BYTES))
-                .ok_or(BridgeError::DocumentLimit)?
-        }
-        BookFormat::Pdf => PDF_RETAINED_OVERHEAD_BYTES,
-        BookFormat::Cbz => {
-            let limits = crate::cbz::CbzLimits::default();
-            // Every retained page name came from the encoded ZIP directory. Account for that
-            // second copy plus bounded vectors, cached dimensions, and the path-derived title.
-            encoded_byte_len
-                .checked_add(
-                    limits
-                        .max_entries
-                        .checked_mul(
-                            std::mem::size_of::<String>()
-                                + std::mem::size_of::<usize>()
-                                + std::mem::size_of::<Option<(u32, u32)>>(),
-                        )
-                        .ok_or(BridgeError::DocumentLimit)?,
-                )
-                .and_then(|bytes| bytes.checked_add(4 * 1024))
-                .ok_or(BridgeError::DocumentLimit)?
-        }
-    };
-    let retained = encoded_byte_len
-        .checked_add(expansion)
+    let retained = OpenDocument::retained_admission_byte_len(format, encoded_byte_len)
         .ok_or(BridgeError::DocumentLimit)?;
     if retained > MAX_BRIDGE_RETAINED_DOCUMENT_BYTES {
         return Err(BridgeError::DocumentLimit);
@@ -708,20 +691,9 @@ fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<u
         OpenDocument::Pdf(document) => document
             .rendered_byte_len(page, scale)
             .map_err(map_preflight_error),
-        OpenDocument::Cbz(document) => {
-            let (width, height) = document.page_size(page).map_err(map_preflight_error)?;
-            let width = (f64::from(width) * f64::from(scale)).ceil();
-            let height = (f64::from(height) * f64::from(scale)).ceil();
-            if !width.is_finite() || !height.is_finite() || width < 1.0 || height < 1.0 {
-                return Err(BridgeError::InvalidRequest(
-                    "render dimensions must be finite and positive".to_owned(),
-                ));
-            }
-            (width as usize)
-                .checked_mul(height as usize)
-                .and_then(|pixels| pixels.checked_mul(4))
-                .ok_or(BridgeError::BufferLimit)
-        }
+        OpenDocument::Cbz(document) => document
+            .rendered_byte_len(page, scale)
+            .map_err(map_preflight_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }
@@ -764,7 +736,7 @@ mod tests {
 
     fn cbz_request() -> OpenRequest {
         OpenRequest {
-            book_id: Some(7),
+            book_id: None,
             local_id: "fixture".to_owned(),
             path_key: crate::path_key::path_key(std::path::Path::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -772,6 +744,18 @@ mod tests {
             ))),
             format_hint: Some(BookFormat::Cbz),
         }
+    }
+
+    #[tokio::test]
+    async fn bridge_rejects_unverified_book_identity_pairings() {
+        let bridge = Bridge::new();
+        let mut request = cbz_request();
+        request.book_id = Some(7);
+
+        assert!(matches!(
+            bridge.open_document(request, Cancellation::new()).await,
+            Err(BridgeError::InvalidRequest(message)) if message.contains("library-backed")
+        ));
     }
 
     fn pdf_request() -> OpenRequest {
@@ -783,6 +767,18 @@ mod tests {
                 "/tests/fixtures/sample.pdf"
             ))),
             format_hint: Some(BookFormat::Pdf),
+        }
+    }
+
+    fn epub_request() -> OpenRequest {
+        OpenRequest {
+            book_id: None,
+            local_id: "epub-fixture".to_owned(),
+            path_key: crate::path_key::path_key(std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.epub"
+            ))),
+            format_hint: Some(BookFormat::Epub),
         }
     }
 
@@ -1003,6 +999,26 @@ mod tests {
         assert!(retained <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES);
     }
 
+    #[tokio::test]
+    async fn parsed_epub_charge_allows_two_retained_documents() {
+        let bridge = Bridge::new();
+        let first = bridge
+            .open_document(epub_request(), Cancellation::new())
+            .await
+            .unwrap();
+
+        let second = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            bridge.open_document(epub_request(), Cancellation::new()),
+        )
+        .await
+        .expect("a small second EPUB must not wait for the first handle")
+        .unwrap();
+
+        assert!(bridge.release_document(first.handle));
+        assert!(bridge.release_document(second.handle));
+    }
+
     #[test]
     fn cbz_retention_charge_includes_copied_directory_names_and_indexes() {
         let encoded = 1024;
@@ -1030,6 +1046,33 @@ mod tests {
             admission.document_bytes.available_permits(),
             MAX_BRIDGE_RETAINED_DOCUMENT_BYTES
         );
+    }
+
+    #[tokio::test]
+    async fn byte_admission_precedes_open_worker_and_parsing() {
+        let mut configured = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        configured.open_slots = Arc::new(Semaphore::new(2));
+        configured.document_bytes = Arc::new(Semaphore::new(0));
+        let admission = Arc::new(configured);
+        let bridge = Bridge::with_admission(Arc::clone(&admission));
+        let cancellation = Cancellation::new();
+        let mut opens = Vec::new();
+        for _ in 0..3 {
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            opens.push(tokio::spawn(async move {
+                bridge.open_document(epub_request(), cancellation).await
+            }));
+        }
+
+        tokio::task::yield_now().await;
+        assert_eq!(admission.open_slots.available_permits(), 2);
+
+        cancellation.cancel();
+        for open in opens {
+            assert_eq!(open.await.unwrap(), Err(BridgeError::Cancelled));
+        }
+        assert_eq!(admission.open_slots.available_permits(), 2);
     }
 
     #[tokio::test]
@@ -1074,6 +1117,23 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), BridgeErrorKind::InvalidRequest);
+    }
+
+    #[tokio::test]
+    async fn oversized_request_strings_are_rejected_before_document_admission() {
+        let bridge = Bridge::new();
+        let mut local_id = cbz_request();
+        local_id.local_id = "x".repeat(MAX_BRIDGE_LOCAL_ID_BYTES + 1);
+        let mut path_key = cbz_request();
+        path_key.path_key = "x".repeat(MAX_BRIDGE_PATH_KEY_BYTES + 1);
+
+        for request in [local_id, path_key] {
+            assert!(matches!(
+                bridge.open_document(request, Cancellation::new()).await,
+                Err(BridgeError::InvalidRequest(_))
+            ));
+        }
+        assert!(bridge.registry.lock().unwrap().documents.is_empty());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
