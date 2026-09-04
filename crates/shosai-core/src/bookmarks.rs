@@ -204,12 +204,26 @@ impl BookmarkStore {
             .context("failed to resolve bookmark book")?
             .with_context(|| format!("book {book_id} not found"))?;
         validate_bookmark_path(&current_path)?;
+
+        // Claim path-only aliases while holding the write lock so lookup, counting, and the
+        // mutation all observe one identity set. Rows belonging to another stable book are not
+        // aliases even if that book currently happens to use the same path.
+        sqlx::query(
+            "UPDATE bookmarks SET book_id = ?
+             WHERE book_id IS NULL AND file_path = ?",
+        )
+        .bind(book_id)
+        .bind(&current_path)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to reconcile bookmark aliases")?;
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
-             WHERE book_id = ? AND page = ?
+             WHERE (book_id = ? OR (book_id IS NULL AND file_path = ?)) AND page = ?
                AND location_offset IS ? AND note IS NULL",
         )
         .bind(book_id)
+        .bind(&current_path)
         .bind(page)
         .bind(location_offset)
         .fetch_optional(&mut *transaction)
@@ -225,11 +239,15 @@ impl BookmarkStore {
             transaction.commit().await?;
             Ok(None)
         } else {
-            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE book_id = ?")
-                .bind(book_id)
-                .fetch_one(&mut *transaction)
-                .await
-                .context("failed to count bookmarks for book")?;
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM bookmarks
+                 WHERE book_id = ? OR (book_id IS NULL AND file_path = ?)",
+            )
+            .bind(book_id)
+            .bind(&current_path)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to count bookmarks for book")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
                 anyhow::bail!("bookmark count limit exceeded");
             }

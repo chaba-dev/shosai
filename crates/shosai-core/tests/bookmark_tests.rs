@@ -405,6 +405,103 @@ async fn stable_book_toggle_reports_a_missing_book() {
 }
 
 #[tokio::test]
+async fn stable_book_toggle_reconciles_path_only_bookmarks_before_counting() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let current_path = PathBuf::from("/book.epub");
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+    )
+    .bind(current_path.to_string_lossy().as_ref())
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+
+    sqlx::query(
+        "WITH RECURSIVE pages(page) AS (
+           SELECT 0 UNION ALL SELECT page + 1 FROM pages WHERE page < ?
+         )
+         INSERT INTO bookmarks (file_path, book_id, page, note, color)
+         SELECT '/old-book.epub', ?, page, 'stable', 'yellow' FROM pages",
+    )
+    .bind(MAX_BOOKMARKS_PER_BOOK as i64 - 2)
+    .bind(book_id)
+    .execute(state.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO bookmarks (file_path, page, note, color)
+         VALUES (?, ?, 'path alias', 'yellow')",
+    )
+    .bind(current_path.to_string_lossy().as_ref())
+    .bind(MAX_BOOKMARKS_PER_BOOK as i64 - 1)
+    .execute(state.pool())
+    .await
+    .unwrap();
+
+    let error = store
+        .toggle_for_book_at_async(
+            book_id,
+            &PathBuf::from("/stale-alias.epub"),
+            MAX_BOOKMARKS_PER_BOOK,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("count limit"));
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bookmarks
+         WHERE book_id = ? OR (book_id IS NULL AND file_path = ?)",
+    )
+    .bind(book_id)
+    .bind(current_path.to_string_lossy().as_ref())
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    assert_eq!(count, MAX_BOOKMARKS_PER_BOOK as i64);
+}
+
+#[tokio::test]
+async fn stable_book_toggle_claims_path_only_aliases() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let path = PathBuf::from("/book.epub");
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+    let alias = store
+        .add_async(&path, 1, None, Some("note"), "yellow")
+        .await
+        .unwrap();
+
+    store
+        .toggle_for_book_at_async(book_id, &path, 2, None, None)
+        .await
+        .unwrap();
+
+    let alias_book_id: Option<i64> =
+        sqlx::query_scalar("SELECT book_id FROM bookmarks WHERE id = ?")
+            .bind(alias.id)
+            .fetch_one(state.pool())
+            .await
+            .unwrap();
+    assert_eq!(alias_book_id, Some(book_id));
+    assert_eq!(store.list_for_book_async(book_id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn concurrent_stable_book_toggles_are_linearizable() {
     let dir = TempDir::new().unwrap();
     let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
