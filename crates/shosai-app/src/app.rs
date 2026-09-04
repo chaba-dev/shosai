@@ -390,6 +390,8 @@ const RETAINED_DOCUMENT_COUNT_CAPACITY: usize = 16;
 const RETAINED_DOCUMENT_BYTE_CAPACITY: usize = 3 * 1024 * 1024 * 1024;
 const MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB: usize = 64;
 const MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB: usize = 256 * 1024;
+const MAX_QUEUED_BOOKMARK_MUTATIONS: usize = 256;
+const MAX_QUEUED_BOOKMARK_MUTATION_BYTES: usize = 1024 * 1024;
 const DOCUMENT_OPEN_WORKERS: usize = 2;
 const SEARCH_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
@@ -4002,18 +4004,29 @@ fn queue_bookmark_mutation(
     tab_id: u64,
     mutation: BookmarkMutation,
 ) -> Task<Message> {
-    let queue = state.bookmark_mutation_queues.entry(tab_id).or_default();
-    let queued_bytes = queue.iter().fold(0usize, |total, queued| {
-        total.saturating_add(queued.retained_byte_len())
-    });
+    let (global_count, global_bytes) = bookmark_mutation_queue_usage(state);
+    let (tab_count, queued_bytes) =
+        state
+            .bookmark_mutation_queues
+            .get(&tab_id)
+            .map_or((0, 0), |queue| {
+                (
+                    queue.len(),
+                    queue.iter().fold(0usize, |total, queued| {
+                        total.saturating_add(queued.retained_byte_len())
+                    }),
+                )
+            });
     let mutation_bytes = mutation.retained_byte_len();
     let note_too_large = matches!(
         &mutation,
         BookmarkMutation::UpdateNote { note: Some(note), .. }
             if note.len() > MAX_BOOKMARK_NOTE_BYTES
     );
-    if queue.len() >= MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB
+    if tab_count >= MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB
         || queued_bytes.saturating_add(mutation_bytes) > MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB
+        || global_count >= MAX_QUEUED_BOOKMARK_MUTATIONS
+        || global_bytes.saturating_add(mutation_bytes) > MAX_QUEUED_BOOKMARK_MUTATION_BYTES
         || note_too_large
     {
         if let BookmarkMutation::UpdateNote { id, note, .. } = mutation {
@@ -4024,8 +4037,25 @@ fn queue_bookmark_mutation(
         ));
         return Task::none();
     }
-    queue.push_back(mutation);
+    state
+        .bookmark_mutation_queues
+        .entry(tab_id)
+        .or_default()
+        .push_back(mutation);
     continue_bookmark_mutations(state, tab_id)
+}
+
+fn bookmark_mutation_queue_usage(state: &State) -> (usize, usize) {
+    state
+        .bookmark_mutation_queues
+        .values()
+        .flat_map(|queue| queue.iter())
+        .fold((0usize, 0usize), |(count, bytes), mutation| {
+            (
+                count.saturating_add(1),
+                bytes.saturating_add(mutation.retained_byte_len()),
+            )
+        })
 }
 
 fn continue_bookmark_mutations(state: &mut State, tab_id: u64) -> Task<Message> {
@@ -4183,11 +4213,15 @@ fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64)
 }
 
 fn restore_bookmark_edit(state: &mut State, tab_id: u64, id: i64, note: String) {
-    if state.active_tab_id == Some(tab_id) {
+    if state.active_tab_id == Some(tab_id) && state.editing_note_id.is_none() {
         state.editing_note_id = Some(id);
         state.editing_note_text = note.clone();
     }
-    if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+    if let Some(tab) = state
+        .tabs
+        .iter_mut()
+        .find(|tab| tab.id == tab_id && tab.editing_note_id.is_none())
+    {
         tab.editing_note_id = Some(id);
         tab.editing_note_text = note;
     }
@@ -9655,6 +9689,33 @@ mod tests {
     }
 
     #[test]
+    fn failed_note_save_does_not_overwrite_a_newer_active_or_inactive_draft() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.editing_note_id = Some(2);
+        state.editing_note_text = "new active draft".to_owned();
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+
+        restore_bookmark_edit(&mut state, 1, 1, "failed active draft".to_owned());
+
+        assert_eq!(state.editing_note_id, Some(2));
+        assert_eq!(state.editing_note_text, "new active draft");
+        assert_eq!(state.tabs[0].editing_note_id, Some(2));
+        assert_eq!(state.tabs[0].editing_note_text, "new active draft");
+
+        state.active_tab_id = Some(2);
+        state.tabs[0].editing_note_text = "new inactive draft".to_owned();
+        restore_bookmark_edit(&mut state, 1, 1, "failed inactive draft".to_owned());
+
+        assert_eq!(state.tabs[0].editing_note_id, Some(2));
+        assert_eq!(state.tabs[0].editing_note_text, "new inactive draft");
+    }
+
+    #[test]
     fn bookmark_mutation_queue_bounds_count_and_payload_bytes() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -9680,6 +9741,36 @@ mod tests {
 
         state.bookmark_mutation_queues.clear();
         let large_valid_note = "x".repeat(MAX_BOOKMARK_NOTE_BYTES);
+        for tab_id in 1..=100 {
+            let _ = queue_bookmark_mutation(
+                &mut state,
+                tab_id,
+                BookmarkMutation::UpdateNote {
+                    generation: tab_id,
+                    file_path: PathBuf::from(format!("book-{tab_id}.epub")),
+                    book_id: None,
+                    id: tab_id as i64,
+                    note: Some(large_valid_note.clone()),
+                },
+            );
+        }
+        let (global_count, global_bytes) = bookmark_mutation_queue_usage(&state);
+        assert!(global_count < 100);
+        assert!(global_count <= MAX_QUEUED_BOOKMARK_MUTATIONS);
+        assert!(global_bytes <= MAX_QUEUED_BOOKMARK_MUTATION_BYTES);
+        let queued_tabs = state
+            .bookmark_mutation_queues
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        for tab_id in queued_tabs {
+            let file_path = PathBuf::from(format!("book-{tab_id}.epub"));
+            let _ = finish_bookmark_mutation(&mut state, tab_id, tab_id, &file_path, None);
+        }
+        assert_eq!(bookmark_mutation_queue_usage(&state), (0, 0));
+        state.editing_note_id = None;
+        state.editing_note_text.clear();
+
         for generation in 0..10 {
             let _ = queue_bookmark_mutation(
                 &mut state,
@@ -9704,6 +9795,8 @@ mod tests {
         );
 
         state.bookmark_mutation_queues.clear();
+        state.editing_note_id = None;
+        state.editing_note_text.clear();
         let oversized = "x".repeat(MAX_BOOKMARK_NOTE_BYTES + 1);
         let _ = queue_bookmark_mutation(
             &mut state,
@@ -9722,7 +9815,7 @@ mod tests {
                 .get(&1)
                 .is_none_or(VecDeque::is_empty)
         );
-        assert_eq!(state.editing_note_text, oversized);
+        assert_eq!(state.editing_note_text.len(), oversized.len());
         assert!(matches!(state.error, Some(AppError::Library(_))));
     }
 
