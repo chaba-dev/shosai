@@ -1,5 +1,8 @@
 //! EPUB-specific pagination models and renderer-neutral page geometry helpers.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use super::render::{ContentNode, TableRow, TableRowGroup};
 use super::{
     EpubDoc, EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextLayout, EpubTextRequest,
@@ -47,12 +50,27 @@ type Size = LayoutSize;
 
 pub struct EpubPaginationBudget {
     remaining_page_breaks: usize,
+    cancellation: Option<EpubPaginationCancellation>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct EpubPaginationCancellation(Arc<AtomicBool>);
+
+impl EpubPaginationCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 impl Default for EpubPaginationBudget {
     fn default() -> Self {
         Self {
             remaining_page_breaks: MAX_EPUB_PAGES - 1,
+            cancellation: None,
         }
     }
 }
@@ -61,7 +79,19 @@ impl EpubPaginationBudget {
     pub fn for_document(chapters: usize) -> Self {
         Self {
             remaining_page_breaks: MAX_EPUB_PAGES.saturating_sub(chapters),
+            cancellation: None,
         }
+    }
+
+    pub fn with_cancellation(mut self, cancellation: EpubPaginationCancellation) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(EpubPaginationCancellation::is_cancelled)
     }
 }
 
@@ -591,6 +621,9 @@ pub fn paginate_epub_chapter_with_budget(
     let mut text_offset = 0;
 
     for (node_index, node) in nodes.iter().enumerate() {
+        if budget.is_cancelled() {
+            return Vec::new();
+        }
         let block_before = if node_index == 0 {
             epub_node_boundary_spacing(nodes, 0, font_size, default_block_spacing)
         } else {
@@ -1315,6 +1348,33 @@ pub fn paginate_document(
     pages
 }
 
+pub fn paginate_document_cancellable(
+    document: &EpubDoc,
+    font_size: f32,
+    line_spacing: f32,
+    page_size: LayoutSize,
+    cancellation: EpubPaginationCancellation,
+) -> Vec<Page> {
+    let mut pages = Vec::new();
+    let chapters = document.presentation().chapters();
+    let mut budget =
+        EpubPaginationBudget::for_document(chapters.len()).with_cancellation(cancellation);
+    for chapter in 0..chapters.len() {
+        if budget.is_cancelled() || pages.len() >= MAX_EPUB_PAGES {
+            break;
+        }
+        pages.extend(paginate_document_chapter(
+            document,
+            chapter,
+            font_size,
+            line_spacing,
+            page_size,
+            &mut budget,
+        ));
+    }
+    pages
+}
+
 pub fn paginate_document_chapter(
     document: &EpubDoc,
     chapter: usize,
@@ -1410,7 +1470,7 @@ fn scaled_characters_per_line(chars_per_line: usize, scale: f32) -> usize {
 }
 
 fn push_epub_page(pages: &mut Vec<PageNodes>, budget: &mut EpubPaginationBudget) -> bool {
-    if budget.remaining_page_breaks == 0 {
+    if budget.is_cancelled() || budget.remaining_page_breaks == 0 {
         return false;
     }
     budget.remaining_page_breaks -= 1;
@@ -5279,6 +5339,7 @@ mod tests {
         let table = one_line_table(200);
         let mut budget = EpubPaginationBudget {
             remaining_page_breaks: 1,
+            ..Default::default()
         };
         let pages = paginate_epub_chapter_with_budget(
             std::slice::from_ref(&table),
@@ -5966,6 +6027,7 @@ mod tests {
         let second_chapter = vec![paragraph('c')];
         let mut budget = EpubPaginationBudget {
             remaining_page_breaks: 3,
+            ..Default::default()
         };
 
         let first_pages = paginate_epub_chapter_with_budget(
@@ -6010,6 +6072,25 @@ mod tests {
             text,
             format!("{}{}{}", "a".repeat(20), "b".repeat(20), "c".repeat(20))
         );
+    }
+
+    #[test]
+    fn cancelled_pagination_stops_before_processing_nodes() {
+        let cancellation = EpubPaginationCancellation::default();
+        cancellation.cancel();
+        let mut budget = EpubPaginationBudget::default().with_cancellation(cancellation);
+
+        let pages = paginate_epub_chapter_with_budget(
+            &[ContentNode::Paragraph(Vec::new(), Default::default())],
+            None,
+            16.0,
+            1.6,
+            Size::new(360.0, 600.0),
+            None,
+            &mut budget,
+        );
+
+        assert!(pages.is_empty());
     }
 
     #[test]
