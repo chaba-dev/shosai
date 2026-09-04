@@ -337,6 +337,7 @@ impl CbzDoc {
         let (width, height) = self.dimensions(index)?;
         let (width, height) = scaled_dimensions(width, height, scale)
             .context("scaled image dimensions must be finite, positive, and in range")?;
+        self.validate_dimensions(width, height)?;
         usize::try_from(width)
             .ok()
             .and_then(|width| width.checked_mul(usize::try_from(height).ok()?))

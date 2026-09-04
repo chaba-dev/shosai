@@ -67,6 +67,32 @@ fn rendered_byte_preflight_matches_fractional_scale_output() {
 }
 
 #[test]
+fn rendered_byte_preflight_rejects_scaled_dimension_and_pixel_limits() {
+    let data = std::fs::read(fixture_path("sample.cbz")).unwrap();
+    let constrained_limits = [
+        CbzLimits {
+            max_image_width: 199,
+            ..CbzLimits::default()
+        },
+        CbzLimits {
+            max_image_height: 299,
+            ..CbzLimits::default()
+        },
+        CbzLimits {
+            max_image_pixels: 59_999,
+            ..CbzLimits::default()
+        },
+    ];
+
+    for limits in constrained_limits {
+        let doc = CbzDoc::from_bytes_with_limits(data.clone(), limits).unwrap();
+        let error = doc.rendered_byte_len(0, 2.0).unwrap_err();
+        assert!(error.to_string().contains("decoded image limits"));
+        assert!(doc.render_page(0, 2.0).is_err());
+    }
+}
+
+#[test]
 fn test_page_size() {
     let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
     assert_eq!(doc.cached_page_size(0), None);
