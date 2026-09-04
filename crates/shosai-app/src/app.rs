@@ -1726,6 +1726,9 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
 
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
+    state.document_opening = false;
+    state.document_open_notice_visible = false;
+    state.document_open_preview = None;
     let locator = DeviceFileLocator::from_path(&path);
     let plan = match OpenDocumentPlan::prepare(&locator) {
         Ok(plan) => plan,
@@ -4197,15 +4200,25 @@ fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64)
     let edit = state
         .bookmark_mutation_queues
         .get(&tab_id)
-        .and_then(|queue| queue.front())
-        .and_then(|mutation| match mutation {
-            BookmarkMutation::UpdateNote {
-                generation: queued_generation,
-                id,
-                note,
-                ..
-            } if *queued_generation == generation => Some((*id, note.clone().unwrap_or_default())),
-            _ => None,
+        .and_then(|queue| {
+            let edit = queue.front().and_then(|mutation| match mutation {
+                BookmarkMutation::UpdateNote {
+                    generation: queued_generation,
+                    id,
+                    note,
+                    ..
+                } if *queued_generation == generation => {
+                    Some((*id, note.clone().unwrap_or_default()))
+                }
+                _ => None,
+            })?;
+            let superseded = queue.iter().skip(1).any(|mutation| match mutation {
+                BookmarkMutation::UpdateNote { id, .. } | BookmarkMutation::Delete { id, .. } => {
+                    *id == edit.0
+                }
+                BookmarkMutation::Toggle { .. } => false,
+            });
+            (!superseded).then_some(edit)
         });
     if let Some((id, note)) = edit {
         restore_bookmark_edit(state, tab_id, id, note);
@@ -9716,6 +9729,44 @@ mod tests {
     }
 
     #[test]
+    fn failed_note_save_does_not_restore_over_a_newer_queued_save() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.bookmark_mutation_queues.insert(
+            1,
+            VecDeque::from([
+                BookmarkMutation::UpdateNote {
+                    generation: 1,
+                    file_path: PathBuf::from("book.epub"),
+                    book_id: None,
+                    id: 42,
+                    note: Some("old failed save".to_owned()),
+                },
+                BookmarkMutation::UpdateNote {
+                    generation: 2,
+                    file_path: PathBuf::from("book.epub"),
+                    book_id: None,
+                    id: 42,
+                    note: Some("new queued save".to_owned()),
+                },
+            ]),
+        );
+
+        restore_failed_bookmark_edit(&mut state, 1, 1);
+        assert_eq!(state.editing_note_id, None);
+        assert_eq!(state.tabs[0].editing_note_id, None);
+
+        state.active_tab_id = Some(2);
+        restore_failed_bookmark_edit(&mut state, 1, 1);
+        assert_eq!(state.tabs[0].editing_note_id, None);
+    }
+
+    #[test]
     fn bookmark_mutation_queue_bounds_count_and_payload_bytes() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -12282,6 +12333,46 @@ mod tests {
         );
         assert!(!state.document_opening);
         assert!(!state.document_open_notice_visible);
+        assert!(state.document_open_preview.is_none());
+    }
+
+    #[test]
+    fn rejected_superseding_open_clears_the_previous_opening_state() {
+        let path = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../shosai-core/tests/fixtures/sample.pdf"
+        ));
+        let (mut state, _) = boot();
+        let first = open_document(&mut state, path.clone(), None);
+        let first_generation = state.document_open_generation;
+        assert!(first.units() > 0);
+        assert!(state.document_opening);
+        assert!(state.document_open_preview.is_some());
+
+        let rejected = open_document(&mut state, PathBuf::from("unsupported.txt"), None);
+        assert_eq!(rejected.units(), 0);
+        assert!(!state.document_opening);
+        assert!(!state.document_open_notice_visible);
+        assert!(state.document_open_preview.is_none());
+
+        let stale_document = PdfDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
+        )
+        .unwrap();
+        let _ = update(
+            &mut state,
+            Message::DocumentOpened {
+                generation: first_generation,
+                path,
+                book_id: None,
+                result: Ok((
+                    OpenDocument::Pdf(Arc::new(stale_document)),
+                    "stale".to_owned(),
+                )),
+            },
+        );
+
+        assert!(!state.document_opening);
         assert!(state.document_open_preview.is_none());
     }
 
