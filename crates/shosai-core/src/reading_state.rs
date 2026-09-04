@@ -12,10 +12,22 @@ use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use sqlx::Row;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
+use sqlx::sqlite::{
+    Sqlite, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous,
+};
+use sqlx::{Row, Transaction};
 
 use crate::path_key::canonical_path_key;
+
+async fn next_reading_state_revision(transaction: &mut Transaction<'_, Sqlite>) -> Result<i64> {
+    sqlx::query_scalar(
+        "UPDATE reading_state_revision SET value = value + 1 WHERE singleton = 1
+         RETURNING value",
+    )
+    .fetch_one(&mut **transaction)
+    .await
+    .context("failed to allocate reading state revision")
+}
 
 /// Data directory used by normal/release launches.
 pub const RELEASE_APP_DIR: &str = "shosai";
@@ -322,23 +334,28 @@ impl ReadingStateStore {
     }
 
     pub(crate) async fn set_key_async(&self, key: &str, state: &FileReadingState) -> Result<()> {
+        let mut transaction = self.pool.begin().await?;
+        let revision = next_reading_state_revision(&mut transaction).await?;
         sqlx::query(
-            "INSERT INTO reading_state (file_path, page, location_offset, zoom, updated_at)
-             VALUES (?, ?, ?, ?, datetime('now'))
+            "INSERT INTO reading_state
+                (file_path, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, datetime('now'), ?)
              ON CONFLICT(file_path) DO UPDATE SET
                 page = excluded.page,
                 location_offset = excluded.location_offset,
                 zoom = excluded.zoom,
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at,
+                revision = excluded.revision",
         )
         .bind(key)
         .bind(state.page as i64)
         .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
-        .execute(&self.pool)
+        .bind(revision)
+        .execute(&mut *transaction)
         .await
         .context("failed to save reading state")?;
-
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -373,6 +390,7 @@ impl ReadingStateStore {
     ) -> Result<()> {
         let key = canonical_key(file_path);
         let mut transaction = self.pool.begin().await?;
+        let revision = next_reading_state_revision(&mut transaction).await?;
         sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
             .bind(book_id)
             .bind(&key)
@@ -381,14 +399,15 @@ impl ReadingStateStore {
             .context("failed to reconcile reading state aliases")?;
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
         )
         .bind(&key)
         .bind(book_id)
         .bind(state.page as i64)
         .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
+        .bind(revision)
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state for book")?;
@@ -402,6 +421,7 @@ impl ReadingStateStore {
         state: &FileReadingState,
     ) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
+        let revision = next_reading_state_revision(&mut transaction).await?;
         let key: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
             .bind(book_id)
             .fetch_one(&mut *transaction)
@@ -415,14 +435,15 @@ impl ReadingStateStore {
             .context("failed to reconcile reading state aliases")?;
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
         )
         .bind(&key)
         .bind(book_id)
         .bind(state.page as i64)
         .bind(state.location_offset.map(|offset| offset as i64))
         .bind(state.zoom as f64)
+        .bind(revision)
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state for current book path")?;
