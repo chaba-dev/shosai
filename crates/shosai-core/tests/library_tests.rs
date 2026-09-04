@@ -76,6 +76,18 @@ async fn direct_import_rejects_replaced_existing_path() {
 }
 
 #[tokio::test]
+async fn stable_book_open_rejects_replaced_content() {
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    let book = lib.import_file(&path).await.unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &path).unwrap();
+
+    let error = lib.open_book_document_at(book.id, &path).await.unwrap_err();
+    assert!(error.to_string().contains("no longer match"));
+}
+
+#[tokio::test]
 async fn reviewed_import_rejects_replaced_existing_path() {
     use std::io::Write;
 
@@ -1003,6 +1015,18 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
     std::fs::copy(fixture_path("sample.epub"), &replacement).unwrap();
     let book = lib.import_file(&original).await.unwrap();
+    // Create the replacement alias first so its rowid is older, then update it last.
+    store
+        .set_async(
+            &replacement,
+            &FileReadingState {
+                page: 0,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
     store
         .set_for_book_async(
             book.id,
@@ -1031,7 +1055,7 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
         )
         .await
         .unwrap();
-    sqlx::query("UPDATE reading_state SET updated_at = '2026-02-01' WHERE file_path = ?")
+    sqlx::query("UPDATE reading_state SET updated_at = '2026-01-01' WHERE file_path = ?")
         .bind(
             replacement
                 .canonicalize()
@@ -1098,14 +1122,15 @@ async fn bookmark_alias_merge_keeps_newest_row_and_all_of_its_metadata() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    sqlx::query(
+    let stable_id: i64 = sqlx::query_scalar(
         "INSERT INTO bookmarks
          (file_path, book_id, page, location_offset, title, note, color, created_at)
-         VALUES (?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')",
+         VALUES (?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')
+         RETURNING id",
     )
     .bind(&original_key)
     .bind(book.id)
-    .execute(store.pool())
+    .fetch_one(store.pool())
     .await
     .unwrap();
     sqlx::query(
@@ -1120,12 +1145,13 @@ async fn bookmark_alias_merge_keeps_newest_row_and_all_of_its_metadata() {
 
     lib.relink(book.id, &replacement).await.unwrap();
 
-    let row = sqlx::query("SELECT title, color, created_at FROM bookmarks WHERE book_id = ?")
+    let row = sqlx::query("SELECT id, title, color, created_at FROM bookmarks WHERE book_id = ?")
         .bind(book.id)
         .fetch_one(store.pool())
         .await
         .unwrap();
     use sqlx::Row;
+    assert_eq!(row.get::<i64, _>("id"), stable_id);
     assert_eq!(row.get::<String, _>("title"), "winner title");
     assert_eq!(row.get::<String, _>("color"), "blue");
     assert_eq!(row.get::<String, _>("created_at"), "2026-02-01");

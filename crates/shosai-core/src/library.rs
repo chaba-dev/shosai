@@ -17,6 +17,7 @@ use sqlx::sqlite::{Sqlite, SqlitePool};
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentPlan};
 use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
@@ -1677,6 +1678,46 @@ impl Library {
         Ok(())
     }
 
+    /// Open the current bytes for a stable library identity after verifying its stored hash.
+    pub async fn open_book_document_at(&self, book_id: i64, path: &Path) -> Result<OpenDocument> {
+        let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path))?;
+        self.open_book_document_with_plan(book_id, path, plan).await
+    }
+
+    #[doc(hidden)]
+    pub async fn open_book_document_with_plan(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+    ) -> Result<OpenDocument> {
+        let book = self
+            .get(book_id)
+            .await?
+            .with_context(|| format!("book {book_id} not found"))?;
+        let requested_path = canonical_path(path);
+        if canonical_path_key(&requested_path) != book.file_path {
+            bail!("book location changed before it could be opened");
+        }
+        let expected_hash = book
+            .content_hash
+            .context("cannot verify this legacy book; remove it and import it again")?;
+        let format = book.format;
+        if plan.format() != format {
+            bail!("book format no longer matches the library identity");
+        }
+        tokio::task::spawn_blocking(move || {
+            let (format, data, title_hint) = plan.read_bytes()?;
+            let actual_hash = format!("{:x}", Sha256::digest(&data));
+            if actual_hash != expected_hash {
+                bail!("book contents no longer match the library identity");
+            }
+            OpenDocument::from_bytes(format, data, title_hint).map_err(anyhow::Error::from)
+        })
+        .await
+        .context("book open task failed")?
+    }
+
     async fn remove_unreferenced_managed_file(&self, file_path: &str) {
         let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE file_path = ?")
             .bind(file_path)
@@ -1711,10 +1752,10 @@ async fn reconcile_identity(
     new_path: &str,
 ) -> Result<()> {
     let reading = sqlx::query(
-        "SELECT page, location_offset, zoom, updated_at
+        "SELECT page, location_offset, zoom, updated_at, revision
          FROM reading_state
          WHERE book_id = ? OR file_path = ? OR file_path = ?
-         ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+         ORDER BY revision DESC LIMIT 1",
     )
     .bind(book_id)
     .bind(old_path)
@@ -1732,8 +1773,8 @@ async fn reconcile_identity(
     if let Some(reading) = reading {
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(new_path)
         .bind(book_id)
@@ -1741,11 +1782,34 @@ async fn reconcile_identity(
         .bind(reading.get::<Option<i64>, _>("location_offset"))
         .bind(reading.get::<f64, _>("zoom"))
         .bind(reading.get::<String, _>("updated_at"))
+        .bind(reading.get::<i64, _>("revision"))
         .execute(&mut **transaction)
         .await
         .context("failed to merge reading state aliases")?;
     }
 
+    // Keep an existing stable-ID row (and therefore any UI edit target) while copying the
+    // newest duplicate's user-visible metadata onto it.
+    sqlx::query(
+        "UPDATE bookmarks AS stable
+         SET (title, color, created_at) = (
+           SELECT candidate.title, candidate.color, candidate.created_at
+           FROM bookmarks AS candidate
+           WHERE (candidate.book_id = ? OR candidate.file_path = ? OR candidate.file_path = ?)
+             AND candidate.page = stable.page
+             AND candidate.location_offset IS stable.location_offset
+             AND candidate.note IS stable.note
+           ORDER BY candidate.created_at DESC, candidate.id DESC LIMIT 1
+         )
+         WHERE stable.book_id = ?",
+    )
+    .bind(book_id)
+    .bind(old_path)
+    .bind(new_path)
+    .bind(book_id)
+    .execute(&mut **transaction)
+    .await
+    .context("failed to preserve stable bookmark aliases")?;
     sqlx::query(
         "DELETE FROM bookmarks
          WHERE (book_id = ? OR file_path = ? OR file_path = ?)
@@ -1753,7 +1817,7 @@ async fn reconcile_identity(
              SELECT id FROM (
                SELECT id, ROW_NUMBER() OVER (
                  PARTITION BY page, location_offset, note
-                 ORDER BY created_at DESC, id DESC
+                 ORDER BY (book_id = ?) DESC, created_at DESC, id DESC
                ) AS rank
                FROM bookmarks
                WHERE book_id = ? OR file_path = ? OR file_path = ?
@@ -1763,6 +1827,7 @@ async fn reconcile_identity(
     .bind(book_id)
     .bind(old_path)
     .bind(new_path)
+    .bind(book_id)
     .bind(book_id)
     .bind(old_path)
     .bind(new_path)
