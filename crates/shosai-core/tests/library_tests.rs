@@ -761,7 +761,10 @@ async fn directory_import_reports_when_every_supported_file_fails() {
 
     assert!(report.books.is_empty());
     assert_eq!(report.failures.len(), 1);
-    assert_eq!(report.failures[0].path, import_dir.join("corrupt.epub"));
+    assert_eq!(
+        report.failures[0].path,
+        import_dir.join("corrupt.epub").canonicalize().unwrap()
+    );
     assert!(lib.list_all().await.unwrap().is_empty());
 }
 

@@ -369,8 +369,6 @@ struct FileVersion {
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FileVersion {
-    volume_serial_number: Option<u32>,
-    file_index: Option<u64>,
     len: u64,
     creation_time: u64,
     last_write_time: u64,
@@ -2109,8 +2107,6 @@ fn file_version(metadata: &std::fs::Metadata) -> FileVersion {
     use std::os::windows::fs::MetadataExt;
 
     FileVersion {
-        volume_serial_number: metadata.volume_serial_number(),
-        file_index: metadata.file_index(),
         len: metadata.file_size(),
         creation_time: metadata.creation_time(),
         last_write_time: metadata.last_write_time(),
