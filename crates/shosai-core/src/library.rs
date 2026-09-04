@@ -1753,32 +1753,46 @@ async fn reconcile_identity(
     old_path: &str,
     new_path: &str,
 ) -> Result<()> {
+    let content_hash: String = sqlx::query_scalar("SELECT content_hash FROM books WHERE id = ?")
+        .bind(book_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .context("failed to resolve book content identity")?
+        .context("book has no stable content hash")?;
     let reading = sqlx::query(
         "SELECT page, location_offset, zoom, updated_at, revision
          FROM reading_state
-         WHERE book_id = ? OR file_path = ? OR file_path = ?
+         WHERE book_id = ?
+            OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))
          ORDER BY revision DESC LIMIT 1",
     )
     .bind(book_id)
+    .bind(&content_hash)
     .bind(old_path)
     .bind(new_path)
     .fetch_optional(&mut **transaction)
     .await
     .context("failed to select reading state aliases")?;
-    sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ? OR file_path = ?")
-        .bind(book_id)
-        .bind(old_path)
-        .bind(new_path)
-        .execute(&mut **transaction)
-        .await
-        .context("failed to remove reading state aliases")?;
+    sqlx::query(
+        "DELETE FROM reading_state
+         WHERE book_id = ?
+            OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))",
+    )
+    .bind(book_id)
+    .bind(&content_hash)
+    .bind(old_path)
+    .bind(new_path)
+    .execute(&mut **transaction)
+    .await
+    .context("failed to remove reading state aliases")?;
     if let Some(reading) = reading {
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(new_path)
+        .bind(&content_hash)
         .bind(book_id)
         .bind(reading.get::<i64, _>("page"))
         .bind(reading.get::<Option<i64>, _>("location_offset"))
@@ -1797,7 +1811,9 @@ async fn reconcile_identity(
          SET (title, color, created_at) = (
            SELECT candidate.title, candidate.color, candidate.created_at
            FROM bookmarks AS candidate
-           WHERE (candidate.book_id = ? OR candidate.file_path = ? OR candidate.file_path = ?)
+           WHERE (candidate.book_id = ?
+                  OR (candidate.book_id IS NULL AND candidate.content_hash = ?
+                      AND (candidate.file_path = ? OR candidate.file_path = ?)))
              AND candidate.page = stable.page
              AND candidate.location_offset IS stable.location_offset
              AND candidate.note IS stable.note
@@ -1806,6 +1822,7 @@ async fn reconcile_identity(
          WHERE stable.book_id = ?",
     )
     .bind(book_id)
+    .bind(&content_hash)
     .bind(old_path)
     .bind(new_path)
     .bind(book_id)
@@ -1814,7 +1831,8 @@ async fn reconcile_identity(
     .context("failed to preserve stable bookmark aliases")?;
     sqlx::query(
         "DELETE FROM bookmarks
-         WHERE (book_id = ? OR file_path = ? OR file_path = ?)
+         WHERE (book_id = ?
+                OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?)))
            AND id NOT IN (
              SELECT id FROM (
                SELECT id, ROW_NUMBER() OVER (
@@ -1822,27 +1840,33 @@ async fn reconcile_identity(
                  ORDER BY (book_id = ?) DESC, created_at DESC, id DESC
                ) AS rank
                FROM bookmarks
-               WHERE book_id = ? OR file_path = ? OR file_path = ?
+               WHERE book_id = ?
+                  OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))
              ) WHERE rank = 1
            )",
     )
     .bind(book_id)
+    .bind(&content_hash)
     .bind(old_path)
     .bind(new_path)
     .bind(book_id)
     .bind(book_id)
+    .bind(&content_hash)
     .bind(old_path)
     .bind(new_path)
     .execute(&mut **transaction)
     .await
     .context("failed to deduplicate bookmark aliases")?;
     sqlx::query(
-        "UPDATE bookmarks SET file_path = ?, book_id = ?
-         WHERE book_id = ? OR file_path = ? OR file_path = ?",
+        "UPDATE bookmarks SET file_path = ?, content_hash = ?, book_id = ?
+         WHERE book_id = ?
+            OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))",
     )
     .bind(new_path)
+    .bind(&content_hash)
     .bind(book_id)
     .bind(book_id)
+    .bind(&content_hash)
     .bind(old_path)
     .bind(new_path)
     .execute(&mut **transaction)

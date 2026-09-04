@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use sqlx::sqlite::{
     Sqlite, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous,
 };
@@ -47,6 +47,9 @@ pub const STORAGE_PROFILE_MARKER_FILE: &str = ".shosai-storage-profile";
 /// Exact marker contents required for development-owned external storage.
 pub const DEVELOPMENT_STORAGE_PROFILE: &str = "shosai-development-v1";
 const DB_FILE: &str = "shosai.db";
+pub const MAX_READING_STATE_PATH_BYTES: usize = 16 * 1024;
+pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
+pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
 
 /// Storage locations supplied by the platform host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,116 +308,150 @@ impl ReadingStateStore {
     }
 
     /// Get the reading state for a file.
-    pub fn get(&self, file_path: &Path) -> Option<FileReadingState> {
+    pub fn get(&self, file_path: &Path, content_hash: &str) -> Result<Option<FileReadingState>> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.get_async(file_path))
+        rt.block_on(self.get_async(file_path, content_hash))
     }
 
     /// Set the reading state for a file.
-    pub fn set(&self, file_path: &Path, state: &FileReadingState) -> Result<()> {
+    pub fn set(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+        state: &FileReadingState,
+    ) -> Result<()> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.set_async(file_path, state))
+        rt.block_on(self.set_async(file_path, content_hash, state))
     }
 
     /// Async: get the reading state for a file.
-    pub async fn get_async(&self, file_path: &Path) -> Option<FileReadingState> {
+    pub async fn get_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+    ) -> Result<Option<FileReadingState>> {
         let key = canonical_key(file_path);
+        validate_path_key(&key)?;
+        validate_content_hash(content_hash)?;
 
-        sqlx::query("SELECT page, location_offset, zoom FROM reading_state WHERE file_path = ?")
-            .bind(&key)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|row| FileReadingState {
-                page: row.get::<i64, _>("page") as usize,
-                location_offset: row
-                    .get::<Option<i64>, _>("location_offset")
-                    .map(|offset| offset as usize),
-                zoom: row.get::<f64, _>("zoom") as f32,
-            })
+        let row = sqlx::query(
+            "SELECT page, location_offset, zoom FROM reading_state
+             WHERE file_path = ? AND content_hash = ?",
+        )
+        .bind(&key)
+        .bind(content_hash)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load reading state")?;
+        row.as_ref().map(row_to_reading_state).transpose()
     }
 
     /// Async: set the reading state for a file.
-    pub async fn set_async(&self, file_path: &Path, state: &FileReadingState) -> Result<()> {
+    pub async fn set_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+        state: &FileReadingState,
+    ) -> Result<()> {
         let key = canonical_key(file_path);
-        self.set_key_async(&key, state).await
+        self.set_key_async(&key, content_hash, state).await
     }
 
-    pub(crate) async fn set_key_async(&self, key: &str, state: &FileReadingState) -> Result<()> {
+    pub(crate) async fn set_key_async(
+        &self,
+        key: &str,
+        content_hash: &str,
+        state: &FileReadingState,
+    ) -> Result<()> {
+        validate_path_key(key)?;
+        validate_content_hash(content_hash)?;
+        let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self.pool.begin().await?;
         let revision = next_reading_state_revision(&mut transaction).await?;
-        sqlx::query(
+        let result = sqlx::query(
             "INSERT INTO reading_state
-                (file_path, page, location_offset, zoom, updated_at, revision)
-             VALUES (?, ?, ?, ?, datetime('now'), ?)
+                (file_path, content_hash, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
              ON CONFLICT(file_path) DO UPDATE SET
+                content_hash = excluded.content_hash,
                 page = excluded.page,
                 location_offset = excluded.location_offset,
                 zoom = excluded.zoom,
                 updated_at = excluded.updated_at,
-                revision = excluded.revision",
+                revision = excluded.revision
+             WHERE reading_state.book_id IS NULL",
         )
         .bind(key)
-        .bind(state.page as i64)
-        .bind(state.location_offset.map(|offset| offset as i64))
-        .bind(state.zoom as f64)
+        .bind(content_hash)
+        .bind(page)
+        .bind(location_offset)
+        .bind(zoom)
         .bind(revision)
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state")?;
+        if result.rows_affected() == 0 {
+            bail!("reading state path is owned by a library book");
+        }
         transaction.commit().await?;
         Ok(())
     }
 
     /// Get reading state using a stable library book identity.
-    pub async fn get_for_book_async(&self, book_id: i64) -> Option<FileReadingState> {
-        sqlx::query("SELECT page, location_offset, zoom FROM reading_state WHERE book_id = ?")
-            .bind(book_id)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|row| FileReadingState {
-                page: row.get::<i64, _>("page") as usize,
-                location_offset: row
-                    .get::<Option<i64>, _>("location_offset")
-                    .map(|offset| offset as usize),
-                zoom: row.get::<f64, _>("zoom") as f32,
-            })
+    pub async fn get_for_book_async(&self, book_id: i64) -> Result<Option<FileReadingState>> {
+        let row =
+            sqlx::query("SELECT page, location_offset, zoom FROM reading_state WHERE book_id = ?")
+                .bind(book_id)
+                .fetch_optional(&self.pool)
+                .await
+                .context("failed to load reading state for book")?;
+        row.as_ref().map(row_to_reading_state).transpose()
     }
 
-    pub fn get_for_book(&self, book_id: i64) -> Option<FileReadingState> {
+    pub fn get_for_book(&self, book_id: i64) -> Result<Option<FileReadingState>> {
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.get_for_book_async(book_id))
     }
 
     /// Save reading state using a stable library book identity.
-    pub async fn set_for_book_async(
-        &self,
-        book_id: i64,
-        file_path: &Path,
-        state: &FileReadingState,
-    ) -> Result<()> {
-        let key = canonical_key(file_path);
+    pub async fn set_for_book_async(&self, book_id: i64, state: &FileReadingState) -> Result<()> {
+        let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self.pool.begin().await?;
+        let current: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT file_path, content_hash FROM books WHERE id = ?")
+                .bind(book_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .context("failed to resolve book path for reading state")?;
+        let Some((current_key, content_hash)) = current else {
+            bail!("book {book_id} not found");
+        };
+        let content_hash = content_hash.context("book has no stable content hash")?;
+        validate_path_key(&current_key)?;
+        validate_content_hash(&content_hash)?;
         let revision = next_reading_state_revision(&mut transaction).await?;
-        sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
-            .bind(book_id)
-            .bind(&key)
-            .execute(&mut *transaction)
-            .await
-            .context("failed to reconcile reading state aliases")?;
+        sqlx::query(
+            "DELETE FROM reading_state
+             WHERE book_id = ?
+                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
+        )
+        .bind(book_id)
+        .bind(&current_key)
+        .bind(&content_hash)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to reconcile reading state aliases")?;
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
+                (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
         )
-        .bind(&key)
+        .bind(&current_key)
+        .bind(&content_hash)
         .bind(book_id)
-        .bind(state.page as i64)
-        .bind(state.location_offset.map(|offset| offset as i64))
-        .bind(state.zoom as f64)
+        .bind(page)
+        .bind(location_offset)
+        .bind(zoom)
         .bind(revision)
         .execute(&mut *transaction)
         .await
@@ -427,35 +464,46 @@ impl ReadingStateStore {
         &self,
         book_id: i64,
         state: &FileReadingState,
-    ) -> std::result::Result<(), CurrentBookPathSaveError> {
+    ) -> std::result::Result<String, CurrentBookPathSaveError> {
+        let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self
             .pool
             .begin()
             .await
             .context("failed to begin reading state transaction")?;
         let revision = next_reading_state_revision(&mut transaction).await?;
-        let key: Option<String> = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
-            .bind(book_id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .context("failed to resolve current book path for reading state")?;
-        let key = key.ok_or(CurrentBookPathSaveError::MissingBook(book_id))?;
-        sqlx::query("DELETE FROM reading_state WHERE book_id = ? OR file_path = ?")
-            .bind(book_id)
-            .bind(&key)
-            .execute(&mut *transaction)
-            .await
-            .context("failed to reconcile reading state aliases")?;
+        let current: Option<(String, Option<String>)> =
+            sqlx::query_as("SELECT file_path, content_hash FROM books WHERE id = ?")
+                .bind(book_id)
+                .fetch_optional(&mut *transaction)
+                .await
+                .context("failed to resolve current book path for reading state")?;
+        let (key, content_hash) = current.ok_or(CurrentBookPathSaveError::MissingBook(book_id))?;
+        let content_hash = content_hash.context("book has no stable content hash")?;
+        validate_path_key(&key)?;
+        validate_content_hash(&content_hash)?;
+        sqlx::query(
+            "DELETE FROM reading_state
+             WHERE book_id = ?
+                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
+        )
+        .bind(book_id)
+        .bind(&key)
+        .bind(&content_hash)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to reconcile reading state aliases")?;
         sqlx::query(
             "INSERT INTO reading_state
-                (file_path, book_id, page, location_offset, zoom, updated_at, revision)
-             VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
+                (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
         )
         .bind(&key)
+        .bind(&content_hash)
         .bind(book_id)
-        .bind(state.page as i64)
-        .bind(state.location_offset.map(|offset| offset as i64))
-        .bind(state.zoom as f64)
+        .bind(page)
+        .bind(location_offset)
+        .bind(zoom)
         .bind(revision)
         .execute(&mut *transaction)
         .await
@@ -464,11 +512,14 @@ impl ReadingStateStore {
             .commit()
             .await
             .context("failed to commit reading state transaction")?;
-        Ok(())
+        Ok(key)
     }
 
     /// Get a stored preference value.
     pub async fn get_pref_async(&self, key: &str) -> Option<String> {
+        if validate_preference_key(key).is_err() {
+            return None;
+        }
         sqlx::query("SELECT value FROM preferences WHERE key = ?")
             .bind(key)
             .fetch_optional(&self.pool)
@@ -491,6 +542,7 @@ impl ReadingStateStore {
 
     /// Set a stored preference value.
     pub async fn set_pref_async(&self, key: &str, value: &str) -> Result<()> {
+        validate_preference(key, value)?;
         sqlx::query(
             "INSERT INTO preferences (key, value, updated_at)
              VALUES (?, ?, datetime('now'))
@@ -536,6 +588,7 @@ impl ReadingStateStore {
     pub async fn set_pref_ints_async(&self, values: &[(&str, i64)]) -> Result<()> {
         let mut transaction = self.pool.begin().await?;
         for (key, value) in values {
+            validate_preference_key(key)?;
             sqlx::query(
                 "INSERT INTO preferences (key, value, updated_at)
                  VALUES (?, ?, datetime('now'))
@@ -553,6 +606,67 @@ impl ReadingStateStore {
 
         Ok(())
     }
+}
+
+fn validate_path_key(key: &str) -> Result<()> {
+    if key.len() > MAX_READING_STATE_PATH_BYTES {
+        bail!("reading state path exceeds {MAX_READING_STATE_PATH_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn validate_content_hash(content_hash: &str) -> Result<()> {
+    if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("reading state content hash must be a SHA-256 digest");
+    }
+    Ok(())
+}
+
+fn validate_preference_key(key: &str) -> Result<()> {
+    if key.len() > MAX_PREFERENCE_KEY_BYTES {
+        bail!("preference key exceeds {MAX_PREFERENCE_KEY_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn validate_preference(key: &str, value: &str) -> Result<()> {
+    validate_preference_key(key)?;
+    if value.len() > MAX_PREFERENCE_VALUE_BYTES {
+        bail!("preference value exceeds {MAX_PREFERENCE_VALUE_BYTES} bytes");
+    }
+    Ok(())
+}
+
+fn reading_state_db_values(state: &FileReadingState) -> Result<(i64, Option<i64>, f64)> {
+    let page = i64::try_from(state.page).context("reading state page exceeds database range")?;
+    let location_offset = state
+        .location_offset
+        .map(i64::try_from)
+        .transpose()
+        .context("reading state location exceeds database range")?;
+    if !state.zoom.is_finite() || state.zoom <= 0.0 {
+        bail!("reading state zoom must be finite and positive");
+    }
+    Ok((page, location_offset, f64::from(state.zoom)))
+}
+
+fn row_to_reading_state(row: &sqlx::sqlite::SqliteRow) -> Result<FileReadingState> {
+    let page = usize::try_from(row.get::<i64, _>("page"))
+        .context("stored reading state page is outside the supported range")?;
+    let location_offset = row
+        .get::<Option<i64>, _>("location_offset")
+        .map(usize::try_from)
+        .transpose()
+        .context("stored reading state location is outside the supported range")?;
+    let zoom = row.get::<f64, _>("zoom");
+    if !zoom.is_finite() || zoom <= 0.0 || zoom > f64::from(f32::MAX) {
+        bail!("stored reading state zoom is outside the supported range");
+    }
+    Ok(FileReadingState {
+        page,
+        location_offset,
+        zoom: zoom as f32,
+    })
 }
 
 fn prepare_development_data_directory(path: &Path) -> Result<()> {

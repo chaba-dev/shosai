@@ -848,7 +848,6 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
     store
         .set_for_book_async(
             book.id,
-            &old_path,
             &FileReadingState {
                 page: 3,
                 location_offset: Some(42),
@@ -872,7 +871,15 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
     assert!(changes[0].new_path.exists());
     let relocated = lib.get(book.id).await.unwrap().unwrap();
     assert_eq!(PathBuf::from(relocated.file_path), changes[0].new_path);
-    assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 3);
+    assert_eq!(
+        store
+            .get_for_book_async(book.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        3
+    );
     let bookmark = bookmarks
         .list_for_book_async(book.id)
         .await
@@ -941,7 +948,6 @@ async fn relink_preserves_stable_identity_reading_state_and_bookmarks() {
     store
         .set_for_book_async(
             book.id,
-            &original,
             &FileReadingState {
                 page: 3,
                 location_offset: Some(42),
@@ -965,7 +971,15 @@ async fn relink_preserves_stable_identity_reading_state_and_bookmarks() {
         PathBuf::from(relinked.file_path),
         replacement.canonicalize().unwrap()
     );
-    assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 3);
+    assert_eq!(
+        store
+            .get_for_book_async(book.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        3
+    );
     assert_eq!(
         bookmarks.list_for_book_async(book.id).await.unwrap().len(),
         1
@@ -1022,6 +1036,7 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     store
         .set_async(
             &replacement,
+            book.content_hash.as_deref().unwrap(),
             &FileReadingState {
                 page: 0,
                 location_offset: None,
@@ -1033,7 +1048,6 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     store
         .set_for_book_async(
             book.id,
-            &original,
             &FileReadingState {
                 page: 2,
                 location_offset: None,
@@ -1050,6 +1064,7 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     store
         .set_async(
             &replacement,
+            book.content_hash.as_deref().unwrap(),
             &FileReadingState {
                 page: 8,
                 location_offset: Some(12),
@@ -1076,17 +1091,33 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
         .await
         .unwrap();
     bookmarks
-        .add_at_async(&replacement, 3, Some(7), None, None, "yellow")
+        .add_at_async(
+            &replacement,
+            book.content_hash.as_deref().unwrap(),
+            3,
+            Some(7),
+            None,
+            None,
+            "yellow",
+        )
         .await
         .unwrap();
     bookmarks
-        .add_at_async(&replacement, 6, None, Some("Other"), Some("note"), "blue")
+        .add_at_async(
+            &replacement,
+            book.content_hash.as_deref().unwrap(),
+            6,
+            None,
+            Some("Other"),
+            Some("note"),
+            "blue",
+        )
         .await
         .unwrap();
 
     lib.relink(book.id, &replacement).await.unwrap();
 
-    let state = store.get_for_book_async(book.id).await.unwrap();
+    let state = store.get_for_book_async(book.id).await.unwrap().unwrap();
     assert_eq!((state.page, state.location_offset), (8, Some(12)));
     let merged = bookmarks.list_for_book_async(book.id).await.unwrap();
     assert_eq!(merged.len(), 2);
@@ -1100,7 +1131,6 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     store
         .set_for_book_async(
             book.id,
-            &replacement,
             &FileReadingState {
                 page: 9,
                 location_offset: Some(13),
@@ -1127,21 +1157,23 @@ async fn bookmark_alias_merge_keeps_newest_row_and_all_of_its_metadata() {
         .into_owned();
     let stable_id: i64 = sqlx::query_scalar(
         "INSERT INTO bookmarks
-         (file_path, book_id, page, location_offset, title, note, color, created_at)
-         VALUES (?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')
+         (file_path, content_hash, book_id, page, location_offset, title, note, color, created_at)
+         VALUES (?, ?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')
          RETURNING id",
     )
     .bind(&original_key)
+    .bind(book.content_hash.as_deref().unwrap())
     .bind(book.id)
     .fetch_one(store.pool())
     .await
     .unwrap();
     sqlx::query(
         "INSERT INTO bookmarks
-         (file_path, page, location_offset, title, note, color, created_at)
-         VALUES (?, 4, 9, 'winner title', 'same note', 'blue', '2026-02-01')",
+         (file_path, content_hash, page, location_offset, title, note, color, created_at)
+         VALUES (?, ?, 4, 9, 'winner title', 'same note', 'blue', '2026-02-01')",
     )
     .bind(&replacement_key)
+    .bind(book.content_hash.as_deref().unwrap())
     .execute(store.pool())
     .await
     .unwrap();

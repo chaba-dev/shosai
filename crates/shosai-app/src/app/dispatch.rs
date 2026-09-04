@@ -1123,6 +1123,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             detached_saves.push(ReadingStateSave {
                                 book_id: None,
                                 path: path.clone(),
+                                content_hash: state.document_content_hash.clone(),
                                 reading: FileReadingState {
                                     page: state.current_page,
                                     location_offset: current_epub_offset(state),
@@ -1142,6 +1143,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 detached_saves.push(ReadingStateSave {
                                     book_id: None,
                                     path,
+                                    content_hash: tab.content_hash.clone(),
                                     reading: FileReadingState {
                                         page: tab.session.location.page,
                                         location_offset: tab.session.location.offset,
@@ -1477,6 +1479,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     BookmarkMutation::Toggle {
                         generation,
                         file_path: path,
+                        content_hash: state.document_content_hash.clone(),
                         book_id,
                         page,
                         location_offset,
@@ -1620,8 +1623,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ExportBookmarks => {
-            if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-                match store.export_markdown(path) {
+            if let (Some(path), Some(content_hash), Some(store)) = (
+                &state.file_path,
+                &state.document_content_hash,
+                &state.bookmark_store,
+            ) {
+                match store.export_markdown(path, content_hash) {
                     Ok(md) => {
                         // Save to file next to the document.
                         let export_path = path.with_extension("bookmarks.md");
