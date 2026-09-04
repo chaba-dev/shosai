@@ -65,7 +65,7 @@ fn finish_book_import(state: &mut State) -> Task<Message> {
     if let Some(error) = error {
         state.library_error = Some(error);
     }
-    refresh
+    Task::batch([refresh, continue_close_after_durable_mutations(state)])
 }
 
 fn continue_book_import(state: &mut State) -> Task<Message> {
@@ -186,6 +186,21 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
+    if state.close_after_geometry_save.is_some()
+        && matches!(
+            &message,
+            Message::AddSelectedBooks
+                | Message::CancelBookImport
+                | Message::RelinkBookSelected { path: Some(_), .. }
+                | Message::RemoveBook(_)
+                | Message::ConfirmManagedLibraryMove
+                | Message::ToggleBookmark
+                | Message::SaveNote
+                | Message::DeleteBookmark(_)
+        )
+    {
+        return Task::none();
+    }
     match message {
         Message::Initialized(Ok(initialized)) => {
             let InitializedState {
@@ -215,6 +230,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_book_behavior = add_book_behavior;
             state.reader_defaults = reader_defaults;
             state.storage_initializing = false;
+            if state.close_after_geometry_save.is_some() {
+                state.window_geometry_dirty = true;
+                return persist_window_geometry(state);
+            }
+            state.fingerprint_backfill_running = true;
             let geometry = (!state.performance.is_automated())
                 .then_some(geometry)
                 .flatten();
@@ -242,16 +262,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.storage_initializing = false;
             state.library_loading = false;
             state.storage_error = Some(AppError::Storage(error));
+            if state.close_after_geometry_save.is_some() {
+                return continue_close_after_durable_mutations(state);
+            }
             if let Some(pending) = state.pending_open.take() {
                 return Task::done(Message::FileSelected(Some(pending)));
             }
         }
 
         Message::FingerprintBackfillFinished(Err(error)) => {
+            state.fingerprint_backfill_running = false;
             eprintln!("warning: failed to backfill legacy book fingerprints: {error}");
+            return continue_close_after_durable_mutations(state);
         }
 
-        Message::FingerprintBackfillFinished(Ok(())) => {}
+        Message::FingerprintBackfillFinished(Ok(())) => {
+            state.fingerprint_backfill_running = false;
+            return continue_close_after_durable_mutations(state);
+        }
 
         Message::OpenFile => {
             let ebooks = state.i18n.text("ebooks");
@@ -1116,6 +1144,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Ok(book) => {
                     state.open_error = None;
                     state.missing_book_id = None;
+                    if state.close_after_geometry_save.is_some() {
+                        return Task::batch([
+                            reset_library(state),
+                            continue_close_after_durable_mutations(state),
+                        ]);
+                    }
                     return Task::batch([
                         reset_library(state),
                         Task::done(Message::OpenLibraryBook(book.id, book.file_path)),
@@ -1123,6 +1157,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
                 Err(error) => state.open_error = Some(AppError::Library(error)),
             }
+            return continue_close_after_durable_mutations(state);
         }
 
         Message::BookRelinked { .. } => {}
@@ -1242,7 +1277,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         state.open_error = None;
                         state.screen = Screen::Library;
                     }
-                    return reset_library(state);
+                    return Task::batch([
+                        reset_library(state),
+                        continue_close_after_durable_mutations(state),
+                    ]);
                 }
                 Err(error)
                     if state.screen == Screen::Reader && state.missing_book_id == Some(id) =>
@@ -1253,6 +1291,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.library_error = Some(AppError::Library(error));
                 }
             }
+            return continue_close_after_durable_mutations(state);
         }
 
         Message::LibrarySearchChanged(query) => {
@@ -1542,10 +1581,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         state.library = Some(library.with_managed_dir(destination));
                     }
                     state.pending_library_move = None;
-                    return reset_library(state);
+                    return Task::batch([
+                        reset_library(state),
+                        continue_close_after_durable_mutations(state),
+                    ]);
                 }
                 Err(error) => state.settings_error = Some(error),
             }
+            return continue_close_after_durable_mutations(state);
         }
 
         Message::ManagedLibraryMoved { .. } => {}
@@ -2303,6 +2346,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::WindowEvent(id, event) => {
+            if state.close_after_geometry_save.is_some() {
+                return Task::none();
+            }
             state.window_id = Some(id);
             let mut application_icon = Task::none();
             match event {
@@ -2340,6 +2386,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::Moved(position) => state.window_position = Some(position),
                 window::Event::CloseRequested => {
                     state.close_after_geometry_save = Some(id);
+                    state.close_flush_started = false;
                     state.window_geometry_generation =
                         state.window_geometry_generation.wrapping_add(1);
                     state.window_geometry_dirty = true;
@@ -2379,16 +2426,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.window_geometry_dirty {
                 return persist_window_geometry(state);
             }
-            if let Some(id) = state.close_after_geometry_save.take() {
-                return flush_reading_state_before_close(state, id);
-            }
+            return continue_close_after_durable_mutations(state);
         }
 
         Message::ReadingStateFlushed { id, result: Ok(()) } => return window::close(id),
 
         Message::ReadingStateFlushed {
             result: Err(error), ..
-        } => state.open_error = Some(AppError::Storage(error)),
+        } => {
+            state.close_after_geometry_save = None;
+            state.close_flush_started = false;
+            state.open_error = Some(AppError::Storage(error));
+        }
 
         Message::PerfFramePresented => return perf::frame_presented(state),
     }

@@ -1045,6 +1045,7 @@ pub struct State {
     managed_library_move_generation: u64,
     settings_error: Option<String>,
     storage_initializing: bool,
+    fingerprint_backfill_running: bool,
     storage_error: Option<AppError>,
     pending_open: Option<PathBuf>,
     window_id: Option<window::Id>,
@@ -1057,6 +1058,7 @@ pub struct State {
     window_geometry_dirty: bool,
     window_geometry_saving: bool,
     close_after_geometry_save: Option<window::Id>,
+    close_flush_started: bool,
     performance: perf::Performance,
 }
 
@@ -1216,6 +1218,7 @@ pub fn boot() -> (State, Task<Message>) {
         managed_library_move_generation: 0,
         settings_error: None,
         storage_initializing: true,
+        fingerprint_backfill_running: false,
         storage_error: None,
         pending_open: performance_file,
         window_id: None,
@@ -1228,6 +1231,7 @@ pub fn boot() -> (State, Task<Message>) {
         window_geometry_dirty: false,
         window_geometry_saving: false,
         close_after_geometry_save: None,
+        close_flush_started: false,
         performance,
     };
     let initialize = Task::perform(
@@ -4265,14 +4269,15 @@ fn finish_bookmark_mutation(
         return continue_bookmark_mutations(state, tab_id);
     }
     state.bookmark_mutation_queues.remove(&tab_id);
-    if state.active_tab_id == Some(tab_id)
+    let refresh = if state.active_tab_id == Some(tab_id)
         && state.file_path.as_deref() == Some(file_path)
         && state.book_id == book_id
     {
         refresh_bookmarks(state)
     } else {
         Task::none()
-    }
+    };
+    Task::batch([refresh, continue_close_after_durable_mutations(state)])
 }
 
 fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64) {
@@ -4444,16 +4449,38 @@ fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Messa
     )
 }
 
+fn durable_mutations_pending(state: &State) -> bool {
+    state.storage_initializing
+        || state.fingerprint_backfill_running
+        || !state.bookmark_mutation_queues.is_empty()
+        || state.adding_books
+        || state.removing_book.is_some()
+        || state.relinking_book.is_some()
+        || state.moving_library
+}
+
+fn continue_close_after_durable_mutations(state: &mut State) -> Task<Message> {
+    let Some(id) = state.close_after_geometry_save else {
+        return Task::none();
+    };
+    if state.window_geometry_saving
+        || state.window_geometry_dirty
+        || state.close_flush_started
+        || durable_mutations_pending(state)
+    {
+        return Task::none();
+    }
+    state.close_flush_started = true;
+    flush_reading_state_before_close(state, id)
+}
+
 fn persist_window_geometry(state: &mut State) -> Task<Message> {
     if state.window_geometry_saving {
         return Task::none();
     }
     let Some(store) = state.reading_state.clone() else {
-        return state
-            .close_after_geometry_save
-            .take()
-            .map(window::close)
-            .unwrap_or_else(Task::none);
+        state.window_geometry_dirty = false;
+        return continue_close_after_durable_mutations(state);
     };
     state.window_geometry_dirty = false;
     state.window_geometry_saving = true;
@@ -10313,7 +10340,132 @@ mod tests {
         let close = update(&mut state, Message::WindowGeometryPersisted);
         assert!(close.units() > 0);
         assert!(!state.window_geometry_saving);
-        assert!(state.close_after_geometry_save.is_none());
+        assert_eq!(state.close_after_geometry_save, Some(id));
+        assert!(state.close_flush_started);
+    }
+
+    #[test]
+    fn close_drains_accepted_bookmark_mutations_and_rejects_new_ones() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let id = window::Id::unique();
+        let path = PathBuf::from("book.epub");
+        state.file_path = Some(path.clone());
+        state
+            .bookmark_mutation_queues
+            .entry(1)
+            .or_default()
+            .push_back(BookmarkMutation::Toggle {
+                generation: 1,
+                file_path: path.clone(),
+                content_hash: state.document_content_hash.clone(),
+                book_id: None,
+                page: 0,
+                location_offset: None,
+            });
+        state.bookmark_mutations_active.insert(1);
+
+        let waiting = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        assert_eq!(waiting.units(), 0);
+        assert_eq!(state.close_after_geometry_save, Some(id));
+        assert!(!state.close_flush_started);
+
+        let rejected = update(&mut state, Message::ToggleBookmark);
+        assert_eq!(rejected.units(), 0);
+        assert_eq!(state.bookmark_mutation_queues.get(&1).unwrap().len(), 1);
+
+        let close = update(
+            &mut state,
+            Message::BookmarkToggled {
+                tab_id: 1,
+                generation: 1,
+                file_path: path,
+                book_id: None,
+                page: 0,
+                location_offset: None,
+                result: Ok(None),
+            },
+        );
+        assert!(state.bookmark_mutation_queues.is_empty());
+        assert!(state.close_flush_started);
+        assert!(close.units() > 0);
+    }
+
+    #[test]
+    fn close_waits_for_every_library_mutation_kind() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+
+        state.storage_initializing = true;
+        assert!(durable_mutations_pending(&state));
+        state.storage_initializing = false;
+        state.fingerprint_backfill_running = true;
+        assert!(durable_mutations_pending(&state));
+        state.fingerprint_backfill_running = false;
+        state.adding_books = true;
+        assert!(durable_mutations_pending(&state));
+        state.adding_books = false;
+        state.removing_book = Some(1);
+        assert!(durable_mutations_pending(&state));
+        state.removing_book = None;
+        state.relinking_book = Some((1, 1));
+        assert!(durable_mutations_pending(&state));
+        state.relinking_book = None;
+        state.moving_library = true;
+        assert!(durable_mutations_pending(&state));
+        state.moving_library = false;
+        assert!(!durable_mutations_pending(&state));
+    }
+
+    #[test]
+    fn close_freezes_geometry_after_the_final_persistence_fence() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let id = window::Id::unique();
+
+        let close = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        assert!(close.units() > 0);
+        assert!(state.close_flush_started);
+        let generation = state.window_geometry_generation;
+        let size = state.window_size;
+        let position = state.window_position;
+
+        assert_eq!(
+            update(
+                &mut state,
+                Message::WindowEvent(id, window::Event::Resized(Size::new(1200.0, 900.0))),
+            )
+            .units(),
+            0
+        );
+        assert_eq!(
+            update(
+                &mut state,
+                Message::WindowEvent(id, window::Event::Moved(Point::new(80.0, 90.0))),
+            )
+            .units(),
+            0
+        );
+        assert_eq!(state.window_geometry_generation, generation);
+        assert_eq!(state.window_size, size);
+        assert_eq!(state.window_position, position);
+        assert!(!state.window_geometry_dirty);
+        assert!(!state.window_geometry_saving);
     }
 
     #[test]
