@@ -1681,7 +1681,9 @@ impl Library {
     /// Open the current bytes for a stable library identity after verifying its stored hash.
     pub async fn open_book_document_at(&self, book_id: i64, path: &Path) -> Result<OpenDocument> {
         let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path))?;
-        self.open_book_document_with_plan(book_id, path, plan).await
+        self.open_book_document_with_plan(book_id, path, plan)
+            .await
+            .map(|(document, _)| document)
     }
 
     #[doc(hidden)]
@@ -1690,7 +1692,7 @@ impl Library {
         book_id: i64,
         path: &Path,
         plan: OpenDocumentPlan,
-    ) -> Result<OpenDocument> {
+    ) -> Result<(OpenDocument, String)> {
         let book = self
             .get(book_id)
             .await?
@@ -1712,7 +1714,8 @@ impl Library {
             if actual_hash != expected_hash {
                 bail!("book contents no longer match the library identity");
             }
-            OpenDocument::from_bytes(format, data, title_hint).map_err(anyhow::Error::from)
+            let document = OpenDocument::from_bytes(format, data, title_hint)?;
+            Ok((document, actual_hash))
         })
         .await
         .context("book open task failed")?

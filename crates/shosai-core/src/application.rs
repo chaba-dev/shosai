@@ -4,6 +4,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::cbz::CbzDoc;
@@ -214,6 +215,14 @@ impl OpenDocumentPlan {
     pub fn open(self) -> Result<OpenDocument, OpenDocumentError> {
         let (format, data, title_hint) = self.read_bytes()?;
         OpenDocument::from_bytes(format, data, title_hint)
+    }
+
+    #[doc(hidden)]
+    pub fn open_with_content_hash(self) -> Result<(OpenDocument, String), OpenDocumentError> {
+        let (format, data, title_hint) = self.read_bytes()?;
+        let content_hash = format!("{:x}", Sha256::digest(&data));
+        let document = OpenDocument::from_bytes(format, data, title_hint)?;
+        Ok((document, content_hash))
     }
 }
 
