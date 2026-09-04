@@ -15,6 +15,19 @@ async fn temp_store() -> (ReadingStateStore, TempDir) {
     (store, dir)
 }
 
+#[tokio::test]
+async fn platform_host_can_inject_its_application_data_directory() {
+    let directory = TempDir::new().unwrap();
+    let data = directory.path().join("mobile-app-support");
+
+    let store = ReadingStateStore::open_in_data_directory_async(&data)
+        .await
+        .unwrap();
+
+    assert_eq!(store.managed_books_dir(), data.join("books"));
+    assert!(data.join("shosai.db").exists());
+}
+
 // ---------------------------------------------------------------------------
 // Basic CRUD
 // ---------------------------------------------------------------------------

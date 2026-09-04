@@ -5,9 +5,8 @@ use std::sync::{Mutex, OnceLock};
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap, fontdb::Database};
 use shosai_core::epub::MathExpression;
 
-pub(crate) const MATH_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../assets/fonts/InterVariable.ttf");
-pub(crate) const MATH_FONT_FAMILY: &str = "Inter Variable";
+pub const MATH_FONT_BYTES: &[u8] = include_bytes!("../../../../../assets/fonts/InterVariable.ttf");
+pub const MATH_FONT_FAMILY: &str = "Inter Variable";
 
 const MIN_SCRIPT_SIZE: f32 = 6.0;
 const MAX_FONT_SIZE: f32 = 256.0;
@@ -15,33 +14,33 @@ const MAX_MATH_EXTENT: f32 = 4_096.0;
 const MAX_MATH_PRIMITIVES: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MathRuleKind {
+pub enum MathRuleKind {
     Fraction,
     Radical,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum MathPrimitiveKind {
+pub enum MathPrimitiveKind {
     Text(String),
     Rule(MathRuleKind),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct MathPrimitive {
-    pub(crate) kind: MathPrimitiveKind,
-    pub(crate) x: f32,
-    pub(crate) y: f32,
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) font_size: f32,
+pub struct MathPrimitive {
+    pub kind: MathPrimitiveKind,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub font_size: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct MathLayout {
-    pub(crate) width: f32,
-    pub(crate) height: f32,
-    pub(crate) baseline: f32,
-    pub(crate) primitives: Vec<MathPrimitive>,
+pub struct MathLayout {
+    pub width: f32,
+    pub height: f32,
+    pub baseline: f32,
+    pub primitives: Vec<MathPrimitive>,
 }
 
 static FONT_SYSTEM: OnceLock<Mutex<FontSystem>> = OnceLock::new();
@@ -55,7 +54,7 @@ fn font_system() -> &'static Mutex<FontSystem> {
     })
 }
 
-pub(crate) fn layout_math(expression: &MathExpression, font_size: f32) -> Option<MathLayout> {
+pub fn layout_math(expression: &MathExpression, font_size: f32) -> Option<MathLayout> {
     if !font_size.is_finite() || !(1.0..=MAX_FONT_SIZE).contains(&font_size) {
         return None;
     }
@@ -66,7 +65,7 @@ pub(crate) fn layout_math(expression: &MathExpression, font_size: f32) -> Option
     valid_layout(&layout).then_some(layout)
 }
 
-pub(crate) fn layout_math_for_bounds(
+pub fn layout_math_for_bounds(
     expression: &MathExpression,
     font_size: f32,
     available_width: f32,

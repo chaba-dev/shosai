@@ -1217,7 +1217,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             };
             state.i18n.set_preference(preference);
             if saves
-                .send(ReadingStateWriterMessage::Language(preference))
+                .send(ReadingStateWriterMessage::Preference(
+                    LANGUAGE_PREFERENCE_KEY.to_owned(),
+                    preference.stored().to_owned(),
+                ))
                 .is_err()
             {
                 eprintln!("warning: state writer stopped unexpectedly");

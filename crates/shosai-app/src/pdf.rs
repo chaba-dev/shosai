@@ -2,27 +2,7 @@
 
 use iced::Size;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ZoomMode {
-    Manual(f32),
-    FitWidth,
-    FitPage,
-}
-
-impl ZoomMode {
-    pub(crate) fn scale(self) -> f32 {
-        match self {
-            Self::Manual(scale) => scale,
-            Self::FitWidth | Self::FitPage => 1.0,
-        }
-    }
-}
-
-impl Default for ZoomMode {
-    fn default() -> Self {
-        Self::Manual(1.0)
-    }
-}
+pub(crate) use shosai_core::reader::ZoomMode;
 
 pub(crate) fn spread_start(page: usize) -> usize {
     page - page % 2
