@@ -499,6 +499,7 @@ impl Library {
         }
         let mut changes = Vec::with_capacity(rows.len());
         let mut created_destinations = Vec::new();
+        let mut destination_hashes = HashMap::with_capacity(rows.len());
 
         for row in rows {
             let book_id = row.get::<i64, _>("id");
@@ -512,25 +513,30 @@ impl Library {
                 .with_context(|| format!("unsupported managed format: .{extension}"))?;
             let source = old_path.clone();
             let destination_dir = new_dir.clone();
-            let relocation = tokio::task::spawn_blocking(move || -> Result<(PathBuf, bool)> {
-                let fingerprint = file_fingerprint(&source)?;
-                if expected_hash
-                    .as_ref()
-                    .is_some_and(|expected| expected != &fingerprint.hash)
-                {
-                    bail!("managed book failed verification: {}", source.display());
-                }
-                let destination =
-                    destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
-                let existed = destination.exists();
-                let staged =
-                    stage_managed_file(&source, &destination_dir, format.max_input_bytes(), None)?;
-                publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
-                Ok((canonical_path(&destination), !existed))
-            })
-            .await
-            .context("managed book relocation task failed");
-            let (new_path, created) = match relocation {
+            let relocation =
+                tokio::task::spawn_blocking(move || -> Result<(PathBuf, bool, String)> {
+                    let fingerprint = file_fingerprint(&source)?;
+                    if expected_hash
+                        .as_ref()
+                        .is_some_and(|expected| expected != &fingerprint.hash)
+                    {
+                        bail!("managed book failed verification: {}", source.display());
+                    }
+                    let destination =
+                        destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
+                    let existed = destination.exists();
+                    let staged = stage_managed_file(
+                        &source,
+                        &destination_dir,
+                        format.max_input_bytes(),
+                        None,
+                    )?;
+                    publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
+                    Ok((canonical_path(&destination), !existed, fingerprint.hash))
+                })
+                .await
+                .context("managed book relocation task failed");
+            let (new_path, created, content_hash) = match relocation {
                 Ok(Ok(relocation)) => relocation,
                 Ok(Err(error)) | Err(error) => {
                     for path in created_destinations {
@@ -547,6 +553,7 @@ impl Library {
                 old_path,
                 new_path,
             });
+            destination_hashes.insert(book_id, content_hash);
         }
 
         let database_result = async {
@@ -600,17 +607,47 @@ impl Library {
         }
 
         for change in &changes {
-            if change.old_path != change.new_path
-                && sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM books WHERE file_path = ?")
+            if change.old_path == change.new_path {
+                continue;
+            }
+            let reference_count =
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM books WHERE file_path = ?")
                     .bind(canonical_path_key(&change.old_path))
                     .fetch_one(&self.pool)
-                    .await
-                    .unwrap_or(1)
-                    == 0
-                && let Err(error) = std::fs::remove_file(&change.old_path)
-            {
+                    .await;
+            let reference_count = match reference_count {
+                Ok(count) => count,
+                Err(error) => {
+                    eprintln!(
+                        "warning: retained old managed book {} because references could not be checked: {error:#}",
+                        change.old_path.display()
+                    );
+                    continue;
+                }
+            };
+            if reference_count != 0 {
+                continue;
+            }
+            let destination = change.new_path.clone();
+            let old_path = change.old_path.clone();
+            let expected_hash = destination_hashes.get(&change.book_id).cloned();
+            let cleanup = tokio::task::spawn_blocking(move || -> Result<()> {
+                let expected_hash = expected_hash.context("missing relocation fingerprint")?;
+                let fingerprint = file_fingerprint(&destination)?;
+                if fingerprint.hash != expected_hash {
+                    bail!("relocated copy does not match its staged content");
+                }
+                std::fs::remove_file(&old_path).context("failed to remove old managed book")
+            })
+            .await;
+            let error = match cleanup {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(format!("{error:#}")),
+                Err(error) => Some(format!("relocation cleanup task failed: {error}")),
+            };
+            if let Some(error) = error {
                 eprintln!(
-                    "warning: failed to remove old managed book {}: {error}",
+                    "warning: retained old managed book {}: {error}",
                     change.old_path.display()
                 );
             }
@@ -666,6 +703,9 @@ impl Library {
         })
         .await
         .context("metadata extraction task failed")??;
+        // Serialize final source verification and identity reconciliation with managed removal,
+        // relinking, and relocation. The source may itself be a currently managed path.
+        let _storage_guard = managed_storage_lock().lock().await;
         let source_path = path.clone();
         let source_file = tokio::task::spawn_blocking(move || {
             fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
