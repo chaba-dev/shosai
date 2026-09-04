@@ -208,6 +208,17 @@ mod tests {
     }
 
     #[test]
+    fn render_honors_preexisting_cancellation() {
+        let document = PdfDoc::from_bytes(selectable_pdf("cancel")).unwrap();
+
+        let error = document
+            .render_page_with_highlights_cancellable(0, 1.0, &[], &|| true)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
     fn bounded_file_read_uses_open_descriptor_after_path_replacement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("document.pdf");
@@ -409,11 +420,12 @@ impl PdfDoc {
         Self::from_bytes_with_limit(data, MAX_PDF_INPUT_BYTES)
     }
 
-    pub(crate) fn from_bytes_admitted(
+    pub(crate) fn from_bytes_admitted_cancellable(
         data: Vec<u8>,
         admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
-        Self::from_bytes_with_limit_admitted(data, MAX_PDF_INPUT_BYTES, None, admission)
+        Self::from_bytes_with_limit_admitted(data, MAX_PDF_INPUT_BYTES, is_cancelled, admission)
     }
 
     pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
@@ -443,6 +455,7 @@ impl PdfDoc {
         }
         check_cancelled(is_cancelled)?;
         let pdfium = create_pdfium()?;
+        check_cancelled(is_cancelled)?;
         preflight_pdf(pdfium.bindings(), &data)?;
         check_cancelled(is_cancelled)?;
         let document = pdfium
@@ -755,7 +768,18 @@ impl PdfDoc {
         scale: f32,
         highlights: &[(usize, usize, bool)],
     ) -> Result<RenderedPage> {
-        self.render_page_impl(index, scale, highlights)
+        self.render_page_impl(index, scale, highlights, None)
+    }
+
+    #[doc(hidden)]
+    pub fn render_page_with_highlights_cancellable(
+        &self,
+        index: usize,
+        scale: f32,
+        highlights: &[(usize, usize, bool)],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<RenderedPage> {
+        self.render_page_impl(index, scale, highlights, Some(is_cancelled))
     }
 
     pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
@@ -786,10 +810,13 @@ impl PdfDoc {
         index: usize,
         scale: f32,
         highlights: &[(usize, usize, bool)],
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<RenderedPage> {
+        check_cancelled(is_cancelled)?;
         let (pixel_w, pixel_h) = self.render_dimensions(index, scale)?;
 
         let pdfium = create_pdfium()?;
+        check_cancelled(is_cancelled)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&self.data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF for rendering: {e}"))?;
@@ -802,9 +829,11 @@ impl PdfDoc {
             .set_target_width(pixel_w)
             .set_maximum_height(pixel_h)
             .use_lcd_text_rendering(true);
+        check_cancelled(is_cancelled)?;
         let bitmap = page
             .render_with_config(&config)
             .map_err(|e| anyhow::anyhow!("failed to render page {index}: {e}"))?;
+        check_cancelled(is_cancelled)?;
 
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
@@ -816,8 +845,10 @@ impl PdfDoc {
             let chars = text.chars();
 
             for &(offset, length, current) in highlights {
+                check_cancelled(is_cancelled)?;
                 let end = offset.saturating_add(length).min(chars.len());
                 for char_index in offset..end {
+                    check_cancelled(is_cancelled)?;
                     let Ok(character) = chars.get(char_index) else {
                         continue;
                     };
@@ -831,6 +862,7 @@ impl PdfDoc {
             }
         }
 
+        check_cancelled(is_cancelled)?;
         Ok(RenderedPage {
             width,
             height,
@@ -1009,7 +1041,7 @@ impl Document for PdfDoc {
     }
 
     fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
-        self.render_page_impl(index, scale, &[])
+        self.render_page_impl(index, scale, &[], None)
     }
 
     fn metadata(&self) -> DocumentMetadata {

@@ -3,6 +3,7 @@ use std::io::Cursor;
 
 use iced::widget::{column, container, image, rich_text, row, scrollable, sensor, span, svg, text};
 use iced::{Element, Font, Length};
+use shosai_core::bridge::Cancellation;
 use shosai_core::epub::EpubDoc;
 use shosai_core::epub::render::ContentNode;
 use shosai_core::epub::{
@@ -192,18 +193,26 @@ pub(super) fn epub_image_paths<'a>(
 pub(super) fn decode_epub_images(
     document: &EpubDoc,
     paths: impl IntoIterator<Item = (String, CachePermit)>,
+    cancellation: &Cancellation,
 ) -> Vec<(String, Option<DecodedEpubImage>)> {
     paths
         .into_iter()
+        .take_while(|_| !cancellation.is_cancelled())
         .map(|(path, permit)| {
             let image = document.resource(&path).and_then(|resource| {
+                if cancellation.is_cancelled() {
+                    return None;
+                }
                 if resource.media_type() == "image/svg+xml" {
                     return Some(DecodedEpubImage::Svg {
                         data: resource.bytes().to_vec(),
                         permit,
                     });
                 }
-                let rgba = decode_epub_raster(resource.bytes())?;
+                let rgba = decode_epub_raster(resource.bytes(), cancellation)?;
+                if cancellation.is_cancelled() {
+                    return None;
+                }
                 let (width, height) = rgba.dimensions();
                 Some(DecodedEpubImage::Raster {
                     width,
@@ -247,7 +256,10 @@ pub(super) fn epub_image_transient_byte_len(document: &EpubDoc, path: &str) -> O
     }
 }
 
-fn decode_epub_raster(data: &[u8]) -> Option<::image::RgbaImage> {
+fn decode_epub_raster(data: &[u8], cancellation: &Cancellation) -> Option<::image::RgbaImage> {
+    if cancellation.is_cancelled() {
+        return None;
+    }
     let dimensions = ::image::ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .ok()?
@@ -270,7 +282,11 @@ fn decode_epub_raster(data: &[u8]) -> Option<::image::RgbaImage> {
     limits.max_image_height = Some(EPUB_IMAGE_MAX_DIMENSION);
     limits.max_alloc = Some(EPUB_IMAGE_MAX_BYTES);
     reader.limits(limits);
-    reader.decode().ok().map(|image| image.to_rgba8())
+    let image = reader.decode().ok()?;
+    if cancellation.is_cancelled() {
+        return None;
+    }
+    Some(image.to_rgba8())
 }
 
 #[cfg(test)]
@@ -1854,7 +1870,7 @@ mod tests {
         bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
         bmp[28..30].copy_from_slice(&32u16.to_le_bytes());
 
-        assert!(decode_epub_raster(&bmp).is_none());
+        assert!(decode_epub_raster(&bmp, &Cancellation::new()).is_none());
     }
 
     #[derive(Default)]

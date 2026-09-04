@@ -101,6 +101,21 @@ impl NativeTextState {
         Self::new(&Database::new(), &[], &[])
     }
     pub(super) fn new(source: &Database, ids: &[fontdb::ID], faces: &[EpubFontFace]) -> Self {
+        Self::new_cancellable(source, ids, faces, None).expect("uncancelled native text setup")
+    }
+    pub(super) fn new_cancellable(
+        source: &Database,
+        ids: &[fontdb::ID],
+        faces: &[EpubFontFace],
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        let check_cancelled = || -> Result<()> {
+            if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+                anyhow::bail!("import cancelled");
+            }
+            Ok(())
+        };
+        check_cancelled()?;
         let mut db = Database::new();
         let mut aliases = HashMap::new();
         let mut styles = HashMap::<String, Vec<Style>>::new();
@@ -109,6 +124,7 @@ impl NativeTextState {
             db.load_system_fonts();
         }
         for (id, declared) in ids.iter().zip(faces) {
+            check_cancelled()?;
             if let Some(mut info) = source.face(*id).cloned() {
                 info.id = fontdb::ID::dummy();
                 let folded = folded_family(&declared.family);
@@ -144,13 +160,14 @@ impl NativeTextState {
                 db.push_face_info(info);
             }
         }
-        Self {
+        check_cancelled()?;
+        Ok(Self {
             fonts: FontSystem::new_with_locale_and_db("en-US".into(), db),
             cache: SwashCache::new(),
             aliases,
             styles,
             weights,
-        }
+        })
     }
 
     #[cfg(test)]

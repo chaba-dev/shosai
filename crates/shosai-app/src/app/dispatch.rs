@@ -317,6 +317,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             book_id,
             result,
         } => {
+            state.document_open_cancellations.remove(&generation);
             if generation != state.document_open_generation {
                 state.pending_document_permits.remove(&generation);
                 return Task::none();
@@ -460,6 +461,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.continuous_pages.clear();
             state.continuous_visible.clear();
             state.render_generation = state.render_generation.wrapping_add(1);
+            if let Some(tab_id) = state.active_tab_id {
+                cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+            }
             let task = refresh_content(state);
             state.page_input = if uses_paginated_epub_layout(state) {
                 (state.epub_page + 1).to_string()
@@ -2040,6 +2044,25 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if !state.epub_image_jobs.contains(&job) {
                 return Task::none();
             }
+            if state
+                .epub_image_cancellations
+                .get(&job)
+                .is_some_and(Cancellation::is_cancelled)
+            {
+                state.epub_image_jobs.remove(&job);
+                state.epub_image_cancellations.remove(&job);
+                if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation
+                {
+                    state.epub_image_decode_active = false;
+                    state.epub_images_pending.remove(&path);
+                } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                    && generation == tab.epub_image_generation
+                {
+                    tab.epub_image_decode_active = false;
+                    tab.epub_images_pending.remove(&path);
+                }
+                return pump_background_work(state);
+            }
             if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
                 if let Some(byte_len) = byte_len
                     && state.epub_images_desired.contains(&path)
@@ -2055,6 +2078,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             .is_none_or(|bytes| bytes > state.transient_decode_budget.limit())
                     {
                         state.epub_image_jobs.remove(&job);
+                        state.epub_image_cancellations.remove(&job);
                         state.epub_image_decode_active = false;
                         state.epub_images_pending.remove(&path);
                         state.epub_images_desired.remove(&path);
@@ -2065,6 +2089,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         return task;
                     }
                     state.epub_image_jobs.remove(&job);
+                    state.epub_image_cancellations.remove(&job);
                     state.epub_image_decode_active = false;
                     state.epub_images_pending.remove(&path);
                     let current_paths = match &state.document {
@@ -2092,6 +2117,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     return Task::none();
                 }
                 state.epub_image_jobs.remove(&job);
+                state.epub_image_cancellations.remove(&job);
                 state.epub_image_decode_active = false;
                 state.epub_images_pending.remove(&path);
                 if byte_len.is_none() && state.epub_images_desired.remove(&path) {
@@ -2101,10 +2127,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && generation == tab.epub_image_generation
             {
                 state.epub_image_jobs.remove(&job);
+                state.epub_image_cancellations.remove(&job);
                 tab.epub_image_decode_active = false;
                 tab.epub_images_pending.remove(&path);
             } else {
                 state.epub_image_jobs.remove(&job);
+                state.epub_image_cancellations.remove(&job);
             }
             return pump_background_work(state);
         }
@@ -2115,15 +2143,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             path,
             images,
         } => {
-            if !state.epub_image_jobs.remove(&EpubImageJob {
+            let job = EpubImageJob {
                 tab_id,
                 generation,
                 path,
-            }) {
+            };
+            if !state.epub_image_jobs.remove(&job) {
                 return Task::none();
             }
+            let cancelled = state
+                .epub_image_cancellations
+                .remove(&job)
+                .is_some_and(|cancellation| cancellation.is_cancelled());
             if state.active_tab_id == Some(tab_id) && generation == state.epub_image_generation {
                 state.epub_image_decode_active = false;
+                if cancelled {
+                    state.epub_images_pending.remove(&job.path);
+                    return pump_background_work(state);
+                }
                 for (path, decoded) in images {
                     state.epub_images_pending.remove(&path);
                     if state.epub_images_desired.remove(&path) {
@@ -2138,6 +2175,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && generation == tab.epub_image_generation
             {
                 tab.epub_image_decode_active = false;
+                if cancelled {
+                    tab.epub_images_pending.remove(&job.path);
+                    return pump_background_work(state);
+                }
                 for (path, decoded) in images {
                     tab.epub_images_pending.remove(&path);
                     if tab.epub_images_desired.remove(&path) {
@@ -2163,8 +2204,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 page,
             };
+            let cancelled = state
+                .cbz_dimension_cancellations
+                .remove(&job)
+                .is_some_and(|cancellation| cancellation.is_cancelled());
             if state.cbz_dimension_jobs.remove(&job).is_none() {
                 return Task::none();
+            }
+            if cancelled {
+                return pump_cbz_dimension_queue(state);
             }
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
@@ -2195,6 +2243,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 key: key.clone(),
             };
+            let cancelled = state
+                .raster_cancellations
+                .remove(&job)
+                .is_some_and(|cancellation| cancellation.is_cancelled());
             let Some(permit) = state.raster_jobs.remove(&job) else {
                 return Task::none();
             };
@@ -2224,6 +2276,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if request_was_superseded {
                     return Task::batch([refresh_content(state), load_epub_images_task(state)]);
                 }
+                return pump_background_work(state);
+            }
+            if cancelled {
+                drop(permit);
                 return pump_background_work(state);
             }
             match result {
@@ -2275,6 +2331,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 request,
                 page,
             };
+            let cancelled = state
+                .raster_cancellations
+                .remove(&job)
+                .is_some_and(|cancellation| cancellation.is_cancelled());
             let Some(permit) = state.raster_jobs.remove(&job) else {
                 return Task::none();
             };
@@ -2293,6 +2353,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     return pump_background_work(state);
                 }
                 state.continuous_pending.remove(&page);
+                if cancelled {
+                    drop(permit);
+                    return pump_background_work(state);
+                }
                 if page >= state.continuous_pages.len() {
                     drop(permit);
                     return pump_background_work(state);

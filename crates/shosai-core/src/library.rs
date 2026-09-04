@@ -2059,6 +2059,23 @@ impl Library {
         path: &Path,
         plan: OpenDocumentPlan,
     ) -> Result<(OpenDocument, String)> {
+        self.open_book_document_with_plan_cancellable(
+            book_id,
+            path,
+            plan,
+            crate::bridge::Cancellation::new(),
+        )
+        .await
+    }
+
+    #[doc(hidden)]
+    pub async fn open_book_document_with_plan_cancellable(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+        cancellation: crate::bridge::Cancellation,
+    ) -> Result<(OpenDocument, String)> {
         let book = self
             .get(book_id)
             .await?
@@ -2075,12 +2092,20 @@ impl Library {
             bail!("book format no longer matches the library identity");
         }
         tokio::task::spawn_blocking(move || {
-            let admitted = plan.read_bytes()?;
-            let actual_hash = format!("{:x}", Sha256::digest(&admitted.data));
+            let is_cancelled = || cancellation.is_cancelled();
+            let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
+            let mut hasher = Sha256::new();
+            for chunk in admitted.data.chunks(64 * 1024) {
+                if cancellation.is_cancelled() {
+                    bail!("document open cancelled");
+                }
+                hasher.update(chunk);
+            }
+            let actual_hash = format!("{:x}", hasher.finalize());
             if actual_hash != expected_hash {
                 bail!("book contents no longer match the library identity");
             }
-            let document = OpenDocument::from_admitted_bytes(admitted)?;
+            let document = OpenDocument::from_admitted_bytes_cancellable(admitted, &is_cancelled)?;
             Ok((document, actual_hash))
         })
         .await

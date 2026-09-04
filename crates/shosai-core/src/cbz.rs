@@ -149,16 +149,17 @@ impl CbzDoc {
         Self::from_bytes_with_title(data, title, CbzLimits::default())
     }
 
-    pub(crate) fn from_bytes_with_title_hint_admitted(
+    pub(crate) fn from_bytes_with_title_hint_admitted_cancellable(
         data: Vec<u8>,
         title: Option<String>,
         admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
         Self::from_bytes_with_title_cancellable_admitted(
             data,
             title,
             CbzLimits::default(),
-            None,
+            is_cancelled,
             admission,
         )
     }
@@ -396,6 +397,26 @@ impl CbzDoc {
     }
 
     pub fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
+        self.render_page_cancellable_inner(index, scale, None)
+    }
+
+    #[doc(hidden)]
+    pub fn render_page_cancellable(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<RenderedPage> {
+        self.render_page_cancellable_inner(index, scale, Some(is_cancelled))
+    }
+
+    fn render_page_cancellable_inner(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<RenderedPage> {
+        check_cancelled(is_cancelled)?;
         if !scale.is_finite() || scale <= 0.0 {
             anyhow::bail!("page scale must be finite and positive");
         }
@@ -403,7 +424,7 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let bytes = self.image_bytes(index)?;
+        let bytes = self.image_bytes_cancellable(index, is_cancelled)?;
         let (width, height) = self
             .cached_dimensions(index)
             .map(Ok)
@@ -422,11 +443,13 @@ impl CbzDoc {
         let img = reader
             .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
+        check_cancelled(is_cancelled)?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
             img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
         } else {
             img
         };
+        check_cancelled(is_cancelled)?;
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
         Ok(RenderedPage {
@@ -437,7 +460,33 @@ impl CbzDoc {
     }
 
     pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
-        let (width, height) = self.dimensions(index)?;
+        self.page_size_cancellable_inner(index, None)
+    }
+
+    #[doc(hidden)]
+    pub fn page_size_cancellable(
+        &self,
+        index: usize,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<(f32, f32)> {
+        self.page_size_cancellable_inner(index, Some(is_cancelled))
+    }
+
+    fn page_size_cancellable_inner(
+        &self,
+        index: usize,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<(f32, f32)> {
+        check_cancelled(is_cancelled)?;
+        let dimensions = if let Some(dimensions) = self.cached_dimensions(index) {
+            dimensions
+        } else {
+            let bytes = self.image_bytes_cancellable(index, is_cancelled)?;
+            check_cancelled(is_cancelled)?;
+            self.inspect_dimensions(index, &bytes)?
+        };
+        check_cancelled(is_cancelled)?;
+        let (width, height) = dimensions;
         Ok((width as f32, height as f32))
     }
 
@@ -611,5 +660,26 @@ mod tests {
         assert!(IMAGE_EXTENSIONS.contains(&"jpg"));
         assert!(IMAGE_EXTENSIONS.contains(&"png"));
         assert!(!IMAGE_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn page_work_honors_preexisting_cancellation() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+
+        assert!(
+            document
+                .page_size_cancellable(0, &|| true)
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        assert!(
+            document
+                .render_page_cancellable(0, 1.0, &|| true)
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
     }
 }

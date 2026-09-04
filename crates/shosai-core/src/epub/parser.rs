@@ -142,7 +142,7 @@ impl EpubDoc {
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         let data = read_epub_file(path.as_ref(), &limits)?;
-        Self::from_bytes_inner_admitted(data, false, limits, admission)
+        Self::from_bytes_inner_admitted(data, false, limits, admission, None)
     }
 
     /// Open an EPUB from raw bytes.
@@ -150,11 +150,12 @@ impl EpubDoc {
         Self::from_bytes_with_limits(data, EpubLimits::default())
     }
 
-    pub(crate) fn from_bytes_admitted(
+    pub(crate) fn from_bytes_admitted_cancellable(
         data: Vec<u8>,
         admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
-        Self::from_bytes_inner_admitted(data, false, EpubLimits::default(), admission)
+        Self::from_bytes_inner_admitted(data, false, EpubLimits::default(), admission, is_cancelled)
     }
 
     /// Open an EPUB from raw bytes with explicit resource admission limits.
@@ -176,7 +177,7 @@ impl EpubDoc {
         let retained_ceiling = epub_admission_ceiling(data.capacity(), &limits)?;
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
-        Self::from_bytes_inner_admitted(data, include_non_spine_content, limits, admission)
+        Self::from_bytes_inner_admitted(data, include_non_spine_content, limits, admission, None)
     }
 
     fn from_bytes_inner_admitted(
@@ -184,20 +185,31 @@ impl EpubDoc {
         include_non_spine_content: bool,
         limits: EpubLimits,
         admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
-        let mut archive = validated_archive(data, &limits)?;
+        let mut archive = validated_archive_cancellable(data, &limits, is_cancelled)?;
 
         // 1. Parse container.xml to find the OPF path.
-        let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits)?;
+        check_cancelled(is_cancelled)?;
+        let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits, is_cancelled)?;
         validate_spine_size(&spine_ids, &limits)?;
 
         // The OPF directory has already been applied to manifest paths by parse_package.
 
         // 3. Try to parse the TOC (NCX or nav document).
-        let toc = parse_toc(&mut archive, &manifest, &limits)?;
+        check_cancelled(is_cancelled)?;
+        let toc = parse_toc(&mut archive, &manifest, &limits, is_cancelled)?;
 
         // 4. Load chapters (spine items) in reading order.
-        let chapters = load_chapters(&mut archive, &spine_ids, &manifest, &toc, &limits)?;
+        check_cancelled(is_cancelled)?;
+        let chapters = load_chapters(
+            &mut archive,
+            &spine_ids,
+            &manifest,
+            &toc,
+            &limits,
+            is_cancelled,
+        )?;
         let chapter_index = chapters
             .iter()
             .enumerate()
@@ -205,6 +217,7 @@ impl EpubDoc {
             .collect::<Result<HashMap<_, _>>>()?;
 
         // 5. Load resources (images, CSS, fonts).
+        check_cancelled(is_cancelled)?;
         let chapter_paths = chapters
             .iter()
             .map(|chapter| chapter.path.as_str())
@@ -215,9 +228,11 @@ impl EpubDoc {
             &chapter_paths,
             include_non_spine_content,
             &limits,
+            is_cancelled,
         )?;
 
         // 6. Retain admitted CSS stylesheets for document-scoped cascade.
+        check_cancelled(is_cancelled)?;
         let css_sources: Vec<(&str, &str)> = manifest
             .values()
             .filter(|item| item.media_type == "text/css")
@@ -234,11 +249,25 @@ impl EpubDoc {
             &limits,
         )?;
 
-        let fonts = super::font::EpubFontBook::new(&chapters, &styles, &resources, &limits)?;
+        let fonts = super::font::EpubFontBook::new_cancellable(
+            &chapters,
+            &styles,
+            &resources,
+            &limits,
+            is_cancelled,
+        )?;
+        check_cancelled(is_cancelled)?;
         #[cfg(test)]
         PRESENTATION_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
-        let presentation =
-            EpubPresentation::parse(&chapters, &styles, &fonts, &resources, &limits)?;
+        let presentation = EpubPresentation::parse(
+            &chapters,
+            &styles,
+            &fonts,
+            &resources,
+            &limits,
+            is_cancelled,
+        )?;
+        check_cancelled(is_cancelled)?;
 
         let mut parsed = Self {
             content: EpubContent {
@@ -423,10 +452,6 @@ fn read_epub_file_cancellable(
     Ok(data)
 }
 
-fn validated_archive(data: Vec<u8>, limits: &EpubLimits) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
-    validated_archive_cancellable(data, limits, None)
-}
-
 fn validated_archive_cancellable(
     data: Vec<u8>,
     limits: &EpubLimits,
@@ -452,12 +477,13 @@ fn validated_archive_cancellable(
 fn parse_package(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<(EpubMetadata, HashMap<String, ManifestItem>, Vec<String>)> {
-    let opf_path = parse_container(archive, limits)?;
+    let opf_path = parse_container(archive, limits, is_cancelled)?;
     let opf_dir = opf_path
         .rsplit_once('/')
         .map_or_else(String::new, |(directory, _)| directory.to_string());
-    let opf_xml = read_archive_entry(archive, &opf_path, limits)
+    let opf_xml = read_archive_entry_cancellable(archive, &opf_path, limits, is_cancelled)
         .with_context(|| format!("failed to read OPF file: {opf_path}"))?;
     parse_opf(&opf_xml, &opf_dir)
 }
@@ -473,7 +499,7 @@ fn inspect_bytes_cancellable(
 ) -> Result<EpubInspection> {
     let mut archive = validated_archive_cancellable(data, &limits, is_cancelled)?;
     check_cancelled(is_cancelled)?;
-    let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits)?;
+    let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits, is_cancelled)?;
     check_cancelled(is_cancelled)?;
     validate_spine_size(&spine_ids, &limits)?;
     let cover = if let Some(item) = metadata
@@ -505,30 +531,22 @@ fn inspect_bytes_cancellable(
     Ok(EpubInspection { metadata, cover })
 }
 
-/// Read a file from the ZIP archive as a UTF-8 string.
-fn read_archive_entry(
+fn read_archive_entry_cancellable(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     name: &str,
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<String> {
-    let bytes = read_archive_bytes_bounded(
+    let bytes = read_archive_bytes_bounded_cancellable(
         archive,
         name,
         limits.max_xml_bytes.min(limits.max_entry_bytes),
+        is_cancelled,
     )?;
     let text = String::from_utf8(bytes)
         .with_context(|| format!("archive entry is not UTF-8 XML: {name}"))?;
     validate_xml_shape(&text, name, limits)?;
     Ok(text)
-}
-
-/// Read a file from the ZIP archive as raw bytes.
-fn read_archive_bytes_bounded(
-    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
-    name: &str,
-    max_bytes: u64,
-) -> Result<Vec<u8>> {
-    read_archive_bytes_bounded_cancellable(archive, name, max_bytes, None)
 }
 
 fn read_archive_bytes_bounded_cancellable(
@@ -846,9 +864,11 @@ fn get_bytes(data: &[u8], offset: usize, length: usize) -> Option<&[u8]> {
 fn parse_container(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<String> {
-    let xml = read_archive_entry(archive, "META-INF/container.xml", limits)
-        .context("EPUB missing META-INF/container.xml")?;
+    let xml =
+        read_archive_entry_cancellable(archive, "META-INF/container.xml", limits, is_cancelled)
+            .context("EPUB missing META-INF/container.xml")?;
 
     let doc = roxmltree::Document::parse(&xml).context("failed to parse container.xml")?;
 
@@ -987,6 +1007,7 @@ fn parse_toc(
     archive: &mut ZipArchive<Cursor<Vec<u8>>>,
     manifest: &HashMap<String, ManifestItem>,
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<TocEntry>> {
     // Try NCX first (EPUB 2).
     if let Some(ncx_item) = manifest
@@ -995,7 +1016,8 @@ fn parse_toc(
     {
         let exists = archive.by_name(&ncx_item.href).is_ok();
         if exists {
-            let xml = read_archive_entry(archive, &ncx_item.href, limits)?;
+            let xml =
+                read_archive_entry_cancellable(archive, &ncx_item.href, limits, is_cancelled)?;
             let base_dir = ncx_item
                 .href
                 .rsplit_once('/')
@@ -1013,7 +1035,8 @@ fn parse_toc(
     {
         let exists = archive.by_name(&nav_item.href).is_ok();
         if exists {
-            let xml = read_archive_entry(archive, &nav_item.href, limits)?;
+            let xml =
+                read_archive_entry_cancellable(archive, &nav_item.href, limits, is_cancelled)?;
             let base_dir = nav_item
                 .href
                 .rsplit_once('/')
@@ -1142,6 +1165,7 @@ fn load_chapters(
     manifest: &HashMap<String, ManifestItem>,
     toc: &[TocEntry],
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<Chapter>> {
     // Build a map from (path without fragment) -> TOC title for quick lookup.
     let mut toc_titles: HashMap<String, String> = HashMap::new();
@@ -1159,6 +1183,7 @@ fn load_chapters(
     let mut chapters = Vec::new();
 
     for (index, id) in spine_ids.iter().enumerate() {
+        check_cancelled(is_cancelled)?;
         let item = manifest
             .get(id)
             .with_context(|| format!("spine references unknown manifest id: {id}"))?;
@@ -1168,7 +1193,7 @@ fn load_chapters(
             continue;
         }
 
-        let content = read_archive_entry(archive, &item.href, limits)
+        let content = read_archive_entry_cancellable(archive, &item.href, limits, is_cancelled)
             .with_context(|| format!("failed to read chapter: {}", item.href))?;
 
         let title = toc_titles.get(&item.href).cloned();
@@ -1191,10 +1216,12 @@ fn load_resources(
     chapter_paths: &HashSet<&str>,
     include_non_spine_content: bool,
     limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<HashMap<CanonicalEpubPath, StoredEpubResource>> {
     let mut resources = HashMap::new();
 
     for item in manifest.values() {
+        check_cancelled(is_cancelled)?;
         let is_content_document = matches!(
             item.media_type.as_str(),
             "application/xhtml+xml" | "application/x-dtbncx+xml"
@@ -1212,10 +1239,11 @@ fn load_resources(
             Err(_) => continue,
         };
         validate_declared_resource_size(&item.href, &item.media_type, declared_size, limits)?;
-        let data = read_archive_bytes_bounded(
+        let data = read_archive_bytes_bounded_cancellable(
             archive,
             &item.href,
             resource_read_limit(&item.media_type, limits),
+            is_cancelled,
         )?;
         validate_resource(&item.href, &item.media_type, &data, limits)?;
         resources.insert(

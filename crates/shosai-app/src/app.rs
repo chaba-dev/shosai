@@ -15,6 +15,7 @@ use shosai_core::application::{
     DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan,
 };
 use shosai_core::bookmarks::{Bookmark, BookmarkStore, MAX_BOOKMARK_NOTE_BYTES};
+use shosai_core::bridge::Cancellation;
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
@@ -901,6 +902,7 @@ pub struct State {
     document: Option<OpenDocument>,
     document_permit: Option<RetainedDocumentPermit>,
     pending_document_permits: HashMap<u64, RetainedDocumentPermit>,
+    document_open_cancellations: HashMap<u64, Cancellation>,
     current_page: usize,
     total_pages: usize,
     zoom: ZoomMode,
@@ -922,6 +924,7 @@ pub struct State {
     epub_image_budget: CacheBudget,
     transient_decode_budget: CacheBudget,
     epub_image_jobs: HashSet<EpubImageJob>,
+    epub_image_cancellations: HashMap<EpubImageJob, Cancellation>,
     epub_pages: Arc<Vec<EpubPage>>,
     epub_layout_key: Option<EpubLayoutKey>,
     epub_layout_pending: Option<EpubLayoutKey>,
@@ -937,8 +940,10 @@ pub struct State {
     next_continuous_request_id: u64,
     raster_budget: CacheBudget,
     raster_jobs: HashMap<RasterJob, CachePermit>,
+    raster_cancellations: HashMap<RasterJob, Cancellation>,
     raster_failures: HashSet<RasterFailure>,
     cbz_dimension_jobs: HashMap<CbzDimensionJob, CachePermit>,
+    cbz_dimension_cancellations: HashMap<CbzDimensionJob, Cancellation>,
     cbz_dimension_failures: HashSet<CbzDimensionJob>,
     epub_jobs: HashMap<EpubJob, EpubPaginationCancellation>,
     page_input: String,
@@ -1080,6 +1085,7 @@ pub fn boot() -> (State, Task<Message>) {
         document: None,
         document_permit: None,
         pending_document_permits: HashMap::new(),
+        document_open_cancellations: HashMap::new(),
         current_page: 0,
         total_pages: 0,
         zoom: ZoomMode::default(),
@@ -1101,6 +1107,7 @@ pub fn boot() -> (State, Task<Message>) {
         epub_image_budget: CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY),
         transient_decode_budget: CacheBudget::new(TRANSIENT_DECODE_BYTE_CAPACITY),
         epub_image_jobs: HashSet::new(),
+        epub_image_cancellations: HashMap::new(),
         epub_pages: Arc::new(Vec::new()),
         epub_layout_key: None,
         epub_layout_pending: None,
@@ -1116,8 +1123,10 @@ pub fn boot() -> (State, Task<Message>) {
         next_continuous_request_id: 1,
         raster_budget: CacheBudget::new(PAGE_CACHE_BYTE_CAPACITY),
         raster_jobs: HashMap::new(),
+        raster_cancellations: HashMap::new(),
         raster_failures: HashSet::new(),
         cbz_dimension_jobs: HashMap::new(),
+        cbz_dimension_cancellations: HashMap::new(),
         cbz_dimension_failures: HashSet::new(),
         epub_jobs: HashMap::new(),
         page_input: String::new(),
@@ -1606,9 +1615,13 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     if index >= state.tabs.len() {
         return Task::none();
     }
+    cancel_document_open(state);
     if state.active_tab == Some(index) {
         state.screen = Screen::Reader;
         return Task::none();
+    }
+    if let Some(tab_id) = state.active_tab_id {
+        cancel_background_jobs_for_tab(state, tab_id);
     }
     save_active_tab(state);
     let tab = state.tabs[index].clone();
@@ -1660,12 +1673,76 @@ fn cancel_epub_jobs_for_tab(state: &mut State, tab_id: u64) {
     }
 }
 
+fn cancel_background_jobs_for_tab(state: &State, tab_id: u64) {
+    for (job, cancellation) in &state.raster_cancellations {
+        if match job {
+            RasterJob::Paginated {
+                tab_id: job_tab, ..
+            }
+            | RasterJob::Continuous {
+                tab_id: job_tab, ..
+            } => *job_tab == tab_id,
+        } {
+            cancellation.cancel();
+        }
+    }
+    for (job, cancellation) in &state.cbz_dimension_cancellations {
+        if job.tab_id == tab_id {
+            cancellation.cancel();
+        }
+    }
+    for (job, cancellation) in &state.epub_image_cancellations {
+        if job.tab_id == tab_id {
+            cancellation.cancel();
+        }
+    }
+}
+
+fn cancel_superseded_raster_jobs(state: &State, tab_id: u64, generation: u64) {
+    for (job, cancellation) in &state.raster_cancellations {
+        let superseded = match job {
+            RasterJob::Paginated {
+                tab_id: job_tab,
+                generation: job_generation,
+                ..
+            } => *job_tab == tab_id && *job_generation != generation,
+            RasterJob::Continuous {
+                tab_id: job_tab,
+                request,
+                ..
+            } => *job_tab == tab_id && request.generation != generation,
+        };
+        if superseded {
+            cancellation.cancel();
+        }
+    }
+    for (job, cancellation) in &state.cbz_dimension_cancellations {
+        if job.tab_id == tab_id && job.generation != generation {
+            cancellation.cancel();
+        }
+    }
+}
+
+fn cancel_document_open(state: &mut State) {
+    if !state.document_opening {
+        return;
+    }
+    for cancellation in state.document_open_cancellations.values() {
+        cancellation.cancel();
+    }
+    state.document_open_generation = state.document_open_generation.wrapping_add(1);
+    state.document_opening = false;
+    state.document_open_notice_visible = false;
+    state.document_open_preview = None;
+}
+
 fn close_tab(state: &mut State, index: usize) -> Task<Message> {
     if index >= state.tabs.len() {
         return Task::none();
     }
     let closing_tab_id = state.tabs[index].id;
     cancel_epub_jobs_for_tab(state, closing_tab_id);
+    cancel_background_jobs_for_tab(state, closing_tab_id);
     let previous_active = state.active_tab;
     save_active_tab(state);
     state.tabs.remove(index);
@@ -1721,6 +1798,7 @@ fn opened_content_matches_book(path: &Path, content_hash: Option<&str>, book: &B
 }
 
 fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
+    cancel_document_open(state);
     let target_book = book_id.and_then(|id| state.library_books.iter().find(|book| book.id == id));
     if let Some(index) = state.tabs.iter().position(|tab| {
         tab.session.book_id == book_id && book_id.is_some()
@@ -1810,6 +1888,10 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             open_worker: Some(open_worker),
         },
     );
+    let cancellation = Cancellation::new();
+    state
+        .document_open_cancellations
+        .insert(generation, cancellation.clone());
     state.document_opening = true;
     state.document_open_notice_visible = false;
     let book =
@@ -1830,6 +1912,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.missing_book_id = None;
     let task_path = path.clone();
     let library = state.library.clone();
+    let open_cancellation = cancellation.clone();
     let open = Task::perform(
         async move {
             if let Some(book_id) = book_id {
@@ -1838,7 +1921,12 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     detail: "library is unavailable".to_owned(),
                 })?;
                 return library
-                    .open_book_document_with_plan(book_id, &task_path, plan)
+                    .open_book_document_with_plan_cancellable(
+                        book_id,
+                        &task_path,
+                        plan,
+                        open_cancellation,
+                    )
                     .await
                     .map_err(|error| AppError::Open {
                         format: "document",
@@ -1846,7 +1934,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     });
             }
             tokio::task::spawn_blocking(move || {
-                plan.open_with_content_hash()
+                plan.open_with_content_hash_cancellable(open_cancellation)
                     .map_err(app_document_open_error)
             })
             .await
@@ -2061,6 +2149,7 @@ struct AppliedReaderDefaultChanges {
 fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefaultChanges {
     let defaults = state.reader_defaults;
     let mut changes = AppliedReaderDefaultChanges::default();
+    let mut invalidated_tabs = Vec::new();
 
     if state.document.is_some() {
         if !state.reader_overrides.reading_mode && state.reading_mode != defaults.reading_mode {
@@ -2099,6 +2188,7 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
             tab.continuous_pending.clear();
             tab.continuous_visible.clear();
             tab.render_generation = tab.render_generation.wrapping_add(1);
+            invalidated_tabs.push((tab.id, tab.render_generation));
         }
         if !tab.reader_overrides.theme {
             tab.theme = defaults.theme;
@@ -2123,7 +2213,11 @@ fn apply_reader_defaults_to_open_tabs(state: &mut State) -> AppliedReaderDefault
             tab.continuous_pending.clear();
             tab.page_cache.clear();
             tab.render_generation = tab.render_generation.wrapping_add(1);
+            invalidated_tabs.push((tab.id, tab.render_generation));
         }
+    }
+    for (tab_id, generation) in invalidated_tabs {
+        cancel_superseded_raster_jobs(state, tab_id, generation);
     }
 
     changes
@@ -2138,6 +2232,9 @@ fn reader_defaults_changed_task(
         state.continuous_pages.clear();
         state.continuous_visible.clear();
         state.render_generation = state.render_generation.wrapping_add(1);
+        if let Some(tab_id) = state.active_tab_id {
+            cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+        }
     }
     if changes.epub_typography {
         perf::begin_relayout(state);
@@ -2190,6 +2287,7 @@ fn install_document(
 ) {
     if let Some(tab_id) = state.active_tab_id {
         cancel_epub_jobs_for_tab(state, tab_id);
+        cancel_background_jobs_for_tab(state, tab_id);
     }
     cancel_active_search(state);
     state.document_content_hash = content_hash;
@@ -2198,6 +2296,9 @@ fn install_document(
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
     state.render_generation = state.render_generation.wrapping_add(1);
+    if let Some(tab_id) = state.active_tab_id {
+        cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+    }
     state.error = None;
     state.rendered_page = None;
     state.rendered_page_index = None;
@@ -2446,9 +2547,10 @@ fn refresh_content(state: &mut State) -> Task<Message> {
         }
     }
 
-    state.render_generation = state.render_generation.wrapping_add(1);
-    let generation = state.render_generation;
     let tab_id = state.active_tab_id.unwrap_or(0);
+    state.render_generation = state.render_generation.wrapping_add(1);
+    cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+    let generation = state.render_generation;
 
     match &state.document {
         Some(OpenDocument::Pdf(doc)) => {
@@ -2503,13 +2605,25 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         }
                     };
                     let doc = Arc::clone(&doc);
+                    let cancellation = Cancellation::new();
+                    state
+                        .raster_cancellations
+                        .insert(job.clone(), cancellation.clone());
+                    let render_cancellation = cancellation.clone();
                     tasks.push(render_page_task(
                         tab_id,
                         generation,
                         key.clone(),
                         Some(transient_permit),
                         retain_document_for_worker(state),
-                        move || doc.render_page_with_highlights(page, scale, &highlights),
+                        move || {
+                            doc.render_page_with_highlights_cancellable(
+                                page,
+                                scale,
+                                &highlights,
+                                &|| render_cancellation.is_cancelled(),
+                            )
+                        },
                     ));
                     state.paginated_pending.push(key.clone());
                     state.raster_jobs.insert(job, permit);
@@ -2623,13 +2737,22 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                         }
                     };
                     let doc = Arc::clone(&doc);
+                    let cancellation = Cancellation::new();
+                    state
+                        .raster_cancellations
+                        .insert(job.clone(), cancellation.clone());
+                    let render_cancellation = cancellation.clone();
                     tasks.push(render_page_task(
                         tab_id,
                         generation,
                         key.clone(),
                         Some(transient_permit),
                         retain_document_for_worker(state),
-                        move || doc.render_page(page, scale),
+                        move || {
+                            doc.render_page_cancellable(page, scale, &|| {
+                                render_cancellation.is_cancelled()
+                            })
+                        },
                     ));
                     state.paginated_pending.push(key.clone());
                     state.raster_jobs.insert(job, permit);
@@ -2677,21 +2800,23 @@ fn schedule_cbz_dimension(
     let Some(permit) = reserve_raster_bytes(state, byte_len) else {
         return Task::none();
     };
-    state.cbz_dimension_jobs.insert(
-        CbzDimensionJob {
-            tab_id,
-            generation,
-            page,
-        },
-        permit,
-    );
+    let job = CbzDimensionJob {
+        tab_id,
+        generation,
+        page,
+    };
+    state.cbz_dimension_jobs.insert(job, permit);
+    let cancellation = Cancellation::new();
+    state
+        .cbz_dimension_cancellations
+        .insert(job, cancellation.clone());
     let document_permit = retain_document_for_worker(state);
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 let _document_permit = document_permit;
                 document
-                    .page_size(page)
+                    .page_size_cancellable(page, &|| cancellation.is_cancelled())
                     .map_err(|error| error.to_string())?;
                 Ok(())
             })
@@ -2753,6 +2878,14 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
             !state.epub_image_handles.contains_key(path) && !state.epub_images_failed.contains(path)
         })
         .collect();
+    for (job, cancellation) in &state.epub_image_cancellations {
+        if state.active_tab_id == Some(job.tab_id)
+            && job.generation == state.epub_image_generation
+            && !state.epub_images_desired.contains(&job.path)
+        {
+            cancellation.cancel();
+        }
+    }
     if state.epub_image_decode_active {
         return Task::none();
     }
@@ -2776,18 +2909,27 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     let document = Arc::clone(document);
     let tab_id = state.active_tab_id.unwrap_or(0);
     let generation = state.epub_image_generation;
-    state.epub_image_jobs.insert(EpubImageJob {
+    let job = EpubImageJob {
         tab_id,
         generation,
         path: path.clone(),
-    });
+    };
+    state.epub_image_jobs.insert(job.clone());
+    let cancellation = Cancellation::new();
+    state
+        .epub_image_cancellations
+        .insert(job, cancellation.clone());
     let probe_path = path.clone();
     let document_permit = retain_document_for_worker(state);
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 let _document_permit = document_permit;
-                epub_image_byte_len(&document, &probe_path)
+                if cancellation.is_cancelled() {
+                    return None;
+                }
+                let byte_len = epub_image_byte_len(&document, &probe_path);
+                (!cancellation.is_cancelled()).then_some(byte_len).flatten()
             })
             .await
             .unwrap_or_default()
@@ -2834,13 +2976,14 @@ fn decode_epub_image_task(
         reserve(state)?
     };
     let path = job.path.clone();
+    let cancellation = state.epub_image_cancellations.get(&job)?.clone();
     let document_permit = retain_document_for_worker(state);
     Some(Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 let _document_permit = document_permit;
                 let _transient_permit = transient_permit;
-                decode_epub_images(&document, [(path, permit)])
+                decode_epub_images(&document, [(path, permit)], &cancellation)
             })
             .await
             .unwrap_or_default()
@@ -3150,6 +3293,24 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
     .into_iter()
     .collect::<BTreeSet<_>>();
 
+    for (job, cancellation) in &state.raster_cancellations {
+        if matches!(job, RasterJob::Continuous { tab_id: job_tab, request, page }
+            if *job_tab == tab_id
+                && request.generation == state.render_generation
+                && !desired.contains(page))
+        {
+            cancellation.cancel();
+        }
+    }
+    for (job, cancellation) in &state.cbz_dimension_cancellations {
+        if job.tab_id == tab_id
+            && job.generation == state.render_generation
+            && !desired.contains(&job.page)
+        {
+            cancellation.cancel();
+        }
+    }
+
     for (page, rendered) in state.continuous_pages.iter_mut().enumerate() {
         if !desired.contains(&page) {
             *rendered = None;
@@ -3290,7 +3451,9 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
             };
             state.next_continuous_request_id = state.next_continuous_request_id.wrapping_add(1);
             state.continuous_pending.insert(page, request);
-            state.raster_jobs.insert(job, permit);
+            state.raster_jobs.insert(job.clone(), permit);
+            let cancellation = Cancellation::new();
+            state.raster_cancellations.insert(job, cancellation.clone());
             occupied += 1;
             occupied_bytes = next_occupied_bytes;
             tasks.push(start_continuous_page_task(
@@ -3299,6 +3462,7 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
                 request,
                 page,
                 Some(transient_permit),
+                cancellation,
             ));
         }
     }
@@ -3311,30 +3475,44 @@ fn start_continuous_page_task(
     request: ContinuousRequest,
     page: usize,
     transient_permit: Option<CachePermit>,
+    cancellation: Cancellation,
 ) -> Task<Message> {
     let scale = raster_render_scale(state, state.zoom.scale());
     match &state.document {
         Some(OpenDocument::Pdf(document)) => {
             let document = Arc::clone(document);
             let highlights = search_highlights_for_page(state, page);
+            let render_cancellation = cancellation.clone();
             render_continuous_page_task(
                 tab_id,
                 request,
                 page,
                 transient_permit,
                 retain_document_for_worker(state),
-                move || document.render_page_with_highlights(page, scale, &highlights),
+                move || {
+                    document.render_page_with_highlights_cancellable(
+                        page,
+                        scale,
+                        &highlights,
+                        &|| render_cancellation.is_cancelled(),
+                    )
+                },
             )
         }
         Some(OpenDocument::Cbz(document)) => {
             let document = Arc::clone(document);
+            let render_cancellation = cancellation.clone();
             render_continuous_page_task(
                 tab_id,
                 request,
                 page,
                 transient_permit,
                 retain_document_for_worker(state),
-                move || document.render_page(page, scale),
+                move || {
+                    document.render_page_cancellable(page, scale, &|| {
+                        render_cancellation.is_cancelled()
+                    })
+                },
             )
         }
         _ => Task::none(),
@@ -3612,6 +3790,9 @@ fn invalidate_continuous_rasters(state: &mut State) {
         });
     }
     state.render_generation = state.render_generation.wrapping_add(1);
+    if let Some(tab_id) = state.active_tab_id {
+        cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+    }
 }
 
 fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Message> {
@@ -3623,6 +3804,7 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
     }
     state.window_scale_factor = scale_factor;
 
+    let mut invalidated_tabs = Vec::new();
     for tab in &mut state.tabs {
         if matches!(tab.session.document, OpenDocument::Pdf(_)) {
             tab.rendered_page = None;
@@ -3634,7 +3816,11 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
             tab.continuous_pages.fill(None);
             tab.continuous_pending.clear();
             tab.render_generation = tab.render_generation.wrapping_add(1);
+            invalidated_tabs.push((tab.id, tab.render_generation));
         }
+    }
+    for (tab_id, generation) in invalidated_tabs {
+        cancel_superseded_raster_jobs(state, tab_id, generation);
     }
 
     if !matches!(state.document, Some(OpenDocument::Pdf(_))) {
@@ -3649,6 +3835,9 @@ fn update_window_scale_factor(state: &mut State, scale_factor: f32) -> Task<Mess
     state.continuous_pages.fill(None);
     state.continuous_pending.clear();
     state.render_generation = state.render_generation.wrapping_add(1);
+    if let Some(tab_id) = state.active_tab_id {
+        cancel_superseded_raster_jobs(state, tab_id, state.render_generation);
+    }
     refresh_content(state)
 }
 
@@ -3897,7 +4086,7 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
     let mut tasks = Vec::new();
 
     for page in pages {
-        if state.raster_jobs.len() >= RASTER_RENDER_WORKERS {
+        if state.raster_jobs.len() >= RASTER_RENDER_WORKERS.saturating_sub(1) {
             break;
         }
         let highlights = if matches!(state.document, Some(OpenDocument::Pdf(_))) {
@@ -3940,13 +4129,25 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                         continue;
                     }
                 };
+                let cancellation = Cancellation::new();
+                state
+                    .raster_cancellations
+                    .insert(job.clone(), cancellation.clone());
+                let render_cancellation = cancellation.clone();
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
                     key.clone(),
                     Some(transient_permit),
                     retain_document_for_worker(state),
-                    move || document.render_page_with_highlights(page, scale, &highlights),
+                    move || {
+                        document.render_page_with_highlights_cancellable(
+                            page,
+                            scale,
+                            &highlights,
+                            &|| render_cancellation.is_cancelled(),
+                        )
+                    },
                 ));
                 state.paginated_pending.push(key.clone());
                 state.raster_jobs.insert(job, permit);
@@ -3969,13 +4170,22 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                         continue;
                     }
                 };
+                let cancellation = Cancellation::new();
+                state
+                    .raster_cancellations
+                    .insert(job.clone(), cancellation.clone());
+                let render_cancellation = cancellation.clone();
                 tasks.push(render_page_task(
                     tab_id,
                     generation,
                     key.clone(),
                     Some(transient_permit),
                     retain_document_for_worker(state),
-                    move || document.render_page(page, scale),
+                    move || {
+                        document.render_page_cancellable(page, scale, &|| {
+                            render_cancellation.is_cancelled()
+                        })
+                    },
                 ));
                 state.paginated_pending.push(key.clone());
                 state.raster_jobs.insert(job, permit);
@@ -7837,6 +8047,66 @@ mod tests {
     fn admit_test_raster(state: &mut State, job: RasterJob, bytes: usize) {
         let permit = state.raster_budget.try_reserve(bytes).unwrap();
         state.raster_jobs.insert(job, permit);
+    }
+
+    #[test]
+    fn raster_and_dimension_invalidation_cancels_superseded_workers() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let generation = state.render_generation;
+        let raster_job = RasterJob::Paginated {
+            tab_id: 1,
+            generation,
+            key: PageCacheKey {
+                page: 0,
+                scale_bits: 1.0_f32.to_bits(),
+                highlights: Vec::new(),
+            },
+        };
+        let dimension_job = CbzDimensionJob {
+            tab_id: 1,
+            generation,
+            page: 0,
+        };
+        let raster_cancellation = Cancellation::new();
+        let dimension_cancellation = Cancellation::new();
+        state
+            .raster_cancellations
+            .insert(raster_job, raster_cancellation.clone());
+        state
+            .cbz_dimension_cancellations
+            .insert(dimension_job, dimension_cancellation.clone());
+
+        invalidate_continuous_rasters(&mut state);
+
+        assert!(raster_cancellation.is_cancelled());
+        assert!(dimension_cancellation.is_cancelled());
+    }
+
+    #[test]
+    fn undesired_epub_image_worker_is_cancelled_without_waiting_for_completion() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let job = EpubImageJob {
+            tab_id: 1,
+            generation: state.epub_image_generation,
+            path: "not-in-the-document.png".to_owned(),
+        };
+        let cancellation = Cancellation::new();
+        state.epub_image_jobs.insert(job.clone());
+        state
+            .epub_image_cancellations
+            .insert(job, cancellation.clone());
+
+        let _ = load_epub_images_task(&mut state);
+
+        assert!(cancellation.is_cancelled());
     }
 
     fn complete_epub_pagination(state: &mut State) {
@@ -12780,6 +13050,7 @@ mod tests {
         );
         let first = open_document(&mut state, first_path, None);
         let first_generation = state.document_open_generation;
+        let first_cancellation = state.document_open_cancellations[&first_generation].clone();
 
         assert_eq!(first.units(), 2);
         assert!(state.document_opening);
@@ -12795,6 +13066,26 @@ mod tests {
 
         let _ = open_document(&mut state, second_path.clone(), Some(42));
         let second_generation = state.document_open_generation;
+        assert!(first_cancellation.is_cancelled());
+        let _ = update(
+            &mut state,
+            Message::DocumentOpened {
+                generation: first_generation,
+                path: PathBuf::from("first.pdf"),
+                book_id: None,
+                result: Err(AppError::UnsupportedFormat("pdf".to_owned())),
+            },
+        );
+        assert!(
+            !state
+                .document_open_cancellations
+                .contains_key(&first_generation)
+        );
+        assert!(
+            !state
+                .pending_document_permits
+                .contains_key(&first_generation)
+        );
         let _ = update(
             &mut state,
             Message::ShowDocumentOpenNotice(first_generation),
@@ -12837,6 +13128,11 @@ mod tests {
         assert!(!state.document_opening);
         assert!(!state.document_open_notice_visible);
         assert!(state.document_open_preview.is_none());
+        assert!(
+            !state
+                .document_open_cancellations
+                .contains_key(&second_generation)
+        );
     }
 
     #[test]
