@@ -111,6 +111,15 @@ impl EpubDoc {
         inspect_bytes(data, limits)
     }
 
+    pub(crate) fn inspect_with_limits_cancellable(
+        path: &Path,
+        limits: EpubLimits,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<EpubInspection> {
+        let data = read_epub_file_cancellable(path, &limits, Some(is_cancelled))?;
+        inspect_bytes_cancellable(data, limits, Some(is_cancelled))
+    }
+
     /// Open an EPUB file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limits(path, EpubLimits::default())
@@ -324,7 +333,16 @@ impl EpubDoc {
 // ---------------------------------------------------------------------------
 
 fn read_epub_file(path: &Path, limits: &EpubLimits) -> Result<Vec<u8>> {
-    let file = File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    read_epub_file_cancellable(path, limits, None)
+}
+
+fn read_epub_file_cancellable(
+    path: &Path,
+    limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<u8>> {
+    let mut file =
+        File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let declared_bytes = file
         .metadata()
         .with_context(|| format!("failed to inspect {}", path.display()))?
@@ -334,19 +352,48 @@ fn read_epub_file(path: &Path, limits: &EpubLimits) -> Result<Vec<u8>> {
         .unwrap_or(usize::MAX)
         .min(usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX));
     let mut data = Vec::with_capacity(capacity);
-    file.take(limits.max_input_bytes.saturating_add(1))
-        .read_to_end(&mut data)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut buffer = [0_u8; 64 * 1024];
+    while data.len() as u64 <= limits.max_input_bytes {
+        check_cancelled(is_cancelled)?;
+        let remaining = limits
+            .max_input_bytes
+            .saturating_add(1)
+            .saturating_sub(data.len() as u64);
+        let read = file
+            .by_ref()
+            .take(remaining)
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
     validate_input_size(data.len() as u64, limits)?;
     Ok(data)
 }
 
 fn validated_archive(data: Vec<u8>, limits: &EpubLimits) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
+    validated_archive_cancellable(data, limits, None)
+}
+
+fn validated_archive_cancellable(
+    data: Vec<u8>,
+    limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
+    check_cancelled(is_cancelled)?;
     validate_input_size(data.len() as u64, limits)?;
     let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
     let mut validation_archive = ZipArchive::new(Cursor::new(data.as_slice()))
         .context("EPUB archive is corrupt: failed to open ZIP archive")?;
-    validate_archive_entries(&mut validation_archive, declared_entries, limits, &data)?;
+    validate_archive_entries(
+        &mut validation_archive,
+        declared_entries,
+        limits,
+        &data,
+        is_cancelled,
+    )?;
     drop(validation_archive);
     ZipArchive::new(Cursor::new(data))
         .context("EPUB archive is corrupt: failed to reopen ZIP archive")
@@ -366,8 +413,18 @@ fn parse_package(
 }
 
 fn inspect_bytes(data: Vec<u8>, limits: EpubLimits) -> Result<EpubInspection> {
-    let mut archive = validated_archive(data, &limits)?;
+    inspect_bytes_cancellable(data, limits, None)
+}
+
+fn inspect_bytes_cancellable(
+    data: Vec<u8>,
+    limits: EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<EpubInspection> {
+    let mut archive = validated_archive_cancellable(data, &limits, is_cancelled)?;
+    check_cancelled(is_cancelled)?;
     let (metadata, manifest, spine_ids) = parse_package(&mut archive, &limits)?;
+    check_cancelled(is_cancelled)?;
     validate_spine_size(&spine_ids, &limits)?;
     let cover = if let Some(item) = metadata
         .cover_image_id
@@ -384,10 +441,11 @@ fn inspect_bytes(data: Vec<u8>, limits: EpubLimits) -> Result<EpubInspection> {
             }
         };
         validate_declared_resource_size(&item.href, &item.media_type, declared_size, &limits)?;
-        let data = read_archive_bytes_bounded(
+        let data = read_archive_bytes_bounded_cancellable(
             &mut archive,
             &item.href,
             resource_read_limit(&item.media_type, &limits),
+            is_cancelled,
         )?;
         validate_resource(&item.href, &item.media_type, &data, &limits)?;
         Some(data)
@@ -420,7 +478,16 @@ fn read_archive_bytes_bounded(
     name: &str,
     max_bytes: u64,
 ) -> Result<Vec<u8>> {
-    let file = archive
+    read_archive_bytes_bounded_cancellable(archive, name, max_bytes, None)
+}
+
+fn read_archive_bytes_bounded_cancellable(
+    archive: &mut ZipArchive<Cursor<Vec<u8>>>,
+    name: &str,
+    max_bytes: u64,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<u8>> {
+    let mut file = archive
         .by_name(name)
         .with_context(|| format!("entry not found in archive: {name}"))?;
     if file.size() > max_bytes {
@@ -433,9 +500,20 @@ fn read_archive_bytes_bounded(
         .unwrap_or(usize::MAX)
         .min(usize::try_from(max_bytes).unwrap_or(usize::MAX));
     let mut buf = Vec::with_capacity(capacity);
-    file.take(max_bytes.saturating_add(1))
-        .read_to_end(&mut buf)
-        .with_context(|| format!("failed to read archive entry: {name}"))?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check_cancelled(is_cancelled)?;
+        let remaining = max_bytes.saturating_add(1).saturating_sub(buf.len() as u64);
+        let read = file
+            .by_ref()
+            .take(remaining)
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read archive entry: {name}"))?;
+        if read == 0 {
+            break;
+        }
+        buf.extend_from_slice(&buffer[..read]);
+    }
     if buf.len() as u64 > max_bytes {
         crate::resource_limit!(
             "EPUB archive entry exceeds byte limit while reading: {name} ({} > {max_bytes})",
@@ -443,6 +521,13 @@ fn read_archive_bytes_bounded(
         );
     }
     Ok(buf)
+}
+
+fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
+    if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+        anyhow::bail!("import cancelled");
+    }
+    Ok(())
 }
 
 fn validate_input_size(bytes: u64, limits: &EpubLimits) -> Result<()> {
@@ -460,6 +545,7 @@ fn validate_archive_entries<R: Read + Seek>(
     declared_entries: usize,
     limits: &EpubLimits,
     encoded_archive: &[u8],
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<()> {
     if archive.len() != declared_entries {
         anyhow::bail!("duplicate EPUB archive entry");
@@ -467,6 +553,7 @@ fn validate_archive_entries<R: Read + Seek>(
     let mut local_header_starts = Vec::with_capacity(archive.len());
     let mut central_directory_start = u64::MAX;
     for index in 0..archive.len() {
+        check_cancelled(is_cancelled)?;
         let file = archive
             .by_index(index)
             .context("EPUB archive is corrupt: failed to inspect ZIP structure")?;
@@ -485,6 +572,7 @@ fn validate_archive_entries<R: Read + Seek>(
     let mut total_uncompressed = 0_u64;
     let mut size_mismatch = None;
     for index in 0..archive.len() {
+        check_cancelled(is_cancelled)?;
         let mut file = archive
             .by_index(index)
             .context("EPUB archive is corrupt: failed to inspect ZIP entry")?;
@@ -535,6 +623,7 @@ fn validate_archive_entries<R: Read + Seek>(
         let mut actual_size = 0_u64;
         let mut buffer = [0_u8; 8192];
         loop {
+            check_cancelled(is_cancelled)?;
             let read = file
                 .read(&mut buffer)
                 .with_context(|| format!("failed to validate EPUB archive entry: {name}"))?;
@@ -589,8 +678,19 @@ fn validate_archive_entries<R: Read + Seek>(
                 .get(compressed_start..compressed_end)
                 .context("EPUB compressed entry extent is outside the archive")?;
             let mut decoder = flate2::bufread::DeflateDecoder::new(compressed);
-            let decoded_size = std::io::copy(&mut decoder, &mut std::io::sink())
-                .with_context(|| format!("failed to inspect EPUB deflate stream: {name}"))?;
+            let mut decoded_size = 0_u64;
+            loop {
+                check_cancelled(is_cancelled)?;
+                let read = decoder
+                    .read(&mut buffer)
+                    .with_context(|| format!("failed to inspect EPUB deflate stream: {name}"))?;
+                if read == 0 {
+                    break;
+                }
+                decoded_size = decoded_size
+                    .checked_add(read as u64)
+                    .context("EPUB deflate byte count overflowed")?;
+            }
             let consumed = decoder.total_in();
             if consumed != compressed_size || decoded_size != actual_size {
                 anyhow::bail!(
@@ -1096,6 +1196,7 @@ fn resolve_manifest_path(opf_dir: &str, href: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::io::{Cursor, Write};
     use std::path::Path;
 
@@ -1108,6 +1209,7 @@ mod tests {
     use super::declared_archive_entry_count;
     use super::parse_opf;
     use super::validate_spine_size;
+    use super::validated_archive_cancellable;
     use super::{PRESENTATION_CONSTRUCTIONS, inspect_bytes};
 
     fn archive_with_entries(names: &[&str]) -> Vec<u8> {
@@ -1533,6 +1635,31 @@ mod tests {
                 "expected {expected:?}, got {error:#}"
             );
         }
+    }
+
+    #[test]
+    fn archive_validation_checks_cancellation_during_decompression() {
+        let payload = vec![b'a'; 1024 * 1024];
+        let archive = archive_with_payloads(&[("payload.bin", payload.as_slice())]);
+        let checks = Cell::new(0);
+        let is_cancelled = || {
+            let next = checks.get() + 1;
+            checks.set(next);
+            next >= 10
+        };
+
+        let error = validated_archive_cancellable(
+            archive,
+            &EpubLimits {
+                compression_ratio_min_bytes: u64::MAX,
+                ..EpubLimits::default()
+            },
+            Some(&is_cancelled),
+        )
+        .expect_err("archive decompression should observe cancellation");
+
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(checks.get(), 10);
     }
 
     #[test]

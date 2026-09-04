@@ -6,7 +6,7 @@ use iced::{keyboard, window};
 use shosai_core::bookmarks::Bookmark;
 use shosai_core::document::RenderedPage;
 use shosai_core::library::{
-    Book, BookPage, ImportDiscovery, ImportFailure, ImportReport, PreparedManagedImport,
+    Book, BookPage, ImportCompletion, ImportDiscovery, ImportFailure, PreparedManagedImport,
 };
 use shosai_core::search::{SearchError, SearchMatch};
 
@@ -129,11 +129,16 @@ pub enum Message {
     ClearAddBooksSelection,
     ChangeAddBooksStorage,
     AddSelectedBooks,
+    CancelBookImport,
     ManagedBookPrepared {
+        generation: u64,
         index: usize,
         result: Result<(PathBuf, Arc<PreparedManagedImport>), ImportFailure>,
     },
-    BookAddedToBatch(ImportReport),
+    BookAddedToBatch {
+        generation: u64,
+        completion: ImportCompletion,
+    },
     OpenLibraryBook(i64, String),
     LocateBook(i64),
     RelinkBookSelected {

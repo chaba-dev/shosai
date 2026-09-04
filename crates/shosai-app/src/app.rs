@@ -19,9 +19,9 @@ use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
 use shosai_core::library::{
-    Book, BookPage, ImportCancellation, ImportCandidate, ImportDiscoveryProgress,
-    ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, Library,
-    ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
+    Book, BookPage, ImportCancellation, ImportCandidate, ImportCompletion, ImportDiscoveryProgress,
+    ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, ImportedBook,
+    Library, ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::path_from_key;
 use shosai_core::reader::{
@@ -164,26 +164,38 @@ impl AppError {
 }
 
 fn import_report_error(report: &ImportReport, i18n: &I18n) -> Option<AppError> {
-    let first = report.failures.first()?;
-    let file = first
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| first.path.display().to_string());
-    let key = if report.books.is_empty() {
+    if report.failed == 0 {
+        return None;
+    }
+    let first = report.failures().first();
+    let file = first.map_or_else(String::new, |failure| {
+        failure
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| failure.path.display().to_string())
+    });
+    let key = if report.succeeded == 0 {
         "books-import-failed"
     } else {
         "books-import-partial"
     };
-    Some(AppError::Import(i18n.text_with_args(
-        key,
-        [
-            ("added", (report.books.len() as i64).into()),
-            ("failed", (report.failures.len() as i64).into()),
-            ("file", file.into()),
-            ("error", first.error.clone().into()),
-        ],
-    )))
+    Some(AppError::Import(
+        i18n.text_with_args(
+            key,
+            [
+                ("added", (report.succeeded as i64).into()),
+                ("failed", (report.failed as i64).into()),
+                ("file", file.into()),
+                (
+                    "error",
+                    first
+                        .map_or_else(String::new, |failure| failure.error.clone())
+                        .into(),
+                ),
+            ],
+        ),
+    ))
 }
 
 #[derive(Clone)]
@@ -1016,6 +1028,8 @@ pub struct State {
     book_import_preparing: usize,
     book_import_next_commit: usize,
     book_import_committing: bool,
+    book_import_generation: u64,
+    book_import_cancellation: Option<ImportCancellation>,
     book_import_copy: bool,
     book_import_prepared: usize,
     book_import_completed: usize,
@@ -1187,6 +1201,8 @@ pub fn boot() -> (State, Task<Message>) {
         book_import_preparing: 0,
         book_import_next_commit: 0,
         book_import_committing: false,
+        book_import_generation: 0,
+        book_import_cancellation: None,
         book_import_copy: false,
         book_import_prepared: 0,
         book_import_completed: 0,
@@ -5628,18 +5644,21 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
         .padding([10, 12])
         .width(Length::Fill);
     let search = container(search_input).width(Length::Fill).max_width(380);
-    let add_message = (state.library.is_some() && !state.adding_books && !state.moving_library)
-        .then_some(Message::OpenAddBooks);
+    let add_message = if state.adding_books {
+        Some(Message::CancelBookImport)
+    } else {
+        (state.library.is_some() && !state.moving_library).then_some(Message::OpenAddBooks)
+    };
     let add_label = if state.adding_books && state.book_import_total > 0 {
         state.i18n.text_with_args(
-            "adding-books-progress",
+            "cancel-adding-books-progress",
             [
                 ("completed", (state.book_import_completed as i64).into()),
                 ("total", (state.book_import_total as i64).into()),
             ],
         )
     } else if state.adding_books {
-        state.i18n.text("adding-books")
+        state.i18n.text("cancel")
     } else {
         state.i18n.text("add-books")
     };
@@ -6222,10 +6241,13 @@ fn library_collection(state: &State) -> Element<'_, Message> {
         .spacing(14)
         .align_x(iced::Center);
         if !state.library_loading && !constrained && state.storage_error.is_none() {
-            let message = (state.library.is_some() && !state.adding_books && !state.moving_library)
-                .then_some(Message::OpenAddBooks);
+            let message = if state.adding_books {
+                Some(Message::CancelBookImport)
+            } else {
+                (state.library.is_some() && !state.moving_library).then_some(Message::OpenAddBooks)
+            };
             let label = if state.adding_books {
-                state.i18n.text("adding-books")
+                state.i18n.text("cancel")
             } else {
                 state.i18n.text("add-first-books")
             };
@@ -8925,6 +8947,16 @@ mod tests {
         }
     }
 
+    fn imported_book(book: &Book, source_path: PathBuf) -> ImportedBook {
+        ImportedBook::new(
+            book.id,
+            source_path,
+            path_from_key(&book.file_path),
+            book.content_hash.clone().unwrap_or_default(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn switching_tabs_preserves_each_documents_reader_state() {
         let epub = EpubDoc::from_bytes(
@@ -10377,24 +10409,21 @@ mod tests {
 
     #[test]
     fn partial_import_completion_keeps_successes_visible_and_surfaces_failures() {
-        let (mut state, _) = boot();
-        state.adding_books = true;
-        state.book_import_total = 1;
-        let report = ImportReport {
-            books: vec![test_book(42)],
-            failures: vec![shosai_core::library::ImportFailure {
-                path: PathBuf::from("corrupt.epub"),
-                error: "invalid archive".to_string(),
-            }],
-        };
+        let (state, _) = boot();
+        let book = test_book(42);
+        let mut report =
+            ImportReport::from_imported(imported_book(&book, PathBuf::from(&book.file_path)));
+        report.merge(ImportReport::from_failure(ImportFailure::new(
+            "corrupt.epub".into(),
+            "invalid archive",
+        )));
 
-        let task = update(&mut state, Message::BookAddedToBatch(report));
-
-        assert_eq!(task.units(), 0);
-        assert!(!state.adding_books);
-        let Some(AppError::Import(error)) = state.library_error else {
+        let Some(AppError::Import(error)) = import_report_error(&report, &state.i18n) else {
             panic!("partial import should surface its failures");
         };
+
+        assert_eq!(report.succeeded, 1);
+        assert_eq!(report.failed, 1);
         assert_eq!(
             error.replace(['\u{2068}', '\u{2069}'], ""),
             "Books added or already present: 1. Files not imported: 1. corrupt.epub: invalid archive"
@@ -10682,6 +10711,7 @@ mod tests {
         state.library_loading = false;
         state.adding_books = true;
         state.book_import_total = 2;
+        state.book_import_cancellation = Some(ImportCancellation::default());
         state.pending_book_imports.push_back((
             1,
             ImportCandidate {
@@ -10695,20 +10725,23 @@ mod tests {
             },
         ));
 
+        let generation = state.book_import_generation;
         let task = update(
             &mut state,
-            Message::BookAddedToBatch(ImportReport {
-                books: vec![test_book(42)],
-                failures: Vec::new(),
-            }),
+            Message::BookAddedToBatch {
+                generation,
+                completion: ImportCompletion::Completed(Ok(imported_book(
+                    &test_book(42),
+                    PathBuf::from("/book-42.epub"),
+                ))),
+            },
         );
 
         assert!(task.units() > 0);
         assert!(state.adding_books);
         assert_eq!(state.book_import_completed, 1);
         assert_eq!(state.library_activity_progress, 0.5);
-        assert_eq!(state.library_books.len(), 1);
-        assert_eq!(state.library_books[0].id, 42);
+        assert!(state.library_books.is_empty());
     }
 
     #[tokio::test]
@@ -10751,6 +10784,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn confirmed_import_cancellation_stops_queued_work_and_drains_preparations() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.add_books_open = true;
+        state.add_books_copy = Some(true);
+        state.staged_imports = (0..6)
+            .map(|index| StagedImport {
+                selected: true,
+                candidate: ImportCandidate {
+                    path: PathBuf::from(format!("book-{index}.epub")),
+                    title: format!("book-{index}"),
+                    group_key: format!("book-{index}"),
+                    format: shosai_core::library::BookFormat::Epub,
+                    file_size: 100,
+                    content_hash: format!("{:064x}", index),
+                    duplicate: None,
+                },
+            })
+            .collect();
+
+        let _ = update(&mut state, Message::AddSelectedBooks);
+        let generation = state.book_import_generation;
+        let cancellation = state.book_import_cancellation.clone().unwrap();
+        let _ = update(&mut state, Message::CancelBookImport);
+
+        assert!(cancellation.is_cancelled());
+        assert!(state.pending_book_imports.is_empty());
+        assert!(state.prepared_book_imports.is_empty());
+        assert!(state.adding_books);
+
+        for index in 0..4 {
+            let _ = update(
+                &mut state,
+                Message::ManagedBookPrepared {
+                    generation,
+                    index,
+                    result: Err(ImportFailure::new(
+                        PathBuf::from(format!("book-{index}.epub")),
+                        "managed preparation cancelled",
+                    )),
+                },
+            );
+        }
+
+        assert!(!state.adding_books);
+        assert!(state.book_import_cancellation.is_none());
+        assert!(state.library_error.is_none());
+    }
+
+    #[tokio::test]
     async fn managed_import_bounds_completed_preparations_behind_a_slow_first_book() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
@@ -10779,15 +10869,17 @@ mod tests {
             .collect();
         let _ = update(&mut state, Message::AddSelectedBooks);
 
+        let generation = state.book_import_generation;
         for index in 1..4 {
             let _ = update(
                 &mut state,
                 Message::ManagedBookPrepared {
+                    generation,
                     index,
-                    result: Err(ImportFailure {
-                        path: PathBuf::from(format!("book-{index}.epub")),
-                        error: "test failure".to_string(),
-                    }),
+                    result: Err(ImportFailure::new(
+                        PathBuf::from(format!("book-{index}.epub")),
+                        "test failure",
+                    )),
                 },
             );
         }
@@ -11253,10 +11345,7 @@ mod tests {
 
         dispatch::record_book_import_report(
             &mut state,
-            ImportReport {
-                books: vec![book],
-                failures: Vec::new(),
-            },
+            ImportReport::from_imported(imported_book(&book, path)),
         );
 
         assert_eq!(state.book_id, Some(42));
@@ -11280,10 +11369,7 @@ mod tests {
 
         dispatch::record_book_import_report(
             &mut state,
-            ImportReport {
-                books: vec![book],
-                failures: Vec::new(),
-            },
+            ImportReport::from_imported(imported_book(&book, path)),
         );
 
         assert_eq!(state.book_id, None);
@@ -11308,10 +11394,7 @@ mod tests {
 
         dispatch::record_book_import_report(
             &mut state,
-            ImportReport {
-                books: vec![book],
-                failures: Vec::new(),
-            },
+            ImportReport::from_imported(imported_book(&book, source)),
         );
 
         assert_eq!(state.book_id, Some(42));

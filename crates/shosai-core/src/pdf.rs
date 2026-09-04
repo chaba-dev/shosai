@@ -371,11 +371,29 @@ impl PdfDoc {
     }
 
     pub fn open_with_limit(path: impl AsRef<Path>, max_input_bytes: u64) -> Result<Self> {
-        let path = path.as_ref();
+        Self::open_with_limit_inner(path.as_ref(), max_input_bytes, None)
+    }
+
+    pub(crate) fn open_with_limit_cancellable(
+        path: &Path,
+        max_input_bytes: u64,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self> {
+        Self::open_with_limit_inner(path, max_input_bytes, Some(is_cancelled))
+    }
+
+    fn open_with_limit_inner(
+        path: &Path,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let data = read_pdf_file_with_limit(file, path, max_input_bytes)?;
-        Self::from_bytes_with_limit(data, max_input_bytes)
+        let data = read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, is_cancelled)?;
+        check_cancelled(is_cancelled)?;
+        let document = Self::from_bytes_with_limit_inner(data, max_input_bytes, is_cancelled)?;
+        check_cancelled(is_cancelled)?;
+        Ok(document)
     }
 
     /// Open a PDF from raw bytes.
@@ -384,19 +402,31 @@ impl PdfDoc {
     }
 
     pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
+        Self::from_bytes_with_limit_inner(data, max_input_bytes, None)
+    }
+
+    fn from_bytes_with_limit_inner(
+        data: Vec<u8>,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > max_input_bytes {
             crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
+        check_cancelled(is_cancelled)?;
         let pdfium = create_pdfium()?;
         preflight_pdf(pdfium.bindings(), &data)?;
+        check_cancelled(is_cancelled)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF: {e}"))?;
+        check_cancelled(is_cancelled)?;
 
         let page_count = document.pages().len() as usize;
 
         let mut page_sizes = Vec::with_capacity(page_count);
         for i in 0..page_count {
+            check_cancelled(is_cancelled)?;
             let page = document
                 .pages()
                 .get(i as u16)
@@ -406,6 +436,7 @@ impl PdfDoc {
             page_sizes.push((w, h));
         }
 
+        check_cancelled(is_cancelled)?;
         let meta = document.metadata();
         let metadata = DocumentMetadata {
             title: meta
@@ -449,10 +480,20 @@ impl PdfDoc {
     }
 }
 
+#[cfg(test)]
 fn read_pdf_file_with_limit(
     file: std::fs::File,
     path: &Path,
     max_input_bytes: u64,
+) -> Result<Vec<u8>> {
+    read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, None)
+}
+
+fn read_pdf_file_with_limit_cancellable(
+    mut file: std::fs::File,
+    path: &Path,
+    max_input_bytes: u64,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<u8>> {
     let metadata = file
         .metadata()
@@ -462,10 +503,30 @@ fn read_pdf_file_with_limit(
     }
     let capacity = usize::try_from(metadata.len().min(max_input_bytes)).unwrap_or(usize::MAX);
     let mut data = Vec::with_capacity(capacity);
-    file.take(max_input_bytes.saturating_add(1))
-        .read_to_end(&mut data)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check_cancelled(is_cancelled)?;
+        let remaining = max_input_bytes
+            .saturating_add(1)
+            .saturating_sub(data.len() as u64);
+        let read = file
+            .by_ref()
+            .take(remaining)
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
     Ok(data)
+}
+
+fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
+    if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+        anyhow::bail!("import cancelled");
+    }
+    Ok(())
 }
 
 fn preflight_pdf(bindings: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<()> {

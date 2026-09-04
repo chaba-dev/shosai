@@ -18,34 +18,34 @@ fn update_book_import_progress(state: &mut State) {
 }
 
 pub(super) fn record_book_import_report(state: &mut State, report: ImportReport) {
-    state.book_import_completed += 1;
+    state.book_import_completed += report.succeeded + report.failed;
     update_book_import_progress(state);
-    for book in &report.books {
+    for imported in report.imported() {
         if state.file_path.as_deref().is_some_and(|path| {
-            opened_content_matches_book(path, state.document_content_hash.as_deref(), book)
+            opened_content_matches_import(path, state.document_content_hash.as_deref(), imported)
         }) {
-            state.book_id = Some(book.id);
+            state.book_id = Some(imported.book_id());
         }
         for tab in &mut state.tabs {
-            if opened_content_matches_book(
+            if opened_content_matches_import(
                 tab.session.locator.path(),
                 tab.content_hash.as_deref(),
-                book,
+                imported,
             ) {
-                tab.session.book_id = Some(book.id);
+                tab.session.book_id = Some(imported.book_id());
             }
         }
-        if book_matches_library_view(state, book)
-            && !state
-                .library_books
-                .iter()
-                .any(|existing| existing.id == book.id)
-        {
-            state.library_books.push(book.clone());
-        }
     }
-    state.book_import_report.books.extend(report.books);
-    state.book_import_report.failures.extend(report.failures);
+    state.book_import_report.merge(report);
+}
+
+fn opened_content_matches_import(
+    path: &Path,
+    content_hash: Option<&str>,
+    imported: &ImportedBook,
+) -> bool {
+    content_hash == Some(imported.content_hash())
+        && (path == imported.source_path() || path == imported.library_path())
 }
 
 fn finish_book_import(state: &mut State) -> Task<Message> {
@@ -55,6 +55,7 @@ fn finish_book_import(state: &mut State) -> Task<Message> {
     state.book_import_preparing = 0;
     state.book_import_next_commit = 0;
     state.book_import_committing = false;
+    state.book_import_cancellation = None;
     let report = std::mem::take(&mut state.book_import_report);
     state.book_import_total = 0;
     state.book_import_prepared = 0;
@@ -74,6 +75,19 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
     let Some(library) = state.library.clone() else {
         return finish_book_import(state);
     };
+    let Some(cancellation) = state.book_import_cancellation.clone() else {
+        return finish_book_import(state);
+    };
+
+    if cancellation.is_cancelled() {
+        state.pending_book_imports.clear();
+        state.prepared_book_imports.clear();
+        if state.book_import_preparing == 0 && !state.book_import_committing {
+            return finish_book_import(state);
+        }
+        return Task::none();
+    }
+    let generation = state.book_import_generation;
 
     if !state.book_import_copy {
         if state.book_import_committing {
@@ -84,8 +98,15 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
         };
         state.book_import_committing = true;
         return Task::perform(
-            async move { library.link_discovered_files(&[candidate]).await },
-            Message::BookAddedToBatch,
+            async move {
+                library
+                    .link_discovered_file_cancellable(candidate, cancellation)
+                    .await
+            },
+            move |completion| Message::BookAddedToBatch {
+                generation,
+                completion,
+            },
         );
     }
 
@@ -97,33 +118,26 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
         {
             state.book_import_next_commit += 1;
             match prepared {
-                Err(failure) => record_book_import_report(
-                    state,
-                    ImportReport {
-                        books: Vec::new(),
-                        failures: vec![failure],
-                    },
-                ),
-                Ok((path, prepared)) => {
+                Err(failure) => {
+                    record_book_import_report(state, ImportReport::from_failure(failure))
+                }
+                Ok((_path, prepared)) => {
                     state.book_import_committing = true;
                     let commit_library = library.clone();
+                    let commit_cancellation = cancellation.clone();
                     tasks.push(Task::perform(
                         async move {
-                            match commit_library.commit_prepared_managed_file(&prepared).await {
-                                Ok(book) => ImportReport {
-                                    books: vec![book],
-                                    failures: Vec::new(),
-                                },
-                                Err(error) => ImportReport {
-                                    books: Vec::new(),
-                                    failures: vec![ImportFailure {
-                                        path,
-                                        error: format!("{error:#}"),
-                                    }],
-                                },
-                            }
+                            commit_library
+                                .commit_prepared_managed_file_cancellable(
+                                    &prepared,
+                                    commit_cancellation,
+                                )
+                                .await
                         },
-                        Message::BookAddedToBatch,
+                        move |completion| Message::BookAddedToBatch {
+                            generation,
+                            completion,
+                        },
                     ));
                     break;
                 }
@@ -141,18 +155,23 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
         };
         let library = library.clone();
         let path = candidate.path.clone();
+        let prepare_cancellation = cancellation.clone();
         state.book_import_preparing += 1;
         tasks.push(Task::perform(
             async move {
-                match library.prepare_discovered_managed_file(candidate).await {
+                match library
+                    .prepare_discovered_managed_file_cancellable(candidate, prepare_cancellation)
+                    .await
+                {
                     Ok(prepared) => Ok((path, Arc::new(prepared))),
-                    Err(error) => Err(ImportFailure {
-                        path,
-                        error: format!("{error:#}"),
-                    }),
+                    Err(error) => Err(ImportFailure::new(path, format!("{error:#}"))),
                 }
             },
-            move |result| Message::ManagedBookPrepared { index, result },
+            move |result| Message::ManagedBookPrepared {
+                generation,
+                index,
+                result,
+            },
         ));
     }
 
@@ -164,22 +183,6 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
     }
 
     Task::batch(tasks)
-}
-
-fn book_matches_library_view(state: &State, book: &Book) -> bool {
-    if state
-        .library_filter
-        .is_some_and(|format| format != book.format)
-    {
-        return false;
-    }
-    let query = state.library_search.to_lowercase();
-    query.is_empty()
-        || book.title.to_lowercase().contains(&query)
-        || book
-            .author
-            .as_ref()
-            .is_some_and(|author| author.to_lowercase().contains(&query))
 }
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
@@ -971,6 +974,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.book_import_preparing = 0;
             state.book_import_next_commit = 0;
             state.book_import_committing = false;
+            state.book_import_generation = state.book_import_generation.wrapping_add(1);
+            state.book_import_cancellation = Some(ImportCancellation::default());
             state.book_import_copy = copy;
             state.book_import_prepared = 0;
             state.book_import_completed = 0;
@@ -982,19 +987,56 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             return continue_book_import(state);
         }
 
-        Message::ManagedBookPrepared { index, result } => {
+        Message::CancelBookImport => {
+            if let Some(cancellation) = &state.book_import_cancellation {
+                cancellation.cancel();
+                state.pending_book_imports.clear();
+                state.prepared_book_imports.clear();
+                return continue_book_import(state);
+            }
+        }
+
+        Message::ManagedBookPrepared {
+            generation,
+            index,
+            result,
+        } if generation == state.book_import_generation && state.adding_books => {
             state.book_import_preparing = state.book_import_preparing.saturating_sub(1);
+            if state
+                .book_import_cancellation
+                .as_ref()
+                .is_some_and(ImportCancellation::is_cancelled)
+            {
+                return continue_book_import(state);
+            }
             state.book_import_prepared += 1;
             update_book_import_progress(state);
             state.prepared_book_imports.insert(index, result);
             return continue_book_import(state);
         }
 
-        Message::BookAddedToBatch(report) => {
+        Message::ManagedBookPrepared { .. } => {}
+
+        Message::BookAddedToBatch {
+            generation,
+            completion,
+        } if generation == state.book_import_generation && state.adding_books => {
             state.book_import_committing = false;
-            record_book_import_report(state, report);
+            match completion {
+                ImportCompletion::Cancelled => {}
+                ImportCompletion::Completed(result) => match result {
+                    Ok(imported) => {
+                        record_book_import_report(state, ImportReport::from_imported(imported))
+                    }
+                    Err(failure) => {
+                        record_book_import_report(state, ImportReport::from_failure(failure))
+                    }
+                },
+            }
             return continue_book_import(state);
         }
+
+        Message::BookAddedToBatch { .. } => {}
 
         Message::OpenLibraryBook(book_id, file_path) => {
             if state.moving_library {
