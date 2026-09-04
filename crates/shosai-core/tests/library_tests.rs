@@ -1,7 +1,7 @@
 use shosai_core::bookmarks::BookmarkStore;
 use shosai_core::library::{
-    BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, Library,
-    MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
+    BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, ImportFailure,
+    Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
 use shosai_core::path_from_key;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
@@ -21,6 +21,31 @@ async fn temp_library() -> (Library, ReadingStateStore, TempDir) {
     let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
     let library = Library::new(store.pool().clone(), store.managed_books_dir());
     (library, store, dir)
+}
+
+#[tokio::test]
+async fn malformed_library_rows_return_an_error_instead_of_being_omitted() {
+    let (library, store, _dir) = temp_library().await;
+    sqlx::query(
+        "INSERT INTO books (title, format, file_path, storage_kind)
+         VALUES ('Malformed', 'unknown', '/books/malformed', 'referenced')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    assert!(library.list_all().await.is_err());
+}
+
+#[tokio::test]
+async fn discovery_failures_do_not_retain_oversized_root_paths() {
+    let (library, _, _dir) = temp_library().await;
+    let oversized = PathBuf::from("x".repeat(20 * 1024));
+
+    let discovery = library.discover_files(&[oversized]).await;
+
+    assert_eq!(discovery.failures.len(), 1);
+    assert!(discovery.failures[0].path().as_os_str().is_empty());
 }
 
 #[tokio::test]
@@ -84,7 +109,10 @@ async fn stable_book_open_rejects_replaced_content() {
     std::fs::copy(fixture_path("sample.pdf"), &path).unwrap();
 
     let error = lib.open_book_document_at(book.id, &path).await.unwrap_err();
-    assert!(error.to_string().contains("no longer match"));
+    assert!(
+        error.to_string().contains("no longer match"),
+        "unexpected error: {error:#}"
+    );
 }
 
 #[tokio::test]
@@ -107,7 +135,11 @@ async fn reviewed_import_rejects_replaced_existing_path() {
     let report = lib.link_discovered_files(&candidate.candidates).await;
     assert_eq!(report.succeeded, 0);
     assert_eq!(report.failures().len(), 1);
-    assert!(report.failures()[0].error.contains("changed after review"));
+    assert!(
+        report.failures()[0]
+            .error()
+            .contains("changed after review")
+    );
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -272,7 +304,7 @@ async fn discovery_caps_selected_roots_before_starting_scanners() {
     assert_eq!(discovery.failures.len(), 1);
     assert!(
         discovery.failures[0]
-            .error
+            .error()
             .contains("too many import roots")
     );
 }
@@ -549,16 +581,8 @@ async fn discovery_failure_order_is_stable() {
     let forward = lib.discover_files(&[first.clone(), second.clone()]).await;
     let reverse = lib.discover_files(&[second.clone(), first.clone()]).await;
 
-    let forward_paths: Vec<_> = forward
-        .failures
-        .iter()
-        .map(|failure| &failure.path)
-        .collect();
-    let reverse_paths: Vec<_> = reverse
-        .failures
-        .iter()
-        .map(|failure| &failure.path)
-        .collect();
+    let forward_paths: Vec<_> = forward.failures.iter().map(ImportFailure::path).collect();
+    let reverse_paths: Vec<_> = reverse.failures.iter().map(ImportFailure::path).collect();
     assert_eq!(forward_paths, vec![&first, &second]);
     assert_eq!(reverse_paths, forward_paths);
 }
@@ -642,10 +666,18 @@ async fn discovered_import_rejects_a_file_changed_after_review() {
 
     assert_eq!(linked.succeeded, 0);
     assert_eq!(linked.failures().len(), 1);
-    assert!(linked.failures()[0].error.contains("changed after review"));
+    assert!(
+        linked.failures()[0]
+            .error()
+            .contains("changed after review")
+    );
     assert_eq!(copied.succeeded, 0);
     assert_eq!(copied.failures().len(), 1);
-    assert!(copied.failures()[0].error.contains("changed after review"));
+    assert!(
+        copied.failures()[0]
+            .error()
+            .contains("changed after review")
+    );
     assert!(lib.list_all().await.unwrap().is_empty());
 }
 
@@ -689,7 +721,11 @@ async fn discovered_referenced_duplicate_rejects_a_file_changed_after_review() {
 
     assert_eq!(linked.succeeded, 0);
     assert_eq!(linked.failures().len(), 1);
-    assert!(linked.failures()[0].error.contains("changed after review"));
+    assert!(
+        linked.failures()[0]
+            .error()
+            .contains("changed after review")
+    );
 }
 
 #[tokio::test]
@@ -783,7 +819,7 @@ async fn directory_import_reports_when_every_supported_file_fails() {
     assert_eq!(report.succeeded, 0);
     assert_eq!(report.failures().len(), 1);
     assert_eq!(
-        report.failures()[0].path,
+        report.failures()[0].path(),
         import_dir.join("corrupt.epub").canonicalize().unwrap()
     );
     assert!(lib.list_all().await.unwrap().is_empty());
@@ -818,7 +854,7 @@ async fn file_batch_continues_after_a_failure_and_reports_it() {
 
     assert_eq!(report.succeeded, 2);
     assert_eq!(report.failures().len(), 1);
-    assert_eq!(report.failures()[0].path, corrupt);
+    assert_eq!(report.failures()[0].path(), corrupt);
     assert_eq!(lib.list_all().await.unwrap().len(), 2);
 }
 

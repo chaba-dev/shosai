@@ -499,8 +499,18 @@ fn prepare_message_with(
             if path.len() > MAX_STATE_PATH_KEY_BYTES {
                 return Err(StateWriterSendError::Full);
             }
-            if save.book_id.is_none()
-                && !save.content_hash.as_deref().is_some_and(valid_content_hash)
+            if save
+                .content_hash
+                .as_deref()
+                .is_some_and(|hash| !valid_content_hash(hash))
+                || save.book_id.is_none() && save.content_hash.is_none()
+                || i64::try_from(save.reading.page).is_err()
+                || save
+                    .reading
+                    .location_offset
+                    .is_some_and(|offset| i64::try_from(offset).is_err())
+                || !save.reading.zoom.is_finite()
+                || save.reading.zoom <= 0.0
             {
                 return Err(StateWriterSendError::Full);
             }
@@ -522,12 +532,17 @@ fn prepare_message_with(
                 byte_len,
             })
         }
-        StateWriterMessage::Progress { book_id, progress } => Ok(PreparedMessage {
-            message: StateWriterMessage::Progress { book_id, progress },
-            key: Some(WriteKey::Progress(book_id)),
-            normalized_path: None,
-            byte_len: 0,
-        }),
+        StateWriterMessage::Progress { book_id, progress } => {
+            if !progress.is_finite() {
+                return Err(StateWriterSendError::Full);
+            }
+            Ok(PreparedMessage {
+                message: StateWriterMessage::Progress { book_id, progress },
+                key: Some(WriteKey::Progress(book_id)),
+                normalized_path: None,
+                byte_len: 0,
+            })
+        }
         StateWriterMessage::Flush(flush) => Ok(PreparedMessage {
             message: StateWriterMessage::Flush(flush),
             key: None,
@@ -642,6 +657,43 @@ mod tests {
     use std::cell::Cell;
 
     const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    #[test]
+    fn invalid_persistence_payloads_are_rejected_at_admission() {
+        let save = |content_hash, reading| {
+            StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: PathBuf::from("book.epub"),
+                content_hash,
+                reading,
+            })
+        };
+        let reading = FileReadingState {
+            page: 0,
+            location_offset: None,
+            zoom: 1.0,
+        };
+
+        assert!(prepare_message(save(None, reading.clone())).is_err());
+        assert!(prepare_message(save(Some("invalid".to_owned()), reading.clone())).is_err());
+        assert!(
+            prepare_message(save(
+                Some(CONTENT_HASH.to_owned()),
+                FileReadingState {
+                    zoom: f32::NAN,
+                    ..reading
+                },
+            ))
+            .is_err()
+        );
+        assert!(
+            prepare_message(StateWriterMessage::Progress {
+                book_id: 1,
+                progress: f64::INFINITY,
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn book_saves_coalesce_across_relocated_paths() {

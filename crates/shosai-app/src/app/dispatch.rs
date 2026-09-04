@@ -187,16 +187,20 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
 
 pub fn update(state: &mut State, message: Message) -> Task<Message> {
     if state.close_after_geometry_save.is_some()
-        && matches!(
+        && !matches!(
             &message,
-            Message::AddSelectedBooks
-                | Message::CancelBookImport
-                | Message::RelinkBookSelected { path: Some(_), .. }
-                | Message::RemoveBook(_)
-                | Message::ConfirmManagedLibraryMove
-                | Message::ToggleBookmark
-                | Message::SaveNote
-                | Message::DeleteBookmark(_)
+            Message::Initialized(_)
+                | Message::FingerprintBackfillFinished(_)
+                | Message::ManagedBookPrepared { .. }
+                | Message::BookAddedToBatch { .. }
+                | Message::BookRelinked { .. }
+                | Message::BookRemoved { .. }
+                | Message::ManagedLibraryMoved { .. }
+                | Message::BookmarkToggled { .. }
+                | Message::BookmarkMutationFinished { .. }
+                | Message::PersistWindowGeometry(_)
+                | Message::WindowGeometryPersisted
+                | Message::ReadingStateFlushed { .. }
         )
     {
         return Task::none();
@@ -230,11 +234,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.add_book_behavior = add_book_behavior;
             state.reader_defaults = reader_defaults;
             state.storage_initializing = false;
+            state.fingerprint_backfill_running = true;
             if state.close_after_geometry_save.is_some() {
                 state.window_geometry_dirty = true;
-                return persist_window_geometry(state);
+                return Task::batch([backfill_task, persist_window_geometry(state)]);
             }
-            state.fingerprint_backfill_running = true;
             let geometry = (!state.performance.is_automated())
                 .then_some(geometry)
                 .flatten();
@@ -703,12 +707,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::LibraryLoaded {
             generation,
             offset,
-            next_offset,
-            mut page,
+            result,
         } => {
             if generation != state.library_generation || offset != state.library_offset {
                 return Task::none();
             }
+            let mut page = match result {
+                Ok(page) => page,
+                Err(error) => {
+                    state.library_loading = false;
+                    state.library_error = Some(AppError::Library(error));
+                    return Task::none();
+                }
+            };
+            let next_offset = offset + page.books.len();
             let covers = page
                 .books
                 .iter_mut()

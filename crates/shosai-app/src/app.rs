@@ -19,8 +19,10 @@ use shosai_core::bridge::Cancellation;
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
+#[cfg(test)]
+use shosai_core::library::BookPage;
 use shosai_core::library::{
-    Book, BookPage, ImportCancellation, ImportCandidate, ImportCompletion, ImportDiscoveryProgress,
+    Book, ImportCancellation, ImportCandidate, ImportCompletion, ImportDiscoveryProgress,
     ImportDiscoveryProgressSnapshot, ImportDuplicate, ImportFailure, ImportReport, ImportedBook,
     Library, ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
@@ -171,10 +173,10 @@ fn import_report_error(report: &ImportReport, i18n: &I18n) -> Option<AppError> {
     let first = report.failures().first();
     let file = first.map_or_else(String::new, |failure| {
         failure
-            .path
+            .path()
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| failure.path.display().to_string())
+            .unwrap_or_else(|| failure.path().display().to_string())
     });
     let key = if report.succeeded == 0 {
         "books-import-failed"
@@ -191,7 +193,7 @@ fn import_report_error(report: &ImportReport, i18n: &I18n) -> Option<AppError> {
                 (
                     "error",
                     first
-                        .map_or_else(String::new, |failure| failure.error.clone())
+                        .map_or_else(String::new, |failure| failure.error().to_owned())
                         .into(),
                 ),
             ],
@@ -1354,16 +1356,12 @@ fn load_library_page(state: &mut State, append: bool) -> Task<Message> {
             library
                 .page(Some(&search), filter, LIBRARY_PAGE_SIZE, offset as u32)
                 .await
-                .unwrap_or(BookPage {
-                    books: Vec::new(),
-                    has_more: false,
-                })
+                .map_err(|error| format!("{error:#}"))
         },
-        move |page| Message::LibraryLoaded {
+        move |result| Message::LibraryLoaded {
             generation,
             offset,
-            next_offset: offset + page.books.len(),
-            page,
+            result,
         },
     )
 }
@@ -6946,10 +6944,10 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
         let discovery_error: Element<'_, Message> =
             if let Some(failure) = state.import_discovery_failures.first() {
                 let file = failure
-                    .path
+                    .path()
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| failure.path.display().to_string());
+                    .unwrap_or_else(|| failure.path().display().to_string());
                 text(state.i18n.text_with_args(
                     "book-discovery-failed",
                     [
@@ -6958,7 +6956,7 @@ fn add_books_modal(state: &State) -> Element<'_, Message> {
                             (state.import_discovery_failures.len() as i64).into(),
                         ),
                         ("file", file.into()),
-                        ("error", failure.error.clone().into()),
+                        ("error", failure.error().to_owned().into()),
                     ],
                 ))
                 .size(11)
@@ -10739,6 +10737,33 @@ mod tests {
     }
 
     #[test]
+    fn close_rejects_navigation_screen_and_preference_events() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let id = window::Id::unique();
+        let page = state.current_page;
+        let font_size = state.reader_defaults.epub_font_size;
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+
+        assert_eq!(update(&mut state, Message::NextPage).units(), 0);
+        assert_eq!(update(&mut state, Message::ShowSettings).units(), 0);
+        assert_eq!(
+            update(&mut state, Message::DefaultEpubFontSizeUp).units(),
+            0
+        );
+        assert_eq!(state.current_page, page);
+        assert_eq!(state.screen, Screen::Reader);
+        assert_eq!(state.reader_defaults.epub_font_size, font_size);
+    }
+
+    #[test]
     fn stale_library_results_do_not_replace_a_newer_query() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -10753,11 +10778,10 @@ mod tests {
             Message::LibraryLoaded {
                 generation: 1,
                 offset: 0,
-                next_offset: 1,
-                page: BookPage {
+                result: Ok(BookPage {
                     books: vec![test_book(1)],
                     has_more: false,
-                },
+                }),
             },
         );
 
@@ -12021,6 +12045,31 @@ mod tests {
     }
 
     #[test]
+    fn library_load_failures_are_surfaced_without_replacing_visible_books() {
+        let (mut state, _) = boot();
+        state.library_books.push(test_book(1));
+        state.library_loading = true;
+        let generation = state.library_generation;
+
+        let task = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation,
+                offset: 0,
+                result: Err("malformed stored book".to_owned()),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.library_loading);
+        assert_eq!(state.library_books.len(), 1);
+        assert_eq!(
+            state.library_error,
+            Some(AppError::Library("malformed stored book".to_owned()))
+        );
+    }
+
+    #[test]
     fn library_metadata_is_installed_before_cover_decoding_finishes() {
         let (mut state, _) = boot();
         let generation = state.library_generation;
@@ -12032,11 +12081,10 @@ mod tests {
             Message::LibraryLoaded {
                 generation,
                 offset: 0,
-                next_offset: 1,
-                page: BookPage {
+                result: Ok(BookPage {
                     books: vec![book],
                     has_more: false,
-                },
+                }),
             },
         );
 
@@ -12137,11 +12185,10 @@ mod tests {
             Message::LibraryLoaded {
                 generation,
                 offset: 0,
-                next_offset: 1,
-                page: BookPage {
+                result: Ok(BookPage {
                     books: vec![test_book(1)],
                     has_more: false,
-                },
+                }),
             },
         );
 
@@ -12216,11 +12263,10 @@ mod tests {
             Message::LibraryLoaded {
                 generation: 2,
                 offset: 0,
-                next_offset: 0,
-                page: BookPage {
+                result: Ok(BookPage {
                     books: Vec::new(),
                     has_more: false,
-                },
+                }),
             },
         );
 
@@ -12246,11 +12292,10 @@ mod tests {
             Message::LibraryLoaded {
                 generation: 1,
                 offset: 0,
-                next_offset: 1,
-                page: BookPage {
+                result: Ok(BookPage {
                     books: vec![test_book(2)],
                     has_more: false,
-                },
+                }),
             },
         );
 

@@ -92,8 +92,7 @@ pub enum Message {
     LibraryLoaded {
         generation: u64,
         offset: usize,
-        next_offset: usize,
-        page: BookPage,
+        result: Result<BookPage, String>,
     },
     LibraryCoversLoaded {
         generation: u64,

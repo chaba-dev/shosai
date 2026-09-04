@@ -223,8 +223,8 @@ pub struct BookPage {
 
 #[derive(Debug, Clone)]
 pub struct ImportFailure {
-    pub path: PathBuf,
-    pub error: String,
+    path: PathBuf,
+    error: String,
 }
 
 impl ImportFailure {
@@ -233,6 +233,14 @@ impl ImportFailure {
             path: compact_path(path),
             error: truncate_utf8(error.into(), MAX_IMPORT_ERROR_BYTES),
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn error(&self) -> &str {
+        &self.error
     }
 
     fn compacted(self) -> Self {
@@ -677,8 +685,10 @@ impl Library {
         .await
         .context("failed to summarize managed books")?;
         Ok(ManagedStorageSummary {
-            book_count: row.get::<i64, _>("book_count") as u64,
-            total_bytes: row.get::<i64, _>("total_bytes") as u64,
+            book_count: u64::try_from(row.try_get::<i64, _>("book_count")?)
+                .context("managed book count is outside the supported range")?,
+            total_bytes: u64::try_from(row.try_get::<i64, _>("total_bytes")?)
+                .context("managed byte count is outside the supported range")?,
         })
     }
 
@@ -714,9 +724,9 @@ impl Library {
         let mut destination_hashes = HashMap::with_capacity(rows.len());
 
         for row in rows {
-            let book_id = row.get::<i64, _>("id");
-            let old_path = path_from_key(&row.get::<String, _>("file_path"));
-            let expected_hash = row.get::<Option<String>, _>("content_hash");
+            let book_id = row.try_get::<i64, _>("id")?;
+            let old_path = path_from_key(&row.try_get::<String, _>("file_path")?);
+            let expected_hash = row.try_get::<Option<String>, _>("content_hash")?;
             let extension = old_path
                 .extension()
                 .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -1509,10 +1519,10 @@ impl Library {
     ) -> ImportDiscovery {
         if roots.len() > MAX_IMPORT_ROOTS {
             return ImportDiscovery {
-                failures: vec![ImportFailure {
-                    path: PathBuf::new(),
-                    error: format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
-                }],
+                failures: vec![ImportFailure::new(
+                    PathBuf::new(),
+                    format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
+                )],
                 ..ImportDiscovery::default()
             };
         }
@@ -1562,12 +1572,12 @@ impl Library {
                     Some(_item) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure {
-                            path: PathBuf::new(),
-                            error: format!(
+                        discovery.failures.push(ImportFailure::new(
+                            PathBuf::new(),
+                            format!(
                                 "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
                             ),
-                        });
+                        ));
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1591,12 +1601,12 @@ impl Library {
                     Some(_) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure {
-                            path: PathBuf::new(),
-                            error: format!(
+                        discovery.failures.push(ImportFailure::new(
+                            PathBuf::new(),
+                            format!(
                                 "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
                             ),
-                        });
+                        ));
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1636,10 +1646,10 @@ impl Library {
             );
         }
         if let Err(error) = scan_task.await {
-            discovery.failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!("book discovery task failed: {error}"),
-            });
+            discovery.failures.push(ImportFailure::new(
+                PathBuf::new(),
+                format!("book discovery task failed: {error}"),
+            ));
         }
 
         fingerprinted.sort_by(|left, right| left.0.path.cmp(&right.0.path));
@@ -1653,10 +1663,9 @@ impl Library {
             let fingerprint = match fingerprint {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
-                    discovery.failures.push(ImportFailure {
-                        path: candidate.path,
-                        error,
-                    });
+                    discovery
+                        .failures
+                        .push(ImportFailure::new(candidate.path, error));
                     progress.completed_file();
                     continue;
                 }
@@ -1670,10 +1679,10 @@ impl Library {
             let existing = match existing {
                 Ok(existing) => existing,
                 Err(error) => {
-                    discovery.failures.push(ImportFailure {
-                        path: candidate.path,
-                        error: format!("failed to check the library: {error:#}"),
-                    });
+                    discovery.failures.push(ImportFailure::new(
+                        candidate.path,
+                        format!("failed to check the library: {error:#}"),
+                    ));
                     progress.completed_file();
                     continue;
                 }
@@ -1840,7 +1849,7 @@ impl Library {
             .fetch_all(&self.pool)
             .await
             .context("failed to load library page")?;
-        let mut books: Vec<_> = rows.iter().filter_map(row_to_book).collect();
+        let mut books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
         let has_more = books.len() > limit as usize;
         books.truncate(limit as usize);
 
@@ -1902,11 +1911,8 @@ impl Library {
                 .fetch_all(&self.pool)
                 .await
                 .context("failed to load books from library snapshot")?;
-            books_by_id.extend(
-                rows.iter()
-                    .filter_map(row_to_book)
-                    .map(|book| (book.id, book)),
-            );
+            let books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
+            books_by_id.extend(books.into_iter().map(|book| (book.id, book)));
         }
 
         Ok(ids.iter().filter_map(|id| books_by_id.remove(id)).collect())
@@ -1981,7 +1987,7 @@ impl Library {
         .fetch_optional(&self.pool)
         .await
         .context("failed to query book by id")?;
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     /// Get a book by file path.
@@ -1996,7 +2002,7 @@ impl Library {
         .await
         .context("failed to query book by path")?;
 
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     async fn get_by_hash(&self, content_hash: &str) -> Result<Option<Book>> {
@@ -2010,7 +2016,7 @@ impl Library {
         .fetch_optional(&self.pool)
         .await
         .context("failed to query book by fingerprint")?;
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     async fn update_location(
@@ -2178,6 +2184,16 @@ async fn reconcile_identity(
     .await
     .context("failed to remove reading state aliases")?;
     if let Some(reading) = reading {
+        let page = reading.try_get::<i64, _>("page")?;
+        let location_offset = reading.try_get::<Option<i64>, _>("location_offset")?;
+        let zoom = reading.try_get::<f64, _>("zoom")?;
+        if page < 0
+            || location_offset.is_some_and(|offset| offset < 0)
+            || !zoom.is_finite()
+            || zoom <= 0.0
+        {
+            bail!("stored reading state is outside the supported range");
+        }
         sqlx::query(
             "INSERT INTO reading_state
                 (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
@@ -2186,11 +2202,11 @@ async fn reconcile_identity(
         .bind(new_path)
         .bind(&content_hash)
         .bind(book_id)
-        .bind(reading.get::<i64, _>("page"))
-        .bind(reading.get::<Option<i64>, _>("location_offset"))
-        .bind(reading.get::<f64, _>("zoom"))
-        .bind(reading.get::<String, _>("updated_at"))
-        .bind(reading.get::<i64, _>("revision"))
+        .bind(page)
+        .bind(location_offset)
+        .bind(zoom)
+        .bind(reading.try_get::<String, _>("updated_at")?)
+        .bind(reading.try_get::<i64, _>("revision")?)
         .execute(&mut **transaction)
         .await
         .context("failed to merge reading state aliases")?;
@@ -2293,28 +2309,31 @@ fn push_library_filters<'a>(
     }
 }
 
-fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Option<Book> {
-    let format_str: String = row.try_get("format").ok()?;
-    let format = BookFormat::from_db(&format_str)?;
-    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind").ok()?)?;
+fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Result<Book> {
+    let format_str: String = row.try_get("format")?;
+    let format = BookFormat::from_db(&format_str).context("stored book format is invalid")?;
+    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind")?)
+        .context("stored book storage kind is invalid")?;
+    let file_size = row
+        .try_get::<Option<i64>, _>("file_size")?
+        .map(u64::try_from)
+        .transpose()
+        .context("stored book file size is outside the supported range")?;
 
-    Some(Book {
-        id: row.try_get("id").ok()?,
-        title: row.try_get("title").ok()?,
-        author: row.try_get("author").ok()?,
+    Ok(Book {
+        id: row.try_get("id")?,
+        title: row.try_get("title")?,
+        author: row.try_get("author")?,
         format,
-        file_path: row.try_get("file_path").ok()?,
+        file_path: row.try_get("file_path")?,
         storage_kind,
-        original_path: row.try_get("original_path").ok()?,
-        content_hash: row.try_get("content_hash").ok()?,
-        file_size: row
-            .try_get::<Option<i64>, _>("file_size")
-            .ok()?
-            .map(|size| size as u64),
-        cover: row.try_get("cover_blob").ok()?,
-        progress: row.try_get("progress").ok()?,
-        date_added: row.try_get("date_added").ok()?,
-        last_read: row.try_get("last_read").ok()?,
+        original_path: row.try_get("original_path")?,
+        content_hash: row.try_get("content_hash")?,
+        file_size,
+        cover: row.try_get("cover_blob")?,
+        progress: row.try_get("progress")?,
+        date_added: row.try_get("date_added")?,
+        last_read: row.try_get("last_read")?,
     })
 }
 
@@ -2628,10 +2647,10 @@ fn collect_fingerprint_result(
         Err(error) => {
             progress.hashed_file();
             progress.completed_file();
-            failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!("book fingerprint task failed: {error}"),
-            });
+            failures.push(ImportFailure::new(
+                PathBuf::new(),
+                format!("book fingerprint task failed: {error}"),
+            ));
         }
     }
 }
@@ -2657,12 +2676,12 @@ fn scan_import_candidates(
         }
         traversal_entries += 1;
         if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
-            let _ = sender.blocking_send(ScannedImport::Failure(ImportFailure {
-                path: PathBuf::new(),
-                error: format!(
+            let _ = sender.blocking_send(ScannedImport::Failure(ImportFailure::new(
+                PathBuf::new(),
+                format!(
                     "book discovery stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
                 ),
-            }));
+            )));
             break;
         }
         let original_path = match cursor {
@@ -2676,13 +2695,10 @@ fn scan_import_candidates(
                     Some(Err(error)) => {
                         pending.push(ScanCursor::Directory(path.clone(), entries));
                         if sender
-                            .blocking_send(ScannedImport::Failure(ImportFailure {
-                                path: path.clone(),
-                                error: format!(
-                                    "failed to read an entry in {}: {error}",
-                                    path.display()
-                                ),
-                            }))
+                            .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                                path.clone(),
+                                format!("failed to read an entry in {}: {error}", path.display()),
+                            )))
                             .is_err()
                         {
                             break;
@@ -2703,13 +2719,10 @@ fn scan_import_candidates(
                     .unwrap_or_default();
                 if (!recursive || BookFormat::from_extension(&extension).is_some())
                     && sender
-                        .blocking_send(ScannedImport::Failure(ImportFailure {
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
                             path,
-                            error: format!(
-                                "failed to inspect {}: {error}",
-                                original_path.display()
-                            ),
-                        }))
+                            format!("failed to inspect {}: {error}", original_path.display()),
+                        )))
                         .is_err()
                 {
                     break;
@@ -2725,10 +2738,10 @@ fn scan_import_candidates(
                 Ok(entries) => pending.push(ScanCursor::Directory(path, entries)),
                 Err(error) => {
                     if sender
-                        .blocking_send(ScannedImport::Failure(ImportFailure {
-                            path: path.clone(),
-                            error: format!("failed to read directory {}: {error}", path.display()),
-                        }))
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                            path.clone(),
+                            format!("failed to read directory {}: {error}", path.display()),
+                        )))
                         .is_err()
                     {
                         break;
@@ -2748,10 +2761,10 @@ fn scan_import_candidates(
         let Some(format) = BookFormat::from_extension(&extension) else {
             if !recursive
                 && sender
-                    .blocking_send(ScannedImport::Failure(ImportFailure {
+                    .blocking_send(ScannedImport::Failure(ImportFailure::new(
                         path,
-                        error: format!("unsupported format: .{extension}"),
-                    }))
+                        format!("unsupported format: .{extension}"),
+                    )))
                     .is_err()
             {
                 break;
@@ -2762,14 +2775,14 @@ fn scan_import_candidates(
         if metadata.len() > format.max_input_bytes() {
             progress.completed_file();
             if sender
-                .blocking_send(ScannedImport::Failure(ImportFailure {
+                .blocking_send(ScannedImport::Failure(ImportFailure::new(
                     path,
-                    error: format!(
+                    format!(
                         "{} input is larger than {} bytes",
                         format,
                         format.max_input_bytes()
                     ),
-                }))
+                )))
                 .is_err()
             {
                 break;
@@ -2862,7 +2875,11 @@ fn compact_string(value: &str) -> String {
 }
 
 fn compact_path(path: PathBuf) -> PathBuf {
-    PathBuf::from(path.as_os_str())
+    if path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES {
+        PathBuf::new()
+    } else {
+        PathBuf::from(path.as_os_str())
+    }
 }
 
 fn imported_book_from_commit(
@@ -3072,13 +3089,11 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
             break;
         }
         for row in rows {
-            let id: i64 = row.get("id");
+            let id: i64 = row.try_get("id")?;
             after_id = id;
-            let file_path: String = row.get("file_path");
-            let Some(format) = BookFormat::from_db(&row.get::<String, _>("format")) else {
-                eprintln!("warning: legacy book {file_path} has an unsupported format");
-                continue;
-            };
+            let file_path: String = row.try_get("file_path")?;
+            let format = BookFormat::from_db(&row.try_get::<String, _>("format")?)
+                .with_context(|| format!("legacy book {file_path} has an unsupported format"))?;
             let path = path_from_key(&file_path);
             if !path.is_file() {
                 continue;
@@ -3145,10 +3160,17 @@ fn extract_pdf_metadata(
         .min((COVER_MAX_HEIGHT - 1) as f32 / page_height)
         .min(1.0);
     check_import_cancelled(cancellation)?;
-    let cover = doc
-        .render_page(0, scale)
-        .ok()
-        .and_then(|page| encode_cover_png(page.width, page.height, &page.pixels));
+    let rendered = if cancellation.is_some() {
+        doc.render_page_with_highlights_cancellable(0, scale, &[], &is_cancelled)
+    } else {
+        doc.render_page(0, scale)
+    };
+    let cover = rendered.ok().and_then(|page| {
+        check_import_cancelled(cancellation).ok()?;
+        let cover = encode_cover_png(page.width, page.height, &page.pixels);
+        check_import_cancelled(cancellation).ok()?;
+        cover
+    });
     check_import_cancelled(cancellation)?;
 
     Ok((title, author, cover))
@@ -3260,6 +3282,16 @@ fn encode_cover_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_failure_intrinsically_discards_oversized_paths() {
+        let failure = ImportFailure::new(
+            PathBuf::from("x".repeat(MAX_IMPORT_PATH_BYTES + 1)),
+            "failed",
+        );
+
+        assert!(failure.path.as_os_str().is_empty());
+    }
 
     #[test]
     fn import_reports_keep_exact_counts_with_bounded_details() {
@@ -3905,6 +3937,17 @@ mod tests {
 
         assert!(cover.width() <= COVER_MAX_WIDTH);
         assert!(cover.height() <= COVER_MAX_HEIGHT);
+    }
+
+    #[test]
+    fn cancelled_pdf_metadata_extraction_does_not_render_a_cover() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.pdf");
+        let cancellation = ImportCancellation::default();
+        cancellation.cancel();
+
+        let error = extract_pdf_metadata(&path, &path, Some(&cancellation)).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 
     #[test]
