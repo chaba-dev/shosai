@@ -11,7 +11,9 @@ use iced::widget::{
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::oneshot;
 
-use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
+use shosai_core::application::{
+    DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan,
+};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
@@ -38,8 +40,8 @@ use crate::epub::PageNode as EpubPageNode;
 use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
     EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget,
-    PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, content_node_text_len,
-    content_starts_with_heading,
+    EpubPaginationCancellation, PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage,
+    content_node_text_len, content_starts_with_heading,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
@@ -905,7 +907,7 @@ pub struct State {
     raster_failures: HashSet<RasterFailure>,
     cbz_dimension_jobs: HashMap<CbzDimensionJob, CachePermit>,
     cbz_dimension_failures: HashSet<CbzDimensionJob>,
-    epub_jobs: HashSet<EpubJob>,
+    epub_jobs: HashMap<EpubJob, EpubPaginationCancellation>,
     page_input: String,
     error: Option<AppError>,
     font_size: f32,
@@ -1075,7 +1077,7 @@ pub fn boot() -> (State, Task<Message>) {
         raster_failures: HashSet::new(),
         cbz_dimension_jobs: HashMap::new(),
         cbz_dimension_failures: HashSet::new(),
-        epub_jobs: HashSet::new(),
+        epub_jobs: HashMap::new(),
         page_input: String::new(),
         error: None,
         font_size: 16.0,
@@ -1597,10 +1599,23 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
     Task::batch([content_task, image_task, search_task, bookmarks_task])
 }
 
+fn cancel_epub_jobs_for_tab(state: &mut State, tab_id: u64) {
+    state.epub_jobs.retain(|job, cancellation| {
+        if job.tab_id == tab_id {
+            cancellation.cancel();
+            false
+        } else {
+            true
+        }
+    });
+}
+
 fn close_tab(state: &mut State, index: usize) -> Task<Message> {
     if index >= state.tabs.len() {
         return Task::none();
     }
+    let closing_tab_id = state.tabs[index].id;
+    cancel_epub_jobs_for_tab(state, closing_tab_id);
     let previous_active = state.active_tab;
     save_active_tab(state);
     state.tabs.remove(index);
@@ -1675,6 +1690,22 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
 
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     let generation = state.document_open_generation;
+    let locator = DeviceFileLocator::from_path(&path);
+    let plan = match OpenDocumentPlan::prepare(&locator) {
+        Ok(plan) => plan,
+        Err(error) => {
+            state.open_error = Some(app_document_open_error(error));
+            return Task::none();
+        }
+    };
+    let format = plan.format();
+    let Some(maximum_retained_bytes) = OpenDocument::maximum_retained_byte_len(format) else {
+        state.open_error = Some(AppError::Open {
+            format: format.display_name(),
+            detail: "retained document byte charge overflowed".to_owned(),
+        });
+        return Task::none();
+    };
     let Some(count) = state.document_admission.count.try_reserve(1) else {
         state.open_error = Some(AppError::Open {
             format: "document",
@@ -1682,7 +1713,11 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         });
         return Task::none();
     };
-    let Some(bytes) = state.document_admission.bytes.try_reserve(0) else {
+    let Some(bytes) = state
+        .document_admission
+        .bytes
+        .try_reserve(maximum_retained_bytes)
+    else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "retained document byte limit exceeded".to_owned(),
@@ -1723,9 +1758,23 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.open_error = None;
     state.missing_book_id = None;
     let task_path = path.clone();
+    let library = state.library.clone();
     let open = Task::perform(
         async move {
-            tokio::task::spawn_blocking(move || load_document(&task_path))
+            if let Some(book_id) = book_id {
+                let library = library.ok_or_else(|| AppError::Open {
+                    format: "document",
+                    detail: "library is unavailable".to_owned(),
+                })?;
+                return library
+                    .open_book_document_with_plan(book_id, &task_path, plan)
+                    .await
+                    .map_err(|error| AppError::Open {
+                        format: "document",
+                        detail: format!("{error:#}"),
+                    });
+            }
+            tokio::task::spawn_blocking(move || plan.open().map_err(app_document_open_error))
                 .await
                 .unwrap_or_else(|error| {
                     Err(AppError::Open {
@@ -2015,25 +2064,25 @@ fn reader_defaults_changed_task(
     }
 }
 
+#[cfg(test)]
 fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
-    match OpenDocument::open(&DeviceFileLocator::from_path(path)) {
-        Ok(document) => Ok(document),
-        Err(OpenDocumentError::UnsupportedFormat(extension)) => {
-            Err(AppError::UnsupportedFormat(extension))
-        }
-        Err(OpenDocumentError::NotFound) => Err(AppError::MissingBook),
-        Err(OpenDocumentError::Inaccessible(detail)) => Err(AppError::Open {
+    OpenDocument::open(&DeviceFileLocator::from_path(path)).map_err(app_document_open_error)
+}
+
+fn app_document_open_error(error: OpenDocumentError) -> AppError {
+    match error {
+        OpenDocumentError::UnsupportedFormat(extension) => AppError::UnsupportedFormat(extension),
+        OpenDocumentError::NotFound => AppError::MissingBook,
+        OpenDocumentError::Inaccessible(detail) => AppError::Open {
             format: "document",
             detail,
-        }),
-        Err(
-            OpenDocumentError::Open { format, detail }
-            | OpenDocumentError::LimitExceeded { format, detail }
-            | OpenDocumentError::BackendUnavailable { format, detail },
-        ) => Err(AppError::Open {
+        },
+        OpenDocumentError::Open { format, detail }
+        | OpenDocumentError::LimitExceeded { format, detail }
+        | OpenDocumentError::BackendUnavailable { format, detail } => AppError::Open {
             format: format.display_name(),
             detail,
-        }),
+        },
     }
 }
 
@@ -2043,6 +2092,9 @@ fn install_document(
     book_id: Option<i64>,
     document: OpenDocument,
 ) {
+    if let Some(tab_id) = state.active_tab_id {
+        cancel_epub_jobs_for_tab(state, tab_id);
+    }
     cancel_active_search(state);
     state.display_title = book_title(book_id, &document, Some(&path), &state.library_books);
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
@@ -2361,20 +2413,26 @@ fn refresh_content(state: &mut State) -> Task<Message> {
             state.rendered_facing_page = None;
             state.rendered_facing_page_handle = None;
             state.error = None;
-            if state.epub_layout_pending.is_some()
+            if state.epub_layout_pending == Some(layout_key)
                 || (state.epub_layout_key == Some(layout_key) && !state.epub_pages.is_empty())
             {
                 return load_epub_images_task(state);
+            }
+            if state.epub_layout_pending.is_some() {
+                cancel_epub_jobs_for_tab(state, tab_id);
+                state.epub_layout_pending = None;
             }
             if !state.epub_jobs.is_empty() {
                 return load_epub_images_task(state);
             }
             state.epub_layout_pending = Some(layout_key);
-            state.epub_jobs.insert(EpubJob {
+            let job = EpubJob {
                 tab_id,
                 generation,
                 layout_key,
-            });
+            };
+            let cancellation = EpubPaginationCancellation::default();
+            state.epub_jobs.insert(job, cancellation.clone());
             return Task::batch([
                 paginate_epub_task(
                     tab_id,
@@ -2383,6 +2441,7 @@ fn refresh_content(state: &mut State) -> Task<Message> {
                     retain_document_for_worker(state),
                     layout_key,
                     state.current_page,
+                    cancellation,
                 ),
                 load_epub_images_task(state),
             ]);
@@ -2764,6 +2823,7 @@ fn paginate_epub_task(
     document_permit: RetainedDocumentPermit,
     layout_key: EpubLayoutKey,
     current_chapter: usize,
+    cancellation: EpubPaginationCancellation,
 ) -> Task<Message> {
     let font_size = f32::from_bits(layout_key.font_size);
     let line_spacing = f32::from_bits(layout_key.line_spacing);
@@ -2772,24 +2832,30 @@ fn paginate_epub_task(
         f32::from_bits(layout_key.height),
     );
     let pagination = iced::futures::stream::unfold(
-        Some((document, document_permit, false)),
+        Some((document, document_permit, false, cancellation)),
         move |state| async move {
-            let (document, document_permit, complete) = state?;
+            let (document, document_permit, complete, cancellation) = state?;
+            if cancellation.is_cancelled() {
+                return None;
+            }
             let worker_document = Arc::clone(&document);
             let worker_permit = document_permit.clone();
+            let worker_cancellation = cancellation.clone();
             let pages = tokio::task::spawn_blocking(move || {
                 let _document_permit = worker_permit;
                 if complete {
-                    crate::epub::paginate_document(
+                    crate::epub::paginate_document_cancellable(
                         &worker_document,
                         font_size,
                         line_spacing,
                         page_size,
+                        worker_cancellation,
                     )
                 } else {
                     let mut budget = EpubPaginationBudget::for_document(
                         worker_document.presentation().chapters().len(),
-                    );
+                    )
+                    .with_cancellation(worker_cancellation);
                     crate::epub::paginate_document_chapter(
                         &worker_document,
                         current_chapter,
@@ -2802,7 +2868,10 @@ fn paginate_epub_task(
             })
             .await
             .unwrap_or_default();
-            let next = (!complete).then_some((document, document_permit, true));
+            if cancellation.is_cancelled() {
+                return None;
+            }
+            let next = (!complete).then_some((document, document_permit, true, cancellation));
             Some(((complete, pages), next))
         },
     );
@@ -4023,6 +4092,28 @@ fn finish_bookmark_mutation(
     }
 }
 
+fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64) {
+    let edit = state
+        .bookmark_mutation_queues
+        .get(&tab_id)
+        .and_then(|queue| queue.front())
+        .and_then(|mutation| match mutation {
+            BookmarkMutation::UpdateNote {
+                generation: queued_generation,
+                id,
+                note,
+                ..
+            } if *queued_generation == generation => Some((*id, note.clone().unwrap_or_default())),
+            _ => None,
+        });
+    if state.active_tab_id == Some(tab_id)
+        && let Some((id, note)) = edit
+    {
+        state.editing_note_id = Some(id);
+        state.editing_note_text = note;
+    }
+}
+
 fn refresh_bookmarks(state: &State) -> Task<Message> {
     if let (Some(tab_id), Some(path), Some(store)) =
         (state.active_tab_id, &state.file_path, &state.bookmark_store)
@@ -4071,6 +4162,9 @@ fn update_bookmark_status(state: &mut State) {
 }
 
 fn save_reading_state(state: &mut State) {
+    if state.book_id.is_some() && state.book_id == state.removing_book {
+        return;
+    }
     if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
         let save = ReadingStateSave {
             book_id: state.book_id,
@@ -7505,11 +7599,14 @@ mod tests {
             crate::epub::LayoutSize::new(page_size.width, page_size.height),
         );
         let layout_key = epub_layout_key(state);
-        state.epub_jobs.insert(EpubJob {
-            tab_id: state.active_tab_id.unwrap(),
-            generation: state.render_generation,
-            layout_key,
-        });
+        state.epub_jobs.insert(
+            EpubJob {
+                tab_id: state.active_tab_id.unwrap(),
+                generation: state.render_generation,
+                layout_key,
+            },
+            EpubPaginationCancellation::default(),
+        );
         let _ = update(
             state,
             Message::EpubPaginated {
@@ -8571,6 +8668,25 @@ mod tests {
     }
 
     #[test]
+    fn closing_an_epub_tab_cancels_its_pagination() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        assert!(refresh_content(&mut state).units() > 0);
+        let cancellation = state.epub_jobs.values().next().unwrap().clone();
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.active_tab = Some(0);
+
+        let _ = update(&mut state, Message::CloseTab(0));
+
+        assert!(cancellation.is_cancelled());
+        assert!(state.epub_jobs.is_empty());
+    }
+
+    #[test]
     fn continuous_epub_mode_reuses_the_shared_chapter_presentation() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -9459,6 +9575,19 @@ mod tests {
         assert_eq!(duplicate.units(), 0);
         assert_eq!(state.bookmark_mutation_queues.get(&1).unwrap().len(), 2);
         assert!(state.bookmark_mutations_active.contains(&1));
+
+        let _delete = update(
+            &mut state,
+            Message::BookmarkMutationFinished {
+                tab_id: 1,
+                generation: 2,
+                file_path: PathBuf::from("book.epub"),
+                book_id: None,
+                result: Err("bookmark 10 not found".to_owned()),
+            },
+        );
+        assert_eq!(state.editing_note_id, Some(10));
+        assert_eq!(state.editing_note_text, "note");
     }
 
     #[test]
@@ -10440,6 +10569,75 @@ mod tests {
         assert_eq!(save.location_offset, Some(17));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn book_removal_flushes_tracked_state_before_deleting_identity() {
+        use iced::futures::StreamExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let path = directory.path().join("book.epub");
+        std::fs::write(
+            &path,
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub"),
+        )
+        .unwrap();
+        let book = library.import_file(&path).await.unwrap();
+        let writer = start_reading_state_writer(store.clone());
+        writer
+            .send(ReadingStateWriterMessage::Save(ReadingStateSave {
+                book_id: Some(book.id),
+                path: path.clone(),
+                reading: FileReadingState {
+                    page: 4,
+                    location_offset: Some(8),
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(library);
+        state.reading_state_saves = Some(writer.clone());
+        state.pending_remove_book = Some(book.id);
+
+        let task = update(&mut state, Message::RemoveBook(book.id));
+        let mut messages = iced_runtime::task::into_stream(task).unwrap();
+        let iced_runtime::Action::Output(message) = messages.next().await.unwrap() else {
+            panic!("removal should complete");
+        };
+        let _ = update(&mut state, message);
+
+        writer.flush().await.unwrap();
+        assert!(store.get_async(&path).await.is_some());
+    }
+
+    #[test]
+    fn importing_an_open_untracked_book_promotes_its_sessions() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = PathBuf::from("/books/imported.epub");
+        state.file_path = Some(path.clone());
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        let mut book = test_book(42);
+        book.file_path = shosai_core::path_key(&path);
+
+        dispatch::record_book_import_report(
+            &mut state,
+            ImportReport {
+                books: vec![book],
+                failures: Vec::new(),
+            },
+        );
+
+        assert_eq!(state.book_id, Some(42));
+        assert_eq!(state.tabs[0].session.book_id, Some(42));
+    }
+
     #[test]
     fn failed_book_removal_keeps_the_book_and_surfaces_the_error() {
         let (mut state, _) = boot();
@@ -11334,7 +11532,7 @@ mod tests {
     }
 
     #[test]
-    fn epub_relayout_coalesces_to_one_in_flight_and_the_latest_request() {
+    fn epub_relayout_cancels_in_flight_work_for_the_latest_request() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -11349,9 +11547,9 @@ mod tests {
         let requested_key = state.epub_layout_requested.unwrap();
 
         assert!(first.units() > 0);
-        assert_eq!(coalesced.units(), 0);
+        assert!(coalesced.units() > 0);
         assert_ne!(first_key, requested_key);
-        assert_eq!(state.epub_layout_pending, Some(first_key));
+        assert_eq!(state.epub_layout_pending, Some(requested_key));
 
         let latest = update(
             &mut state,
@@ -11364,7 +11562,7 @@ mod tests {
             },
         );
 
-        assert!(latest.units() > 0);
+        assert_eq!(latest.units(), 0);
         assert_eq!(state.epub_layout_pending, Some(requested_key));
     }
 
@@ -11379,11 +11577,14 @@ mod tests {
         state.current_page = 1;
         state.epub_offset = 25;
         let layout_key = epub_layout_key(&state);
-        state.epub_jobs.insert(EpubJob {
-            tab_id: 1,
-            generation: 2,
-            layout_key,
-        });
+        state.epub_jobs.insert(
+            EpubJob {
+                tab_id: 1,
+                generation: 2,
+                layout_key,
+            },
+            EpubPaginationCancellation::default(),
+        );
 
         let _ = update(
             &mut state,
@@ -11454,7 +11655,7 @@ mod tests {
     }
 
     #[test]
-    fn installing_epub_clears_stale_layout_state_and_resumes_after_old_job() {
+    fn installing_epub_cancels_stale_layout_and_starts_the_replacement() {
         let first = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
         )
@@ -11462,7 +11663,7 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(first)));
         state.file_path = Some(PathBuf::from("first.epub"));
         assert!(refresh_content(&mut state).units() > 0);
-        let old_job = *state.epub_jobs.iter().next().unwrap();
+        let old_job = *state.epub_jobs.keys().next().unwrap();
         assert!(state.epub_layout_pending.is_some());
 
         let second = EpubDoc::from_bytes(
@@ -11477,7 +11678,7 @@ mod tests {
         );
         assert_eq!(state.epub_layout_pending, None);
         assert_eq!(state.epub_layout_requested, None);
-        assert_eq!(refresh_content(&mut state).units(), 0);
+        assert!(refresh_content(&mut state).units() > 0);
         let requested = state.epub_layout_requested.unwrap();
 
         let task = update(
@@ -11491,10 +11692,10 @@ mod tests {
             },
         );
 
-        assert!(task.units() > 0);
+        assert_eq!(task.units(), 0);
         assert_eq!(state.epub_layout_pending, Some(requested));
         assert!(state.epub_pages.is_empty());
-        assert!(state.epub_jobs.iter().any(|job| {
+        assert!(state.epub_jobs.keys().any(|job| {
             job.layout_key == requested && job.generation == state.render_generation
         }));
     }
@@ -11519,11 +11720,14 @@ mod tests {
         state.tabs = vec![first, second];
         state.active_tab = Some(1);
         let layout_key = epub_layout_key_for_tab(&state, &state.tabs[0]);
-        state.epub_jobs.insert(EpubJob {
-            tab_id: 1,
-            generation: 4,
-            layout_key,
-        });
+        state.epub_jobs.insert(
+            EpubJob {
+                tab_id: 1,
+                generation: 4,
+                layout_key,
+            },
+            EpubPaginationCancellation::default(),
+        );
 
         let _ = update(
             &mut state,
@@ -11631,13 +11835,28 @@ mod tests {
 
     #[test]
     fn document_open_notice_is_delayed_and_scoped_to_the_latest_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let first_path = directory.path().join("first.pdf");
+        let second_path = directory.path().join("second.pdf");
+        std::fs::write(
+            &first_path,
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf"),
+        )
+        .unwrap();
+        std::fs::write(
+            &second_path,
+            include_bytes!("../../shosai-core/tests/fixtures/sample.pdf"),
+        )
+        .unwrap();
         let (mut state, _) = boot();
-        state.library_books = vec![test_book(42)];
+        let mut book = test_book(42);
+        book.file_path = shosai_core::path_key(&second_path);
+        state.library_books = vec![book];
         state.library_cover_handles.insert(
             42,
             RasterImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255])),
         );
-        let first = open_document(&mut state, PathBuf::from("first.epub"), None);
+        let first = open_document(&mut state, first_path, None);
         let first_generation = state.document_open_generation;
 
         assert_eq!(first.units(), 2);
@@ -11652,7 +11871,7 @@ mod tests {
             Some("first")
         );
 
-        let _ = open_document(&mut state, PathBuf::from("second.epub"), Some(42));
+        let _ = open_document(&mut state, second_path.clone(), Some(42));
         let second_generation = state.document_open_generation;
         let _ = update(
             &mut state,
@@ -11688,9 +11907,9 @@ mod tests {
             &mut state,
             Message::DocumentOpened {
                 generation: second_generation,
-                path: PathBuf::from("second.epub"),
+                path: second_path,
                 book_id: Some(42),
-                result: Err(AppError::UnsupportedFormat("epub".to_string())),
+                result: Err(AppError::UnsupportedFormat("pdf".to_string())),
             },
         );
         assert!(!state.document_opening);
@@ -11725,28 +11944,16 @@ mod tests {
         let old_document = state.document.clone();
         let path = PathBuf::from("unsupported.txt");
         let open_task = open_document(&mut state, path.clone(), None);
-        let open_generation = state.document_open_generation;
 
         assert!(render_task.units() > 0);
-        assert!(open_task.units() > 0);
-        assert!(state.document_opening);
+        assert_eq!(open_task.units(), 0);
+        assert!(!state.document_opening);
         assert_eq!(state.render_generation, old_generation);
         assert!(matches!(
             (&state.document, &old_document),
             (Some(OpenDocument::Cbz(_)), Some(OpenDocument::Cbz(_)))
         ));
 
-        let _ = update(
-            &mut state,
-            Message::DocumentOpened {
-                generation: open_generation,
-                path,
-                book_id: None,
-                result: Err(AppError::UnsupportedFormat("txt".to_string())),
-            },
-        );
-
-        assert!(!state.document_opening);
         assert!(matches!(
             state.open_error,
             Some(AppError::UnsupportedFormat(ref format)) if format == "txt"
@@ -11807,11 +12014,12 @@ mod tests {
                 admission.open_workers.try_reserve(1).unwrap()
             };
             state.document_admission = admission;
+            let path = PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.pdf"
+            ));
 
-            assert_eq!(
-                open_document(&mut state, PathBuf::from("other.pdf"), None).units(),
-                0
-            );
+            assert_eq!(open_document(&mut state, path, None).units(), 0);
             assert!(matches!(
                 &state.open_error,
                 Some(AppError::Open { detail, .. }) if detail == expected
@@ -11826,30 +12034,24 @@ mod tests {
     }
 
     #[test]
-    fn retained_document_byte_admission_rejects_parsed_replacement() {
+    fn retained_document_byte_admission_rejects_before_parsing() {
         let active = Arc::new(
             PdfDoc::from_bytes(
                 include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
             )
             .unwrap(),
         );
-        let replacement = OpenDocument::Pdf(Arc::new(
-            PdfDoc::from_bytes(
-                include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
-            )
-            .unwrap(),
+        let path = PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../shosai-core/tests/fixtures/sample.pdf"
         ));
-        let retained_bytes = replacement.retained_byte_len().unwrap();
+        let retained_bytes =
+            OpenDocument::maximum_retained_byte_len(shosai_core::library::BookFormat::Pdf).unwrap();
         let mut state = state_with_document(OpenDocument::Pdf(Arc::clone(&active)));
         state.file_path = Some(PathBuf::from("active.pdf"));
         state.document_admission = DocumentAdmission::new(2, retained_bytes - 1, 1);
 
-        assert!(open_document(&mut state, PathBuf::from("other.pdf"), None).units() > 0);
-        assert_eq!(state.document_admission.open_workers.used(), 1);
-        assert_eq!(
-            finish_open_document(&mut state, PathBuf::from("other.pdf"), None, replacement).units(),
-            0
-        );
+        assert_eq!(open_document(&mut state, path, None).units(), 0);
 
         assert!(matches!(
             state.open_error,
@@ -11868,11 +12070,16 @@ mod tests {
     #[test]
     fn failed_document_open_releases_all_admission_for_retry() {
         let (mut state, _) = boot();
-        state.document_admission = DocumentAdmission::new(1, 1, 1);
-        let path = PathBuf::from("missing.pdf");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("corrupt.pdf");
+        std::fs::write(&path, b"not a pdf").unwrap();
+        let retained_bytes =
+            OpenDocument::maximum_retained_byte_len(shosai_core::library::BookFormat::Pdf).unwrap();
+        state.document_admission = DocumentAdmission::new(1, retained_bytes, 1);
 
         assert!(open_document(&mut state, path.clone(), None).units() > 0);
         assert_eq!(state.document_admission.count.used(), 1);
+        assert_eq!(state.document_admission.bytes.used(), retained_bytes);
         assert_eq!(state.document_admission.open_workers.used(), 1);
         let generation = state.document_open_generation;
         let _ = update(

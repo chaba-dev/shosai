@@ -17,10 +17,19 @@ fn update_book_import_progress(state: &mut State) {
     };
 }
 
-fn record_book_import_report(state: &mut State, report: ImportReport) {
+pub(super) fn record_book_import_report(state: &mut State, report: ImportReport) {
     state.book_import_completed += 1;
     update_book_import_progress(state);
     for book in &report.books {
+        let path = shosai_core::path_from_key(&book.file_path);
+        if state.file_path.as_ref() == Some(&path) {
+            state.book_id = Some(book.id);
+        }
+        for tab in &mut state.tabs {
+            if tab.session.locator.path() == path {
+                tab.session.book_id = Some(book.id);
+            }
+        }
         if book_matches_library_view(state, book)
             && !state
                 .library_books
@@ -1073,8 +1082,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.pending_remove_book = None;
             state.removing_book = Some(id);
             state.library_error = None;
+            let saves = state.reading_state_saves.clone();
             return Task::perform(
-                async move { lib.remove(id).await.map_err(|error| format!("{error:#}")) },
+                async move {
+                    if let Some(saves) = saves {
+                        saves.flush().await.map_err(|error| error.to_string())?;
+                    }
+                    lib.remove(id).await.map_err(|error| format!("{error:#}"))
+                },
                 move |result| Message::BookRemoved { id, result },
             );
         }
@@ -1586,6 +1601,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         } => {
             if let Err(error) = result {
                 eprintln!("warning: failed to update bookmark: {error}");
+                restore_failed_bookmark_edit(state, tab_id, generation);
             }
             return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
@@ -1766,7 +1782,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 layout_key,
             };
-            if !state.epub_jobs.contains(&job) {
+            if !state.epub_jobs.contains_key(&job) {
                 return Task::none();
             }
             if complete {
