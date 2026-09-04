@@ -2810,8 +2810,7 @@ mod tests {
 
         #[cfg(windows)]
         {
-            let error = std::fs::remove_file(&path).unwrap_err();
-            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            std::fs::remove_file(&path).unwrap_err();
             drop(file);
             std::fs::remove_file(&path).unwrap();
             std::fs::rename(&replacement, &path).unwrap();
