@@ -1,0 +1,272 @@
+= RFD 4 Phase 0 decisions and acceptance gates
+
+This document freezes the frontend boundary for the migration.  It records
+decisions and acceptance targets; measurements not explicitly identified as a
+baseline are gates for Phase 2, not claims about a Flutter application that does
+not exist yet.
+
+== Direction and first target matrix
+
+Shosai will have one production Flutter frontend backed by a platform-neutral
+Rust application core.  Iced remains runnable only as a behavior and benchmark
+reference until the Flutter parity gate, and receives no parallel production
+feature implementation.  Highlighting from RFD 6 is the first vertical slice.
+
+[cols="1,1,2,2"]
+|===
+|Target |Initial disposition |Phase 2 gate |Current evidence
+
+|Linux desktop
+|First desktop development target
+|Build and launch the Flutter host; open EPUB/PDF; run mouse, keyboard,
+accessibility, lifecycle, release, and budget checks
+|Rust workspace tests and the existing Iced application run on Linux
+
+|Android arm64
+|First mobile validation target
+|Build and launch on a physical device; run touch, TalkBack, rotation,
+background/process-death, memory, and release checks
+|The extracted core cross-compiles with the Android NDK.  This is not a host or
+physical-device claim.
+
+|macOS arm64/x86-64
+|Planned desktop target, currently unclaimed
+|Native host build, signing/package, VoiceOver, lifecycle, and performance
+|Existing Iced benchmark data only; no Flutter host evidence
+
+|Windows x86-64
+|Planned desktop target, currently unclaimed
+|Native host build/package, Narrator, lifecycle, and performance
+|No Flutter host evidence
+
+|iOS arm64
+|Planned mobile target, currently unclaimed
+|Native host build/signing and physical-device VoiceOver, touch, rotation,
+lifecycle, memory, and release checks
+|No Flutter host or physical-device evidence
+
+|Web
+|Deferred to the independent Phase 6 decision
+|Compare local WASM/browser storage with a service adapter
+|The native core deliberately fails a ~wasm32~ build at configuration time
+|===
+
+Passing one row never implies support for another.  Linux and Android are the
+first implementation order, not release promises; a platform becomes supported
+only after its row's build, package, lifecycle, accessibility, and hardware
+gates pass.
+
+== Responsibility inventory
+
+The ownership rule is policy and durable domain state in Rust, presentation and
+interaction in Flutter, and capabilities in thin platform adapters.  Viewport
+measurements and GPU/widget handles are transient frontend state.
+
+[cols="2,3,3"]
+|===
+|Owner |Responsibilities |Current implementation or migration disposition
+
+|Rust core
+|Format detection and capabilities; document admission; EPUB/PDF/CBZ parsing;
+PDF/CBZ raster rendering; EPUB style, font, MathML, pagination, and
+renderer-neutral geometry; search; library discovery/import/progress; book,
+bookmark, reading-state, and annotation persistence; logical reader location,
+preferences, replacement rules, cache/prefetch policy, coalesced writes; bridge
+handles, cancellation, errors, panic containment, and buffer limits
+|~shosai-core::{application,document,epub,pdf,cbz,search,library,bookmarks,
+reading_state,annotations,reader,state_writer,bridge}~
+
+|Flutter presentation
+|Routes and responsive compositions; widgets, painting, image handles, reader
+tabs and panels; pointer/keyboard/touch gestures; focus and semantics nodes;
+viewport measurement, continuous-scroll offsets, safe areas, orientation,
+loading/error presentation, themes, localization, and animation
+|Future Flutter host.  Current equivalents in ~app.rs~, ~app/dispatch.rs~,
+~app/epub_view.rs~, ~widgets.rs~, ~theme.rs~, ~typography.rs~, and ~i18n.rs~ are
+temporary Iced reference code.
+
+|Platform adapters
+|File and directory pickers; device-local document capability resolution;
+application-data directory selection; external URL opening; windows, lifecycle,
+process restoration, secure storage, sharing, and notifications
+|Current desktop adapters are in ~main.rs~, ~app.rs~, ~app/dispatch.rs~, and
+~app/epub_navigation.rs~.  They are replaced per Flutter host rather than moved
+into core.  Only ~DeviceFileLocator~ and ~ApplicationDataPaths~ cross into Rust.
+
+|Temporary Iced reference
+|Iced event/update loop, subscriptions and tasks; library/reader view state;
+Iced raster/SVG handles; EPUB painting, shaped paragraphs, tables, MathML
+widgets, and selection spikes; desktop window behavior
+|All of ~shosai-app~: ~main.rs~, ~app.rs~, ~app/{message,dispatch,
+epub_navigation,epub_view,perf}.rs~, ~epub.rs~, ~epub/{math_widget,native_text,
+table_layout,text_layout,text_shaping}.rs~, ~pdf.rs~, ~selection_spike.rs~,
+~widgets.rs~, ~theme.rs~, ~typography.rs~, and ~i18n.rs~.  Renderer-neutral
+pagination is now only re-exported through the Iced EPUB facade.
+
+|Obsolete after parity
+|Iced executable, Iced dependencies, Iced-only performance subscriptions and
+widget adapters, and duplicate desktop packaging entry points
+|Delete in Phase 5 only after Flutter passes parity, package, and recovery gates.
+No current Iced file is deleted in Phases 0 or 1 because it remains the
+executable reference.
+|===
+
+Reader tab activation, visible widgets, panel state, and measured scroll
+geometry intentionally remain presentation concerns.  Their logical document,
+location, preferences, and cache decisions belong to core; retaining the former
+in ~ReaderTab~ is not a second application domain implementation.
+
+== EPUB scene and semantics boundary
+
+Rust remains the only EPUB layout engine.  One bridge response carries a
+bounded page or chapter scene at block and shaped-inline-batch granularity:
+
+* page identity, spine occurrence, logical Unicode-scalar ranges, and resolved
+  block geometry come from ~Page~, ~PageNode~, and ~LayoutSize~;
+* text batches retain style, direction, link, and chapter offsets from the core
+  presentation/text-layout model;
+* images, tables, and MathML are typed scene nodes with bounded resource or
+  primitive payloads; large encoded/raster resources use owned buffer handles;
+* a parallel semantic tree contains reading order, roles, labels, actions, and
+  the same logical ranges.  It never derives reading order from painted pixels.
+
+Flutter paints those batches, creates platform semantics nodes, performs hit
+testing against retained endpoint geometry, and draws selection/highlight
+overlays.  Flutter does not repaginate or reshape document text.  Rust is not
+called per glyph, pointer move, or semantics node.  Relayout is one cancellable
+coarse request for a new viewport/font/theme key; selection and restoration use
+logical scalar offsets, never durable viewport coordinates.
+
+This boundary preserves current layout fidelity and RFD 6 anchors, keeps bridge
+volume proportional to visible scene content rather than glyph/event count, and
+avoids implementing CSS, bidi, line breaking, table layout, and MathML twice.
+Phase 2 must serialize the existing renderer-neutral model into bridge-safe DTOs
+and measure payload volume before treating this decision as performant.
+
+== Bridge decision
+
+Use ~flutter_rust_bridge~ 2.13 for native Flutter host integration in Phase 2.
+Its documented target set covers Android, iOS, Linux, macOS, Windows, and web;
+the migration uses its async functions, opaque Rust types, generated Dart error
+mapping, and zero-copy buffer support.  The generator-neutral contract in
+~shosai_core::bridge~ remains the source of ownership rules so changing code
+generation does not change the application domain.
+
+Opaque documents and byte buffers always have explicit ~release~ operations.
+Dart finalizers are a leak backstop, not normal lifecycle control.  Requests
+carry cancellation tokens, errors are owned enums/strings, Rust entry points
+contain panics, and no borrowed Rust data crosses the bridge.  One buffer is
+limited to 160 MiB and all retained bridge buffers to 320 MiB.
+
+The selection is based on the upstream target/API contract plus a Linux core
+test and Android arm64 core cross-build.  It does not claim that generated host
+projects, PDFium packaging, Apple signing, Windows loading, or mobile lifecycle
+already work.  Those are deliberately Phase 2 per-target gates; requiring them
+before selecting a bridge would duplicate Phase 2 and make the plan circular.
+
+Upstream references:
+
+* https://pub.dev/packages/flutter_rust_bridge[flutter_rust_bridge package and supported platforms]
+* https://cjycode.com/flutter_rust_bridge/guides/concepts/opaque[opaque Rust types and explicit disposal]
+
+== Performance and resource budgets
+
+Measure release builds after five warmups and at least 50 samples on the same
+device when comparing Iced and Flutter.  Report p50, p95, maximum, fixture,
+viewport, power mode, binary format, and retained/RSS definitions.  These are
+acceptance ceilings, not Phase 0 measurements unless a baseline is cited.
+
+[cols="2,4"]
+|===
+|Area |Gate
+
+|Startup
+|Process launch to an operable library: p95 at most 2.0 s on desktop and 3.0 s
+on the first physical mobile target, and no more than 25% slower than the Iced
+reference measured on the same host.
+
+|Memory
+|Representative large-document steady RSS at most 512 MiB desktop and 384 MiB
+mobile, with no positive retained trend after 20 open/render/release cycles.
+Bridge buffers are at most 160 MiB each and 320 MiB total.  RFD 6 selection
+geometry remains at most 8 MiB per open document.
+
+|Binary size
+|Installed release payload at most 200 MiB desktop and 150 MiB mobile, and the
+Flutter host plus generated bridge may add at most 30 MiB over the equivalent
+native artifact before target SDK/runtime packaging.  Record split/debug-symbol
+and universal-binary effects separately.
+
+|Render/navigation
+|Preserve the checked-in EPUB baseline budgets: warm page turn p50/p95 at most
+8/16.7 ms, chapter transition at most 16.7/33.3 ms, and font relayout at most
+50/100 ms.  PDF/CBZ cached page presentation uses the warm-turn gate; uncached
+raster latency is reported separately by fixture and scale.
+
+|Selection drag
+|No bridge, file, SQLite, PDFium, or asynchronous wait during drag.  End-to-end
+pointer/touch update to submitted overlay p95 at most 8 ms and maximum at most
+16.7 ms.  The measured Rust endpoint lookup baseline from RFD 6 remains below
+1 µs p95 for both representative EPUB and PDF surfaces.
+
+|Bridge
+|Warm no-op/request-response p95 at most 1 ms; visible-scene DTO transfer and
+Dart materialization p95 at most 4 ms and no more than one request and one
+response per operation.  No bridge call occurs per glyph or drag event.
+|===
+
+The existing renderer comparison and protocol are in
+~benchmarks/epub-page-turn/2026-08-17/README.md~.  RFD 6's measured 2026-09-02
+Linux lookup baselines are EPUB p95 231 ns with 1,546,240 retained bytes and PDF
+p95 121 ns with 988,160 retained bytes.  They prove the retained-geometry hot
+path only, not Flutter rendering.
+
+== Accessibility acceptance matrix
+
+[cols="1,2,4"]
+|===
+|Target |Assistive technology |Required evidence
+
+|Linux |Orca
+|Named landmarks and controls, logical reading/focus order, keyboard-only
+operation, visible focus, document text/selection announcements, and no
+color-only highlight state
+
+|macOS |VoiceOver
+|The Linux checks plus native rotor/navigation behavior, menu shortcuts, and
+full-keyboard access
+
+|Windows |Narrator
+|The Linux checks plus scan mode, standard shortcut behavior, and high-contrast
+mode
+
+|Android |TalkBack
+|Explore-by-touch order, selection/actions, 48 dp targets, system back,
+orientation/safe areas, and no lost focus after background/resume
+
+|iOS |VoiceOver
+|Explore-by-touch and rotor order, selection/actions, 44 pt targets, safe areas,
+orientation, and no lost focus after background/resume
+|===
+
+Every claimed target must additionally pass 200% text scaling without clipped
+controls or lost content, platform contrast/high-contrast settings, reduced
+motion, non-color selected/highlight indication, deterministic focus after
+dialogs/navigation, and all applicable mouse, keyboard, touch, and rotation
+paths.  Automated semantics tests supplement but do not replace one manual run
+with the named screen reader on real target hardware.
+
+== Phase 0 evidence and limitations
+
+The renderer-neutral page/geometry, logical annotation anchors, and bounded
+selection spikes are executable Rust/Iced evidence.  The extracted core and its
+bridge contract pass Linux tests.  Android core compatibility was checked with:
+
+----
+HOST_CC=clang HOST_AR=ar .agents/dev cargo ndk -t arm64-v8a check -p shosai-core
+----
+
+There is intentionally no Flutter application, generated bridge binding, or
+claimed platform package in Phase 0.  Phase 2 must replace upstream capability
+claims with local host builds and physical mobile evidence and must measure all
+unmeasured budgets above.

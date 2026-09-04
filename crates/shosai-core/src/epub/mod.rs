@@ -8,6 +8,7 @@
 
 mod font;
 mod math;
+pub mod pagination;
 mod parser;
 mod presentation;
 pub mod render;

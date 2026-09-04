@@ -11,6 +11,7 @@ use iced::widget::{
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::{mpsc, oneshot};
 
+use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
@@ -21,16 +22,23 @@ use shosai_core::library::{
     ManagedPathChange, ManagedStorageSummary, PreparedManagedImport,
 };
 use shosai_core::pdf::PdfDoc;
+use shosai_core::reader::{
+    BoundedCache, ReaderLocation, ReadingMode, nearby_chapters, prioritized_pages,
+};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::search::SearchMatch;
+use shosai_core::state_writer::{
+    StateSave as ReadingStateSave, StateWriterMessage as ReadingStateWriterMessage,
+    start_state_writer as start_reading_state_writer,
+};
 
 #[cfg(test)]
 use crate::epub::PageNode as EpubPageNode;
 use crate::epub::{
     BLOCKQUOTE_SPACING as EPUB_BLOCKQUOTE_SPACING, EPUB_TABLE_CELL_PADDING,
-    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget, MAX_EPUB_PAGES,
+    EPUB_TABLE_CELL_SPACING, EPUB_TABLE_ROW_SPACING, EpubPaginationBudget,
     PAGE_NUMBER_SIZE as EPUB_PAGE_NUMBER_SIZE, Page as EpubPage, content_node_text_len,
-    content_starts_with_heading, paginate_epub_chapter_with_budget,
+    content_starts_with_heading,
 };
 use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
@@ -87,17 +95,6 @@ impl<T> std::fmt::Display for SelectOption<T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.label)
     }
-}
-
-// ---------------------------------------------------------------------------
-// Open document wrapper
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub(crate) enum OpenDocument {
-    Pdf(Arc<PdfDoc>),
-    Epub(Arc<EpubDoc>),
-    Cbz(Arc<CbzDoc>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -566,13 +563,6 @@ impl operation::Operation<(usize, usize, f32, f32)> for ContinuousItemOperation 
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum ReadingMode {
-    #[default]
-    Paginated,
-    Continuous,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EpubLayoutKey {
     width: u32,
@@ -592,22 +582,6 @@ impl EpubLayoutKey {
     }
 }
 
-impl ReadingMode {
-    fn from_stored(value: Option<&str>) -> Self {
-        match value {
-            Some("continuous") => Self::Continuous,
-            _ => Self::Paginated,
-        }
-    }
-
-    fn stored(self) -> &'static str {
-        match self {
-            Self::Paginated => "paginated",
-            Self::Continuous => "continuous",
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct ReaderTab {
     id: u64,
@@ -623,7 +597,7 @@ struct ReaderTab {
     rendered_page_handle: Option<RasterImageHandle>,
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
-    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
+    page_cache: BoundedCache<PageCacheKey, RenderedPage>,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
     epub_images_desired: HashSet<String>,
@@ -676,22 +650,6 @@ pub struct InitializedState {
     reader_defaults: ReaderDefaults,
 }
 
-#[derive(Debug)]
-struct ReadingStateSave {
-    book_id: Option<i64>,
-    path: PathBuf,
-    reading: FileReadingState,
-}
-
-#[derive(Debug)]
-enum ReadingStateWriterMessage {
-    Save(ReadingStateSave),
-    Progress { book_id: i64, progress: f64 },
-    Language(LanguagePreference),
-    Preference(&'static str, String),
-    Flush(oneshot::Sender<()>),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PageCacheKey {
     page: usize,
@@ -727,7 +685,7 @@ pub struct State {
     rendered_page_handle: Option<RasterImageHandle>,
     rendered_facing_page: Option<(usize, RenderedPage)>,
     rendered_facing_page_handle: Option<RasterImageHandle>,
-    page_cache: VecDeque<(PageCacheKey, RenderedPage)>,
+    page_cache: BoundedCache<PageCacheKey, RenderedPage>,
     render_generation: u64,
     epub_image_handles: HashMap<String, EpubImageHandle>,
     epub_images_pending: HashSet<String>,
@@ -876,7 +834,7 @@ pub fn boot() -> (State, Task<Message>) {
         rendered_page_handle: None,
         rendered_facing_page: None,
         rendered_facing_page_handle: None,
-        page_cache: VecDeque::new(),
+        page_cache: BoundedCache::new(PAGE_CACHE_CAPACITY),
         render_generation: 0,
         epub_image_handles: HashMap::new(),
         epub_images_pending: HashSet::new(),
@@ -1690,30 +1648,15 @@ fn reader_defaults_changed_task(
 }
 
 fn load_document(path: &PathBuf) -> Result<OpenDocument, AppError> {
-    let ext = path
-        .extension()
-        .map(|extension| extension.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    match ext.as_str() {
-        "pdf" => PdfDoc::open(path)
-            .map(|document| OpenDocument::Pdf(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "PDF",
-                detail: error.to_string(),
-            }),
-        "epub" => EpubDoc::open(path)
-            .map(|document| OpenDocument::Epub(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "EPUB",
-                detail: format!("{error:#}"),
-            }),
-        "cbz" => CbzDoc::open(path)
-            .map(|document| OpenDocument::Cbz(Arc::new(document)))
-            .map_err(|error| AppError::Open {
-                format: "CBZ",
-                detail: error.to_string(),
-            }),
-        _ => Err(AppError::UnsupportedFormat(ext)),
+    match OpenDocument::open(&DeviceFileLocator::from_path(path)) {
+        Ok(document) => Ok(document),
+        Err(OpenDocumentError::UnsupportedFormat(extension)) => {
+            Err(AppError::UnsupportedFormat(extension))
+        }
+        Err(OpenDocumentError::Open { format, detail }) => Err(AppError::Open {
+            format: format.display_name(),
+            detail,
+        }),
     }
 }
 
@@ -1757,11 +1700,7 @@ fn install_document(
     state.search_text = None;
     state.search_loading = false;
 
-    state.total_pages = match &document {
-        OpenDocument::Pdf(document) => document.page_count(),
-        OpenDocument::Epub(document) => document.chapter_count(),
-        OpenDocument::Cbz(document) => document.page_count(),
-    };
+    state.total_pages = document.page_count();
     state.document = Some(document);
 
     let saved = state.reading_state.as_ref().and_then(|store| {
@@ -1769,13 +1708,9 @@ fn install_document(
             .and_then(|id| store.get_for_book(id))
             .or_else(|| store.get(&path))
     });
-    if let Some(saved) = saved {
-        state.current_page = saved.page.min(state.total_pages.saturating_sub(1));
-        state.epub_offset = saved.location_offset.unwrap_or(0);
-    } else {
-        state.current_page = 0;
-        state.epub_offset = 0;
-    }
+    let location = ReaderLocation::restored(saved.as_ref(), state.total_pages);
+    state.current_page = location.page;
+    state.epub_offset = location.offset.unwrap_or(0);
     state.zoom = ZoomMode::FitPage;
 
     state.page_input = format!("{}", state.current_page + 1);
@@ -2053,10 +1988,8 @@ pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
         return Task::none();
     }
 
-    let first = state.current_page.saturating_sub(1);
-    let last = state.current_page.saturating_add(1).min(chapters.len() - 1);
     let nearby = epub_image_paths(
-        chapters[first..=last]
+        chapters[nearby_chapters(state.current_page, chapters.len(), 1)]
             .iter()
             .flat_map(|chapter| chapter.nodes()),
     );
@@ -2108,13 +2041,15 @@ fn epub_uses_spread(state: &State) -> bool {
 }
 
 fn epub_page_size(state: &State) -> Size {
-    crate::epub::page_size(
-        available_reader_size(state),
+    let available = available_reader_size(state);
+    let page = crate::epub::page_size(
+        crate::epub::LayoutSize::new(available.width, available.height),
         epub_uses_spread(state),
         PAGE_GUTTER,
         state.font_size,
         state.line_spacing,
-    )
+    );
+    Size::new(page.width, page.height)
 }
 
 fn epub_layout_key(state: &State) -> EpubLayoutKey {
@@ -2133,13 +2068,17 @@ fn epub_layout_key_for_tab(state: &State, tab: &ReaderTab) -> EpubLayoutKey {
         && matches!(tab.document, OpenDocument::Epub(_))
         && available_size.width >= MIN_TWO_PAGE_WIDTH;
     let page_size = crate::epub::page_size(
-        available_size,
+        crate::epub::LayoutSize::new(available_size.width, available_size.height),
         uses_spread,
         PAGE_GUTTER,
         tab.font_size,
         tab.line_spacing,
     );
-    EpubLayoutKey::new(page_size, tab.font_size, tab.line_spacing)
+    EpubLayoutKey::new(
+        Size::new(page_size.width, page_size.height),
+        tab.font_size,
+        tab.line_spacing,
+    )
 }
 
 fn epub_spread_start(state: &State, page: usize) -> usize {
@@ -2195,7 +2134,7 @@ fn paginate_epub_task(
 ) -> Task<Message> {
     let font_size = f32::from_bits(layout_key.font_size);
     let line_spacing = f32::from_bits(layout_key.line_spacing);
-    let page_size = Size::new(
+    let page_size = crate::epub::LayoutSize::new(
         f32::from_bits(layout_key.width),
         f32::from_bits(layout_key.height),
     );
@@ -2205,12 +2144,17 @@ fn paginate_epub_task(
             let worker_document = Arc::clone(&document);
             let pages = tokio::task::spawn_blocking(move || {
                 if complete {
-                    paginate_epub_document(&worker_document, font_size, line_spacing, page_size)
+                    crate::epub::paginate_document(
+                        &worker_document,
+                        font_size,
+                        line_spacing,
+                        page_size,
+                    )
                 } else {
                     let mut budget = EpubPaginationBudget::for_document(
                         worker_document.presentation().chapters().len(),
                     );
-                    paginate_epub_document_chapter(
+                    crate::epub::paginate_document_chapter(
                         &worker_document,
                         current_chapter,
                         font_size,
@@ -2234,71 +2178,6 @@ fn paginate_epub_task(
             pages: Arc::new(pages),
         }
     })
-}
-
-fn paginate_epub_document(
-    document: &EpubDoc,
-    font_size: f32,
-    line_spacing: f32,
-    page_size: Size,
-) -> Vec<EpubPage> {
-    let mut pages = Vec::new();
-    let chapters = document.presentation().chapters();
-    let mut budget = EpubPaginationBudget::for_document(chapters.len());
-    for chapter_index in 0..chapters.len() {
-        if pages.len() >= MAX_EPUB_PAGES {
-            break;
-        }
-        pages.extend(paginate_epub_document_chapter(
-            document,
-            chapter_index,
-            font_size,
-            line_spacing,
-            page_size,
-            &mut budget,
-        ));
-    }
-    pages
-}
-
-fn paginate_epub_document_chapter(
-    document: &EpubDoc,
-    chapter_index: usize,
-    font_size: f32,
-    line_spacing: f32,
-    page_size: Size,
-    budget: &mut EpubPaginationBudget,
-) -> Vec<EpubPage> {
-    let Some(presentation) = document.presentation().chapter(chapter_index) else {
-        return Vec::new();
-    };
-    let nodes = presentation.nodes();
-    let source = document
-        .chapter(chapter_index)
-        .expect("presentation chapters match source chapters");
-    let title = source
-        .title
-        .as_deref()
-        .filter(|title| !content_starts_with_heading(nodes, title));
-    paginate_epub_chapter_with_budget(
-        nodes,
-        title,
-        font_size,
-        line_spacing,
-        page_size,
-        Some(document.fonts()),
-        budget,
-    )
-    .into_iter()
-    .enumerate()
-    .map(|(page_index, nodes)| EpubPage {
-        chapter: chapter_index,
-        title: (page_index == 0)
-            .then(|| title.map(str::to_string))
-            .flatten(),
-        nodes,
-    })
-    .collect()
 }
 
 fn continuous_scroll_id(tab_id: u64, activation: u64) -> iced::widget::Id {
@@ -2421,13 +2300,14 @@ fn reconcile_continuous_rasters(state: &mut State) -> Task<Message> {
     let Some(tab_id) = state.active_tab_id else {
         return Task::none();
     };
-    let mut desired = state.continuous_visible.iter().copied().collect::<Vec<_>>();
-    if state.current_page < state.total_pages && !desired.contains(&state.current_page) {
-        desired.push(state.current_page);
-    }
-    desired.sort_by_key(|page| (page.abs_diff(state.current_page), *page));
-    desired.truncate(CONTINUOUS_PAGE_CACHE_CAPACITY);
-    let desired = desired.into_iter().collect::<BTreeSet<_>>();
+    let desired = prioritized_pages(
+        state.continuous_visible.iter().copied(),
+        state.current_page,
+        state.continuous_pages.len(),
+        CONTINUOUS_PAGE_CACHE_CAPACITY,
+    )
+    .into_iter()
+    .collect::<BTreeSet<_>>();
 
     for (page, rendered) in state.continuous_pages.iter_mut().enumerate() {
         if !desired.contains(&page) {
@@ -2820,17 +2700,7 @@ fn is_page_cached(state: &State, key: &PageCacheKey) -> bool {
 }
 
 fn cache_rendered_page(state: &mut State, key: PageCacheKey, page: RenderedPage) {
-    if let Some(position) = state
-        .page_cache
-        .iter()
-        .position(|(cached_key, _)| cached_key == &key)
-    {
-        state.page_cache.remove(position);
-    }
-    state.page_cache.push_back((key, page));
-    while state.page_cache.len() > PAGE_CACHE_CAPACITY {
-        state.page_cache.pop_front();
-    }
+    state.page_cache.insert(key, page);
 }
 
 fn raster_image_handle(rendered: &RenderedPage) -> RasterImageHandle {
@@ -2977,95 +2847,14 @@ fn save_reading_state(state: &State) {
 fn save_preference(state: &State, key: &'static str, value: impl Into<String>) {
     if let Some(saves) = &state.reading_state_saves
         && saves
-            .send(ReadingStateWriterMessage::Preference(key, value.into()))
+            .send(ReadingStateWriterMessage::Preference(
+                key.to_owned(),
+                value.into(),
+            ))
             .is_err()
     {
         eprintln!("warning: state writer stopped unexpectedly");
     }
-}
-
-fn start_reading_state_writer(
-    store: ReadingStateStore,
-) -> mpsc::UnboundedSender<ReadingStateWriterMessage> {
-    let (sender, mut receiver) = mpsc::unbounded_channel::<ReadingStateWriterMessage>();
-    let library = Library::new(store.pool().clone(), store.managed_books_dir());
-    tokio::spawn(async move {
-        while let Some(first) = receiver.recv().await {
-            let mut pending = HashMap::new();
-            let mut progress = HashMap::new();
-            let mut language = None;
-            let mut preferences = HashMap::new();
-            let mut flushes = Vec::new();
-            match first {
-                ReadingStateWriterMessage::Save(save) => {
-                    pending.insert((save.book_id, save.path), save.reading);
-                }
-                ReadingStateWriterMessage::Progress {
-                    book_id,
-                    progress: value,
-                } => {
-                    progress.insert(book_id, value);
-                }
-                ReadingStateWriterMessage::Language(preference) => language = Some(preference),
-                ReadingStateWriterMessage::Preference(key, value) => {
-                    preferences.insert(key, value);
-                }
-                ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
-            }
-            while let Ok(message) = receiver.try_recv() {
-                match message {
-                    ReadingStateWriterMessage::Save(save) => {
-                        pending.insert((save.book_id, save.path), save.reading);
-                    }
-                    ReadingStateWriterMessage::Progress {
-                        book_id,
-                        progress: value,
-                    } => {
-                        progress.insert(book_id, value);
-                    }
-                    ReadingStateWriterMessage::Language(preference) => {
-                        language = Some(preference);
-                    }
-                    ReadingStateWriterMessage::Preference(key, value) => {
-                        preferences.insert(key, value);
-                    }
-                    ReadingStateWriterMessage::Flush(flush) => flushes.push(flush),
-                }
-            }
-
-            for ((book_id, path), reading) in pending {
-                let result = if let Some(book_id) = book_id {
-                    store.set_for_book_async(book_id, &path, &reading).await
-                } else {
-                    store.set_async(&path, &reading).await
-                };
-                if let Err(error) = result {
-                    eprintln!("warning: failed to save reading state: {error}");
-                }
-            }
-            for (book_id, progress) in progress {
-                if let Err(error) = library.update_progress(book_id, progress).await {
-                    eprintln!("warning: failed to save library progress: {error}");
-                }
-            }
-            if let Some(preference) = language
-                && let Err(error) = store
-                    .set_pref_async(LANGUAGE_PREFERENCE_KEY, preference.stored())
-                    .await
-            {
-                eprintln!("warning: failed to save language preference: {error}");
-            }
-            for (key, value) in preferences {
-                if let Err(error) = store.set_pref_async(key, &value).await {
-                    eprintln!("warning: failed to save preference {key}: {error}");
-                }
-            }
-            for flush in flushes {
-                let _ = flush.send(());
-            }
-        }
-    });
-    sender
 }
 
 fn flush_reading_state_before_close(state: &State, id: window::Id) -> Task<Message> {
@@ -6430,11 +6219,12 @@ mod tests {
         let Some(OpenDocument::Epub(document)) = &state.document else {
             panic!("expected EPUB document");
         };
-        let pages = paginate_epub_document(
+        let page_size = epub_page_size(state);
+        let pages = crate::epub::paginate_document(
             document,
             state.font_size,
             state.line_spacing,
-            epub_page_size(state),
+            crate::epub::LayoutSize::new(page_size.width, page_size.height),
         );
         let layout_key = epub_layout_key(state);
         let _ = update(
@@ -9955,7 +9745,7 @@ mod tests {
             height: 11,
             pixels: bytes::Bytes::from(vec![0; 7 * 11 * 4]),
         });
-        state.page_cache.push_back((
+        state.page_cache.insert(
             PageCacheKey {
                 page: 0,
                 scale_bits: 1.0_f32.to_bits(),
@@ -9966,7 +9756,7 @@ mod tests {
                 height: 17,
                 pixels: bytes::Bytes::from(vec![0; 13 * 17 * 4]),
             },
-        ));
+        );
         let rejected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../shosai-core/tests/fixtures/epub-conformance/resource-limits.epub");
 
@@ -9980,7 +9770,7 @@ mod tests {
         assert!(Arc::ptr_eq(current_document, &old_document));
         assert_eq!(state.rendered_page.as_ref().map(|page| page.width), Some(7));
         assert_eq!(state.page_cache.len(), 1);
-        assert_eq!(state.page_cache[0].1.width, 13);
+        assert_eq!(state.page_cache.iter().next().unwrap().1.width, 13);
         assert!(matches!(
             &state.open_error,
             Some(AppError::Open { format: "EPUB", detail })
@@ -10665,13 +10455,15 @@ mod tests {
         let saves = start_reading_state_writer(store.clone());
 
         saves
-            .send(ReadingStateWriterMessage::Language(
-                LanguagePreference::Japanese,
+            .send(ReadingStateWriterMessage::Preference(
+                LANGUAGE_PREFERENCE_KEY.to_owned(),
+                LanguagePreference::Japanese.stored().to_owned(),
             ))
             .unwrap();
         saves
-            .send(ReadingStateWriterMessage::Language(
-                LanguagePreference::English,
+            .send(ReadingStateWriterMessage::Preference(
+                LANGUAGE_PREFERENCE_KEY.to_owned(),
+                LanguagePreference::English.stored().to_owned(),
             ))
             .unwrap();
         let (flushed, wait_for_flush) = oneshot::channel();

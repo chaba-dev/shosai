@@ -2545,8 +2545,13 @@ mod tests {
             panic!("expected heading presentation");
         };
 
-        let pages =
-            crate::epub::paginate_epub_chapter(&nodes, None, 16.0, 1.6, Size::new(240.0, 180.0));
+        let pages = crate::epub::paginate_epub_chapter(
+            &nodes,
+            None,
+            16.0,
+            1.6,
+            crate::epub::LayoutSize::new(240.0, 180.0),
+        );
         let ContentNode::Heading {
             spans: paginated_spans,
             ..

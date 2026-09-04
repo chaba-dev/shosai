@@ -43,24 +43,28 @@ assuming native FFI works in a browser.
 
 * M0 — Freeze the boundary and migration slice
 :PROPERTIES:
-:STATUS: IN-PROGRESS
+:STATUS: DONE
 :END:
 
-- [ ] Approve RFD 4's single-frontend direction and record the initial supported
+- [X] Approve RFD 4's single-frontend direction and record the initial supported
   desktop and mobile target matrix.
 - [X] Use RFD 6 highlighting as the first cross-format Flutter vertical slice;
   treat its completed Iced Phase 0 as contract evidence, not production UI.
-- [ ] Inventory every responsibility in ~shosai-app~ and classify it as core,
+- [X] Inventory every responsibility in ~shosai-app~ and classify it as core,
   Flutter presentation, platform adapter, temporary Iced reference, or obsolete.
-- [ ] Choose the granularity of the Rust-laid-out EPUB scene and semantic model
+- [X] Choose the granularity of the Rust-laid-out EPUB scene and semantic model
   consumed by Flutter. Measure bridge volume, fidelity, selection,
   accessibility, relayout, and implementation duplication without moving
   document layout into Flutter.
-- [ ] Select a Dart/Rust bridge after proving Android, iOS, macOS, Windows, and
-  Linux build integration, owned buffers, cancellation, error mapping, panic
-  containment, and deterministic handle release.
-- [ ] Record startup, memory, binary-size, render, selection-drag, and bridge
+- [X] Select a Dart/Rust bridge from its upstream target contract plus local
+  Linux and Android-core evidence. Prove generated Android, iOS, macOS, Windows,
+  and Linux host integration in M2 alongside owned buffers, cancellation, error
+  mapping, panic containment, and deterministic handle release.
+- [X] Record startup, memory, binary-size, render, selection-drag, and bridge
   latency budgets plus the accessibility acceptance matrix.
+
+Decisions, evidence, budgets, and explicit non-claims are recorded in
+[[file:PHASE-0.adoc][the Phase 0 decision record]].
 
 *Exit*: the core/frontend ownership table, bridge, EPUB rendering decision,
 first target matrix, and highlighting slice are explicit enough to implement
@@ -68,25 +72,28 @@ without maintaining two production feature paths.
 
 * M1 — Extract the Rust application core
 :PROPERTIES:
-:STATUS: IN-PROGRESS
+:STATUS: DONE
 :END:
 
-- [ ] Move EPUB pagination and renderer-neutral geometry out of
+- [X] Move EPUB pagination and renderer-neutral geometry out of
   ~crates/shosai-app~, replacing ~iced::Size~ and widget types at the boundary.
-- [ ] Extract reader-session policy: open/close, restore location, preferences,
+- [X] Extract reader-session policy: open/close, restore location, preferences,
   relayout anchors, and document replacement.
-- [ ] Extract bounded rendered-page/resource caches, prefetch policy, and
+- [X] Extract bounded rendered-page/resource caches, prefetch policy, and
   coalesced reading-state persistence without exposing Iced handles or tasks.
-- [ ] Centralize format capabilities, import/open orchestration, and typed
+- [X] Centralize format capabilities, import/open orchestration, and typed
   progress while leaving file pickers and UI progress presentation outside core.
 - [X] Implement RFD 6's renderer-independent annotation domain, anchors,
   normalization, resolution states, and store before Flutter persistence work.
-- [ ] Accept injected application-data locations and device-local file locators;
+- [X] Accept injected application-data locations and device-local file locators;
   stop requiring canonical desktop paths as portable record identity.
-- [ ] Expose coarse async operations, owned DTOs, stable opaque handles, bounded
+- [X] Expose coarse async operations, owned DTOs, stable opaque handles, bounded
   byte buffers, typed errors, cancellation, and release through the bridge API.
-- [ ] Feature-gate or adapt native-only dependencies so unsupported targets fail
+- [X] Feature-gate or adapt native-only dependencies so unsupported targets fail
   at build/configuration boundaries rather than through runtime surprises.
+
+The extracted ownership map, invariants, tests, and target-check protocol are
+recorded in [[file:PHASE-1.adoc][the Phase 1 evidence record]].
 
 *Exit*: core tests exercise the application behavior without an Iced event loop;
 no bridge-facing type contains Iced, Flutter, borrowed Rust, or durable viewport
@@ -218,10 +225,6 @@ unblocked.
 
 * Open questions
 
-- Which bridge passes every native build and lifecycle gate with the smallest
-  generated API and maintenance surface?
-- What granularity of Rust-laid-out EPUB scene and semantic representation gives
-  Flutter efficient painting, selection, and accessibility?
 - Which Android/iOS platform ships first after physical-device evidence?
 - Which native dependencies require platform adapters or replacement?
 - Does web use local WASM/browser storage, a remote service, or remain deferred?
