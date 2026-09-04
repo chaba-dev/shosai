@@ -299,16 +299,8 @@ impl CbzDoc {
             .cached_dimensions(index)
             .map(Ok)
             .unwrap_or_else(|| self.inspect_dimensions(index, &bytes))?;
-        let scaled_width = (width as f64 * f64::from(scale)).floor();
-        let scaled_height = (height as f64 * f64::from(scale)).floor();
-        if scaled_width > f64::from(u32::MAX) || scaled_height > f64::from(u32::MAX) {
-            anyhow::bail!("scaled image dimensions overflow");
-        }
-        let new_width = scaled_width as u32;
-        let new_height = scaled_height as u32;
-        if new_width == 0 || new_height == 0 {
-            anyhow::bail!("scaled image dimensions must be positive");
-        }
+        let (new_width, new_height) = scaled_dimensions(width, height, scale)
+            .context("scaled image dimensions must be finite, positive, and in range")?;
         self.validate_dimensions(new_width, new_height)?;
         let mut reader = image::ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
@@ -322,7 +314,7 @@ impl CbzDoc {
             .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
-            img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
+            img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
         } else {
             img
         };
@@ -340,6 +332,18 @@ impl CbzDoc {
         Ok((width as f32, height as f32))
     }
 
+    /// Exact byte length of the final RGBA render buffer.
+    pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
+        let (width, height) = self.dimensions(index)?;
+        let (width, height) = scaled_dimensions(width, height, scale)
+            .context("scaled image dimensions must be finite, positive, and in range")?;
+        usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(usize::try_from(height).ok()?))
+            .and_then(|pixels| pixels.checked_mul(4))
+            .context("rendered image byte length overflow")
+    }
+
     /// Conservative temporary allocation charge for decoding and resizing a page.
     /// The final RGBA output is accounted separately by the caller.
     pub fn render_transient_byte_len(&self, index: usize, scale: f32) -> Option<usize> {
@@ -347,23 +351,14 @@ impl CbzDoc {
             return None;
         }
         let (width, height) = self.cached_dimensions(index)?;
-        let target_width = (f64::from(width) * f64::from(scale)).floor();
-        let target_height = (f64::from(height) * f64::from(scale)).floor();
-        if !target_width.is_finite()
-            || !target_height.is_finite()
-            || target_width < 1.0
-            || target_height < 1.0
-            || target_width > f64::from(u32::MAX)
-            || target_height > f64::from(u32::MAX)
-        {
-            return None;
-        }
+        let (target_width, target_height) = scaled_dimensions(width, height, scale)?;
         let decoded = usize::try_from(width)
             .ok()?
             .checked_mul(usize::try_from(height).ok()?)?
             .checked_mul(4)?;
-        let resized = (target_width as usize)
-            .checked_mul(target_height as usize)?
+        let resized = usize::try_from(target_width)
+            .ok()?
+            .checked_mul(usize::try_from(target_height).ok()?)?
             .checked_mul(4)?;
         decoded.checked_add(resized)
     }
@@ -398,6 +393,27 @@ impl CbzDoc {
         }
         Ok(bytes)
     }
+}
+
+fn scaled_dimensions(width: u32, height: u32, scale: f32) -> Option<(u32, u32)> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    if (scale - 1.0).abs() <= f32::EPSILON {
+        return Some((width, height));
+    }
+    let width = (f64::from(width) * f64::from(scale)).floor();
+    let height = (f64::from(height) * f64::from(scale)).floor();
+    if !width.is_finite()
+        || !height.is_finite()
+        || width < 1.0
+        || height < 1.0
+        || width > f64::from(u32::MAX)
+        || height > f64::from(u32::MAX)
+    {
+        return None;
+    }
+    Some((width as u32, height as u32))
 }
 
 fn read_cbz_snapshot(

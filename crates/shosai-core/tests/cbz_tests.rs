@@ -59,6 +59,14 @@ fn test_render_page_scaled() {
 }
 
 #[test]
+fn rendered_byte_preflight_matches_fractional_scale_output() {
+    let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
+    let page = doc.render_page(0, 1.007).unwrap();
+
+    assert_eq!(doc.rendered_byte_len(0, 1.007).unwrap(), page.pixels.len());
+}
+
+#[test]
 fn test_page_size() {
     let doc = CbzDoc::open(fixture_path("sample.cbz")).unwrap();
     assert_eq!(doc.cached_page_size(0), None);
