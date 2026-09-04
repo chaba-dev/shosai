@@ -2558,7 +2558,7 @@ fn epub_table_geometry_bounded_from_placements_cancellable(
                 if !table_cell_internal_checkpoint(cancellation, child_index) {
                     return None;
                 }
-                let child_height = epub_bounded_node_height(
+                let child_height = epub_bounded_node_height_cancellable(
                     fonts,
                     child,
                     font_size,
@@ -2566,7 +2566,8 @@ fn epub_table_geometry_bounded_from_placements_cancellable(
                     remaining_height,
                     chars_per_line,
                     lines_per_page,
-                );
+                    cancellation,
+                )?;
                 remaining_height = (remaining_height - child_height).max(1.0);
                 content_height += child_height;
             }
@@ -2574,6 +2575,115 @@ fn epub_table_geometry_bounded_from_placements_cancellable(
         },
         cancellation,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn epub_bounded_node_height_cancellable(
+    fonts: Option<&EpubFontBook>,
+    node: &ContentNode,
+    font_size: f32,
+    width: f32,
+    height: f32,
+    chars_per_line: usize,
+    lines_per_page: usize,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<f32> {
+    content_node_internal_checkpoints(node, cancellation)?;
+    Some(epub_bounded_node_height(
+        fonts,
+        node,
+        font_size,
+        width,
+        height,
+        chars_per_line,
+        lines_per_page,
+    ))
+}
+
+fn spans_internal_checkpoints(
+    spans: &[shosai_core::epub::render::TextSpan],
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<()> {
+    let mut characters = 0;
+    for span in spans {
+        for _ in span.text.chars() {
+            if !table_cell_internal_checkpoint(cancellation, characters) {
+                return None;
+            }
+            characters += 1;
+        }
+    }
+    Some(())
+}
+
+fn content_node_internal_checkpoints(
+    node: &ContentNode,
+    cancellation: Option<&EpubPaginationCancellation>,
+) -> Option<()> {
+    match node {
+        ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => {
+            spans_internal_checkpoints(spans, cancellation)
+        }
+        ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
+            for (index, child) in children.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                content_node_internal_checkpoints(child, cancellation)?;
+            }
+            Some(())
+        }
+        ContentNode::Table { row_groups, .. } => {
+            for (index, cell) in row_groups
+                .iter()
+                .flat_map(|group| &group.rows)
+                .flat_map(|row| &row.cells)
+                .enumerate()
+            {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                for child in &cell.children {
+                    content_node_internal_checkpoints(child, cancellation)?;
+                }
+            }
+            Some(())
+        }
+        ContentNode::UnorderedList(items) | ContentNode::OrderedList { items, .. } => {
+            for (index, item) in items.iter().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+                spans_internal_checkpoints(item, cancellation)?;
+            }
+            Some(())
+        }
+        ContentNode::Image { alt, caption, .. } => {
+            for (index, _) in alt.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            spans_internal_checkpoints(caption, cancellation)
+        }
+        ContentNode::Math { content, .. } => {
+            for (index, _) in content.fallback.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            Some(())
+        }
+        ContentNode::CodeBlock { code, .. } | ContentNode::InlineCode(code) => {
+            for (index, _) in code.chars().enumerate() {
+                if !table_cell_internal_checkpoint(cancellation, index) {
+                    return None;
+                }
+            }
+            Some(())
+        }
+        ContentNode::HorizontalRule => Some(()),
+    }
 }
 
 fn epub_node_list_spacing_cancellable(
@@ -2778,7 +2888,10 @@ fn spans_visual_characters_cancellable(
         if !table_cell_internal_checkpoint(cancellation, span_index) {
             return None;
         }
-        for character in span.text.chars() {
+        for (character_index, character) in span.text.chars().enumerate() {
+            if !table_cell_internal_checkpoint(cancellation, character_index) {
+                return None;
+            }
             if character == '\n' {
                 longest = longest.max(current);
                 current = 0;
@@ -6523,6 +6636,72 @@ mod tests {
         );
         assert_eq!(visits, EPUB_PAGINATION_LOOP_CHUNK * 2 + 1);
         assert!(visits < total_children * 2, "traversal did not stop early");
+    }
+
+    #[test]
+    fn table_cancellation_interrupts_each_oversized_nested_child() {
+        let oversized_paragraph = || {
+            let mut table = one_line_table(1);
+            let ContentNode::Table { row_groups, .. } = &mut table else {
+                unreachable!();
+            };
+            let ContentNode::Paragraph(spans, _) = &mut row_groups[0].rows[0].cells[0].children[0]
+            else {
+                unreachable!();
+            };
+            spans[0].text = "x".repeat(EPUB_PAGINATION_LOOP_CHUNK * 4);
+            row_groups[0].rows[0].cells[0].children.remove(0)
+        };
+        let paragraph = oversized_paragraph();
+        let mut nested_table = one_line_table(1);
+        let ContentNode::Table { row_groups, .. } = &mut nested_table else {
+            unreachable!();
+        };
+        row_groups[0].rows[0].cells[0].children = vec![oversized_paragraph()];
+        let children = [
+            paragraph.clone(),
+            ContentNode::Figure {
+                children: vec![paragraph.clone()],
+                style: Default::default(),
+            },
+            ContentNode::BlockQuote {
+                children: vec![paragraph],
+                style: Default::default(),
+            },
+            nested_table,
+        ];
+
+        for child in children {
+            let mut table = one_line_table(1);
+            let ContentNode::Table { row_groups, .. } = &mut table else {
+                unreachable!();
+            };
+            row_groups[0].rows[0].cells[0].children = vec![child];
+            TABLE_CELL_INTERNAL_VISITS.with(|visits| visits.set(0));
+            TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| limit.set(Some(16)));
+            let cancellation = EpubPaginationCancellation::default();
+            let mut budget =
+                EpubPaginationBudget::default().with_cancellation(cancellation.clone());
+
+            let pages = paginate_epub_chapter_with_budget(
+                &[table],
+                None,
+                16.0,
+                1.6,
+                Size::new(360.0, 600.0),
+                None,
+                &mut budget,
+            );
+            let visits = TABLE_CELL_INTERNAL_VISITS.with(std::cell::Cell::get);
+            TABLE_CANCEL_AFTER_INTERNAL_VISITS.with(|limit| limit.set(None));
+
+            assert!(cancellation.is_cancelled());
+            assert!(pages.is_empty(), "cancelled table page was published");
+            assert!(
+                visits < EPUB_PAGINATION_LOOP_CHUNK * 4,
+                "oversized child traversal did not stop early: {visits}"
+            );
+        }
     }
 
     #[test]
