@@ -2,7 +2,7 @@
 
 use super::EpubLimits;
 use super::limits::svg_dimensions;
-use super::render::{ContentNode, ImageKind, ImageSize};
+use super::render::{ContentNode, ImageKind, ImageSize, TextSpan};
 use super::resource::CanonicalEpubPath;
 use super::style::EpubStyles;
 use super::types::{Chapter, StoredEpubResource};
@@ -79,7 +79,7 @@ impl EpubPresentation {
                 limits,
             )?;
             total_nodes = total_nodes
-                .checked_add(content_node_count(&parsed.nodes))
+                .checked_add(presentation_unit_count(&parsed.nodes))
                 .ok_or_else(|| {
                     crate::application::ResourceLimitError(
                         "EPUB aggregate presentation node count overflowed".to_owned(),
@@ -111,30 +111,113 @@ impl EpubPresentation {
         self.chapters.get(index)
     }
 
-    pub(crate) fn retained_node_count(&self) -> usize {
+    pub(crate) fn retained_presentation_unit_count(&self) -> usize {
         self.chapters
             .iter()
-            .map(|chapter| content_node_count(&chapter.nodes))
+            .map(|chapter| presentation_unit_count(&chapter.nodes))
             .sum()
     }
 }
 
-fn content_node_count(nodes: &[ContentNode]) -> usize {
+/// Count heap-backed presentation structures using the same unit that gates
+/// aggregate admission and charges retained memory.
+fn presentation_unit_count(nodes: &[ContentNode]) -> usize {
     nodes.iter().fold(0_usize, |count, node| {
-        let children = match node {
-            ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
-                content_node_count(children)
+        let retained = match node {
+            ContentNode::Heading { spans, .. } | ContentNode::Paragraph(spans, _) => {
+                text_span_unit_count(spans)
             }
-            ContentNode::Table { row_groups, .. } => row_groups
+            ContentNode::BlockQuote { children, .. } | ContentNode::Figure { children, .. } => {
+                presentation_unit_count(children)
+            }
+            ContentNode::Table {
+                caption,
+                row_groups,
+                ..
+            } => row_groups
                 .iter()
-                .flat_map(|group| &group.rows)
-                .flat_map(|row| &row.cells)
-                .map(|cell| content_node_count(&cell.children))
-                .sum(),
+                .fold(text_span_unit_count(caption), |total, group| {
+                    group
+                        .rows
+                        .iter()
+                        .fold(total.saturating_add(1), |total, row| {
+                            row.cells
+                                .iter()
+                                .fold(total.saturating_add(1), |total, cell| {
+                                    total
+                                        .saturating_add(1)
+                                        .saturating_add(cell.headers.len())
+                                        .saturating_add(cell.block_starts.len())
+                                        .saturating_add(presentation_unit_count(&cell.children))
+                                })
+                        })
+                }),
+            ContentNode::Math { content, .. } => math_content_unit_count(content),
+            ContentNode::UnorderedList(items) => list_unit_count(items),
+            ContentNode::OrderedList { items, .. } => list_unit_count(items),
+            ContentNode::Image { caption, .. } => text_span_unit_count(caption),
             _ => 0,
         };
-        count.saturating_add(1).saturating_add(children)
+        count.saturating_add(1).saturating_add(retained)
     })
+}
+
+fn text_span_unit_count(spans: &[TextSpan]) -> usize {
+    spans.iter().fold(0, |total, span| {
+        total
+            .saturating_add(1)
+            .saturating_add(span.math.as_ref().map_or(0, math_content_unit_count))
+    })
+}
+
+fn list_unit_count(items: &[Vec<TextSpan>]) -> usize {
+    items.iter().fold(0, |total, item| {
+        total
+            .saturating_add(1)
+            .saturating_add(text_span_unit_count(item))
+    })
+}
+
+fn math_content_unit_count(content: &super::MathContent) -> usize {
+    content
+        .expression
+        .as_ref()
+        .map_or(0, math_expression_unit_count)
+}
+
+fn math_expression_unit_count(expression: &super::MathExpression) -> usize {
+    use super::MathExpression;
+
+    let children = match expression {
+        MathExpression::Row(children) | MathExpression::SquareRoot(children) => children
+            .iter()
+            .map(math_expression_unit_count)
+            .fold(0_usize, usize::saturating_add),
+        MathExpression::Fraction(left, right)
+        | MathExpression::Root(left, right)
+        | MathExpression::Subscript(left, right)
+        | MathExpression::Superscript(left, right) => {
+            math_expression_unit_count(left).saturating_add(math_expression_unit_count(right))
+        }
+        MathExpression::SubSuperscript {
+            base,
+            subscript,
+            superscript,
+        } => math_expression_unit_count(base)
+            .saturating_add(math_expression_unit_count(subscript))
+            .saturating_add(math_expression_unit_count(superscript)),
+        MathExpression::Fenced { content, .. } => content
+            .iter()
+            .map(math_expression_unit_count)
+            .fold(0_usize, usize::saturating_add),
+        MathExpression::Table(rows) => rows.iter().fold(0_usize, |total, row| {
+            row.iter()
+                .map(math_expression_unit_count)
+                .fold(total.saturating_add(1), usize::saturating_add)
+        }),
+        MathExpression::Token(_) => 0,
+    };
+    1_usize.saturating_add(children)
 }
 
 fn svg_intrinsic_size(bytes: &[u8]) -> Option<ImageSize> {

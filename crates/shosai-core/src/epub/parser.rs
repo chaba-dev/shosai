@@ -91,7 +91,7 @@ impl EpubDoc {
             .checked_add(self.fonts.retained_decoded_bytes())?
             .checked_add(
                 self.presentation
-                    .retained_node_count()
+                    .retained_presentation_unit_count()
                     .checked_mul(PRESENTATION_NODE_BYTES)?,
             )?
             .checked_add(CONTAINER_OVERHEAD_BYTES)
@@ -1199,6 +1199,62 @@ mod tests {
                 .downcast_ref::<crate::application::ResourceLimitError>()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn empty_table_cells_are_admitted_and_charged_as_presentation_units() {
+        const CELL_COUNT: usize = 20;
+        // One table, one row group, one row, and every retained empty cell.
+        const PRESENTATION_UNITS: usize = 3 + CELL_COUNT;
+
+        let cells = "<td></td>".repeat(CELL_COUNT);
+        let chapter = format!(
+            r#"<html xmlns="http://www.w3.org/1999/xhtml"><body><table><tbody><tr>{cells}</tr></tbody></table></body></html>"#
+        );
+        let bytes = archive_with_payloads(&[
+            ("mimetype", b"application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                br#"<container><rootfile full-path="book.opf"/></container>"#,
+            ),
+            (
+                "book.opf",
+                br#"<package><metadata><title>Cells</title></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>"#,
+            ),
+            ("chapter.xhtml", chapter.as_bytes()),
+        ]);
+        let rejected = EpubDoc::from_bytes_with_limits(
+            bytes.clone(),
+            EpubLimits {
+                max_total_presentation_nodes: PRESENTATION_UNITS - 1,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(
+            rejected
+                .to_string()
+                .contains("aggregate presentation node limit")
+        );
+
+        let document = EpubDoc::from_bytes_with_limits(
+            bytes.clone(),
+            EpubLimits {
+                max_total_presentation_nodes: PRESENTATION_UNITS,
+                ..EpubLimits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            document.presentation.retained_presentation_unit_count(),
+            PRESENTATION_UNITS
+        );
+        let admission = crate::application::OpenDocument::retained_admission_byte_len(
+            crate::library::BookFormat::Epub,
+            bytes.len(),
+        )
+        .unwrap();
+        assert!(document.retained_byte_len().unwrap() <= admission);
     }
 
     fn linked_chapter_epub() -> Vec<u8> {
