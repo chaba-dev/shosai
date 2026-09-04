@@ -3,8 +3,8 @@ use shosai_core::library::{
     BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, Library,
     MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
+use shosai_core::path_from_key;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
-use shosai_core::{application::DeviceFileLocator, application::OpenDocument, path_from_key};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -61,6 +61,8 @@ async fn test_import_duplicate_returns_existing() {
 async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
+
+    use shosai_core::application::{DeviceFileLocator, OpenDocument};
 
     let (lib, _, dir) = temp_library().await;
     let first = dir
