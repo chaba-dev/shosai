@@ -8,11 +8,16 @@ use thiserror::Error;
 
 use crate::cbz::CbzDoc;
 use crate::document::Document;
-use crate::epub::EpubDoc;
 use crate::epub::pagination::content_node_text_len;
+use crate::epub::{EpubDoc, EpubLimits};
 use crate::library::BookFormat;
 use crate::path_key::path_key;
 use crate::pdf::PdfDoc;
+
+const EPUB_RETAINED_SOURCE_COPIES: usize = 4;
+const EPUB_PRESENTATION_NODE_BYTES: usize = 256;
+const EPUB_CONTAINER_OVERHEAD_BYTES: usize = 64 * 1024 * 1024;
+const PDF_RETAINED_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
 
 /// A locator supplied by the current device.
 ///
@@ -130,7 +135,131 @@ pub enum OpenDocument {
     Cbz(Arc<CbzDoc>),
 }
 
+#[derive(Debug)]
+pub struct OpenDocumentPlan {
+    format: BookFormat,
+    file: std::fs::File,
+    encoded_byte_len: usize,
+    title_hint: Option<String>,
+}
+
+impl OpenDocumentPlan {
+    pub fn prepare(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
+        let format = locator.format()?;
+        let file = std::fs::File::open(locator.path()).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
+            _ => OpenDocumentError::Inaccessible(error.to_string()),
+        })?;
+        let max_input_bytes = OpenDocument::max_input_bytes(format);
+        let file_size = file
+            .metadata()
+            .map_err(|error| OpenDocumentError::Inaccessible(error.to_string()))?
+            .len();
+        if file_size > max_input_bytes {
+            return Err(OpenDocumentError::LimitExceeded {
+                format,
+                detail: format!("input is larger than {max_input_bytes} bytes"),
+            });
+        }
+        let encoded_byte_len =
+            usize::try_from(file_size).map_err(|_| OpenDocumentError::LimitExceeded {
+                format,
+                detail: "input size cannot be represented".to_owned(),
+            })?;
+        Ok(Self {
+            format,
+            file,
+            encoded_byte_len,
+            title_hint: locator
+                .path()
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned()),
+        })
+    }
+
+    pub fn format(&self) -> BookFormat {
+        self.format
+    }
+
+    pub fn retained_admission_byte_len(&self) -> Option<usize> {
+        OpenDocument::retained_admission_byte_len(self.format, self.encoded_byte_len)
+    }
+
+    pub(crate) fn read_bytes(
+        mut self,
+    ) -> Result<(BookFormat, Vec<u8>, Option<String>), OpenDocumentError> {
+        let max_input_bytes = OpenDocument::max_input_bytes(self.format);
+        let read_limit =
+            max_input_bytes
+                .checked_add(1)
+                .ok_or_else(|| OpenDocumentError::LimitExceeded {
+                    format: self.format,
+                    detail: "input byte limit cannot be represented".to_owned(),
+                })?;
+        let mut data = Vec::with_capacity(self.encoded_byte_len);
+        self.file
+            .by_ref()
+            .take(read_limit)
+            .read_to_end(&mut data)
+            .map_err(|error| classify_open_error(self.format, error.into()))?;
+        if data.len() as u64 > max_input_bytes {
+            return Err(OpenDocumentError::LimitExceeded {
+                format: self.format,
+                detail: format!("input is larger than {max_input_bytes} bytes"),
+            });
+        }
+        Ok((self.format, data, self.title_hint))
+    }
+
+    pub fn open(self) -> Result<OpenDocument, OpenDocumentError> {
+        let (format, data, title_hint) = self.read_bytes()?;
+        OpenDocument::from_bytes(format, data, title_hint)
+    }
+}
+
 impl OpenDocument {
+    /// Conservative charge that must be admitted before parsing this format.
+    #[doc(hidden)]
+    pub fn maximum_retained_byte_len(format: BookFormat) -> Option<usize> {
+        let encoded_byte_len = usize::try_from(Self::max_input_bytes(format)).ok()?;
+        Self::retained_admission_byte_len(format, encoded_byte_len)
+    }
+
+    /// Conservative retained charge for a stable encoded input length.
+    #[doc(hidden)]
+    pub fn retained_admission_byte_len(
+        format: BookFormat,
+        encoded_byte_len: usize,
+    ) -> Option<usize> {
+        let expansion = match format {
+            BookFormat::Epub => {
+                let limits = EpubLimits::default();
+                usize::try_from(limits.max_total_uncompressed_bytes)
+                    .ok()?
+                    .checked_mul(EPUB_RETAINED_SOURCE_COPIES)?
+                    .checked_add(limits.max_total_decoded_font_bytes)?
+                    .checked_add(
+                        limits
+                            .max_total_presentation_nodes
+                            .checked_mul(EPUB_PRESENTATION_NODE_BYTES)?,
+                    )?
+                    .checked_add(EPUB_CONTAINER_OVERHEAD_BYTES)?
+            }
+            BookFormat::Pdf => PDF_RETAINED_OVERHEAD_BYTES,
+            BookFormat::Cbz => {
+                let limits = crate::cbz::CbzLimits::default();
+                encoded_byte_len
+                    .checked_add(limits.max_entries.checked_mul(
+                        std::mem::size_of::<String>()
+                            + std::mem::size_of::<usize>()
+                            + std::mem::size_of::<Option<(u32, u32)>>(),
+                    )?)?
+                    .checked_add(4 * 1024)?
+            }
+        };
+        encoded_byte_len.checked_add(expansion)
+    }
+
     /// Conservative byte charge for memory retained by this parsed document.
     #[doc(hidden)]
     pub fn retained_byte_len(&self) -> Option<usize> {
@@ -142,50 +271,7 @@ impl OpenDocument {
     }
 
     pub fn open(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
-        let format = locator.format()?;
-        let mut file = std::fs::File::open(locator.path()).map_err(|error| match error.kind() {
-            std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
-            _ => OpenDocumentError::Inaccessible(error.to_string()),
-        })?;
-        let max_input_bytes = Self::max_input_bytes(format);
-        let file_size = file
-            .metadata()
-            .map_err(|error| OpenDocumentError::Inaccessible(error.to_string()))?
-            .len();
-        if file_size > max_input_bytes {
-            return Err(OpenDocumentError::LimitExceeded {
-                format,
-                detail: format!("input is larger than {max_input_bytes} bytes"),
-            });
-        }
-        let read_limit =
-            max_input_bytes
-                .checked_add(1)
-                .ok_or_else(|| OpenDocumentError::LimitExceeded {
-                    format,
-                    detail: "input byte limit cannot be represented".to_owned(),
-                })?;
-        let initial_capacity =
-            usize::try_from(file_size).map_err(|_| OpenDocumentError::LimitExceeded {
-                format,
-                detail: "input size cannot be represented".to_owned(),
-            })?;
-        let mut data = Vec::with_capacity(initial_capacity);
-        file.by_ref()
-            .take(read_limit)
-            .read_to_end(&mut data)
-            .map_err(|error| classify_open_error(format, error.into()))?;
-        if data.len() as u64 > max_input_bytes {
-            return Err(OpenDocumentError::LimitExceeded {
-                format,
-                detail: format!("input is larger than {max_input_bytes} bytes"),
-            });
-        }
-        let title_hint = locator
-            .path()
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned());
-        Self::from_bytes(format, data, title_hint)
+        OpenDocumentPlan::prepare(locator)?.open()
     }
 
     pub(crate) fn max_input_bytes(format: BookFormat) -> u64 {
