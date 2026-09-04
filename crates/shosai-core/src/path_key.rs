@@ -17,7 +17,7 @@ pub fn path_key(path: &Path) -> String {
     #[cfg(windows)]
     let (prefix, units) = {
         use std::os::windows::ffi::OsStrExt;
-        let units = path
+        let units: Vec<u8> = path
             .as_os_str()
             .encode_wide()
             .flat_map(|unit| unit.to_be_bytes())

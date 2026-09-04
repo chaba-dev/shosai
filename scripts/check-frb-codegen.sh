@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temporary="$(mktemp -d)"
+temporary="$(cd "$temporary" && pwd -P)"
 rust_root="$temporary/rust/crates/shosai-core"
 rust_output="$rust_root/src/frb_codegen_smoke_generated.rs"
 trap 'rm -rf "$temporary"' EXIT
