@@ -145,6 +145,18 @@ async fn test_update_note() {
 }
 
 #[tokio::test]
+async fn updating_a_removed_bookmark_reports_not_found() {
+    let (store, _dir) = temp_store().await;
+
+    let error = store
+        .update_note_async(404, Some("preserve me"))
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("not found"));
+}
+
+#[tokio::test]
 async fn test_update_title() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/test.pdf");

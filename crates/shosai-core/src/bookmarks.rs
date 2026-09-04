@@ -354,24 +354,30 @@ impl BookmarkStore {
     /// Update the note on a bookmark.
     pub async fn update_note_async(&self, bookmark_id: i64, note: Option<&str>) -> Result<()> {
         validate_optional_bytes(note, MAX_BOOKMARK_NOTE_BYTES, "bookmark note")?;
-        sqlx::query("UPDATE bookmarks SET note = ? WHERE id = ?")
+        let result = sqlx::query("UPDATE bookmarks SET note = ? WHERE id = ?")
             .bind(note)
             .bind(bookmark_id)
             .execute(&self.pool)
             .await
             .context("failed to update bookmark note")?;
+        if result.rows_affected() != 1 {
+            anyhow::bail!("bookmark {bookmark_id} not found");
+        }
         Ok(())
     }
 
     /// Update the title on a bookmark.
     pub async fn update_title_async(&self, bookmark_id: i64, title: Option<&str>) -> Result<()> {
         validate_optional_bytes(title, MAX_BOOKMARK_TITLE_BYTES, "bookmark title")?;
-        sqlx::query("UPDATE bookmarks SET title = ? WHERE id = ?")
+        let result = sqlx::query("UPDATE bookmarks SET title = ? WHERE id = ?")
             .bind(title)
             .bind(bookmark_id)
             .execute(&self.pool)
             .await
             .context("failed to update bookmark title")?;
+        if result.rows_affected() != 1 {
+            anyhow::bail!("bookmark {bookmark_id} not found");
+        }
         Ok(())
     }
 
