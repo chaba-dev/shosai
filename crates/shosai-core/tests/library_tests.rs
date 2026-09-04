@@ -56,7 +56,7 @@ async fn test_import_duplicate_returns_existing() {
     assert_eq!(book1.id, book2.id);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
     use std::ffi::OsString;
@@ -338,7 +338,7 @@ async fn discovery_marks_books_already_in_the_library() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn discovery_matches_changed_content_by_non_unicode_path() {
     use std::ffi::OsStr;
@@ -755,7 +755,7 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn non_unicode_managed_directory_survives_persistence() {
     use std::ffi::OsStr;

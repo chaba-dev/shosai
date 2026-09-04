@@ -7319,6 +7319,8 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
+        // This test isolates worker scheduling from transient-byte admission.
+        state.transient_decode_budget = CacheBudget::new(usize::MAX);
 
         let task = refresh_content(&mut state);
 
@@ -10255,6 +10257,9 @@ mod tests {
         .expect("fixture should be a valid CBZ");
         cbz.page_size(0).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        // Keep both synthetic generations admitted while their tasks remain
+        // unpolled so this test exercises supersession rather than budgeting.
+        state.transient_decode_budget = CacheBudget::new(usize::MAX);
 
         let first_task = refresh_content(&mut state);
         let first_generation = state.render_generation;

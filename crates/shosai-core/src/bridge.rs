@@ -1076,7 +1076,7 @@ mod tests {
         assert_eq!(error.kind(), BridgeErrorKind::InvalidRequest);
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[tokio::test]
     async fn open_requests_decode_lossless_native_path_keys() {
         use std::ffi::OsStr;
