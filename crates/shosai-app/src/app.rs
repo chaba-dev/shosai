@@ -2656,6 +2656,24 @@ fn schedule_cbz_dimension(
     )
 }
 
+fn pump_cbz_dimension_queue(state: &mut State) -> Task<Message> {
+    let Some(OpenDocument::Cbz(document)) = &state.document else {
+        return Task::none();
+    };
+    let document = Arc::clone(document);
+    let pages = if state.reading_mode == ReadingMode::Continuous {
+        prioritized_pages(
+            state.continuous_visible.iter().copied(),
+            state.current_page,
+            state.continuous_pages.len(),
+            CONTINUOUS_PAGE_CACHE_CAPACITY,
+        )
+    } else {
+        paginated_raster_pages(state)
+    };
+    schedule_cbz_dimension(state, document, pages)
+}
+
 pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
     let Some(OpenDocument::Epub(document)) = &state.document else {
         return Task::none();
@@ -8120,6 +8138,7 @@ mod tests {
         state.active_tab = Some(1);
         assert_eq!(refresh_content(&mut state).units(), 0);
         assert!(!state.cbz_dimension_jobs.keys().any(|job| job.tab_id == 2));
+        let generation = state.render_generation;
 
         let task = update(
             &mut state,
@@ -8132,6 +8151,7 @@ mod tests {
         );
 
         assert!(task.units() > 0);
+        assert_eq!(state.render_generation, generation);
         assert!(
             state
                 .cbz_dimension_jobs
@@ -8403,6 +8423,76 @@ mod tests {
 
         assert!(show_cached_paginated_spread(&mut state));
         assert_eq!(prefetch_next_paginated_spread(&mut state).units(), 1);
+    }
+
+    #[test]
+    fn failed_spread_prefetch_preserves_the_visible_spread() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        cbz.page_size(0).unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+        let scale = paginated_raster_scale(&state, &[0, 1]);
+        for page in [0, 1] {
+            let permit = reserve_raster_bytes(&mut state, 10 * 20 * 4).unwrap();
+            let rendered = attach_raster_permit(
+                RenderedPage {
+                    width: 10,
+                    height: 20,
+                    pixels: bytes::Bytes::from(vec![0; 10 * 20 * 4]),
+                },
+                permit,
+            )
+            .unwrap();
+            cache_rendered_page(
+                &mut state,
+                PageCacheKey {
+                    page,
+                    scale_bits: scale.to_bits(),
+                    highlights: Vec::new(),
+                },
+                rendered,
+            );
+        }
+        assert!(show_cached_paginated_spread(&mut state));
+        let first_id = state.rendered_page_handle.as_ref().unwrap().0.id();
+        let facing_id = state.rendered_facing_page_handle.as_ref().unwrap().0.id();
+        state.error = Some(AppError::Render("existing".to_owned()));
+
+        assert_eq!(prefetch_next_paginated_spread(&mut state).units(), 1);
+        let RasterJob::Paginated {
+            tab_id,
+            generation,
+            key,
+        } = state.raster_jobs.keys().next().unwrap().clone()
+        else {
+            panic!("expected a paginated prefetch");
+        };
+        assert_eq!(key.page, 2);
+
+        let _ = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id,
+                generation,
+                key: key.clone(),
+                result: Err("prefetch failed".to_owned()),
+            },
+        );
+
+        assert_eq!(
+            state.rendered_page_handle.as_ref().unwrap().0.id(),
+            first_id
+        );
+        assert_eq!(
+            state.rendered_facing_page_handle.as_ref().unwrap().0.id(),
+            facing_id
+        );
+        assert_eq!(state.error, Some(AppError::Render("existing".to_owned())));
     }
 
     #[test]

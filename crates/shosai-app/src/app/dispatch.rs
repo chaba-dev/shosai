@@ -2027,19 +2027,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if state.cbz_dimension_jobs.remove(&job).is_none() {
                 return Task::none();
             }
-            if state.active_tab_id == Some(tab_id) {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
                     Ok(()) => return refresh_content(state),
-                    Err(error) if generation == state.render_generation => {
+                    Err(error) => {
                         state.cbz_dimension_failures.insert(job);
                         state.error = Some(AppError::Render(error));
                         return pump_background_work(state);
                     }
-                    Err(_) => return refresh_content(state),
                 }
             } else {
                 return if matches!(state.document, Some(OpenDocument::Cbz(_))) {
-                    refresh_content(state)
+                    pump_cbz_dimension_queue(state)
                 } else {
                     pump_raster_queue(state)
                 };
@@ -2113,12 +2112,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(error) => {
                     drop(permit);
                     state.raster_failures.insert(job.failure());
-                    state.rendered_page = None;
-                    state.rendered_page_index = None;
-                    state.rendered_page_handle = None;
-                    state.rendered_facing_page = None;
-                    state.rendered_facing_page_handle = None;
-                    state.error = Some(AppError::Render(error));
+                    if paginated_raster_pages(state).contains(&key.page) {
+                        state.rendered_page = None;
+                        state.rendered_page_index = None;
+                        state.rendered_page_handle = None;
+                        state.rendered_facing_page = None;
+                        state.rendered_facing_page_handle = None;
+                        state.error = Some(AppError::Render(error));
+                    }
                 }
             }
             return pump_background_work(state);
