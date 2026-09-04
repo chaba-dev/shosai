@@ -808,12 +808,13 @@ impl Library {
             {
                 bail!("managed preparation cancelled");
             }
-            inspect_book(
+            inspect_book_cancellable(
                 &inspection_path,
                 &title_path,
                 format,
                 expected_hash.as_deref(),
                 None,
+                inspection_cancellation.as_ref(),
             )
             .and_then(|inspection| {
                 if inspection_cancellation
@@ -1934,13 +1935,31 @@ fn inspect_book(
     expected_hash: Option<&str>,
     initial_fingerprint: Option<FileFingerprint>,
 ) -> Result<BookInspection> {
+    inspect_book_cancellable(
+        path,
+        title_path,
+        format,
+        expected_hash,
+        initial_fingerprint,
+        None,
+    )
+}
+
+fn inspect_book_cancellable(
+    path: &Path,
+    title_path: &Path,
+    format: BookFormat,
+    expected_hash: Option<&str>,
+    initial_fingerprint: Option<FileFingerprint>,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<BookInspection> {
     inspect_book_with(
         path,
         title_path,
         expected_hash,
         initial_fingerprint,
         || extract_metadata_and_cover(path, title_path, format),
-        file_fingerprint,
+        |path| file_fingerprint_cancellable(path, cancellation),
     )
 }
 
@@ -2923,6 +2942,42 @@ mod tests {
         )
         .unwrap_err();
         assert!(during_error.to_string().contains("changed after review"));
+    }
+
+    #[test]
+    fn reviewed_inspection_fingerprint_passes_honor_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(&path, b"reviewed bytes").unwrap();
+        let expected_hash = file_fingerprint(&path).unwrap().hash;
+
+        let cancelled_before = ImportCancellation::default();
+        cancelled_before.cancel();
+        let before_error = inspect_book_with(
+            &path,
+            &path,
+            Some(&expected_hash),
+            None,
+            || panic!("cancelled first fingerprint must stop before extraction"),
+            |path| file_fingerprint_cancellable(path, Some(&cancelled_before)),
+        )
+        .unwrap_err();
+        assert!(before_error.to_string().contains("cancelled"));
+
+        let cancelled_during = ImportCancellation::default();
+        let during_error = inspect_book_with(
+            &path,
+            &path,
+            Some(&expected_hash),
+            None,
+            || {
+                cancelled_during.cancel();
+                Ok(("Book".into(), None, None))
+            },
+            |path| file_fingerprint_cancellable(path, Some(&cancelled_during)),
+        )
+        .unwrap_err();
+        assert!(during_error.to_string().contains("cancelled"));
     }
 
     #[test]
