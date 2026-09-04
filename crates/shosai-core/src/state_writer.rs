@@ -80,6 +80,7 @@ struct PreparedMessage {
 struct PendingSave {
     save: StateSave,
     normalized_path: String,
+    enqueue_sequence: u64,
 }
 
 #[derive(Debug, Default)]
@@ -91,7 +92,7 @@ struct Pending {
 }
 
 impl Pending {
-    fn insert(&mut self, prepared: PreparedMessage) {
+    fn insert(&mut self, prepared: PreparedMessage, enqueue_sequence: Option<u64>) {
         match prepared.message {
             StateWriterMessage::Save(save) => {
                 let Some(WriteKey::Save(key)) = prepared.key else {
@@ -104,6 +105,8 @@ impl Pending {
                         normalized_path: prepared
                             .normalized_path
                             .expect("prepared save must have a normalized path"),
+                        enqueue_sequence: enqueue_sequence
+                            .expect("prepared save must have an enqueue sequence"),
                     },
                 );
             }
@@ -157,6 +160,7 @@ struct WriterState {
     admitted: HashSet<WriteKey>,
     pending_bytes: HashMap<WriteKey, usize>,
     total_admitted_bytes: usize,
+    next_save_sequence: u64,
 }
 
 impl WriterState {
@@ -189,7 +193,15 @@ impl WriterState {
             self.admitted.insert(key.clone());
             self.pending_bytes.insert(key, prepared.byte_len);
         }
-        self.pending.insert(prepared);
+        let enqueue_sequence = matches!(prepared.message, StateWriterMessage::Save(_)).then(|| {
+            let sequence = self.next_save_sequence;
+            self.next_save_sequence = self
+                .next_save_sequence
+                .checked_add(1)
+                .expect("state save enqueue sequence exhausted");
+            sequence
+        });
+        self.pending.insert(prepared, enqueue_sequence);
         Ok(())
     }
 
@@ -530,7 +542,11 @@ async fn persist_batch(
 ) -> (Pending, Option<PersistError>) {
     let mut failed = Pending::default();
     let mut errors = Vec::new();
-    for (key, pending) in batch.saves.drain() {
+    let mut saves: Vec<_> = batch.saves.drain().collect();
+    saves.sort_by_key(|(_, pending)| pending.enqueue_sequence);
+    let mut failed_saves = Vec::new();
+    let mut successful_saves = Vec::new();
+    for (key, pending) in saves {
         let result = if let Some(book_id) = pending.save.book_id {
             match store
                 .set_for_book_current_path_async(book_id, &pending.save.reading)
@@ -550,7 +566,20 @@ async fn persist_batch(
                 .await
         };
         if let Err(error) = result {
-            errors.push(format!("reading state: {error:#}"));
+            failed_saves.push((key, pending, format!("reading state: {error:#}")));
+        } else {
+            successful_saves.push((pending.normalized_path.clone(), pending.enqueue_sequence));
+        }
+    }
+    for (key, pending, error) in failed_saves {
+        // A newer stable-identity save for the same path supersedes this
+        // failed path-key save; retaining it would let a retry restore stale
+        // state after promotion.
+        let superseded = successful_saves.iter().any(|(path, sequence)| {
+            path == &pending.normalized_path && *sequence > pending.enqueue_sequence
+        });
+        if !superseded {
+            errors.push(error);
             failed.saves.insert(key, pending);
         }
     }
@@ -1167,6 +1196,38 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row, (relocated_key, 9));
+    }
+
+    #[tokio::test]
+    async fn promoted_book_save_wins_over_older_path_save_in_the_same_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        let mut writer_state = WriterState::default();
+        for (book_id, page) in [(None, 3), (Some(book.id), 17)] {
+            writer_state
+                .insert(StateWriterMessage::Save(StateSave {
+                    book_id,
+                    path: source.clone(),
+                    reading: FileReadingState {
+                        page,
+                        location_offset: None,
+                        zoom: 1.0,
+                    },
+                }))
+                .unwrap();
+        }
+        let (batch, _) = writer_state.take_batch();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 17);
     }
 
     #[tokio::test]
