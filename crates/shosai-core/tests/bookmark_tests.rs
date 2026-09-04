@@ -502,6 +502,33 @@ async fn stable_book_toggle_claims_path_only_aliases() {
 }
 
 #[tokio::test]
+async fn stable_book_listing_claims_late_path_only_aliases() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let path = PathBuf::from("/book.epub");
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+
+    let alias = store
+        .add_async(&path, 4, None, Some("late alias"), "yellow")
+        .await
+        .unwrap();
+
+    let listed = store.list_for_book_async(book_id).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, alias.id);
+    assert_eq!(listed[0].book_id, Some(book_id));
+}
+
+#[tokio::test]
 async fn concurrent_stable_book_toggles_are_linearizable() {
     let dir = TempDir::new().unwrap();
     let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))

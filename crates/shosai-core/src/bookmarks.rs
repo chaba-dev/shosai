@@ -321,6 +321,23 @@ impl BookmarkStore {
 
     /// List bookmarks using a stable library book identity.
     pub async fn list_for_book_async(&self, book_id: i64) -> Result<Vec<Bookmark>> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current_path: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
+            .bind(book_id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .context("failed to resolve bookmark book")?
+            .with_context(|| format!("book {book_id} not found"))?;
+
+        sqlx::query(
+            "UPDATE bookmarks SET book_id = ?
+             WHERE book_id IS NULL AND file_path = ?",
+        )
+        .bind(book_id)
+        .bind(&current_path)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to reconcile bookmark aliases")?;
         let rows = sqlx::query(
             "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
              FROM bookmarks
@@ -330,12 +347,13 @@ impl BookmarkStore {
         )
         .bind(book_id)
         .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *transaction)
         .await
         .context("failed to list bookmarks for book")?;
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
             anyhow::bail!("bookmark count limit exceeded");
         }
+        transaction.commit().await?;
         Ok(rows.iter().filter_map(row_to_bookmark).collect())
     }
 
