@@ -386,7 +386,7 @@ fn read_archive_bytes_bounded(
         .by_name(name)
         .with_context(|| format!("entry not found in archive: {name}"))?;
     if file.size() > max_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB archive entry exceeds byte limit: {name} ({} > {max_bytes})",
             file.size()
         );
@@ -399,7 +399,7 @@ fn read_archive_bytes_bounded(
         .read_to_end(&mut buf)
         .with_context(|| format!("failed to read archive entry: {name}"))?;
     if buf.len() as u64 > max_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB archive entry exceeds byte limit while reading: {name} ({} > {max_bytes})",
             buf.len()
         );
@@ -409,7 +409,7 @@ fn read_archive_bytes_bounded(
 
 fn validate_input_size(bytes: u64, limits: &EpubLimits) -> Result<()> {
     if bytes > limits.max_input_bytes {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB input exceeds archive byte limit: {bytes} > {}",
             limits.max_input_bytes
         );
@@ -458,7 +458,7 @@ fn validate_archive_entries<R: Read + Seek>(
             anyhow::bail!("duplicate EPUB archive entry: {}", file.name());
         }
         if file.size() > limits.max_entry_bytes {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB archive entry exceeds byte limit: {} ({} > {})",
                 file.name(),
                 file.size(),
@@ -466,7 +466,7 @@ fn validate_archive_entries<R: Read + Seek>(
             );
         }
         if is_xml_archive_path(file.name()) && file.size() > limits.max_xml_bytes {
-            anyhow::bail!(
+            crate::resource_limit!(
                 "EPUB XML entry exceeds byte limit: {} ({} > {})",
                 file.name(),
                 file.size(),
@@ -507,13 +507,13 @@ fn validate_archive_entries<R: Read + Seek>(
                 .checked_add(read as u64)
                 .context("EPUB entry uncompressed byte count overflowed")?;
             if actual_size > limits.max_entry_bytes {
-                anyhow::bail!(
+                crate::resource_limit!(
                     "EPUB archive entry exceeds byte limit: {name} ({actual_size} > {})",
                     limits.max_entry_bytes
                 );
             }
             if is_xml_archive_path(&name) && actual_size > limits.max_xml_bytes {
-                anyhow::bail!(
+                crate::resource_limit!(
                     "EPUB XML entry exceeds byte limit: {name} ({actual_size} > {})",
                     limits.max_xml_bytes
                 );
@@ -522,7 +522,7 @@ fn validate_archive_entries<R: Read + Seek>(
                 .checked_add(read as u64)
                 .context("EPUB aggregate uncompressed byte count overflowed")?;
             if total_uncompressed > limits.max_total_uncompressed_bytes {
-                anyhow::bail!(
+                crate::resource_limit!(
                     "EPUB archive exceeds aggregate uncompressed byte limit: {total_uncompressed} > {}",
                     limits.max_total_uncompressed_bytes
                 );
@@ -531,7 +531,7 @@ fn validate_archive_entries<R: Read + Seek>(
                 && (compressed_size == 0
                     || actual_size > compressed_size.saturating_mul(limits.max_compression_ratio))
             {
-                anyhow::bail!(
+                crate::resource_limit!(
                     "EPUB archive entry exceeds compression ratio limit: {name} ({compressed_size} compressed, {actual_size} uncompressed, max {}:1)",
                     limits.max_compression_ratio
                 );
@@ -623,7 +623,7 @@ fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<us
 fn bounded_archive_entry_count(entries: u64, configured_max: usize) -> Result<usize> {
     let max_entries = configured_max.min(MAX_ARCHIVE_ENTRIES);
     if entries > max_entries as u64 {
-        anyhow::bail!("EPUB archive has too many entries: {entries}");
+        crate::resource_limit!("EPUB archive has too many entries: {entries}");
     }
     usize::try_from(entries).context("EPUB ZIP64 entry count is too large")
 }
@@ -779,7 +779,7 @@ fn parse_opf(
 
 fn validate_spine_size(spine_ids: &[String], limits: &EpubLimits) -> Result<()> {
     if spine_ids.len() > limits.max_spine_items {
-        anyhow::bail!(
+        crate::resource_limit!(
             "EPUB spine exceeds item limit ({} > {})",
             spine_ids.len(),
             limits.max_spine_items
@@ -1137,6 +1137,30 @@ mod tests {
         ]);
         let error = inspect_bytes(oversized_cover, EpubLimits::default()).unwrap_err();
         assert!(error.to_string().contains("could not inspect dimensions"));
+    }
+
+    #[test]
+    fn full_open_enforces_the_aggregate_presentation_node_limit() {
+        let bytes =
+            std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"))
+                .unwrap();
+        let limits = EpubLimits {
+            max_total_presentation_nodes: 0,
+            ..EpubLimits::default()
+        };
+
+        let error = EpubDoc::from_bytes_with_limits(bytes, limits).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("aggregate presentation node limit")
+        );
+        assert!(
+            error
+                .downcast_ref::<crate::application::ResourceLimitError>()
+                .is_some()
+        );
     }
 
     fn linked_chapter_epub() -> Vec<u8> {

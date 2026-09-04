@@ -1,9 +1,10 @@
 = RFD 4 Phase 1 extraction evidence
 
 Phase 1 preserves the Iced application as an executable reference while moving
-application policy and renderer-neutral state behind ~shosai-core~ APIs.  The
-old frontend may hold transient mirrors needed to paint a frame, but it no
-longer owns the extracted policies.
+reusable application policy and renderer-neutral state behind ~shosai-core~
+APIs.  The old frontend remains a compatibility reference: it owns the active
+mutable reader mirror and synchronizes it with core sessions at document and
+tab boundaries until that presentation path is replaced.
 
 == Extracted boundaries
 
@@ -22,26 +23,34 @@ widget modules create Iced paragraphs, widgets, and paint commands only.  No
 
 |Reader sessions
 |~reader::{ReaderSession,ReaderLocation,ReaderPreferences,ReadingMode,ZoomMode}~
-owns document admission into a logical session, saved-location restoration and
-clamping, default preferences, relayout offsets, and document replacement while
-preserving/clamping the logical anchor.  Closing releases the owned session;
-bridge document handles provide the explicit foreign-frontend release path.
+provides document admission into a logical session, saved-location restoration
+and clamping, default preferences, relayout offsets, and document replacement
+while preserving/clamping the logical anchor.  Closing releases the owned
+session; bridge document handles provide the explicit foreign-frontend release
+path.
 |Tabs, active-index selection, panel visibility, measured scroll offsets, image
-handles, and current viewport remain frontend presentation state.  The Iced
-reference consumes the core reading mode, zoom mode, and restore policy.
+handles, current viewport, and the Iced reference's active mutable reader state
+remain frontend-owned.  The reference creates core sessions when documents are
+installed and transfers session state at tab boundaries; making a core session
+the continuously mutated source of truth belongs to the frontend migration.
 
 |Caches and prefetch
-|~reader::BoundedCache~ provides deterministic fixed-entry eviction.
+|~reader::BoundedCache~ provides deterministic fixed-entry and shared weighted
+byte eviction; cloned cache entries share reservations until their final owner
+is dropped.
 ~prioritized_pages~ bounds visible raster work around the logical page and
 ~nearby_chapters~ bounds EPUB resource warming around the logical chapter.
-|Iced owns only renderer handles and pending-task IDs.  It applies the core
-policy, drops continuous rasters outside the shared capacity, retains EPUB
-resources only for nearby chapters, and invalidates handles on relayout or
-document replacement.
+|Iced owns renderer handles and admitted pending-task IDs.  It applies a shared
+128 MiB paginated cache budget across tabs, admits continuous retained and
+in-flight rasters against a 128 MiB budget, caps raster workers at two, drops
+inactive continuous rasters, decodes one bounded EPUB image at a time, and
+coalesces relayout/raster requests to the latest key.
 
 |Coalesced persistence
 |~state_writer~ owns the asynchronous queue and coalesces file/book reading
-positions, library progress, and key/value preference writes before SQLite.
+positions by stable book identity (or path for untracked files), library
+progress, and key/value preference writes before SQLite.  Its producer queue is
+bounded, failed writes remain pending for retry, and flush reports failures.
 |The frontend sends owned ~StateWriterMessage~ values; it does not own a writer
 loop or pass Iced commands/tasks into persistence.
 
@@ -49,7 +58,10 @@ loop or pass Iced commands/tasks into persistence.
 |~application::{format_capabilities,OpenDocument,OpenDocumentError}~ is the one
 document admission path.  ~library~ owns recursive discovery, fingerprints,
 duplicate classification, cancellation, ~ImportDiscoveryProgressSnapshot~,
-preparation, import/link execution, and typed reports/failures.
+preparation, import/link execution, and typed reports/failures. Supported input
+ceilings are shared by opening, pre-hash discovery, fingerprinting, and bounded
+managed-file staging. Discovery retains at most 10,000 candidate/failure results
+and reports truncation as an explicit partial failure.
 |Pickers, staged-review widgets, progress display, delayed-open notice, and
 generation IDs remain frontend concerns.  The Iced loader delegates format
 admission to core.
@@ -58,7 +70,8 @@ admission to core.
 |~reading_state::ApplicationDataPaths~ accepts a host-provided app-data
 directory and derives database/managed-book locations.  ~DeviceFileLocator~
 keeps a platform-local locator separate from stable book identity and logical
-annotation anchors.
+annotation anchors.  Non-Unicode native paths use a lossless encoded key rather
+than display-text conversion.
 |Desktop defaults remain a compatibility convenience.  Future Flutter hosts
 inject their support directory and resolve picker/provider capabilities locally;
 neither paths nor provider tokens become portable identity.
@@ -67,10 +80,18 @@ neither paths nor provider tokens become portable identity.
 |~bridge::Bridge~ exposes coarse asynchronous open/render operations, owned
 request/summary/buffer DTOs, opaque document and buffer handles, atomic
 cancellation, typed errors, panic containment, and explicit take/release.
-Buffers are capped at 160 MiB individually and 320 MiB in aggregate.
-|Generated Dart bindings and Flutter image/scene materialization belong to M2.
-No borrowed Rust value, frontend type, or durable viewport coordinate is in the
-contract.
+Buffers are admitted before rendering, capped at 160 MiB individually and 320
+MiB across retained and in-flight work, and transferred as generated Dart byte
+lists. Admission is process-global across bridge facades and also caps 64
+in-flight requests, 64 retained documents, 256 retained buffers, two open
+workers, two render workers, 3 GiB of conservatively derived retained-document
+memory, and 512 MiB of CBZ probe/decode work. Documents are parsed from one
+bounded file snapshot, so path replacement or growth cannot invalidate the
+admission decision. Cancellation and release form publication barriers.
+|A disposable ~flutter_rust_bridge~ smoke test generates Rust and Dart bindings
+from the public module.  Checking in bindings and Flutter image/scene
+materialization belong to M2. No borrowed Rust value, frontend type, or durable
+viewport coordinate is in the contract.
 
 |Target failures
 |The native SQLite/PDFium core emits an intentional ~wasm32~ compile error with
@@ -87,16 +108,23 @@ of both frontends.
 
 == Ownership invariants
 
-* Core has no Iced or Flutter dependency.  Public bridge DTOs own their strings,
-  locators, summaries, and byte buffers; handles are numeric opaque identities.
+* Core has no production UI-framework or bridge-runtime dependency.  The
+  code-generation smoke test supplies the bridge runtime only in its temporary
+  workspace and creates its own generated host. Public bridge DTOs own their
+  strings, locators, summaries, and byte buffers; handles are numeric opaque
+  identities.
 * Durable locations are a page/resource plus optional logical scalar offset.
   Viewport size, zoomed pixels, scroll position, widget IDs, and GPU handles are
   not persisted or exposed as document identity.
 * CPU/blocking document open, pagination, decode, and raster work executes off
   the frontend event loop.  Cancellation is checked before and after worker
-  operations; deterministic release reclaims registry ownership.
-* Cache admission is bounded before work is scheduled.  Stale generations may
-  finish but cannot replace the active document or scene.
+  operations; deterministic release reclaims registry ownership. EPUB, CBZ, and
+  PDF image/render peaks share a 320 MiB transient decode budget in the Iced
+  reference, while bridge render/probe peaks are admitted before worker launch.
+* Cache admission is bounded by bytes and count before work is scheduled.
+  Relayout and raster workers are globally capped; rapid changes retain only
+  the latest requested key. Stale generations cannot replace the active
+  document or scene.
 * File paths and provider IDs are device-local associations.  Portable book and
   annotation identity remain independent values.
 
@@ -109,18 +137,22 @@ The Phase 1 exit gate is checked from the repository root with:
 .agents/dev cargo clippy --workspace --all-targets -- -D warnings
 .agents/dev cargo test --workspace --no-fail-fast
 .agents/dev make test-scripts
+.agents/dev make check-frb
 .agents/dev make check-rfds
 HOST_CC=clang HOST_AR=ar .agents/dev cargo ndk -t arm64-v8a check -p shosai-core
 ----
 
-The workspace checks exercise the Iced reference and all core modules.  Core
-unit/integration tests directly exercise pagination, document admission,
-session restoration and replacement policy, cache/prefetch bounds, coalesced
-writes, injected data paths, import progress/cancellation, annotation behavior,
-bridge cancellation/error/release, and aggregate buffer limits without an Iced
-event loop.
+Core unit/integration tests directly exercise pagination, document admission,
+session restoration and replacement policy, weighted cache reservations,
+bounded/coalesced writes and failed flushes, injected data paths, lossless path
+keys, import progress/cancellation, annotation behavior, bridge
+cancellation/error/release barriers, and aggregate buffer limits without an
+Iced event loop. Iced-reference tests cover tab/session transfer, global worker
+admission, stale-request coalescing, continuous raster bytes, and incremental
+EPUB image decoding. The generator smoke test proves that the public bridge
+module is accepted as a generated Dart API.
 
-The extraction does not prove a generated Dart API, Flutter scene fidelity,
-native host packaging, physical-device lifecycle, or the Phase 0 performance
-and accessibility budgets.  Those are Phase 2 gates rather than hidden Phase 1
-claims.
+The extraction does not prove generated-binding compilation in a checked-in
+host, Flutter scene fidelity, native host packaging, physical-device lifecycle,
+or the Phase 0 performance and accessibility budgets. Those are Phase 2 gates
+rather than hidden Phase 1 claims.

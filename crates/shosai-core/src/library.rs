@@ -16,13 +16,15 @@ use sqlx::sqlite::{Sqlite, SqlitePool};
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::cbz::CbzDoc;
+use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
-use crate::epub::EpubDoc;
-use crate::pdf::PdfDoc;
+use crate::epub::{EpubDoc, EpubLimits};
+use crate::path_key::{canonical_path_key, path_from_key};
+use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
+const MAX_IMPORT_DISCOVERY_RESULTS: usize = 10_000;
 
 /// Supported book format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +81,14 @@ impl BookFormat {
             Self::Pdf => "PDF",
             Self::Epub => "EPUB",
             Self::Cbz => "CBZ",
+        }
+    }
+
+    pub(crate) fn max_input_bytes(self) -> u64 {
+        match self {
+            Self::Pdf => MAX_PDF_INPUT_BYTES,
+            Self::Epub => EpubLimits::default().max_input_bytes,
+            Self::Cbz => CbzLimits::default().max_archive_bytes,
         }
     }
 
@@ -338,12 +348,14 @@ impl Library {
 
         for row in rows {
             let book_id = row.get::<i64, _>("id");
-            let old_path = PathBuf::from(row.get::<String, _>("file_path"));
+            let old_path = path_from_key(&row.get::<String, _>("file_path"));
             let expected_hash = row.get::<Option<String>, _>("content_hash");
             let extension = old_path
                 .extension()
                 .map(|extension| extension.to_string_lossy().to_lowercase())
                 .unwrap_or_default();
+            let format = BookFormat::from_extension(&extension)
+                .with_context(|| format!("unsupported managed format: .{extension}"))?;
             let source = old_path.clone();
             let destination_dir = new_dir.clone();
             let relocation = tokio::task::spawn_blocking(move || -> Result<(PathBuf, bool)> {
@@ -357,7 +369,8 @@ impl Library {
                 let destination =
                     destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
                 let existed = destination.exists();
-                let staged = stage_managed_file(&source, &destination_dir)?;
+                let staged =
+                    stage_managed_file(&source, &destination_dir, format.max_input_bytes())?;
                 publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
                 Ok((canonical_path(&destination), !existed))
             })
@@ -385,10 +398,10 @@ impl Library {
         let database_result = async {
             let mut transaction = self.pool.begin().await?;
             for change in &changes {
-                let old_path = change.old_path.to_string_lossy();
-                let new_path = change.new_path.to_string_lossy();
+                let old_path = canonical_path_key(&change.old_path);
+                let new_path = canonical_path_key(&change.new_path);
                 sqlx::query("UPDATE books SET file_path = ? WHERE id = ?")
-                    .bind(new_path.as_ref())
+                    .bind(&new_path)
                     .bind(change.book_id)
                     .execute(&mut *transaction)
                     .await
@@ -396,8 +409,8 @@ impl Library {
                 reconcile_identity(
                     &mut transaction,
                     change.book_id,
-                    old_path.as_ref(),
-                    new_path.as_ref(),
+                    &old_path,
+                    &new_path,
                 )
                 .await?;
             }
@@ -407,7 +420,7 @@ impl Library {
                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
             )
             .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
-            .bind(new_dir.to_string_lossy().as_ref())
+            .bind(canonical_path_key(&new_dir))
             .execute(&mut *transaction)
             .await
             .context("failed to save managed library location")?;
@@ -456,7 +469,7 @@ impl Library {
     ) -> Result<Book> {
         // Normalize paths so lookups and progress updates stay consistent.
         let path = canonical_path(path);
-        let path_str = path.to_string_lossy().to_string();
+        let path_str = canonical_path_key(&path);
 
         let initial_fingerprint = if let Some(expected_hash) = expected_hash {
             let fingerprint_path = path.clone();
@@ -556,7 +569,7 @@ impl Library {
         expected_hash: Option<&str>,
     ) -> Result<PreparedManagedImport> {
         let source = canonical_path(source);
-        let source_str = source.to_string_lossy().to_string();
+        let source_str = canonical_path_key(&source);
         let ext = source
             .extension()
             .map(|value| value.to_string_lossy().to_lowercase())
@@ -565,10 +578,11 @@ impl Library {
             .with_context(|| format!("unsupported format: .{ext}"))?;
         let stage_source = source.clone();
         let stage_dir = self.managed_dir.clone();
-        let staged =
-            tokio::task::spawn_blocking(move || stage_managed_file(&stage_source, &stage_dir))
-                .await
-                .context("managed book staging task failed")??;
+        let staged = tokio::task::spawn_blocking(move || {
+            stage_managed_file(&stage_source, &stage_dir, format.max_input_bytes())
+        })
+        .await
+        .context("managed book staging task failed")??;
         let inspection_path = staged.path.clone();
         let title_path = source.clone();
         let expected_hash = expected_hash.map(str::to_owned);
@@ -618,7 +632,7 @@ impl Library {
         .await
         .context("managed book publication task failed")??;
         let destination = canonical_path(&destination);
-        let destination_str = destination.to_string_lossy().to_string();
+        let destination_str = canonical_path_key(&destination);
         let existing_hash = self.get_by_hash(&inspection.fingerprint.hash).await?;
 
         if let Some(existing) = &existing_hash
@@ -698,7 +712,7 @@ impl Library {
         if expected != &fingerprint.hash {
             bail!("selected file does not match this book");
         }
-        let replacement_str = replacement.to_string_lossy().to_string();
+        let replacement_str = canonical_path_key(&replacement);
         self.update_location(
             book.id,
             &book.file_path,
@@ -843,6 +857,7 @@ impl Library {
         let mut fingerprinted = Vec::new();
         let mut discovery = ImportDiscovery::default();
         let mut scanning = true;
+        let mut received_results = 0_usize;
 
         while scanning || !fingerprint_tasks.is_empty() {
             if cancellation.is_cancelled() {
@@ -864,14 +879,28 @@ impl Library {
 
             if fingerprint_tasks.is_empty() {
                 match scan_receiver.recv().await {
+                    Some(_item) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
+                        scan_receiver.close();
+                        scanning = false;
+                        discovery.failures.push(ImportFailure {
+                            path: PathBuf::new(),
+                            error: format!(
+                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
+                            ),
+                        });
+                    }
                     Some(ScannedImport::Candidate(candidate)) => {
+                        received_results += 1;
                         spawn_candidate_fingerprint(
                             &mut fingerprint_tasks,
                             candidate,
                             cancellation.clone(),
                         );
                     }
-                    Some(ScannedImport::Failure(failure)) => discovery.failures.push(failure),
+                    Some(ScannedImport::Failure(failure)) => {
+                        received_results += 1;
+                        discovery.failures.push(failure);
+                    }
                     None => scanning = false,
                 }
                 continue;
@@ -879,14 +908,28 @@ impl Library {
 
             tokio::select! {
                 item = scan_receiver.recv() => match item {
+                    Some(_) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
+                        scan_receiver.close();
+                        scanning = false;
+                        discovery.failures.push(ImportFailure {
+                            path: PathBuf::new(),
+                            error: format!(
+                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
+                            ),
+                        });
+                    }
                     Some(ScannedImport::Candidate(candidate)) => {
+                        received_results += 1;
                         spawn_candidate_fingerprint(
                             &mut fingerprint_tasks,
                             candidate,
                             cancellation.clone(),
                         );
                     }
-                    Some(ScannedImport::Failure(failure)) => discovery.failures.push(failure),
+                    Some(ScannedImport::Failure(failure)) => {
+                        received_results += 1;
+                        discovery.failures.push(failure);
+                    }
                     None => scanning = false,
                 },
                 result = fingerprint_tasks.join_next() => {
@@ -930,8 +973,8 @@ impl Library {
                     continue;
                 }
             };
-            let path_str = candidate.path.to_string_lossy();
-            let existing = match self.get_by_path(path_str.as_ref()).await {
+            let path_key = canonical_path_key(&candidate.path);
+            let existing = match self.get_by_path(&path_key).await {
                 Ok(Some(book)) => Ok(Some(book)),
                 Ok(None) => self.get_by_hash(&fingerprint.hash).await,
                 Err(error) => Err(error),
@@ -1243,7 +1286,7 @@ impl Library {
     pub async fn update_progress_by_path(&self, path: &Path, progress: f64) -> Result<()> {
         // Use canonical paths so the reader and library always converge on one row.
         let progress = progress.clamp(0.0, 1.0);
-        let key = canonical_path(path).to_string_lossy().to_string();
+        let key = canonical_path_key(path);
 
         sqlx::query(
             "UPDATE books SET progress = ?, last_read = datetime('now') WHERE file_path = ?",
@@ -1373,7 +1416,7 @@ impl Library {
         if remaining != 0 {
             return;
         }
-        let path = PathBuf::from(file_path);
+        let path = path_from_key(file_path);
         let Ok(managed_dir) = self.managed_dir.canonicalize() else {
             return;
         };
@@ -1603,6 +1646,18 @@ fn file_fingerprint_cancellable(
     let file =
         std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
     let file_size = file.metadata()?.len();
+    if let Some(format) = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(BookFormat::from_extension)
+        && file_size > format.max_input_bytes()
+    {
+        bail!(
+            "{} input is larger than {} bytes",
+            format,
+            format.max_input_bytes()
+        );
+    }
     fingerprint_reader(file, file_size, cancellation)
 }
 
@@ -1796,6 +1851,23 @@ fn scan_import_candidates(
             continue;
         };
         progress.found_file();
+        if metadata.len() > format.max_input_bytes() {
+            progress.completed_file();
+            if sender
+                .blocking_send(ScannedImport::Failure(ImportFailure {
+                    path,
+                    error: format!(
+                        "{} input is larger than {} bytes",
+                        format,
+                        format.max_input_bytes()
+                    ),
+                }))
+                .is_err()
+            {
+                break;
+            }
+            continue;
+        }
         if sender
             .blocking_send(ScannedImport::Candidate(PendingImportCandidate {
                 path,
@@ -1850,7 +1922,11 @@ fn unique_managed_path(parent: &Path, label: &str) -> PathBuf {
     ))
 }
 
-fn stage_managed_file(source: &Path, managed_dir: &Path) -> Result<ManagedStage> {
+fn stage_managed_file(
+    source: &Path,
+    managed_dir: &Path,
+    max_input_bytes: u64,
+) -> Result<ManagedStage> {
     use std::io::Write;
 
     std::fs::create_dir_all(managed_dir)
@@ -1858,14 +1934,25 @@ fn stage_managed_file(source: &Path, managed_dir: &Path) -> Result<ManagedStage>
     let path = unique_managed_path(managed_dir, "import");
     let mut input = std::fs::File::open(source)
         .with_context(|| format!("failed to read {}", source.display()))?;
+    if input.metadata()?.len() > max_input_bytes {
+        bail!("book exceeds its input byte limit");
+    }
     let mut output = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&path)
         .context("failed to create managed book staging file")?;
-    let result = std::io::copy(&mut input, &mut output)
-        .and_then(|_| output.flush())
-        .and_then(|_| output.sync_all());
+    let result = std::io::copy(
+        &mut std::io::Read::take(&mut input, max_input_bytes.saturating_add(1)),
+        &mut output,
+    )
+    .and_then(|copied| {
+        if copied > max_input_bytes {
+            Err(std::io::Error::other("book exceeds its input byte limit"))
+        } else {
+            output.flush().and_then(|_| output.sync_all())
+        }
+    });
     if let Err(error) = result {
         let _ = std::fs::remove_file(&path);
         return Err(error).context("failed to stage managed book");
@@ -1946,7 +2033,7 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
     for row in rows {
         let id: i64 = row.get("id");
         let file_path: String = row.get("file_path");
-        let path = PathBuf::from(&file_path);
+        let path = path_from_key(&file_path);
         if !path.is_file() {
             continue;
         }
@@ -2098,6 +2185,23 @@ mod tests {
     }
 
     #[test]
+    fn managed_staging_rejects_oversized_sparse_inputs_without_publishing_a_stage() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let managed_dir = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("oversized.pdf");
+        std::fs::File::create(&source)
+            .unwrap()
+            .set_len(MAX_PDF_INPUT_BYTES + 1)
+            .unwrap();
+
+        let error = stage_managed_file(&source, managed_dir.path(), MAX_PDF_INPUT_BYTES)
+            .expect_err("oversized managed input must be rejected");
+
+        assert!(error.to_string().contains("input byte limit"));
+        assert_eq!(std::fs::read_dir(managed_dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
     fn reviewed_inspection_reuses_preinspection_fingerprint_then_hashes_after_extraction() {
         use std::cell::RefCell;
 
@@ -2195,6 +2299,30 @@ mod tests {
         cancellation.cancel();
         drop(receiver);
         scanner.join().unwrap();
+    }
+
+    #[test]
+    fn scanner_rejects_oversized_inputs_before_fingerprinting() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("oversized.pdf");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_PDF_INPUT_BYTES + 1)
+            .unwrap();
+        let cancellation = ImportCancellation::default();
+        let progress = ImportDiscoveryProgress::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+
+        scan_import_candidates(vec![path.clone()], false, &cancellation, &progress, &sender);
+
+        let Some(ScannedImport::Failure(failure)) = receiver.blocking_recv() else {
+            panic!("oversized input should fail discovery");
+        };
+        assert_eq!(failure.path, canonical_path(&path));
+        assert!(failure.error.contains("input is larger"));
+        let snapshot = progress.snapshot();
+        assert_eq!(snapshot.hashed_files, 0);
+        assert_eq!(snapshot.completed_files, 1);
     }
 
     #[tokio::test]

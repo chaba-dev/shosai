@@ -118,7 +118,11 @@ in ~ReaderTab~ is not a second application domain implementation.
 
 == EPUB scene and semantics boundary
 
-Rust remains the only EPUB layout engine.  One bridge response carries a
+Rust remains the only EPUB layout engine.  The current renderer-neutral
+~Page~, ~PageNode~, ~LayoutSize~, presentation nodes, and retained selection
+geometry freeze the source model and ownership boundary.  They do not yet
+contain the complete shaped batches, resource handles, or semantic tree below.
+M2 must derive bridge DTOs from that source model so one response carries a
 bounded page or chapter scene at block and shaped-inline-batch granularity:
 
 * page identity, spine occurrence, logical Unicode-scalar ranges, and resolved
@@ -145,7 +149,7 @@ and measure payload volume before treating this decision as performant.
 
 == Bridge decision
 
-Use ~flutter_rust_bridge~ 2.13 for native Flutter host integration in Phase 2.
+Use ~flutter_rust_bridge~ 2.x for native Flutter host integration in Phase 2.
 Its documented target set covers Android, iOS, Linux, macOS, Windows, and web;
 the migration uses its async functions, opaque Rust types, generated Dart error
 mapping, and zero-copy buffer support.  The generator-neutral contract in
@@ -266,7 +270,8 @@ bridge contract pass Linux tests.  Android core compatibility was checked with:
 HOST_CC=clang HOST_AR=ar .agents/dev cargo ndk -t arm64-v8a check -p shosai-core
 ----
 
-There is intentionally no Flutter application, generated bridge binding, or
-claimed platform package in Phase 0.  Phase 2 must replace upstream capability
+There is intentionally no Flutter application or claimed platform package in
+Phase 0.  Phase 1 added a disposable code-generation smoke test, but no binding
+is checked in or linked into a host.  Phase 2 must replace upstream capability
 claims with local host builds and physical mobile evidence and must measure all
 unmeasured budgets above.

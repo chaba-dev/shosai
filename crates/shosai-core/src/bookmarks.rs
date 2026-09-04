@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 use sqlx::sqlite::SqlitePool;
 
+use crate::path_key::canonical_path_key;
+
 /// A single bookmark entry.
 #[derive(Debug, Clone)]
 pub struct Bookmark {
@@ -404,10 +406,7 @@ impl BookmarkStore {
 }
 
 fn canonical_key(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+    canonical_path_key(path)
 }
 
 fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Option<Bookmark> {

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Cursor;
 
 use iced::widget::{column, container, image, rich_text, row, scrollable, sensor, span, svg, text};
 use iced::{Element, Font, Length};
@@ -7,6 +8,7 @@ use shosai_core::epub::render::ContentNode;
 use shosai_core::epub::{
     EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextRequest, EpubTextRun,
 };
+use shosai_core::reader::CachePermit;
 
 use super::{
     BOOKMARKS_PANEL_WIDTH, DecodedEpubImage, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE,
@@ -21,6 +23,9 @@ use crate::epub::{
 };
 use crate::i18n::I18n;
 use crate::theme::ReaderPalette;
+
+const EPUB_IMAGE_MAX_DIMENSION: u32 = 8192;
+const EPUB_IMAGE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(super) fn continuous_epub_content_view<'a>(
     state: &'a State,
@@ -186,26 +191,86 @@ pub(super) fn epub_image_paths<'a>(
 
 pub(super) fn decode_epub_images(
     document: &EpubDoc,
-    paths: impl IntoIterator<Item = String>,
+    paths: impl IntoIterator<Item = (String, CachePermit)>,
 ) -> Vec<(String, Option<DecodedEpubImage>)> {
     paths
         .into_iter()
-        .map(|path| {
+        .map(|(path, permit)| {
             let image = document.resource(&path).and_then(|resource| {
                 if resource.media_type() == "image/svg+xml" {
-                    return Some(DecodedEpubImage::Svg(resource.bytes().to_vec()));
+                    return Some(DecodedEpubImage::Svg {
+                        data: resource.bytes().to_vec(),
+                        permit,
+                    });
                 }
-                let rgba = ::image::load_from_memory(resource.bytes()).ok()?.to_rgba8();
+                let rgba = decode_epub_raster(resource.bytes())?;
                 let (width, height) = rgba.dimensions();
                 Some(DecodedEpubImage::Raster {
                     width,
                     height,
                     pixels: rgba.into_raw(),
+                    permit,
                 })
             });
             (path, image)
         })
         .collect()
+}
+
+pub(super) fn epub_image_byte_len(document: &EpubDoc, path: &str) -> Option<usize> {
+    let resource = document.resource(path)?;
+    if resource.media_type() == "image/svg+xml" {
+        return Some(resource.bytes().len());
+    }
+    let (width, height) = ::image::ImageReader::new(Cursor::new(resource.bytes()))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if width > EPUB_IMAGE_MAX_DIMENSION || height > EPUB_IMAGE_MAX_DIMENSION {
+        return None;
+    }
+    usize::try_from(
+        u64::from(width)
+            .checked_mul(u64::from(height))?
+            .checked_mul(4)?,
+    )
+    .ok()
+}
+
+pub(super) fn epub_image_transient_byte_len(document: &EpubDoc, path: &str) -> Option<usize> {
+    let resource = document.resource(path)?;
+    if resource.media_type() == "image/svg+xml" {
+        Some(0)
+    } else {
+        usize::try_from(EPUB_IMAGE_MAX_BYTES).ok()
+    }
+}
+
+fn decode_epub_raster(data: &[u8]) -> Option<::image::RgbaImage> {
+    let dimensions = ::image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    let decoded_bytes = u64::from(dimensions.0)
+        .checked_mul(u64::from(dimensions.1))?
+        .checked_mul(4)?;
+    if dimensions.0 > EPUB_IMAGE_MAX_DIMENSION
+        || dimensions.1 > EPUB_IMAGE_MAX_DIMENSION
+        || decoded_bytes > EPUB_IMAGE_MAX_BYTES
+    {
+        return None;
+    }
+    let mut reader = ::image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = ::image::Limits::default();
+    limits.max_image_width = Some(EPUB_IMAGE_MAX_DIMENSION);
+    limits.max_image_height = Some(EPUB_IMAGE_MAX_DIMENSION);
+    limits.max_alloc = Some(EPUB_IMAGE_MAX_BYTES);
+    reader.limits(limits);
+    reader.decode().ok().map(|image| image.to_rgba8())
 }
 
 #[cfg(test)]
@@ -224,7 +289,12 @@ pub(super) fn cache_epub_image_handles<'a, F>(
             continue;
         };
         let handle = if data.starts_with(b"<svg") {
-            EpubImageHandle::Svg(svg::Handle::from_memory(data.to_vec()))
+            EpubImageHandle::Svg {
+                handle: svg::Handle::from_memory(data.to_vec()),
+                _permit: shosai_core::reader::CacheBudget::new(data.len())
+                    .try_reserve(data.len())
+                    .unwrap(),
+            }
         } else {
             let Ok(rgba) = ::image::load_from_memory(data).map(|decoded| decoded.to_rgba8()) else {
                 continue;
@@ -986,7 +1056,7 @@ fn render_epub_image<'a>(
                 .width(Length::Fixed(layout.width))
                 .height(Length::Fixed(layout.height))
                 .into(),
-            EpubImageHandle::Svg(handle) => svg(handle.clone())
+            EpubImageHandle::Svg { handle, .. } => svg(handle.clone())
                 .content_fit(iced::ContentFit::Fill)
                 .width(Length::Fixed(layout.width))
                 .height(Length::Fixed(layout.height))
@@ -1772,6 +1842,21 @@ mod tests {
     use iced::advanced::widget::{Id as WidgetId, Operation};
     use iced::{Rectangle, Size, Vector};
 
+    #[test]
+    fn epub_raster_dimensions_are_rejected_before_pixel_decode() {
+        let mut bmp = vec![0; 54];
+        bmp[0..2].copy_from_slice(b"BM");
+        bmp[2..6].copy_from_slice(&400_000_054u32.to_le_bytes());
+        bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+        bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+        bmp[18..22].copy_from_slice(&10_000u32.to_le_bytes());
+        bmp[22..26].copy_from_slice(&10_000u32.to_le_bytes());
+        bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+        bmp[28..30].copy_from_slice(&32u16.to_le_bytes());
+
+        assert!(decode_epub_raster(&bmp).is_none());
+    }
+
     #[derive(Default)]
     struct RecordedWidgetIds {
         containers: Vec<WidgetId>,
@@ -1961,7 +2046,7 @@ mod tests {
         });
         assert!(matches!(
             handles.get("figure.svg"),
-            Some(EpubImageHandle::Svg(_))
+            Some(EpubImageHandle::Svg { .. })
         ));
         let layout =
             crate::epub::epub_image_layout(&nodes[0], 16.0, 400.0, Some(300.0), Some(300.0), None)

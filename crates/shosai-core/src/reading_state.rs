@@ -15,6 +15,8 @@ use anyhow::{Context, Result};
 use sqlx::Row;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqliteSynchronous};
 
+use crate::path_key::canonical_path_key;
+
 /// Data directory used by normal/release launches.
 pub const RELEASE_APP_DIR: &str = "shosai";
 /// Isolated data directory used when `SHOSAI_DEV_BUILD=1`.
@@ -168,9 +170,8 @@ pub struct FileReadingState {
 
 /// SQLite-backed store for reading state (and future library data).
 ///
-/// The public API is synchronous — it bridges to async sqlx internally via
-/// the tokio runtime that iced provides. Async methods are also available
-/// for use in background tasks or future phases.
+/// The public API is synchronous and bridges to async sqlx internally via the
+/// current Tokio runtime. Async methods are also available for background tasks.
 #[derive(Debug, Clone)]
 pub struct ReadingStateStore {
     pool: SqlitePool,
@@ -498,12 +499,8 @@ fn prepare_development_data_directory(path: &Path) -> Result<()> {
         .with_context(|| format!("failed to write data marker {}", marker.display()))
 }
 
-/// Convert a file path to a canonical string key.
 fn canonical_key(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+    canonical_path_key(path)
 }
 
 /// Get the platform-specific data directory.
