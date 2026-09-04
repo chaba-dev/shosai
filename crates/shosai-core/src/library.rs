@@ -2807,11 +2807,22 @@ mod tests {
         std::fs::write(&path, b"original").unwrap();
         std::fs::write(&replacement, b"replacement").unwrap();
         let file = fingerprint_file_with_limit(&path, Some(1024), None).unwrap();
-        std::fs::rename(&replacement, &path).unwrap();
 
-        let error = verify_fingerprinted_path(&path, &file, "test").unwrap_err();
+        #[cfg(windows)]
+        {
+            let error = std::fs::remove_file(&path).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            drop(file);
+            std::fs::remove_file(&path).unwrap();
+            std::fs::rename(&replacement, &path).unwrap();
+        }
 
-        assert!(error.to_string().contains("changed during test"));
+        #[cfg(not(windows))]
+        {
+            std::fs::rename(&replacement, &path).unwrap();
+            let error = verify_fingerprinted_path(&path, &file, "test").unwrap_err();
+            assert!(error.to_string().contains("changed during test"));
+        }
     }
 
     #[cfg(unix)]
