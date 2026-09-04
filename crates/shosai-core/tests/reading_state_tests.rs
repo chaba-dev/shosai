@@ -371,6 +371,42 @@ async fn test_migrations_are_idempotent() {
 }
 
 #[tokio::test]
+async fn revision_migration_orders_legacy_rows_by_last_update() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shosai.db");
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true);
+    let pool = SqlitePool::connect_with(options).await.unwrap();
+    let v8_migrator = sqlx::migrate::Migrator {
+        migrations: Cow::Owned(MIGRATOR.migrations[..8].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    v8_migrator.run(&pool).await.unwrap();
+    sqlx::query(
+        "INSERT INTO reading_state (file_path, page, zoom, updated_at)
+         VALUES ('older-rowid', 1, 1.0, '2026-02-01 00:00:00'),
+                ('newer-rowid', 2, 1.0, '2026-01-01 00:00:00')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+    let revisions: Vec<(String, i64)> =
+        sqlx::query_as("SELECT file_path, revision FROM reading_state ORDER BY revision")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+
+    assert_eq!(
+        revisions,
+        vec![("newer-rowid".to_owned(), 1), ("older-rowid".to_owned(), 2),]
+    );
+}
+
+#[tokio::test]
 async fn legacy_fingerprints_can_be_backfilled_after_migration() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
