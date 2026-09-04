@@ -166,10 +166,11 @@ mod tests {
     use crate::document::Document;
 
     use super::{
-        BoundedPageTextError, PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
-        validate_pdf_preflight, validate_pdf_selection_endpoint_count,
+        BoundedPageTextError, PdfDoc, bundled_pdfium_path, read_pdf_file_with_limit,
+        validate_pdf_bitmap_size, validate_pdf_preflight, validate_pdf_selection_endpoint_count,
     };
     use std::cell::Cell;
+    use std::fs::File;
     use std::path::{Path, PathBuf};
 
     fn selectable_pdf(text: &str) -> Vec<u8> {
@@ -204,6 +205,22 @@ mod tests {
             .as_bytes(),
         );
         pdf
+    }
+
+    #[test]
+    fn bounded_file_read_uses_open_descriptor_after_path_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("document.pdf");
+        let replacement = directory.path().join("replacement.pdf");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::write(&replacement, vec![b'x'; 32]).unwrap();
+
+        let file = File::open(&path).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+
+        let data = read_pdf_file_with_limit(file, &path, 8).unwrap();
+        assert_eq!(data, b"original");
+        assert_eq!(std::fs::read(&path).unwrap(), vec![b'x'; 32]);
     }
 
     #[test]
@@ -355,17 +372,9 @@ impl PdfDoc {
 
     pub fn open_with_limit(path: impl AsRef<Path>, max_input_bytes: u64) -> Result<Self> {
         let path = path.as_ref();
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("failed to inspect {}", path.display()))?;
-        if metadata.len() > max_input_bytes {
-            crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
-        }
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let mut data = Vec::with_capacity(metadata.len().min(max_input_bytes) as usize);
-        file.take(max_input_bytes.saturating_add(1))
-            .read_to_end(&mut data)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let data = read_pdf_file_with_limit(file, path, max_input_bytes)?;
         Self::from_bytes_with_limit(data, max_input_bytes)
     }
 
@@ -438,6 +447,25 @@ impl PdfDoc {
             data,
         })
     }
+}
+
+fn read_pdf_file_with_limit(
+    file: std::fs::File,
+    path: &Path,
+    max_input_bytes: u64,
+) -> Result<Vec<u8>> {
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.len() > max_input_bytes {
+        crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
+    }
+    let capacity = usize::try_from(metadata.len().min(max_input_bytes)).unwrap_or(usize::MAX);
+    let mut data = Vec::with_capacity(capacity);
+    file.take(max_input_bytes.saturating_add(1))
+        .read_to_end(&mut data)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(data)
 }
 
 fn preflight_pdf(bindings: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<()> {
