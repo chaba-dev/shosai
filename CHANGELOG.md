@@ -44,6 +44,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Preserve actionable resource errors (#63)
 - *(epub)* Restore publisher rendering and book titles (#70)
 - *(app)* Fade completed library activity (#73)
+- *(core)* Harden document identity, persistence, and lifecycle (#80)
 
 ### 🚜 Refactor
 
