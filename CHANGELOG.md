@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-03
+## [0.1.0] - 2026-09-04
 
 ### 🚀 Features
 
@@ -47,6 +47,7 @@ All notable changes to this project will be documented in this file.
 ### 🚜 Refactor
 
 - *(epub)* Isolate view construction (#61)
+- *(core)* Extract platform-neutral reader foundations (#78)
 
 ### 📚 Documentation
 
