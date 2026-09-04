@@ -21,12 +21,17 @@ pub(super) fn record_book_import_report(state: &mut State, report: ImportReport)
     state.book_import_completed += 1;
     update_book_import_progress(state);
     for book in &report.books {
-        let path = shosai_core::path_from_key(&book.file_path);
-        if state.file_path.as_ref() == Some(&path) {
+        if state.file_path.as_deref().is_some_and(|path| {
+            opened_content_matches_book(path, state.document_content_hash.as_deref(), book)
+        }) {
             state.book_id = Some(book.id);
         }
         for tab in &mut state.tabs {
-            if tab.session.locator.path() == path {
+            if opened_content_matches_book(
+                tab.session.locator.path(),
+                tab.content_hash.as_deref(),
+                book,
+            ) {
                 tab.session.book_id = Some(book.id);
             }
         }
@@ -289,7 +294,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.document_open_notice_visible = false;
             state.document_open_preview = None;
             match result {
-                Ok(document) => return finish_open_document(state, path, book_id, document),
+                Ok((document, content_hash)) => {
+                    return finish_open_document_with_hash(
+                        state,
+                        path,
+                        book_id,
+                        document,
+                        Some(content_hash),
+                    );
+                }
                 Err(error) => {
                     state.pending_document_permits.remove(&generation);
                     let performance_task = perf::fail(state, &error.diagnostic());
@@ -1782,11 +1795,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 layout_key,
             };
-            if !state.epub_jobs.contains_key(&job) {
+            let Some(cancelled) = state
+                .epub_jobs
+                .get(&job)
+                .map(EpubPaginationCancellation::is_cancelled)
+            else {
                 return Task::none();
-            }
+            };
             if complete {
                 state.epub_jobs.remove(&job);
+            }
+            if cancelled {
+                if complete
+                    && state.epub_jobs.is_empty()
+                    && matches!(state.document, Some(OpenDocument::Epub(_)))
+                    && state.epub_layout_pending.is_none()
+                    && state.epub_layout_requested.is_some()
+                {
+                    return refresh_content(state);
+                }
+                return Task::none();
             }
             let active = state.active_tab_id == Some(tab_id);
             let accepts_active_layout = active

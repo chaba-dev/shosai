@@ -27,7 +27,7 @@ pub enum Message {
         generation: u64,
         path: PathBuf,
         book_id: Option<i64>,
-        result: Result<super::OpenDocument, super::AppError>,
+        result: Result<(super::OpenDocument, String), super::AppError>,
     },
     ShowDocumentOpenNotice(u64),
 

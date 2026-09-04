@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 use shosai_core::application::{
     DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan,
 };
-use shosai_core::bookmarks::{Bookmark, BookmarkStore};
+use shosai_core::bookmarks::{Bookmark, BookmarkStore, MAX_BOOKMARK_NOTE_BYTES};
 use shosai_core::cbz::CbzDoc;
 use shosai_core::document::{Document, RenderedPage};
 use shosai_core::epub::EpubDoc;
@@ -388,6 +388,8 @@ const RASTER_RENDER_WORKERS: usize = 2;
 const CBZ_DIMENSION_WORKERS: usize = 1;
 const RETAINED_DOCUMENT_COUNT_CAPACITY: usize = 16;
 const RETAINED_DOCUMENT_BYTE_CAPACITY: usize = 3 * 1024 * 1024 * 1024;
+const MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB: usize = 64;
+const MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB: usize = 256 * 1024;
 const DOCUMENT_OPEN_WORKERS: usize = 2;
 const SEARCH_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
@@ -623,6 +625,7 @@ impl EpubLayoutKey {
 struct ReaderTab {
     id: u64,
     session: ReaderSession,
+    content_hash: Option<String>,
     display_title: String,
     total_pages: usize,
     rendered_page: Option<RenderedPage>,
@@ -699,6 +702,18 @@ impl BookmarkMutation {
             | Self::UpdateNote { generation, .. }
             | Self::Delete { generation, .. } => *generation,
         }
+    }
+
+    fn retained_byte_len(&self) -> usize {
+        let (file_path, note) = match self {
+            Self::Toggle { file_path, .. } | Self::Delete { file_path, .. } => (file_path, None),
+            Self::UpdateNote {
+                file_path, note, ..
+            } => (file_path, note.as_deref()),
+        };
+        std::mem::size_of::<Self>()
+            .saturating_add(file_path.to_string_lossy().len())
+            .saturating_add(note.map_or(0, str::len))
     }
 }
 
@@ -863,6 +878,7 @@ pub struct State {
 
     // -- Reader state --
     book_id: Option<i64>,
+    document_content_hash: Option<String>,
     display_title: Option<String>,
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
@@ -1033,6 +1049,7 @@ pub fn boot() -> (State, Task<Message>) {
         i18n: I18n::new(LanguagePreference::System),
 
         book_id: None,
+        document_content_hash: None,
         display_title: None,
         file_path: None,
         document: None,
@@ -1404,6 +1421,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
                 pdf_zoom: state.zoom,
             },
         },
+        content_hash: state.document_content_hash.clone(),
         display_title: state
             .display_title
             .clone()
@@ -1457,6 +1475,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     cancel_active_search(state);
     state.active_tab_id = Some(tab.id);
     state.book_id = tab.session.book_id;
+    state.document_content_hash = tab.content_hash;
     state.display_title = Some(tab.display_title);
     state.file_path = Some(tab.session.locator.path().to_path_buf());
     state.document = Some(tab.session.document);
@@ -1600,14 +1619,11 @@ fn select_tab(state: &mut State, index: usize) -> Task<Message> {
 }
 
 fn cancel_epub_jobs_for_tab(state: &mut State, tab_id: u64) {
-    state.epub_jobs.retain(|job, cancellation| {
+    for (job, cancellation) in &state.epub_jobs {
         if job.tab_id == tab_id {
             cancellation.cancel();
-            false
-        } else {
-            true
         }
-    });
+    }
 }
 
 fn close_tab(state: &mut State, index: usize) -> Task<Message> {
@@ -1660,11 +1676,29 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
     select_tab(state, next)
 }
 
+fn opened_content_matches_book(path: &Path, content_hash: Option<&str>, book: &Book) -> bool {
+    content_hash.is_some()
+        && content_hash == book.content_hash.as_deref()
+        && (path == path_from_key(&book.file_path)
+            || book
+                .original_path
+                .as_deref()
+                .is_some_and(|original| path == path_from_key(original)))
+}
+
 fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task<Message> {
+    let target_book = book_id.and_then(|id| state.library_books.iter().find(|book| book.id == id));
     if let Some(index) = state.tabs.iter().position(|tab| {
-        book_id.is_some() && tab.session.book_id == book_id || tab.session.locator.path() == path
-    }) && state.tabs[index].session.locator.path() == path
-    {
+        tab.session.book_id == book_id && book_id.is_some()
+            || target_book.is_some_and(|book| {
+                tab.session.book_id.is_none()
+                    && opened_content_matches_book(
+                        tab.session.locator.path(),
+                        tab.content_hash.as_deref(),
+                        book,
+                    )
+            })
+    }) {
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
         state.document_open_notice_visible = false;
@@ -1774,14 +1808,17 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                         detail: format!("{error:#}"),
                     });
             }
-            tokio::task::spawn_blocking(move || plan.open().map_err(app_document_open_error))
-                .await
-                .unwrap_or_else(|error| {
-                    Err(AppError::Open {
-                        format: "document",
-                        detail: format!("document loader stopped unexpectedly: {error}"),
-                    })
+            tokio::task::spawn_blocking(move || {
+                plan.open_with_content_hash()
+                    .map_err(app_document_open_error)
+            })
+            .await
+            .unwrap_or_else(|error| {
+                Err(AppError::Open {
+                    format: "document",
+                    detail: format!("document loader stopped unexpectedly: {error}"),
                 })
+            })
         },
         move |result| Message::DocumentOpened {
             generation,
@@ -1797,11 +1834,22 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     Task::batch([open, notice])
 }
 
+#[cfg(test)]
 fn finish_open_document(
     state: &mut State,
     path: PathBuf,
     book_id: Option<i64>,
     document: OpenDocument,
+) -> Task<Message> {
+    finish_open_document_with_hash(state, path, book_id, document, None)
+}
+
+fn finish_open_document_with_hash(
+    state: &mut State,
+    path: PathBuf,
+    book_id: Option<i64>,
+    document: OpenDocument,
+    content_hash: Option<String>,
 ) -> Task<Message> {
     let Some(document_permit) = state
         .pending_document_permits
@@ -1832,6 +1880,7 @@ fn finish_open_document(
             path,
             book_id,
             document,
+            content_hash,
             RetainedDocumentPermit {
                 _count: count,
                 _bytes: bytes,
@@ -1839,7 +1888,14 @@ fn finish_open_document(
             },
         );
     };
-    finish_open_document_with_permit(state, path, book_id, document, document_permit)
+    finish_open_document_with_permit(
+        state,
+        path,
+        book_id,
+        document,
+        content_hash,
+        document_permit,
+    )
 }
 
 fn finish_open_document_with_permit(
@@ -1847,6 +1903,7 @@ fn finish_open_document_with_permit(
     path: PathBuf,
     book_id: Option<i64>,
     document: OpenDocument,
+    content_hash: Option<String>,
     mut document_permit: RetainedDocumentPermit,
 ) -> Task<Message> {
     let Some(retained_bytes) = document.retained_byte_len() else {
@@ -1895,6 +1952,7 @@ fn finish_open_document_with_permit(
         );
         save_active_tab(state);
         state.tabs[index].session.book_id = book_id;
+        state.tabs[index].content_hash = content_hash.clone();
         state.tabs[index]
             .session
             .replace_document(DeviceFileLocator::from_path(&path), document.clone());
@@ -1907,6 +1965,7 @@ fn finish_open_document_with_permit(
         state.open_error = None;
         state.missing_book_id = None;
         install_document(state, path, book_id, document);
+        state.document_content_hash = content_hash;
         state.document_permit = Some(document_permit);
         state.zoom = retained_preferences.pdf_zoom;
         state.font_size = retained_preferences.epub_font_size;
@@ -1934,6 +1993,7 @@ fn finish_open_document_with_permit(
     state.open_error = None;
     state.missing_book_id = None;
     install_document(state, path, book_id, document);
+    state.document_content_hash = content_hash;
     state.document_permit = Some(document_permit);
     apply_reader_defaults(state);
     let task = refresh_content(state);
@@ -2096,6 +2156,7 @@ fn install_document(
         cancel_epub_jobs_for_tab(state, tab_id);
     }
     cancel_active_search(state);
+    state.document_content_hash = None;
     state.display_title = book_title(book_id, &document, Some(&path), &state.library_books);
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
@@ -2836,7 +2897,7 @@ fn paginate_epub_task(
         move |state| async move {
             let (document, document_permit, complete, cancellation) = state?;
             if cancellation.is_cancelled() {
-                return None;
+                return Some(((true, Vec::new()), None));
             }
             let worker_document = Arc::clone(&document);
             let worker_permit = document_permit.clone();
@@ -2869,7 +2930,7 @@ fn paginate_epub_task(
             .await
             .unwrap_or_default();
             if cancellation.is_cancelled() {
-                return None;
+                return Some(((true, Vec::new()), None));
             }
             let next = (!complete).then_some((document, document_permit, true, cancellation));
             Some(((complete, pages), next))
@@ -3298,17 +3359,9 @@ fn raster_byte_len(state: &State, page: usize, scale: f32) -> Result<usize, Stri
         OpenDocument::Pdf(document) => document
             .rendered_byte_len(page, scale)
             .map_err(|error| error.to_string()),
-        OpenDocument::Cbz(document) => {
-            let (width, height) = document
-                .page_size(page)
-                .map_err(|error| error.to_string())?;
-            let width = (f64::from(width) * f64::from(scale)).floor() as usize;
-            let height = (f64::from(height) * f64::from(scale)).floor() as usize;
-            width
-                .checked_mul(height)
-                .and_then(|pixels| pixels.checked_mul(4))
-                .ok_or_else(|| "rendered page byte charge overflowed".to_owned())
-        }
+        OpenDocument::Cbz(document) => document
+            .rendered_byte_len(page, scale)
+            .map_err(|error| error.to_string()),
         OpenDocument::Epub(_) => Err("EPUB does not use raster page rendering".to_owned()),
     }
 }
@@ -3949,11 +4002,29 @@ fn queue_bookmark_mutation(
     tab_id: u64,
     mutation: BookmarkMutation,
 ) -> Task<Message> {
-    state
-        .bookmark_mutation_queues
-        .entry(tab_id)
-        .or_default()
-        .push_back(mutation);
+    let queue = state.bookmark_mutation_queues.entry(tab_id).or_default();
+    let queued_bytes = queue.iter().fold(0usize, |total, queued| {
+        total.saturating_add(queued.retained_byte_len())
+    });
+    let mutation_bytes = mutation.retained_byte_len();
+    let note_too_large = matches!(
+        &mutation,
+        BookmarkMutation::UpdateNote { note: Some(note), .. }
+            if note.len() > MAX_BOOKMARK_NOTE_BYTES
+    );
+    if queue.len() >= MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB
+        || queued_bytes.saturating_add(mutation_bytes) > MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB
+        || note_too_large
+    {
+        if let BookmarkMutation::UpdateNote { id, note, .. } = mutation {
+            restore_bookmark_edit(state, tab_id, id, note.unwrap_or_default());
+        }
+        state.error = Some(AppError::Library(
+            "bookmark changes are busy; wait for pending changes to finish".to_owned(),
+        ));
+        return Task::none();
+    }
+    queue.push_back(mutation);
     continue_bookmark_mutations(state, tab_id)
 }
 
@@ -4106,11 +4177,19 @@ fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64)
             } if *queued_generation == generation => Some((*id, note.clone().unwrap_or_default())),
             _ => None,
         });
-    if state.active_tab_id == Some(tab_id)
-        && let Some((id, note)) = edit
-    {
+    if let Some((id, note)) = edit {
+        restore_bookmark_edit(state, tab_id, id, note);
+    }
+}
+
+fn restore_bookmark_edit(state: &mut State, tab_id: u64, id: i64, note: String) {
+    if state.active_tab_id == Some(tab_id) {
         state.editing_note_id = Some(id);
-        state.editing_note_text = note;
+        state.editing_note_text = note.clone();
+    }
+    if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id) {
+        tab.editing_note_id = Some(id);
+        tab.editing_note_text = note;
     }
 }
 
@@ -7900,6 +7979,24 @@ mod tests {
     }
 
     #[test]
+    fn cbz_raster_preflight_matches_output_near_one_x_scale() {
+        let document = Arc::new(
+            CbzDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+            )
+            .unwrap(),
+        );
+        let state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        for scale in [1.0 - f32::EPSILON, 1.0 + f32::EPSILON, 1.007] {
+            let rendered = document.render_page(0, scale).unwrap();
+            assert_eq!(
+                raster_byte_len(&state, 0, scale).unwrap(),
+                rendered.pixels.len()
+            );
+        }
+    }
+
+    #[test]
     fn pdf_render_waits_for_transient_decode_admission() {
         let pdf = PdfDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.pdf").to_vec(),
@@ -8683,7 +8780,7 @@ mod tests {
         let _ = update(&mut state, Message::CloseTab(0));
 
         assert!(cancellation.is_cancelled());
-        assert!(state.epub_jobs.is_empty());
+        assert_eq!(state.epub_jobs.len(), 1);
     }
 
     #[test]
@@ -9512,6 +9609,121 @@ mod tests {
 
         assert!(state.bookmarks.is_empty());
         assert!(!state.current_page_bookmarked);
+    }
+
+    #[test]
+    fn failed_note_save_restores_the_inactive_tabs_draft() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let document = OpenDocument::Epub(Arc::new(epub));
+        let mut state = state_with_document(document.clone());
+        state.file_path = Some(PathBuf::from("first.epub"));
+        let first = capture_reader_tab(&state).unwrap();
+        state.active_tab_id = Some(2);
+        state.file_path = Some(PathBuf::from("second.epub"));
+        state.document = Some(document);
+        let second = capture_reader_tab(&state).unwrap();
+        state.tabs = vec![first, second];
+        state.active_tab = Some(1);
+        state.bookmark_mutation_queues.insert(
+            1,
+            VecDeque::from([BookmarkMutation::UpdateNote {
+                generation: 7,
+                file_path: PathBuf::from("first.epub"),
+                book_id: None,
+                id: 42,
+                note: Some("unsaved draft".to_owned()),
+            }]),
+        );
+        state.bookmark_mutations_active.insert(1);
+
+        let _ = update(
+            &mut state,
+            Message::BookmarkMutationFinished {
+                tab_id: 1,
+                generation: 7,
+                file_path: PathBuf::from("first.epub"),
+                book_id: None,
+                result: Err("injected failure".to_owned()),
+            },
+        );
+
+        assert_eq!(state.tabs[0].editing_note_id, Some(42));
+        assert_eq!(state.tabs[0].editing_note_text, "unsaved draft");
+    }
+
+    #[test]
+    fn bookmark_mutation_queue_bounds_count_and_payload_bytes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        for generation in 0..=MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB {
+            let _ = queue_bookmark_mutation(
+                &mut state,
+                1,
+                BookmarkMutation::Delete {
+                    generation: generation as u64,
+                    file_path: PathBuf::from("book.epub"),
+                    book_id: None,
+                    id: generation as i64,
+                },
+            );
+        }
+        assert_eq!(
+            state.bookmark_mutation_queues.get(&1).unwrap().len(),
+            MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB
+        );
+
+        state.bookmark_mutation_queues.clear();
+        let large_valid_note = "x".repeat(MAX_BOOKMARK_NOTE_BYTES);
+        for generation in 0..10 {
+            let _ = queue_bookmark_mutation(
+                &mut state,
+                1,
+                BookmarkMutation::UpdateNote {
+                    generation,
+                    file_path: PathBuf::from("book.epub"),
+                    book_id: None,
+                    id: generation as i64,
+                    note: Some(large_valid_note.clone()),
+                },
+            );
+        }
+        let queued = state.bookmark_mutation_queues.get(&1).unwrap();
+        assert!(queued.len() < 10);
+        assert!(
+            queued
+                .iter()
+                .map(BookmarkMutation::retained_byte_len)
+                .sum::<usize>()
+                <= MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB
+        );
+
+        state.bookmark_mutation_queues.clear();
+        let oversized = "x".repeat(MAX_BOOKMARK_NOTE_BYTES + 1);
+        let _ = queue_bookmark_mutation(
+            &mut state,
+            1,
+            BookmarkMutation::UpdateNote {
+                generation: 1,
+                file_path: PathBuf::from("book.epub"),
+                book_id: None,
+                id: 42,
+                note: Some(oversized.clone()),
+            },
+        );
+        assert!(
+            state
+                .bookmark_mutation_queues
+                .get(&1)
+                .is_none_or(VecDeque::is_empty)
+        );
+        assert_eq!(state.editing_note_text, oversized);
+        assert!(matches!(state.error, Some(AppError::Library(_))));
     }
 
     #[tokio::test]
@@ -10622,9 +10834,66 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         let path = PathBuf::from("/books/imported.epub");
         state.file_path = Some(path.clone());
+        let mut book = test_book(42);
+        book.file_path = shosai_core::path_key(&path);
+        book.content_hash = Some("same-content".to_owned());
+        state.document_content_hash = book.content_hash.clone();
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+
+        dispatch::record_book_import_report(
+            &mut state,
+            ImportReport {
+                books: vec![book],
+                failures: Vec::new(),
+            },
+        );
+
+        assert_eq!(state.book_id, Some(42));
+        assert_eq!(state.tabs[0].session.book_id, Some(42));
+    }
+
+    #[test]
+    fn importing_replaced_path_does_not_promote_stale_open_bytes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = PathBuf::from("/books/replaced.epub");
+        state.file_path = Some(path.clone());
+        state.document_content_hash = Some("opened-before-replacement".to_owned());
         state.tabs = vec![capture_reader_tab(&state).unwrap()];
         let mut book = test_book(42);
         book.file_path = shosai_core::path_key(&path);
+        book.content_hash = Some("imported-after-replacement".to_owned());
+
+        dispatch::record_book_import_report(
+            &mut state,
+            ImportReport {
+                books: vec![book],
+                failures: Vec::new(),
+            },
+        );
+
+        assert_eq!(state.book_id, None);
+        assert_eq!(state.tabs[0].session.book_id, None);
+    }
+
+    #[test]
+    fn managed_import_promotes_matching_open_source_bytes() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let source = PathBuf::from("/books/source.epub");
+        state.file_path = Some(source.clone());
+        state.document_content_hash = Some("same-content".to_owned());
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        let mut book = test_book(42);
+        book.file_path = shosai_core::path_key(Path::new("/managed/book.epub"));
+        book.original_path = Some(shosai_core::path_key(&source));
+        book.content_hash = Some("same-content".to_owned());
 
         dispatch::record_book_import_report(
             &mut state,
@@ -11542,14 +11811,18 @@ mod tests {
         let first = refresh_content(&mut state);
         let first_generation = state.render_generation;
         let first_key = state.epub_layout_pending.unwrap();
-        state.font_size = 24.0;
-        let coalesced = refresh_content(&mut state);
+        for font_size in 24..34 {
+            state.font_size = font_size as f32;
+            let _coalesced = refresh_content(&mut state);
+            assert_eq!(state.epub_jobs.len(), 1);
+        }
         let requested_key = state.epub_layout_requested.unwrap();
 
         assert!(first.units() > 0);
-        assert!(coalesced.units() > 0);
         assert_ne!(first_key, requested_key);
-        assert_eq!(state.epub_layout_pending, Some(requested_key));
+        assert_eq!(state.epub_layout_pending, None);
+        assert_eq!(state.epub_jobs.len(), 1);
+        assert!(state.epub_jobs.values().all(|job| job.is_cancelled()));
 
         let latest = update(
             &mut state,
@@ -11562,8 +11835,10 @@ mod tests {
             },
         );
 
-        assert_eq!(latest.units(), 0);
+        assert!(latest.units() > 0);
         assert_eq!(state.epub_layout_pending, Some(requested_key));
+        assert_eq!(state.epub_jobs.len(), 1);
+        assert!(state.epub_jobs.values().all(|job| !job.is_cancelled()));
     }
 
     #[test]
@@ -11678,7 +11953,7 @@ mod tests {
         );
         assert_eq!(state.epub_layout_pending, None);
         assert_eq!(state.epub_layout_requested, None);
-        assert!(refresh_content(&mut state).units() > 0);
+        let _waiting = refresh_content(&mut state);
         let requested = state.epub_layout_requested.unwrap();
 
         let task = update(
@@ -11692,7 +11967,7 @@ mod tests {
             },
         );
 
-        assert_eq!(task.units(), 0);
+        assert!(task.units() > 0);
         assert_eq!(state.epub_layout_pending, Some(requested));
         assert!(state.epub_pages.is_empty());
         assert!(state.epub_jobs.keys().any(|job| {
@@ -12125,7 +12400,7 @@ mod tests {
                 generation: 1,
                 path: PathBuf::from("stale.epub"),
                 book_id: None,
-                result: Ok(OpenDocument::Epub(Arc::new(epub))),
+                result: Ok((OpenDocument::Epub(Arc::new(epub)), "stale".to_owned())),
             },
         );
 
