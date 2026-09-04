@@ -56,6 +56,60 @@ async fn test_import_duplicate_returns_existing() {
     assert_eq!(book1.id, book2.id);
 }
 
+#[tokio::test]
+async fn direct_import_rejects_replaced_existing_path() {
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    lib.import_file(&path).await.unwrap();
+    let mut replacement = std::fs::read(&path).unwrap();
+    let comment_length = replacement.len() - 2;
+    replacement[comment_length..].copy_from_slice(&1_u16.to_le_bytes());
+    replacement.push(b'x');
+    std::fs::write(&path, replacement).unwrap();
+
+    let error = lib.import_file(&path).await.unwrap_err();
+    assert!(
+        error.to_string().contains("no longer match"),
+        "unexpected error: {error:#}"
+    );
+}
+
+#[tokio::test]
+async fn stable_book_open_rejects_replaced_content() {
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    let book = lib.import_file(&path).await.unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), &path).unwrap();
+
+    let error = lib.open_book_document_at(book.id, &path).await.unwrap_err();
+    assert!(error.to_string().contains("no longer match"));
+}
+
+#[tokio::test]
+async fn reviewed_import_rejects_replaced_existing_path() {
+    use std::io::Write;
+
+    let (lib, _, dir) = temp_library().await;
+    let path = dir.path().join("book.epub");
+    std::fs::copy(fixture_path("sample.epub"), &path).unwrap();
+    lib.import_file(&path).await.unwrap();
+    let candidate = lib.discover_files(std::slice::from_ref(&path)).await;
+    assert_eq!(candidate.candidates.len(), 1);
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(b"replacement")
+        .unwrap();
+
+    let report = lib.link_discovered_files(&candidate.candidates).await;
+    assert!(report.books.is_empty());
+    assert_eq!(report.failures.len(), 1);
+    assert!(report.failures[0].error.contains("changed after review"));
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn non_unicode_library_paths_remain_distinct_and_reopenable() {
@@ -162,6 +216,65 @@ async fn test_library_pages_are_bounded_and_combine_filters() {
         .unwrap();
     assert_eq!(filtered.books.len(), 1);
     assert_eq!(filtered.books[0].format, BookFormat::Epub);
+}
+
+#[tokio::test]
+async fn library_caps_pages_and_chunks_large_id_snapshots() {
+    let (lib, store, _dir) = temp_library().await;
+    for id in 0..1_005 {
+        sqlx::query("INSERT INTO books (title, format, file_path) VALUES (?, 'pdf', ?)")
+            .bind(format!("Book {id}"))
+            .bind(format!("/synthetic/{id}.pdf"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    let page = lib.page(None, None, u32::MAX, 0).await.unwrap();
+    assert_eq!(page.books.len(), 500);
+    assert!(page.has_more);
+    assert!(
+        lib.list_all()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("use page()")
+    );
+    let ids = lib.matching_ids(None, None).await.unwrap();
+    let books = lib.books_by_ids(&ids).await.unwrap();
+    assert_eq!(books.len(), 1_005);
+    assert_eq!(books.first().unwrap().id, ids[0]);
+    assert_eq!(books.last().unwrap().id, *ids.last().unwrap());
+    assert!(
+        lib.books_by_ids(&vec![0; 10_001])
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("snapshot exceeds")
+    );
+    assert!(
+        lib.page(Some(&"q".repeat(4 * 1024 + 1)), None, 10, 0)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("query exceeds")
+    );
+}
+
+#[tokio::test]
+async fn discovery_caps_selected_roots_before_starting_scanners() {
+    let (lib, _, _dir) = temp_library().await;
+    let roots = vec![fixture_path("sample.epub"); 10_001];
+
+    let discovery = lib.discover_files(&roots).await;
+
+    assert!(discovery.candidates.is_empty());
+    assert_eq!(discovery.failures.len(), 1);
+    assert!(
+        discovery.failures[0]
+            .error
+            .contains("too many import roots")
+    );
 }
 
 #[tokio::test]
@@ -290,6 +403,23 @@ async fn test_import_directory() {
 
     let report = lib.import_directory(&import_dir).await;
     assert_eq!(report.books.len(), 2);
+    assert!(report.failures.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn direct_directory_import_does_not_follow_directory_cycles() {
+    use std::os::unix::fs::symlink;
+
+    let (lib, _, dir) = temp_library().await;
+    let root = dir.path().join("cycle");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), root.join("book.epub")).unwrap();
+    symlink(&root, root.join("again")).unwrap();
+
+    let report = lib.link_directory(&root).await;
+
+    assert_eq!(report.books.len(), 1);
     assert!(report.failures.is_empty());
 }
 
@@ -631,7 +761,10 @@ async fn directory_import_reports_when_every_supported_file_fails() {
 
     assert!(report.books.is_empty());
     assert_eq!(report.failures.len(), 1);
-    assert_eq!(report.failures[0].path, import_dir.join("corrupt.epub"));
+    assert_eq!(
+        report.failures[0].path,
+        import_dir.join("corrupt.epub").canonicalize().unwrap()
+    );
     assert!(lib.list_all().await.unwrap().is_empty());
 }
 
@@ -745,6 +878,12 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
         .await
         .unwrap()
         .remove(0);
+    assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
+    let bookmark = bookmarks
+        .toggle_for_book_at_async(book.id, &old_path, 4, Some(9), None)
+        .await
+        .unwrap()
+        .expect("bookmark should be added using the stable book identity");
     assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
     assert_eq!(
         path_from_key(
@@ -879,6 +1018,18 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
     std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
     std::fs::copy(fixture_path("sample.epub"), &replacement).unwrap();
     let book = lib.import_file(&original).await.unwrap();
+    // Create the replacement alias first so its rowid is older, then update it last.
+    store
+        .set_async(
+            &replacement,
+            &FileReadingState {
+                page: 0,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
     store
         .set_for_book_async(
             book.id,
@@ -907,7 +1058,7 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
         )
         .await
         .unwrap();
-    sqlx::query("UPDATE reading_state SET updated_at = '2026-02-01' WHERE file_path = ?")
+    sqlx::query("UPDATE reading_state SET updated_at = '2026-01-01' WHERE file_path = ?")
         .bind(
             replacement
                 .canonicalize()
@@ -958,6 +1109,55 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
         )
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn bookmark_alias_merge_keeps_newest_row_and_all_of_its_metadata() {
+    let (lib, store, dir) = temp_library().await;
+    let original = dir.path().join("original.epub");
+    let replacement = dir.path().join("replacement.epub");
+    std::fs::copy(fixture_path("sample.epub"), &original).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &replacement).unwrap();
+    let book = lib.import_file(&original).await.unwrap();
+    let original_key = book.file_path.clone();
+    let replacement_key = replacement
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let stable_id: i64 = sqlx::query_scalar(
+        "INSERT INTO bookmarks
+         (file_path, book_id, page, location_offset, title, note, color, created_at)
+         VALUES (?, ?, 4, 9, 'older title', 'same note', 'yellow', '2026-01-01')
+         RETURNING id",
+    )
+    .bind(&original_key)
+    .bind(book.id)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO bookmarks
+         (file_path, page, location_offset, title, note, color, created_at)
+         VALUES (?, 4, 9, 'winner title', 'same note', 'blue', '2026-02-01')",
+    )
+    .bind(&replacement_key)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    lib.relink(book.id, &replacement).await.unwrap();
+
+    let row = sqlx::query("SELECT id, title, color, created_at FROM bookmarks WHERE book_id = ?")
+        .bind(book.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    use sqlx::Row;
+    assert_eq!(row.get::<i64, _>("id"), stable_id);
+    assert_eq!(row.get::<String, _>("title"), "winner title");
+    assert_eq!(row.get::<String, _>("color"), "blue");
+    assert_eq!(row.get::<String, _>("created_at"), "2026-02-01");
 }
 
 #[tokio::test]

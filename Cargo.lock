@@ -5228,6 +5228,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml",
  "roxmltree 0.21.1",
+ "same-file",
  "sha2",
  "sqlx",
  "syntect",

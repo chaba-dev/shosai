@@ -13,6 +13,7 @@ pub const PDF_SELECTION_MAX_RETAINED_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PDF_INPUT_BYTES: u64 = 512 * 1024 * 1024;
 pub const MAX_PDF_BITMAP_DIMENSION: u32 = 16_384;
 pub const MAX_PDF_BITMAP_PIXELS: u64 = 40_000_000;
+pub const MAX_PDF_PAGE_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PDF_METADATA_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,9 +166,11 @@ mod tests {
     use crate::document::Document;
 
     use super::{
-        PdfDoc, bundled_pdfium_path, validate_pdf_bitmap_size,
-        validate_pdf_selection_endpoint_count,
+        BoundedPageTextError, PdfDoc, bundled_pdfium_path, read_pdf_file_with_limit,
+        validate_pdf_bitmap_size, validate_pdf_preflight, validate_pdf_selection_endpoint_count,
     };
+    use std::cell::Cell;
+    use std::fs::File;
     use std::path::{Path, PathBuf};
 
     fn selectable_pdf(text: &str) -> Vec<u8> {
@@ -202,6 +205,22 @@ mod tests {
             .as_bytes(),
         );
         pdf
+    }
+
+    #[test]
+    fn bounded_file_read_uses_open_descriptor_after_path_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("document.pdf");
+        let replacement = directory.path().join("replacement.pdf");
+        std::fs::write(&path, b"original").unwrap();
+        std::fs::write(&replacement, vec![b'x'; 32]).unwrap();
+
+        let file = File::open(&path).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+
+        let data = read_pdf_file_with_limit(file, &path, 8).unwrap();
+        assert_eq!(data, b"original");
+        assert_eq!(std::fs::read(&path).unwrap(), vec![b'x'; 32]);
     }
 
     #[test]
@@ -268,6 +287,50 @@ mod tests {
                 .is_some()
         );
     }
+
+    #[test]
+    fn bounded_page_text_stops_during_character_extraction() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+        let checks = Cell::new(0);
+
+        let result = document.page_text_bounded(0, usize::MAX, || {
+            checks.set(checks.get() + 1);
+            checks.get() > 3
+        });
+
+        assert!(matches!(result, Err(BoundedPageTextError::Cancelled)));
+        assert_eq!(checks.get(), 4);
+    }
+
+    #[test]
+    fn bounded_page_text_rejects_text_that_cannot_fit() {
+        let document = PdfDoc::from_bytes(selectable_pdf("TARGET")).unwrap();
+
+        assert!(matches!(
+            document.page_text_bounded(0, 1, || false),
+            Err(BoundedPageTextError::Limit { actual }) if actual > 1
+        ));
+    }
+
+    #[test]
+    fn retained_charge_includes_input_allocation_capacity() {
+        let bytes = selectable_pdf("TARGET");
+        let logical_len = bytes.len();
+        let mut overallocated = Vec::with_capacity(logical_len * 4);
+        overallocated.extend_from_slice(&bytes);
+        let capacity = overallocated.capacity();
+
+        let document = PdfDoc::from_bytes(overallocated).unwrap();
+
+        assert!(document.retained_byte_len().unwrap() >= capacity);
+    }
+
+    #[test]
+    fn native_page_count_and_metadata_lengths_are_preflighted() {
+        assert!(validate_pdf_preflight(u16::MAX as i32, &[1024]).is_ok());
+        assert!(validate_pdf_preflight(u16::MAX as i32 + 1, &[0]).is_err());
+        assert!(validate_pdf_preflight(1, &[super::MAX_PDF_METADATA_BYTES + 1]).is_err());
+    }
 }
 
 /// A PDF document backed by pdfium-render.
@@ -281,6 +344,27 @@ pub struct PdfDoc {
 }
 
 impl PdfDoc {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        let metadata = [
+            &self.metadata.title,
+            &self.metadata.author,
+            &self.metadata.subject,
+            &self.metadata.creator,
+        ]
+        .into_iter()
+        .flatten()
+        .try_fold(0_usize, |total, value| total.checked_add(value.capacity()))?;
+        self.data
+            .capacity()
+            .checked_add(
+                self.page_sizes
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<(f32, f32)>())?,
+            )?
+            .checked_add(metadata)
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
+    }
+
     /// Open a PDF file from disk.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_limit(path, MAX_PDF_INPUT_BYTES)
@@ -288,17 +372,9 @@ impl PdfDoc {
 
     pub fn open_with_limit(path: impl AsRef<Path>, max_input_bytes: u64) -> Result<Self> {
         let path = path.as_ref();
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("failed to inspect {}", path.display()))?;
-        if metadata.len() > max_input_bytes {
-            crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
-        }
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let mut data = Vec::with_capacity(metadata.len().min(max_input_bytes) as usize);
-        file.take(max_input_bytes.saturating_add(1))
-            .read_to_end(&mut data)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let data = read_pdf_file_with_limit(file, path, max_input_bytes)?;
         Self::from_bytes_with_limit(data, max_input_bytes)
     }
 
@@ -312,6 +388,7 @@ impl PdfDoc {
             crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
         let pdfium = create_pdfium()?;
+        preflight_pdf(pdfium.bindings(), &data)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF: {e}"))?;
@@ -372,31 +449,127 @@ impl PdfDoc {
     }
 }
 
+fn read_pdf_file_with_limit(
+    file: std::fs::File,
+    path: &Path,
+    max_input_bytes: u64,
+) -> Result<Vec<u8>> {
+    let metadata = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if metadata.len() > max_input_bytes {
+        crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
+    }
+    let capacity = usize::try_from(metadata.len().min(max_input_bytes)).unwrap_or(usize::MAX);
+    let mut data = Vec::with_capacity(capacity);
+    file.take(max_input_bytes.saturating_add(1))
+        .read_to_end(&mut data)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(data)
+}
+
+fn preflight_pdf(bindings: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<()> {
+    let document = bindings.FPDF_LoadMemDocument64(data, None);
+    if document.is_null() {
+        anyhow::bail!("failed to load PDF for resource preflight");
+    }
+    struct DocumentGuard<'a> {
+        bindings: &'a dyn PdfiumLibraryBindings,
+        document: FPDF_DOCUMENT,
+    }
+    impl Drop for DocumentGuard<'_> {
+        fn drop(&mut self) {
+            self.bindings.FPDF_CloseDocument(self.document);
+        }
+    }
+    let guard = DocumentGuard { bindings, document };
+    let metadata_lengths = [
+        "Title",
+        "Author",
+        "Subject",
+        "Keywords",
+        "Creator",
+        "Producer",
+        "CreationDate",
+        "ModificationDate",
+    ]
+    .map(|tag| bindings.FPDF_GetMetaText(document, tag, std::ptr::null_mut(), 0) as usize);
+    validate_pdf_preflight(bindings.FPDF_GetPageCount(document), &metadata_lengths)?;
+    drop(guard);
+    Ok(())
+}
+
+fn validate_pdf_preflight(page_count: i32, metadata_lengths: &[usize]) -> Result<()> {
+    if !(0..=u16::MAX as i32).contains(&page_count) {
+        crate::resource_limit!("PDF page count is outside the supported range");
+    }
+    let metadata_bytes = metadata_lengths
+        .iter()
+        .try_fold(0_usize, |total, bytes| total.checked_add(*bytes))
+        .filter(|total| *total <= MAX_PDF_METADATA_BYTES);
+    if metadata_bytes.is_none() {
+        crate::resource_limit!("PDF metadata exceeds retained byte limit");
+    }
+    Ok(())
+}
+
 impl PdfDoc {
     /// Extract all text from a single page.
     pub fn page_text(&self, index: usize) -> Result<String> {
+        self.page_text_bounded(index, MAX_PDF_PAGE_TEXT_BYTES, || false)
+            .map_err(|error| match error {
+                BoundedPageTextError::Cancelled => anyhow::anyhow!("PDF text extraction cancelled"),
+                BoundedPageTextError::Limit { .. } => anyhow::anyhow!(
+                    "PDF page text exceeds the {MAX_PDF_PAGE_TEXT_BYTES}-byte limit"
+                ),
+                BoundedPageTextError::Document(error) => error,
+            })
+    }
+
+    pub(crate) fn page_text_bounded(
+        &self,
+        index: usize,
+        max_bytes: usize,
+        is_cancelled: impl Fn() -> bool,
+    ) -> std::result::Result<String, BoundedPageTextError> {
         if index >= self.page_count {
-            anyhow::bail!(
+            return Err(BoundedPageTextError::Document(anyhow::anyhow!(
                 "page index {index} out of range (total: {})",
                 self.page_count
-            );
+            )));
+        }
+        if is_cancelled() {
+            return Err(BoundedPageTextError::Cancelled);
         }
 
-        let pdfium = create_pdfium()?;
+        let pdfium = create_pdfium().map_err(BoundedPageTextError::Document)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&self.data, None)
-            .map_err(|e| anyhow::anyhow!("failed to load PDF for text extraction: {e}"))?;
+            .map_err(|error| {
+                BoundedPageTextError::Document(anyhow::anyhow!(
+                    "failed to load PDF for text extraction: {error}"
+                ))
+            })?;
+        let page = document.pages().get(index as u16).map_err(|error| {
+            BoundedPageTextError::Document(anyhow::anyhow!("failed to get page {index}: {error}"))
+        })?;
+        let text = page.text().map_err(|error| {
+            BoundedPageTextError::Document(anyhow::anyhow!(
+                "failed to load text for page {index}: {error}"
+            ))
+        })?;
 
-        let page = document
-            .pages()
-            .get(index as u16)
-            .map_err(|e| anyhow::anyhow!("failed to get page {index}: {e}"))?;
+        // Each PDFium character produces at least one UTF-8 byte. Rejecting on
+        // the character count avoids allocating PdfPageTextChars for a page
+        // that cannot fit in the caller's remaining text budget.
+        let character_count = usize::try_from(text.len()).unwrap_or(usize::MAX);
+        if character_count > max_bytes {
+            return Err(BoundedPageTextError::Limit {
+                actual: character_count,
+            });
+        }
 
-        let text = page
-            .text()
-            .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
-
-        Ok(searchable_page_text(&page, &text))
+        searchable_page_text_bounded(&page, &text, max_bytes, is_cancelled)
     }
 
     /// Extracts a bounded owned hit-test snapshot for a page rendered at `scale`.
@@ -475,28 +648,6 @@ impl PdfDoc {
             );
         }
         Ok(snapshot)
-    }
-
-    /// Extract text from every page while loading the PDF only once.
-    pub fn page_texts(&self) -> Result<Vec<String>> {
-        let pdfium = create_pdfium()?;
-        let document = pdfium
-            .load_pdf_from_byte_slice(&self.data, None)
-            .map_err(|e| anyhow::anyhow!("failed to load PDF for text extraction: {e}"))?;
-
-        let mut pages = Vec::with_capacity(self.page_count);
-        for index in 0..self.page_count {
-            let text = match document.pages().get(index as u16) {
-                Ok(page) => page
-                    .text()
-                    .map(|text| searchable_page_text(&page, &text))
-                    .unwrap_or_default(),
-                Err(_) => String::new(),
-            };
-            pages.push(text);
-        }
-
-        Ok(pages)
     }
 
     /// Render a page and tint the text ranges used by in-document search.
@@ -593,6 +744,13 @@ impl PdfDoc {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum BoundedPageTextError {
+    Cancelled,
+    Limit { actual: usize },
+    Document(anyhow::Error),
+}
+
 fn validate_pdf_selection_endpoint_count(count: usize) -> Result<()> {
     if count > PDF_SELECTION_MAX_ENDPOINTS {
         crate::resource_limit!(
@@ -647,32 +805,46 @@ fn pdf_selection_rows(mut zones: Vec<PdfSelectionZone>) -> Vec<PdfSelectionRow> 
     rows
 }
 
-fn searchable_page_text(page: &PdfPage<'_>, text: &PdfPageText<'_>) -> String {
+fn searchable_page_text_bounded(
+    page: &PdfPage<'_>,
+    text: &PdfPageText<'_>,
+    max_bytes: usize,
+    is_cancelled: impl Fn() -> bool,
+) -> std::result::Result<String, BoundedPageTextError> {
     let page_bounds = page
         .boundaries()
         .bounding()
         .ok()
         .map(|boundary| boundary.bounds);
-    let mut result = String::with_capacity(text.chars().len());
+    let chars = text.chars();
+    let mut result = String::with_capacity(chars.len().min(max_bytes));
 
-    for character in text.chars().iter() {
+    for character in chars.iter() {
+        if is_cancelled() {
+            return Err(BoundedPageTextError::Cancelled);
+        }
         // Generated whitespace and line breaks must remain to preserve PDFium
         // character indexes even though they often have no visible bounds.
         let visible = character.is_generated().unwrap_or(false)
             || character.loose_bounds().is_ok_and(|bounds| {
                 page_bounds.is_some_and(|page_bounds| bounds.does_overlap(&page_bounds))
             });
-        result.push(if visible {
+        let character = if visible {
             character
                 .unicode_char()
                 .filter(|character| *character != '\0')
                 .unwrap_or('\u{FFFD}')
         } else {
             '\u{FFFD}'
-        });
+        };
+        let actual = result.len().saturating_add(character.len_utf8());
+        if actual > max_bytes {
+            return Err(BoundedPageTextError::Limit { actual });
+        }
+        result.push(character);
     }
 
-    result
+    Ok(result)
 }
 
 fn rect_to_pixels(

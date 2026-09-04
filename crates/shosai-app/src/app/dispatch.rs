@@ -17,10 +17,24 @@ fn update_book_import_progress(state: &mut State) {
     };
 }
 
-fn record_book_import_report(state: &mut State, report: ImportReport) {
+pub(super) fn record_book_import_report(state: &mut State, report: ImportReport) {
     state.book_import_completed += 1;
     update_book_import_progress(state);
     for book in &report.books {
+        if state.file_path.as_deref().is_some_and(|path| {
+            opened_content_matches_book(path, state.document_content_hash.as_deref(), book)
+        }) {
+            state.book_id = Some(book.id);
+        }
+        for tab in &mut state.tabs {
+            if opened_content_matches_book(
+                tab.session.locator.path(),
+                tab.content_hash.as_deref(),
+                book,
+            ) {
+                tab.session.book_id = Some(book.id);
+            }
+        }
         if book_matches_library_view(state, book)
             && !state
                 .library_books
@@ -273,14 +287,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             result,
         } => {
             if generation != state.document_open_generation {
+                state.pending_document_permits.remove(&generation);
                 return Task::none();
             }
             state.document_opening = false;
             state.document_open_notice_visible = false;
             state.document_open_preview = None;
             match result {
-                Ok(document) => return finish_open_document(state, path, book_id, document),
+                Ok((document, content_hash)) => {
+                    return finish_open_document_with_hash(
+                        state,
+                        path,
+                        book_id,
+                        document,
+                        Some(content_hash),
+                    );
+                }
                 Err(error) => {
+                    state.pending_document_permits.remove(&generation);
                     let performance_task = perf::fail(state, &error.diagnostic());
                     state.screen = Screen::Reader;
                     state.open_error = Some(error);
@@ -1071,8 +1095,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.pending_remove_book = None;
             state.removing_book = Some(id);
             state.library_error = None;
+            let saves = state.reading_state_saves.clone();
             return Task::perform(
-                async move { lib.remove(id).await.map_err(|error| format!("{error:#}")) },
+                async move {
+                    if let Some(saves) = saves {
+                        saves.flush().await.map_err(|error| error.to_string())?;
+                    }
+                    lib.remove(id).await.map_err(|error| format!("{error:#}"))
+                },
                 move |result| Message::BookRemoved { id, result },
             );
         }
@@ -1387,14 +1417,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 async move {
                     if let Some(saves) = saves {
                         let (flushed, wait) = oneshot::channel();
-                        if saves
+                        saves
                             .send(ReadingStateWriterMessage::Flush(flushed))
-                            .is_ok()
-                        {
-                            wait.await
-                                .map_err(|_| "state writer stopped before relocation".to_owned())?
-                                .map_err(|error| error.to_string())?;
-                        }
+                            .map_err(|error| error.to_string())?;
+                        wait.await
+                            .map_err(|_| "state writer stopped before relocation".to_owned())?
+                            .map_err(|error| error.to_string())?;
                     }
                     shosai_core::reading_state::prepare_managed_library_directory(
                         &relocation_destination,
@@ -1433,41 +1461,25 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         // Bookmarks
         Message::ToggleBookmark => {
-            if let (Some(tab_id), Some(path), Some(store)) =
+            if let (Some(tab_id), Some(path), Some(_store)) =
                 (state.active_tab_id, &state.file_path, &state.bookmark_store)
             {
                 let path = path.clone();
-                let task_path = path.clone();
-                let store = store.clone();
                 let book_id = state.book_id;
                 let page = state.current_page;
                 let location_offset = current_epub_offset(state);
-                return Task::perform(
-                    async move {
-                        let result = if let Some(book_id) = book_id {
-                            store
-                                .toggle_for_book_at_async(
-                                    book_id,
-                                    &task_path,
-                                    page,
-                                    location_offset,
-                                    None,
-                                )
-                                .await
-                        } else {
-                            store
-                                .toggle_at_async(&task_path, page, location_offset, None)
-                                .await
-                        };
-                        result.map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkToggled {
-                        tab_id,
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::Toggle {
+                        generation,
                         file_path: path,
                         book_id,
                         page,
                         location_offset,
-                        result,
                     },
                 );
             }
@@ -1475,33 +1487,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarkToggled {
             tab_id,
+            generation,
             file_path,
             book_id,
             page,
             location_offset,
             result,
         } => {
-            if state.active_tab_id != Some(tab_id)
-                || state.file_path.as_ref() != Some(&file_path)
-                || state.book_id != book_id
-            {
-                return Task::none();
+            let _ = (page, location_offset);
+            if let Err(error) = result {
+                eprintln!("warning: failed to toggle bookmark: {error}");
             }
-            match result {
-                Ok(Some(bookmark)) => {
-                    state.bookmarks.push(bookmark);
-                    state.current_page_bookmarked = true;
-                }
-                Ok(None) => {
-                    state.bookmarks.retain(|bookmark| {
-                        bookmark.page != page
-                            || bookmark.location_offset != location_offset
-                            || bookmark.note.is_some()
-                    });
-                    state.current_page_bookmarked = false;
-                }
-                Err(error) => eprintln!("warning: failed to toggle bookmark: {error}"),
-            }
+            return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
 
         Message::ToggleBookmarksPanel => {
@@ -1517,11 +1514,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarksLoaded {
             tab_id,
+            generation,
             file_path,
             book_id,
             bookmarks,
         } => {
             if state.active_tab_id != Some(tab_id)
+                || state.bookmark_mutation_generation != generation
                 || state.file_path.as_ref() != Some(&file_path)
                 || state.book_id != book_id
             {
@@ -1545,7 +1544,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SaveNote => {
-            if let (Some(tab_id), Some(path), Some(id), Some(store)) = (
+            if let (Some(tab_id), Some(path), Some(id), Some(_store)) = (
                 state.active_tab_id,
                 &state.file_path,
                 state.editing_note_id,
@@ -1556,23 +1555,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 } else {
                     Some(state.editing_note_text.clone())
                 };
-                let store = store.clone();
                 let file_path = path.clone();
                 let book_id = state.book_id;
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
                 state.editing_note_id = None;
                 state.editing_note_text = String::new();
-                return Task::perform(
-                    async move {
-                        store
-                            .update_note_async(id, note.as_deref())
-                            .await
-                            .map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkMutationFinished {
-                        tab_id,
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::UpdateNote {
+                        generation,
                         file_path,
                         book_id,
-                        result,
+                        id,
+                        note,
                     },
                 );
             }
@@ -1586,24 +1584,22 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::DeleteBookmark(id) => {
-            if let (Some(tab_id), Some(path), Some(store)) =
+            if let (Some(tab_id), Some(path), Some(_store)) =
                 (state.active_tab_id, &state.file_path, &state.bookmark_store)
             {
-                let store = store.clone();
                 let file_path = path.clone();
                 let book_id = state.book_id;
-                return Task::perform(
-                    async move {
-                        store
-                            .remove_async(id)
-                            .await
-                            .map_err(|error| format!("{error:#}"))
-                    },
-                    move |result| Message::BookmarkMutationFinished {
-                        tab_id,
+                state.bookmark_mutation_generation =
+                    state.bookmark_mutation_generation.wrapping_add(1);
+                let generation = state.bookmark_mutation_generation;
+                return queue_bookmark_mutation(
+                    state,
+                    tab_id,
+                    BookmarkMutation::Delete {
+                        generation,
                         file_path,
                         book_id,
-                        result,
+                        id,
                     },
                 );
             }
@@ -1611,20 +1607,16 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarkMutationFinished {
             tab_id,
+            generation,
             file_path,
             book_id,
             result,
         } => {
             if let Err(error) = result {
                 eprintln!("warning: failed to update bookmark: {error}");
-                return Task::none();
+                restore_failed_bookmark_edit(state, tab_id, generation);
             }
-            if state.active_tab_id == Some(tab_id)
-                && state.file_path.as_ref() == Some(&file_path)
-                && state.book_id == book_id
-            {
-                return refresh_bookmarks(state);
-            }
+            return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
 
         Message::ExportBookmarks => {
@@ -1661,6 +1653,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.search_results.clear();
                     state.search_current = 0;
                     state.search_query_generation = state.search_query_generation.wrapping_add(1);
+                    cancel_active_search(state);
                     if uses_paginated_raster_layout(state) {
                         return refresh_content(state);
                     }
@@ -1679,6 +1672,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::SearchQueryChanged(query) => {
             let previous_highlights = current_page_search_highlights(state);
+            cancel_active_search(state);
             state.search_query = query;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
             state.search_results.clear();
@@ -1722,37 +1716,32 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
-        Message::SearchTextExtracted {
-            tab_id,
-            document_generation,
-            text,
-        } => {
-            if state.active_tab_id == Some(tab_id)
-                && document_generation == state.search_document_generation
-            {
-                state.search_loading = false;
-                state.search_text = Some(text);
-                if !state.search_query.is_empty() {
-                    return perform_search(state);
-                }
-            }
-        }
-
         Message::SearchPerformed {
             tab_id,
             document_generation,
             query_generation,
-            results,
+            result,
         } => {
             if state.active_tab_id == Some(tab_id)
                 && document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
             {
+                state.search_cancellation = None;
+                state.search_loading = false;
+                state.search_waiting = false;
                 let previous_highlights = current_page_search_highlights(state);
-                state.search_results = results;
-                state.search_current = 0;
-                // Navigate to first result if any.
-                return navigate_to_current_search_result(state, &previous_highlights);
+                match result {
+                    Ok(results) => {
+                        state.search_results = results;
+                        state.search_current = 0;
+                        // Navigate to first result if any.
+                        return navigate_to_current_search_result(state, &previous_highlights);
+                    }
+                    Err(SearchError::Cancelled) => {}
+                    Err(error) => state.error = Some(AppError::Render(error.to_string())),
+                }
+            } else if state.search_waiting && !state.search_query.is_empty() {
+                return perform_search(state);
             }
         }
 
@@ -1784,6 +1773,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             state.search_results.clear();
             state.search_current = 0;
             state.search_query_generation = state.search_query_generation.wrapping_add(1);
+            cancel_active_search(state);
             if uses_paginated_raster_layout(state) {
                 return refresh_content(state);
             }
@@ -1805,11 +1795,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 generation,
                 layout_key,
             };
-            if !state.epub_jobs.contains(&job) {
+            let Some(cancelled) = state
+                .epub_jobs
+                .get(&job)
+                .map(EpubPaginationCancellation::is_cancelled)
+            else {
                 return Task::none();
-            }
+            };
             if complete {
                 state.epub_jobs.remove(&job);
+            }
+            if cancelled {
+                if complete
+                    && state.epub_jobs.is_empty()
+                    && matches!(state.document, Some(OpenDocument::Epub(_)))
+                    && state.epub_layout_pending.is_none()
+                    && state.epub_layout_requested.is_some()
+                {
+                    return refresh_content(state);
+                }
+                return Task::none();
             }
             let active = state.active_tab_id == Some(tab_id);
             let accepts_active_layout = active
@@ -1900,15 +1905,52 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 if let Some(byte_len) = byte_len
                     && state.epub_images_desired.contains(&path)
                 {
+                    let transient_byte_len = match &state.document {
+                        Some(OpenDocument::Epub(document)) => {
+                            epub_image_transient_byte_len(document, &path)
+                        }
+                        _ => None,
+                    };
+                    if byte_len > state.epub_image_budget.limit()
+                        || transient_byte_len
+                            .is_none_or(|bytes| bytes > state.transient_decode_budget.limit())
+                    {
+                        state.epub_image_jobs.remove(&job);
+                        state.epub_image_decode_active = false;
+                        state.epub_images_pending.remove(&path);
+                        state.epub_images_desired.remove(&path);
+                        state.epub_images_failed.insert(path);
+                        return load_epub_images_task(state);
+                    }
                     if let Some(task) = decode_epub_image_task(state, job.clone(), byte_len) {
                         return task;
                     }
                     state.epub_image_jobs.remove(&job);
                     state.epub_image_decode_active = false;
                     state.epub_images_pending.remove(&path);
-                    state.epub_images_desired.remove(&path);
-                    state.epub_images_failed.insert(path);
-                    return load_epub_images_task(state);
+                    let current_paths = match &state.document {
+                        Some(OpenDocument::Epub(document)) => {
+                            let chapters = document.presentation().chapters();
+                            epub_image_paths(
+                                chapters[state.current_page.min(chapters.len() - 1)].nodes(),
+                            )
+                        }
+                        _ => HashSet::new(),
+                    };
+                    // The first image in document order wins when the current
+                    // chapter cannot retain all its images simultaneously.
+                    // Transient contention remains retryable and is pumped by
+                    // every raster/image worker completion.
+                    if state.transient_decode_budget.used() == 0
+                        && current_paths.contains(&path)
+                        && state.epub_image_budget.used().saturating_add(byte_len)
+                            > state.epub_image_budget.limit()
+                    {
+                        state.epub_images_desired.remove(&path);
+                        state.epub_images_failed.insert(path);
+                        return load_epub_images_task(state);
+                    }
+                    return Task::none();
                 }
                 state.epub_image_jobs.remove(&job);
                 state.epub_image_decode_active = false;
@@ -1925,7 +1967,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 state.epub_image_jobs.remove(&job);
             }
-            return load_epub_images_task(state);
+            return pump_background_work(state);
         }
 
         Message::EpubImagesDecoded {
@@ -1968,7 +2010,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
-            return load_epub_images_task(state);
+            return pump_background_work(state);
         }
 
         Message::CbzDimensionsLoaded {
@@ -1977,28 +2019,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             page,
             result,
         } => {
-            if state
-                .cbz_dimension_jobs
-                .remove(&CbzDimensionJob {
-                    tab_id,
-                    generation,
-                    page,
-                })
-                .is_none()
-            {
+            let job = CbzDimensionJob {
+                tab_id,
+                generation,
+                page,
+            };
+            if state.cbz_dimension_jobs.remove(&job).is_none() {
                 return Task::none();
             }
-            if state.active_tab_id == Some(tab_id) {
+            if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
                     Ok(()) => return refresh_content(state),
-                    Err(error) if generation == state.render_generation => {
+                    Err(error) => {
+                        state.cbz_dimension_failures.insert(job);
                         state.error = Some(AppError::Render(error));
+                        return pump_background_work(state);
                     }
-                    Err(_) => return refresh_content(state),
                 }
             } else {
                 return if matches!(state.document, Some(OpenDocument::Cbz(_))) {
-                    refresh_content(state)
+                    pump_cbz_dimension_queue(state)
                 } else {
                     pump_raster_queue(state)
                 };
@@ -2040,24 +2080,39 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 && was_pending
                 && state.paginated_pending.is_empty()
                 && generation != state.render_generation;
-            if active && generation == state.render_generation {
-                match result {
-                    Ok(page) => {
-                        let Some(page) = attach_raster_permit(page, permit) else {
-                            state.error = Some(AppError::Render(
-                                "rendered page exceeds its admitted raster budget".to_owned(),
-                            ));
-                            return pump_raster_queue(state);
-                        };
-                        let is_visible = paginated_raster_pages(state).contains(&key.page);
-                        cache_rendered_page(state, key, page);
-                        let spread_changed = is_visible && show_cached_paginated_spread(state);
+            if !active || generation != state.render_generation {
+                drop(permit);
+                if request_was_superseded {
+                    return Task::batch([refresh_content(state), load_epub_images_task(state)]);
+                }
+                return pump_background_work(state);
+            }
+            match result {
+                Ok(page) => {
+                    let Some(page) = attach_raster_permit(page, permit) else {
+                        state.raster_failures.insert(job.failure());
+                        state.error = Some(AppError::Render(
+                            "rendered page exceeds its admitted raster budget".to_owned(),
+                        ));
+                        return pump_background_work(state);
+                    };
+                    let is_visible = paginated_raster_pages(state).contains(&key.page);
+                    cache_rendered_page(state, key, page);
+                    let spread_changed = is_visible && show_cached_paginated_spread(state);
+                    if !has_current_raster_failure(state) {
                         state.error = None;
-                        if spread_changed {
-                            return prefetch_next_paginated_spread(state);
-                        }
                     }
-                    Err(error) => {
+                    if spread_changed {
+                        return Task::batch([
+                            prefetch_next_paginated_spread(state),
+                            load_epub_images_task(state),
+                        ]);
+                    }
+                }
+                Err(error) => {
+                    drop(permit);
+                    state.raster_failures.insert(job.failure());
+                    if paginated_raster_pages(state).contains(&key.page) {
                         state.rendered_page = None;
                         state.rendered_page_index = None;
                         state.rendered_page_handle = None;
@@ -2067,10 +2122,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                 }
             }
-            if request_was_superseded {
-                return refresh_content(state);
-            }
-            return pump_raster_queue(state);
+            return pump_background_work(state);
         }
 
         Message::ContinuousPageRendered {
@@ -2093,15 +2145,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 {
                     tab.continuous_pending.remove(&page);
                 }
-                return pump_raster_queue(state);
+                drop(permit);
+                return pump_background_work(state);
             }
             if state.active_tab_id == Some(tab_id) {
                 if state.continuous_pending.get(&page) != Some(&request) {
-                    return pump_raster_queue(state);
+                    drop(permit);
+                    return pump_background_work(state);
                 }
                 state.continuous_pending.remove(&page);
                 if page >= state.continuous_pages.len() {
-                    return pump_raster_queue(state);
+                    drop(permit);
+                    return pump_background_work(state);
                 }
                 match (request.generation == state.render_generation, result) {
                     (true, Ok(rendered))
@@ -2119,24 +2174,31 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         }
                     }
                     (true, Err(error)) => {
+                        drop(permit);
+                        state.raster_failures.insert(job.failure());
                         if page == state.current_page {
                             state.error = Some(AppError::Render(error));
-                            return Task::none();
+                            return pump_background_work(state);
                         }
                         state.continuous_visible.remove(&page);
-                        return pump_raster_queue(state);
+                        return pump_background_work(state);
                     }
                     (true, Ok(_)) => {
+                        drop(permit);
+                        state.raster_failures.insert(job.failure());
                         if page == state.current_page {
                             state.error = Some(AppError::Render(
                                 "rendered page exceeds the continuous raster budget".to_owned(),
                             ));
                         }
-                        return pump_raster_queue(state);
+                        return pump_background_work(state);
                     }
-                    (false, _) => {}
+                    (false, _) => {
+                        drop(permit);
+                        return pump_background_work(state);
+                    }
                 }
-                return pump_raster_queue(state);
+                return pump_background_work(state);
             }
         }
 

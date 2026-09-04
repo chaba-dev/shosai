@@ -130,6 +130,10 @@ impl fmt::Debug for EpubFontBook {
 }
 
 impl EpubFontBook {
+    pub(crate) fn retained_decoded_bytes(&self) -> usize {
+        self.decoded_bytes
+    }
+
     pub fn is_empty(&self) -> bool {
         self.faces.is_empty()
     }

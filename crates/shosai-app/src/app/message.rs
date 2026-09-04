@@ -8,7 +8,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::{
     Book, BookPage, ImportDiscovery, ImportFailure, ImportReport, PreparedManagedImport,
 };
-use shosai_core::search::SearchMatch;
+use shosai_core::search::{SearchError, SearchMatch};
 
 use super::{
     ContinuousRequest, DecodedEpubImage, EpubLayoutKey, EpubPage, InitializedState, PageCacheKey,
@@ -27,7 +27,7 @@ pub enum Message {
         generation: u64,
         path: PathBuf,
         book_id: Option<i64>,
-        result: Result<super::OpenDocument, super::AppError>,
+        result: Result<(super::OpenDocument, String), super::AppError>,
     },
     ShowDocumentOpenNotice(u64),
 
@@ -179,6 +179,7 @@ pub enum Message {
     ToggleBookmark,
     BookmarkToggled {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         page: usize,
@@ -188,6 +189,7 @@ pub enum Message {
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         bookmarks: Vec<Bookmark>,
@@ -200,6 +202,7 @@ pub enum Message {
     DeleteBookmark(i64),
     BookmarkMutationFinished {
         tab_id: u64,
+        generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
         result: Result<(), String>,
@@ -214,16 +217,11 @@ pub enum Message {
         document_generation: u64,
         query_generation: u64,
     },
-    SearchTextExtracted {
-        tab_id: u64,
-        document_generation: u64,
-        text: Arc<Vec<String>>,
-    },
     SearchPerformed {
         tab_id: u64,
         document_generation: u64,
         query_generation: u64,
-        results: Vec<SearchMatch>,
+        result: Result<Vec<SearchMatch>, SearchError>,
     },
     SearchNext,
     SearchPrev,

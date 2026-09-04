@@ -40,7 +40,7 @@ fn test_chapter_presentation_is_parsed_once_and_shared_with_search() {
         shosai_core::search::extract_text_from_nodes(first.nodes())
     );
     assert_eq!(
-        shosai_core::search::extract_epub_text(&doc),
+        shosai_core::search::extract_epub_text(&doc).unwrap(),
         doc.presentation()
             .chapters()
             .iter()

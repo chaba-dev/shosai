@@ -29,6 +29,7 @@ unicode-casefold = "0.2.0"
 unicode-normalization = "=0.1.25"
 unicode-segmentation = "=1.13.2"
 sha2 = "0.10.9"
+same-file = "1.0.6"
 uuid = { version = "1.23.0", features = ["js", "v4"] }
 
 [dev-dependencies]

@@ -2649,7 +2649,8 @@ mod tests {
         let search_text = shosai_core::search::extract_text_from_nodes(&nodes);
         assert_eq!(search_text, "Styled plain\n");
         let mut matches = Vec::new();
-        shosai_core::search::find_matches_in_text_pub(&search_text, "plain", 0, &mut matches);
+        shosai_core::search::find_matches_in_text_pub(&search_text, "plain", 0, &mut matches)
+            .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].offset, 7);
         assert_eq!(matches[0].length, 5);
