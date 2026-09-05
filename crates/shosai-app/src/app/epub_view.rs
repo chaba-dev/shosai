@@ -9,7 +9,7 @@ use shosai_core::epub::render::ContentNode;
 use shosai_core::epub::{
     EpubFontBook, EpubTextAlign, EpubTextDirection, EpubTextHighlight, EpubTextRequest, EpubTextRun,
 };
-use shosai_core::reader::CachePermit;
+use shosai_core::reader::{CacheBudget, CachePermit};
 
 use super::{
     BOOKMARKS_PANEL_WIDTH, DecodedEpubImage, EPUB_BLOCKQUOTE_SPACING, EPUB_PAGE_NUMBER_SIZE,
@@ -193,6 +193,7 @@ pub(super) fn epub_image_paths<'a>(
 pub(super) fn decode_epub_images(
     document: &EpubDoc,
     paths: impl IntoIterator<Item = (String, CachePermit)>,
+    retained_budget: &CacheBudget,
     cancellation: &Cancellation,
 ) -> Vec<(String, Option<DecodedEpubImage>)> {
     paths
@@ -214,10 +215,14 @@ pub(super) fn decode_epub_images(
                     return None;
                 }
                 let (width, height) = rgba.dimensions();
+                let pixels = rgba.into_raw();
+                let permit = retained_budget
+                    .try_reserve_replacing(pixels.capacity(), vec![permit])
+                    .ok()?;
                 Some(DecodedEpubImage::Raster {
                     width,
                     height,
-                    pixels: rgba.into_raw(),
+                    pixels,
                     permit,
                 })
             });

@@ -210,8 +210,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 | Message::FingerprintBackfillFinished(_)
                 | Message::DocumentOpenPrepared { .. }
                 | Message::DocumentOpened { .. }
+                | Message::DocumentStateLoaded { .. }
                 | Message::LibraryLoaded { .. }
                 | Message::LibraryCoversLoaded { .. }
+                | Message::LibraryCoverLoaded { .. }
                 | Message::ManagedBookPrepared { .. }
                 | Message::BookAddedToBatch { .. }
                 | Message::BookRelinked { .. }
@@ -527,7 +529,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 {
                     state.tabs[index] = tab;
                 }
-                if location_changed && state.document_permit.is_some() {
+                if location_changed
+                    && state.document_permit.is_some()
+                    && state.close_after_geometry_save.is_none()
+                {
                     return refresh_content(state);
                 }
                 return Task::none();
@@ -971,6 +976,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Ok(page) => page,
                 Err(error) => {
                     state.library_loading = false;
+                    state.library_offset = state.library_page_start + state.library_books.len();
                     state.library_error = Some(AppError::Library(error));
                     return Task::none();
                 }
@@ -1060,6 +1066,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state
                     .library_cover_handles
                     .insert_weighted(book_id, handle, retained_bytes);
+            }
+            if state.close_after_geometry_save.is_some() {
+                return Task::none();
             }
             return start_library_cover_reload(state);
         }
@@ -1398,7 +1407,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 Task::none()
             };
-            let reading_state = if active_promoted {
+            let reading_state = if active_promoted && state.reading_state_restore_pending {
                 load_document_state_task(state, false)
             } else {
                 Task::none()
@@ -1612,6 +1621,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.library_books.retain(|book| book.id != id);
                     state.library_cover_handles.remove(&id);
                     let mut refresh_detached_bookmarks = false;
+                    let mut restart_detached_reading_state = false;
                     let active_matches = state.book_id == Some(id)
                         || removal_target.as_ref().is_some_and(|target| {
                             state.file_path.as_deref().is_some_and(|path| {
@@ -1630,6 +1640,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             state.file_path = Some(path.clone());
                         }
                         state.book_id = None;
+                        if let Some(save) = &mut state.pending_reading_state_save {
+                            save.book_id = None;
+                            if let Some(path) = &state.file_path {
+                                save.path = path.clone();
+                            }
+                        }
+                        restart_detached_reading_state = state.reading_state_restore_pending;
                         state.bookmarks.clear();
                         state.bookmark_mutation_generation =
                             state.bookmark_mutation_generation.wrapping_add(1);
@@ -1653,6 +1670,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 .unwrap_or_else(|| tab.session.locator.path().to_path_buf());
                             tab.session.locator = DeviceFileLocator::from_path(&path);
                             tab.session.book_id = None;
+                            if let Some(save) = &mut tab.pending_reading_state_save {
+                                save.book_id = None;
+                                save.path = path;
+                            }
                             tab.bookmarks.clear();
                             tab.bookmark_mutation_generation =
                                 tab.bookmark_mutation_generation.wrapping_add(1);
@@ -1662,7 +1683,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     if let Some(mut save) = suppressed_save {
                         save.book_id = None;
-                        if let Some(path) = detached_path {
+                        if let Some(path) = detached_path.clone() {
                             save.path = path;
                         }
                         queue_reading_state_save(state, save);
@@ -1677,8 +1698,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     } else {
                         Task::none()
                     };
+                    let reading_state = if restart_detached_reading_state {
+                        load_document_state_task(state, false)
+                    } else {
+                        Task::none()
+                    };
                     return Task::batch([
                         bookmarks,
+                        reading_state,
                         reset_library(state),
                         continue_close_after_durable_mutations(state),
                     ]);
@@ -2691,7 +2718,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             if cancelled {
-                return pump_cbz_dimension_queue(state);
+                let content = if state.close_after_geometry_save.is_none()
+                    && matches!(state.document, Some(OpenDocument::Cbz(_)))
+                {
+                    refresh_content(state)
+                } else {
+                    Task::none()
+                };
+                return Task::batch([content, pump_background_work(state)]);
             }
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
