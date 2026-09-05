@@ -90,6 +90,7 @@ use-current-location = 現在の場所にあるファイルを使用
 use-current-location-description = ファイルを複製しませんが、移動した場合やドライブが接続されていない場合は読めなくなります。
 change-storage-choice = 保存方法を変更
 add-selected-books = 本を追加
+cancel-adding-books-progress = 本の追加をキャンセル（{ $completed }/{ $total }）
 back = 戻る
 books-import-partial = { $added }冊を追加、または追加済みとして確認しました。{ $failed }個のファイルを読み込めませんでした。{ $file }: { $error }
 books-import-failed = 本を追加できませんでした。{ $failed }個のファイルを読み込めませんでした。{ $file }: { $error }

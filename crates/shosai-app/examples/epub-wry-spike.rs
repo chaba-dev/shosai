@@ -209,6 +209,7 @@ struct SpikeResource {
 #[derive(Debug)]
 struct SpikeBook {
     start_url: String,
+    epub: Option<EpubDoc>,
     resources: HashMap<CanonicalEpubPath, SpikeResource>,
     requests: Vec<String>,
     network_proof_page_served: bool,
@@ -227,37 +228,6 @@ impl SpikeBook {
             CanonicalEpubPath::new(&first_chapter.path).map_err(|error| error.to_string())?;
         let start_url = first_path.to_protocol_uri();
         let mut resources = HashMap::new();
-        let mut manifest_resources = epub
-            .resources()
-            .map(|resource| {
-                (
-                    resource.path().as_str().to_string(),
-                    resource.bytes().to_vec(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        let content = epub.into_content();
-        let mut chapter_resources = content
-            .chapters
-            .into_iter()
-            .map(|chapter| (chapter.path, chapter.content.into_bytes()))
-            .collect::<HashMap<_, _>>();
-
-        for item in content.manifest.into_values() {
-            if let Some(body) = manifest_resources
-                .remove(&item.href)
-                .or_else(|| chapter_resources.remove(&item.href))
-            {
-                let path = CanonicalEpubPath::new(&item.href).map_err(|error| error.to_string())?;
-                resources.insert(
-                    path,
-                    SpikeResource {
-                        content_type: item.media_type,
-                        body,
-                    },
-                );
-            }
-        }
         resources.insert(
             CanonicalEpubPath::new(NETWORK_PROOF_PATH).map_err(|error| error.to_string())?,
             SpikeResource {
@@ -267,6 +237,7 @@ impl SpikeBook {
         );
         Ok(Self {
             start_url,
+            epub: Some(epub),
             resources,
             requests: Vec::new(),
             network_proof_page_served: false,
@@ -285,10 +256,34 @@ impl SpikeBook {
         )]);
         Ok(Self {
             start_url,
+            epub: None,
             resources,
             requests: Vec::new(),
             network_proof_page_served: false,
         })
+    }
+
+    fn resource(&self, path: &CanonicalEpubPath) -> Option<(String, Vec<u8>)> {
+        if let Some(resource) = self.resources.get(path) {
+            return Some((resource.content_type.clone(), resource.body.clone()));
+        }
+        let epub = self.epub.as_ref()?;
+        if let Some(resource) = epub.resources().find(|resource| resource.path() == path) {
+            return Some((resource.media_type().to_owned(), resource.bytes().to_vec()));
+        }
+        let chapter = epub
+            .content()
+            .chapters
+            .iter()
+            .find(|chapter| chapter.path == path.as_str())?;
+        let content_type = epub
+            .content()
+            .manifest
+            .values()
+            .find(|item| item.href == chapter.path)?
+            .media_type
+            .clone();
+        Some((content_type, chapter.content.as_bytes().to_vec()))
     }
 }
 
@@ -6019,10 +6014,7 @@ fn serve_epub_resource(
         let mut slot = slot.borrow_mut();
         let book = slot.as_mut()?;
         book.requests.push(uri);
-        let resource = path
-            .as_ref()
-            .and_then(|path| book.resources.get(path))
-            .map(|resource| (resource.content_type.clone(), resource.body.clone()));
+        let resource = path.as_ref().and_then(|path| book.resource(path));
         if resource.is_some()
             && path
                 .as_ref()

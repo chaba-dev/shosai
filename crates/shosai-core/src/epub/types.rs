@@ -84,7 +84,7 @@ pub(crate) struct StoredEpubResource {
 }
 
 /// Complete parsed EPUB structure.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EpubContent {
     /// Document metadata.
     pub metadata: EpubMetadata,
@@ -98,4 +98,74 @@ pub struct EpubContent {
     pub(crate) resources: HashMap<CanonicalEpubPath, StoredEpubResource>,
     /// Admitted author stylesheets used by the native computed-style engine.
     pub styles: EpubStyles,
+}
+
+impl EpubContent {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        fn toc_bytes(entries: &[TocEntry], capacity: usize) -> Option<usize> {
+            entries.iter().try_fold(
+                capacity.checked_mul(std::mem::size_of::<TocEntry>())?,
+                |total, entry| {
+                    total
+                        .checked_add(entry.title.capacity())?
+                        .checked_add(entry.href.capacity())?
+                        .checked_add(toc_bytes(&entry.children, entry.children.capacity())?)
+                },
+            )
+        }
+
+        let metadata = [
+            &self.metadata.title,
+            &self.metadata.author,
+            &self.metadata.language,
+            &self.metadata.publisher,
+            &self.metadata.description,
+            &self.metadata.cover_image_id,
+        ]
+        .into_iter()
+        .flatten()
+        .try_fold(0_usize, |total, value| total.checked_add(value.capacity()))?;
+        let chapters = self.chapters.iter().try_fold(
+            self.chapters
+                .capacity()
+                .checked_mul(std::mem::size_of::<Chapter>())?,
+            |total, chapter| {
+                total
+                    .checked_add(chapter.title.as_ref().map_or(0, String::capacity))?
+                    .checked_add(chapter.path.capacity())?
+                    .checked_add(chapter.content.capacity())
+            },
+        )?;
+        let manifest = self.manifest.iter().try_fold(
+            self.manifest
+                .capacity()
+                .checked_mul(std::mem::size_of::<String>() + std::mem::size_of::<ManifestItem>())?,
+            |total, (id, item)| {
+                total
+                    .checked_add(id.capacity())?
+                    .checked_add(item.id.capacity())?
+                    .checked_add(item.href.capacity())?
+                    .checked_add(item.media_type.capacity())
+            },
+        )?;
+        let resources = self.resources.iter().try_fold(
+            self.resources.capacity().checked_mul(
+                std::mem::size_of::<CanonicalEpubPath>()
+                    + std::mem::size_of::<StoredEpubResource>(),
+            )?,
+            |total, (path, resource)| {
+                total
+                    .checked_add(path.as_str().len())?
+                    .checked_add(resource.media_type.capacity())?
+                    .checked_add(resource.bytes.capacity())
+            },
+        )?;
+        metadata
+            .checked_add(chapters)?
+            .checked_add(toc_bytes(&self.toc, self.toc.capacity())?)?
+            .checked_add(manifest)?
+            .checked_add(resources)?
+            .checked_add(self.styles.retained_byte_len()?)?
+            .checked_add(std::mem::size_of::<Self>())
+    }
 }

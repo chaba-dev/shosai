@@ -90,6 +90,7 @@ use-current-location = Use files in their current location
 use-current-location-description = Avoids duplicate storage, but books become unavailable if the files move or their drive is disconnected.
 change-storage-choice = Change storage choice
 add-selected-books = Add books
+cancel-adding-books-progress = Cancel adding books ({ $completed }/{ $total })
 back = Back
 books-import-partial = Books added or already present: { $added }. Files not imported: { $failed }. { $file }: { $error }
 books-import-failed = No books were added. Files not imported: { $failed }. { $file }: { $error }

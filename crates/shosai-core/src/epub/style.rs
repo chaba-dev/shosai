@@ -49,7 +49,7 @@ struct StylesheetImport {
 
 #[derive(Debug, Clone)]
 struct StylesheetSource {
-    body: String,
+    body: Box<str>,
     imports: Vec<StylesheetImport>,
     urls: HashMap<String, String>,
     base_path: String,
@@ -63,6 +63,44 @@ pub struct EpubStyles {
 }
 
 impl EpubStyles {
+    pub(crate) fn retained_byte_len(&self) -> Option<usize> {
+        self.sources.iter().try_fold(
+            self.sources.capacity().checked_mul(
+                std::mem::size_of::<CanonicalEpubPath>() + std::mem::size_of::<StylesheetSource>(),
+            )?,
+            |total, (path, source)| {
+                let imports = source.imports.iter().try_fold(
+                    source
+                        .imports
+                        .capacity()
+                        .checked_mul(std::mem::size_of::<StylesheetImport>())?,
+                    |total, import| {
+                        total
+                            .checked_add(import.href.capacity())?
+                            .checked_add(import.media.as_ref().map_or(0, String::capacity))
+                    },
+                )?;
+                let urls = source.urls.iter().try_fold(
+                    source.urls.capacity().checked_mul(
+                        std::mem::size_of::<String>() + std::mem::size_of::<String>(),
+                    )?,
+                    |total, (from, to)| {
+                        total
+                            .checked_add(from.capacity())?
+                            .checked_add(to.capacity())
+                    },
+                )?;
+                total
+                    .checked_add(path.as_str().len())?
+                    .checked_add(source.body.len())?
+                    .checked_add(source.base_path.capacity())?
+                    .checked_add(source.owner_path.as_ref().map_or(0, String::capacity))?
+                    .checked_add(imports)?
+                    .checked_add(urls)
+            },
+        )
+    }
+
     /// Retain UTF-8 stylesheets for document-scoped matching and cascade.
     pub fn parse<'a>(css_sources: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
         Self::parse_with_limits(css_sources, &EpubLimits::default()).unwrap_or_default()
@@ -72,29 +110,38 @@ impl EpubStyles {
         css_sources: impl IntoIterator<Item = (&'a str, &'a str)>,
         limits: &EpubLimits,
     ) -> Result<Self> {
-        let sources = css_sources
-            .into_iter()
-            .map(|(path, css)| -> Result<Option<_>> {
-                if css.len() as u64 > limits.max_css_resource_bytes {
-                    crate::resource_limit!(
-                        "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
-                        css.len(),
-                        limits.max_css_resource_bytes
-                    );
-                }
-                let Ok(path) = CanonicalEpubPath::new(path) else {
-                    return Ok(None);
-                };
-                let base_path = stylesheet_directory(path.as_str());
-                let Some(css) = parsed_stylesheet(css, base_path, Some(path.as_str())) else {
-                    return Ok(None);
-                };
-                Ok(Some((path, css)))
-            })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+        let mut sources = HashMap::new();
+        let mut source_bytes = 0_usize;
+        let mut retained_body_bytes = 0_usize;
+        for (path, css) in css_sources {
+            if css.len() as u64 > limits.max_css_resource_bytes {
+                crate::resource_limit!(
+                    "EPUB CSS resource exceeds byte limit: {path} ({} > {})",
+                    css.len(),
+                    limits.max_css_resource_bytes
+                );
+            }
+            source_bytes = source_bytes
+                .checked_add(css.len())
+                .context("EPUB aggregate CSS source size overflowed")?;
+            let Ok(path) = CanonicalEpubPath::new(path) else {
+                continue;
+            };
+            let base_path = stylesheet_directory(path.as_str());
+            let Some(css) = parsed_stylesheet(css, base_path, Some(path.as_str())) else {
+                continue;
+            };
+            retained_body_bytes = retained_body_bytes
+                .checked_add(css.body.len())
+                .context("EPUB retained stylesheet size overflowed")?;
+            let retained_body_limit = source_bytes
+                .checked_mul(3)
+                .context("EPUB retained stylesheet budget overflowed")?;
+            if retained_body_bytes > retained_body_limit {
+                crate::resource_limit!("EPUB parsed stylesheets exceed their source byte budget");
+            }
+            sources.insert(path, css);
+        }
         Ok(Self { sources })
     }
 
@@ -407,7 +454,7 @@ fn parsed_stylesheet(
         }
     }
     Some(StylesheetSource {
-        body: result.code,
+        body: result.code.into_boxed_str(),
         imports,
         urls,
         base_path: base_path.to_owned(),
@@ -436,7 +483,7 @@ fn resolve_css_url(
 
 fn rewrite_resource_urls(source: &StylesheetSource, limits: &EpubLimits) -> Result<String> {
     let mut rewritten = String::new();
-    let mut remainder = source.body.as_str();
+    let mut remainder = source.body.as_ref();
     while let Some(start) = remainder.find("url(\"") {
         append_selected_css(&mut rewritten, &remainder[..start], limits)?;
         let token = &remainder[start..];

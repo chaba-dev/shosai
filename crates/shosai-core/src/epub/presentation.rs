@@ -49,28 +49,33 @@ impl EpubPresentation {
         fonts: &super::font::EpubFontBook,
         resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
         limits: &EpubLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
-        let image_sizes = resources
-            .iter()
-            .filter_map(|(path, resource)| {
-                if let Ok(format) = image::guess_format(&resource.bytes) {
-                    let (width, height) =
-                        ImageReader::with_format(Cursor::new(&resource.bytes), format)
-                            .into_dimensions()
-                            .ok()?;
-                    Some((
-                        path.as_str(),
-                        (ImageSize { width, height }, ImageKind::Raster),
-                    ))
-                } else {
-                    svg_intrinsic_size(&resource.bytes)
-                        .map(|size| (path.as_str(), (size, ImageKind::Svg)))
-                }
-            })
-            .collect::<HashMap<_, _>>();
+        let check_cancelled = || -> Result<()> {
+            if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+                anyhow::bail!("import cancelled");
+            }
+            Ok(())
+        };
+        let mut image_sizes = HashMap::new();
+        for (path, resource) in resources {
+            check_cancelled()?;
+            let size = if let Ok(format) = image::guess_format(&resource.bytes) {
+                ImageReader::with_format(Cursor::new(&resource.bytes), format)
+                    .into_dimensions()
+                    .ok()
+                    .map(|(width, height)| (ImageSize { width, height }, ImageKind::Raster))
+            } else {
+                svg_intrinsic_size(&resource.bytes).map(|size| (size, ImageKind::Svg))
+            };
+            if let Some(size) = size {
+                image_sizes.insert(path.as_str(), size);
+            }
+        }
         let mut presentations = Vec::with_capacity(chapters.len());
         let mut total_units = 0_usize;
         for chapter in chapters.iter() {
+            check_cancelled()?;
             let mut parsed = super::render::parse_chapter_content_at_path_with_limits(
                 &chapter.content,
                 &chapter.path,
@@ -93,6 +98,7 @@ impl EpubPresentation {
             }
             populate_image_sizes(&mut parsed.nodes, &image_sizes);
             let search_text = crate::search::extract_text_from_nodes(&parsed.nodes);
+            check_cancelled()?;
             presentations.push(EpubChapterPresentation {
                 nodes: parsed.nodes,
                 search_text,

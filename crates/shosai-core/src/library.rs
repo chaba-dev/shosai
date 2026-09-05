@@ -33,6 +33,14 @@ const MAX_IMPORT_TRAVERSAL_ENTRIES: usize = 50_000;
 const MAX_LIBRARY_PAGE_SIZE: u32 = 500;
 const MAX_LIBRARY_SNAPSHOT_SIZE: usize = 10_000;
 const MAX_LIBRARY_QUERY_BYTES: usize = 4 * 1024;
+const MAX_IMPORT_PATH_BYTES: usize = 16 * 1024;
+const MAX_IMPORT_METADATA_BYTES: usize = 4 * 1024;
+const MAX_IMPORT_COVER_BYTES: usize = 512 * 1024;
+const MAX_IMPORT_ERROR_BYTES: usize = 4 * 1024;
+const MAX_IMPORT_DETAILS: usize = 256;
+const MAX_IMPORT_FAILURE_DETAILS: usize = 32;
+const MAX_IMPORT_DETAIL_BYTES: usize = 512 * 1024;
+const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
@@ -65,11 +73,15 @@ async fn acquire_import_work(
     cancellation: Option<&ImportCancellation>,
 ) -> Result<tokio::sync::OwnedSemaphorePermit> {
     if let Some(cancellation) = cancellation {
+        if cancellation.is_cancelled() {
+            bail!("import cancelled");
+        }
         tokio::select! {
+            biased;
+            () = cancellation.cancelled() => bail!("import cancelled"),
             permit = import_work_admission().clone().acquire_owned() => {
                 permit.context("import work admission closed")
             }
-            () = cancellation.cancelled() => bail!("import cancelled"),
         }
     } else {
         import_work_admission()
@@ -83,6 +95,23 @@ async fn acquire_import_work(
 fn managed_storage_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn acquire_managed_storage(
+    cancellation: Option<&ImportCancellation>,
+) -> Result<tokio::sync::MutexGuard<'static, ()>> {
+    if let Some(cancellation) = cancellation {
+        if cancellation.is_cancelled() {
+            bail!("import cancelled");
+        }
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => bail!("import cancelled"),
+            guard = managed_storage_lock().lock() => Ok(guard),
+        }
+    } else {
+        Ok(managed_storage_lock().lock().await)
+    }
 }
 
 /// Supported book format.
@@ -194,8 +223,36 @@ pub struct BookPage {
 
 #[derive(Debug, Clone)]
 pub struct ImportFailure {
-    pub path: PathBuf,
-    pub error: String,
+    path: PathBuf,
+    error: String,
+}
+
+impl ImportFailure {
+    pub fn new(path: PathBuf, error: impl Into<String>) -> Self {
+        Self {
+            path: compact_path(path),
+            error: truncate_utf8(error.into(), MAX_IMPORT_ERROR_BYTES),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn error(&self) -> &str {
+        &self.error
+    }
+
+    fn compacted(self) -> Self {
+        Self {
+            path: compact_path(self.path),
+            error: truncate_utf8(self.error, MAX_IMPORT_ERROR_BYTES),
+        }
+    }
+
+    fn retained_byte_len(&self) -> usize {
+        self.path.capacity().saturating_add(self.error.capacity())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,20 +367,183 @@ impl ImportDiscoveryProgress {
     }
 }
 
+/// Minimal successful-import detail retained by batch reports and frontends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedBook {
+    book_id: i64,
+    source_path: PathBuf,
+    library_path: PathBuf,
+    content_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportCompletion {
+    Cancelled,
+    Completed(Result<ImportedBook, ImportFailure>),
+}
+
+impl ImportedBook {
+    fn from_book(source_path: PathBuf, book: &Book) -> Self {
+        Self {
+            book_id: book.id,
+            source_path: compact_path(source_path),
+            library_path: compact_path(path_from_key(&book.file_path)),
+            content_hash: compact_string(book.content_hash.as_deref().unwrap_or_default()),
+        }
+    }
+
+    pub fn new(
+        book_id: i64,
+        source_path: PathBuf,
+        library_path: PathBuf,
+        content_hash: String,
+    ) -> Option<Self> {
+        if source_path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES
+            || library_path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES
+            || content_hash.len() > 128
+        {
+            return None;
+        }
+        Some(Self {
+            book_id,
+            source_path: compact_path(source_path),
+            library_path: compact_path(library_path),
+            content_hash: compact_string(&content_hash),
+        })
+    }
+
+    pub fn book_id(&self) -> i64 {
+        self.book_id
+    }
+
+    pub fn source_path(&self) -> &Path {
+        &self.source_path
+    }
+
+    pub fn library_path(&self) -> &Path {
+        &self.library_path
+    }
+
+    pub fn content_hash(&self) -> &str {
+        &self.content_hash
+    }
+
+    fn compacted(self) -> Self {
+        Self {
+            book_id: self.book_id,
+            source_path: compact_path(self.source_path),
+            library_path: compact_path(self.library_path),
+            content_hash: compact_string(&self.content_hash),
+        }
+    }
+
+    fn retained_byte_len(&self) -> usize {
+        self.source_path
+            .capacity()
+            .saturating_add(self.library_path.capacity())
+            .saturating_add(self.content_hash.capacity())
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ImportReport {
-    pub books: Vec<Book>,
-    pub failures: Vec<ImportFailure>,
+    pub succeeded: usize,
+    pub failed: usize,
+    imported: Vec<ImportedBook>,
+    failures: Vec<ImportFailure>,
+    imported_detail_bytes: usize,
+    failure_detail_bytes: usize,
 }
 
 impl ImportReport {
+    pub fn imported(&self) -> &[ImportedBook] {
+        &self.imported
+    }
+
+    pub fn failures(&self) -> &[ImportFailure] {
+        &self.failures
+    }
+
     fn record(&mut self, path: PathBuf, result: Result<Book>) {
         match result {
-            Ok(book) => self.books.push(book),
-            Err(error) => self.failures.push(ImportFailure {
-                path,
-                error: format!("{error:#}"),
-            }),
+            Ok(book) => self.record_success(ImportedBook::from_book(path, &book)),
+            Err(error) => self.record_failure(ImportFailure::new(path, format!("{error:#}"))),
+        }
+    }
+
+    pub fn from_imported(imported: ImportedBook) -> Self {
+        let mut report = Self::default();
+        report.record_success(imported);
+        report
+    }
+
+    pub fn from_failure(failure: ImportFailure) -> Self {
+        let mut report = Self::default();
+        report.record_failure(failure);
+        report
+    }
+
+    fn record_success(&mut self, imported: ImportedBook) {
+        self.succeeded = self.succeeded.saturating_add(1);
+        let imported = imported.compacted();
+        let bytes = imported.retained_byte_len();
+        if self.imported.len() < MAX_IMPORT_DETAILS
+            && self
+                .imported_detail_bytes
+                .checked_add(bytes)
+                .is_some_and(|total| total <= MAX_IMPORT_DETAIL_BYTES)
+        {
+            self.imported_detail_bytes += bytes;
+            self.imported.push(imported);
+        }
+    }
+
+    fn record_failure(&mut self, mut failure: ImportFailure) {
+        self.failed = self.failed.saturating_add(1);
+        if failure.path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES {
+            failure.path = PathBuf::new();
+        }
+        let failure = failure.compacted();
+        let bytes = failure.retained_byte_len();
+        if self.failures.len() < MAX_IMPORT_FAILURE_DETAILS
+            && self
+                .failure_detail_bytes
+                .checked_add(bytes)
+                .is_some_and(|total| total <= MAX_IMPORT_FAILURE_DETAIL_BYTES)
+        {
+            self.failure_detail_bytes += bytes;
+            self.failures.push(failure);
+        }
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.succeeded = self.succeeded.saturating_add(other.succeeded);
+        self.failed = self.failed.saturating_add(other.failed);
+        for imported in other.imported {
+            let bytes = imported.retained_byte_len();
+            if self.imported.len() >= MAX_IMPORT_DETAILS
+                || self
+                    .imported_detail_bytes
+                    .checked_add(bytes)
+                    .is_none_or(|total| total > MAX_IMPORT_DETAIL_BYTES)
+            {
+                break;
+            }
+            self.imported_detail_bytes += bytes;
+            self.imported.push(imported);
+        }
+        for failure in other.failures {
+            let bytes = failure.retained_byte_len();
+            if self.failures.len() >= MAX_IMPORT_FAILURE_DETAILS
+                || self
+                    .failure_detail_bytes
+                    .checked_add(bytes)
+                    .is_none_or(|total| total > MAX_IMPORT_FAILURE_DETAIL_BYTES)
+            {
+                break;
+            }
+            self.failure_detail_bytes += bytes;
+            self.failures.push(failure);
         }
     }
 }
@@ -465,8 +685,10 @@ impl Library {
         .await
         .context("failed to summarize managed books")?;
         Ok(ManagedStorageSummary {
-            book_count: row.get::<i64, _>("book_count") as u64,
-            total_bytes: row.get::<i64, _>("total_bytes") as u64,
+            book_count: u64::try_from(row.try_get::<i64, _>("book_count")?)
+                .context("managed book count is outside the supported range")?,
+            total_bytes: u64::try_from(row.try_get::<i64, _>("total_bytes")?)
+                .context("managed byte count is outside the supported range")?,
         })
     }
 
@@ -502,9 +724,9 @@ impl Library {
         let mut destination_hashes = HashMap::with_capacity(rows.len());
 
         for row in rows {
-            let book_id = row.get::<i64, _>("id");
-            let old_path = path_from_key(&row.get::<String, _>("file_path"));
-            let expected_hash = row.get::<Option<String>, _>("content_hash");
+            let book_id = row.try_get::<i64, _>("id")?;
+            let old_path = path_from_key(&row.try_get::<String, _>("file_path")?);
+            let expected_hash = row.try_get::<Option<String>, _>("content_hash")?;
             let extension = old_path
                 .extension()
                 .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -663,16 +885,22 @@ impl Library {
     /// Extracts metadata and cover image from the file. If the file
     /// already exists in the library, returns its existing book entry.
     pub async fn import_file(&self, path: &Path) -> Result<Book> {
-        self.import_file_with_hash(path, None).await
+        let imported = self.import_file_with_hash(path, None, None, None).await?;
+        self.get(imported.book_id())
+            .await?
+            .context("referenced book not found after import")
     }
 
     async fn import_file_with_hash(
         &self,
         path: &Path,
         expected_hash: Option<&str>,
-    ) -> Result<Book> {
+        cancellation: Option<&ImportCancellation>,
+        commit_started: Option<&AtomicBool>,
+    ) -> Result<ImportedBook> {
         // Normalize paths so lookups and progress updates stay consistent.
         let path = canonical_path(path);
+        validate_import_path(&path)?;
         let path_str = canonical_path_key(&path);
 
         let ext = path
@@ -681,31 +909,44 @@ impl Library {
             .unwrap_or_default();
         let format = BookFormat::from_extension(&ext)
             .with_context(|| format!("unsupported format: .{ext}"))?;
-        let _work_permit = acquire_import_work(None).await?;
+        let _work_permit = acquire_import_work(cancellation).await?;
         let stage_source = path.clone();
         let stage_dir = self.managed_dir.clone();
+        let stage_cancellation = cancellation.cloned();
         let staged = tokio::task::spawn_blocking(move || {
-            stage_managed_file(&stage_source, &stage_dir, format.max_input_bytes(), None)
+            stage_managed_file(
+                &stage_source,
+                &stage_dir,
+                format.max_input_bytes(),
+                stage_cancellation.as_ref(),
+            )
         })
         .await
         .context("referenced book staging task failed")??;
         let inspection_path = staged.path.clone();
         let title_path = path.clone();
         let expected_hash = expected_hash.map(str::to_owned);
+        let inspection_cancellation = cancellation.cloned();
         let inspection = tokio::task::spawn_blocking(move || {
-            inspect_book(
+            inspect_book_cancellable(
                 &inspection_path,
                 &title_path,
                 format,
                 expected_hash.as_deref(),
                 None,
+                inspection_cancellation.as_ref(),
             )
         })
         .await
         .context("metadata extraction task failed")??;
         // Serialize final source verification and identity reconciliation with managed removal,
         // relinking, and relocation. The source may itself be a currently managed path.
-        let _storage_guard = managed_storage_lock().lock().await;
+        // Acquiring this lock is the commit point. From here the source verification and
+        // database mutation run to a definitive result even if cancellation arrives.
+        let _storage_guard = acquire_managed_storage(cancellation).await?;
+        if let Some(commit_started) = commit_started {
+            commit_started.store(true, Ordering::Release);
+        }
         let source_path = path.clone();
         let source_file = tokio::task::spawn_blocking(move || {
             fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
@@ -727,10 +968,12 @@ impl Library {
             verify_fingerprinted_path(&path, &source_file, "import")?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
             transaction.commit().await?;
-            return self
-                .get(book.id)
-                .await?
-                .context("book not found after identity repair");
+            return Ok(imported_book_from_commit(
+                book.id,
+                &path_str,
+                &path_str,
+                &source_file.fingerprint.hash,
+            ));
         }
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -759,9 +1002,12 @@ impl Library {
             .context("book not found after insert")?;
         reconcile_identity(&mut transaction, book_id, &path_str, &path_str).await?;
         transaction.commit().await?;
-        self.get(book_id)
-            .await?
-            .context("book not found after insert")
+        Ok(imported_book_from_commit(
+            book_id,
+            &path_str,
+            &path_str,
+            &source_file.fingerprint.hash,
+        ))
     }
 
     /// Copy a book into Shosai's private data directory and add it to the library.
@@ -812,6 +1058,7 @@ impl Library {
     ) -> Result<PreparedManagedImport> {
         let preparation_permit = acquire_import_work(cancellation).await?;
         let source = canonical_path(source);
+        validate_import_path(&source)?;
         let source_str = canonical_path_key(&source);
         let ext = source
             .extension()
@@ -882,7 +1129,47 @@ impl Library {
         &self,
         prepared: &PreparedManagedImport,
     ) -> Result<Book> {
-        let _storage_guard = managed_storage_lock().lock().await;
+        let imported = self
+            .commit_prepared_managed_file_inner(prepared, None, None)
+            .await?;
+        self.get(imported.book_id())
+            .await?
+            .context("managed book not found after commit")
+    }
+
+    pub async fn commit_prepared_managed_file_cancellable(
+        &self,
+        prepared: &PreparedManagedImport,
+        cancellation: ImportCancellation,
+    ) -> ImportCompletion {
+        let commit_started = AtomicBool::new(false);
+        let result = self
+            .commit_prepared_managed_file_inner(
+                prepared,
+                Some(&cancellation),
+                Some(&commit_started),
+            )
+            .await;
+        import_completion(
+            path_from_key(&prepared.source_str),
+            result,
+            &cancellation,
+            commit_started.load(Ordering::Acquire),
+        )
+    }
+
+    async fn commit_prepared_managed_file_inner(
+        &self,
+        prepared: &PreparedManagedImport,
+        cancellation: Option<&ImportCancellation>,
+        commit_started: Option<&AtomicBool>,
+    ) -> Result<ImportedBook> {
+        // Acquiring this lock is the commit point. Publication and the database mutation must
+        // finish definitively after this point, even if cancellation arrives.
+        let _storage_guard = acquire_managed_storage(cancellation).await?;
+        if let Some(commit_started) = commit_started {
+            commit_started.store(true, Ordering::Release);
+        }
         let PreparedManagedImport {
             source_str,
             extension,
@@ -895,6 +1182,7 @@ impl Library {
         let destination = self
             .managed_dir
             .join(format!("{}.{extension}", inspection.fingerprint.hash));
+        validate_import_path(&destination)?;
         let destination_existed = destination.exists();
         let publish_stage = staged.path.clone();
         let copy_destination = destination.clone();
@@ -915,6 +1203,7 @@ impl Library {
         if let Some(existing) = &existing_hash
             && existing.storage_kind == StorageKind::Managed
         {
+            validate_import_path(&path_from_key(&existing.file_path))?;
             // Repair identity attachment if an earlier attempt committed the book row but was
             // interrupted before reconciliation (or if this source is a newly seen alias).
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -926,13 +1215,14 @@ impl Library {
             )
             .await?;
             transaction.commit().await?;
-            let book = self
-                .get(existing.id)
-                .await?
-                .context("managed book not found after identity repair")?;
             publication.keep();
             prepared.release_admission();
-            return Ok(book);
+            return Ok(imported_book_from_commit(
+                existing.id,
+                source_str,
+                &existing.file_path,
+                &inspection.fingerprint.hash,
+            ));
         }
 
         if let Some(existing) = self.get_by_path(source_str).await?.or(existing_hash) {
@@ -948,13 +1238,14 @@ impl Library {
                 },
             )
             .await?;
-            let book = self
-                .get(existing.id)
-                .await?
-                .context("managed book not found after update")?;
             publication.keep();
             prepared.release_admission();
-            return Ok(book);
+            return Ok(imported_book_from_commit(
+                existing.id,
+                source_str,
+                &destination_str,
+                &inspection.fingerprint.hash,
+            ));
         }
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -986,13 +1277,14 @@ impl Library {
         .context("managed book not found after insert")?;
         reconcile_identity(&mut transaction, book_id, source_str, &destination_str).await?;
         transaction.commit().await?;
-        let book = self
-            .get(book_id)
-            .await?
-            .context("managed book not found after insert")?;
         publication.keep();
         prepared.release_admission();
-        Ok(book)
+        Ok(imported_book_from_commit(
+            book_id,
+            source_str,
+            &destination_str,
+            &inspection.fingerprint.hash,
+        ))
     }
 
     /// Relink a missing referenced book while preserving its stable identity and reader data.
@@ -1076,6 +1368,37 @@ impl Library {
         self.add_discovered_files(candidates, false).await
     }
 
+    /// Link one reviewed candidate, checking cancellation through preparation.
+    pub async fn link_discovered_file_cancellable(
+        &self,
+        candidate: ImportCandidate,
+        cancellation: ImportCancellation,
+    ) -> ImportCompletion {
+        if let Err(error) = validate_import_candidate(&candidate) {
+            return ImportCompletion::Completed(Err(ImportFailure::new(
+                candidate.path,
+                format!("{error:#}"),
+            )));
+        }
+        let content_hash = candidate.content_hash;
+        let source_path = candidate.path;
+        let commit_started = AtomicBool::new(false);
+        let result = self
+            .import_file_with_hash(
+                &source_path,
+                Some(&content_hash),
+                Some(&cancellation),
+                Some(&commit_started),
+            )
+            .await;
+        import_completion(
+            source_path,
+            result,
+            &cancellation,
+            commit_started.load(Ordering::Acquire),
+        )
+    }
+
     async fn add_discovered_files(
         &self,
         candidates: &[ImportCandidate],
@@ -1087,22 +1410,34 @@ impl Library {
                 report.record(candidate.path.clone(), Err(error));
                 continue;
             }
-            let result = if managed {
+            let result: Result<ImportedBook> = if managed {
                 self.import_managed_file_with_hash(&candidate.path, Some(&candidate.content_hash))
                     .await
+                    .map(|book| ImportedBook::from_book(candidate.path.clone(), &book))
             } else {
-                self.import_file_with_hash(&candidate.path, Some(&candidate.content_hash))
-                    .await
+                self.import_file_with_hash(
+                    &candidate.path,
+                    Some(&candidate.content_hash),
+                    None,
+                    None,
+                )
+                .await
             };
-            report.record(candidate.path.clone(), result);
+            match result {
+                Ok(imported) => report.record_success(imported),
+                Err(error) => report.record_failure(ImportFailure::new(
+                    candidate.path.clone(),
+                    format!("{error:#}"),
+                )),
+            }
         }
         if candidates.len() > MAX_IMPORT_DISCOVERY_RESULTS {
-            report.failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!(
+            report.record_failure(ImportFailure::new(
+                PathBuf::new(),
+                format!(
                     "too many discovered import candidates (maximum {MAX_IMPORT_DISCOVERY_RESULTS})"
                 ),
-            });
+            ));
         }
         report
     }
@@ -1184,10 +1519,10 @@ impl Library {
     ) -> ImportDiscovery {
         if roots.len() > MAX_IMPORT_ROOTS {
             return ImportDiscovery {
-                failures: vec![ImportFailure {
-                    path: PathBuf::new(),
-                    error: format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
-                }],
+                failures: vec![ImportFailure::new(
+                    PathBuf::new(),
+                    format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
+                )],
                 ..ImportDiscovery::default()
             };
         }
@@ -1237,12 +1572,12 @@ impl Library {
                     Some(_item) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure {
-                            path: PathBuf::new(),
-                            error: format!(
+                        discovery.failures.push(ImportFailure::new(
+                            PathBuf::new(),
+                            format!(
                                 "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
                             ),
-                        });
+                        ));
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1266,12 +1601,12 @@ impl Library {
                     Some(_) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure {
-                            path: PathBuf::new(),
-                            error: format!(
+                        discovery.failures.push(ImportFailure::new(
+                            PathBuf::new(),
+                            format!(
                                 "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
                             ),
-                        });
+                        ));
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1311,10 +1646,10 @@ impl Library {
             );
         }
         if let Err(error) = scan_task.await {
-            discovery.failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!("book discovery task failed: {error}"),
-            });
+            discovery.failures.push(ImportFailure::new(
+                PathBuf::new(),
+                format!("book discovery task failed: {error}"),
+            ));
         }
 
         fingerprinted.sort_by(|left, right| left.0.path.cmp(&right.0.path));
@@ -1328,10 +1663,9 @@ impl Library {
             let fingerprint = match fingerprint {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
-                    discovery.failures.push(ImportFailure {
-                        path: candidate.path,
-                        error,
-                    });
+                    discovery
+                        .failures
+                        .push(ImportFailure::new(candidate.path, error));
                     progress.completed_file();
                     continue;
                 }
@@ -1345,10 +1679,10 @@ impl Library {
             let existing = match existing {
                 Ok(existing) => existing,
                 Err(error) => {
-                    discovery.failures.push(ImportFailure {
-                        path: candidate.path,
-                        error: format!("failed to check the library: {error:#}"),
-                    });
+                    discovery.failures.push(ImportFailure::new(
+                        candidate.path,
+                        format!("failed to check the library: {error:#}"),
+                    ));
                     progress.completed_file();
                     continue;
                 }
@@ -1405,10 +1739,10 @@ impl Library {
             report.record(path.clone(), result);
         }
         if paths.len() > MAX_IMPORT_ROOTS {
-            report.failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
-            });
+            report.record_failure(ImportFailure::new(
+                PathBuf::new(),
+                format!("too many import roots (maximum {MAX_IMPORT_ROOTS})"),
+            ));
         }
         report
     }
@@ -1428,7 +1762,9 @@ impl Library {
         let mut report = self
             .add_discovered_files(&discovery.candidates, managed)
             .await;
-        report.failures.extend(discovery.failures);
+        for failure in discovery.failures {
+            report.record_failure(failure);
+        }
         report
     }
 
@@ -1513,7 +1849,7 @@ impl Library {
             .fetch_all(&self.pool)
             .await
             .context("failed to load library page")?;
-        let mut books: Vec<_> = rows.iter().filter_map(row_to_book).collect();
+        let mut books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
         let has_more = books.len() > limit as usize;
         books.truncate(limit as usize);
 
@@ -1575,11 +1911,8 @@ impl Library {
                 .fetch_all(&self.pool)
                 .await
                 .context("failed to load books from library snapshot")?;
-            books_by_id.extend(
-                rows.iter()
-                    .filter_map(row_to_book)
-                    .map(|book| (book.id, book)),
-            );
+            let books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
+            books_by_id.extend(books.into_iter().map(|book| (book.id, book)));
         }
 
         Ok(ids.iter().filter_map(|id| books_by_id.remove(id)).collect())
@@ -1654,7 +1987,7 @@ impl Library {
         .fetch_optional(&self.pool)
         .await
         .context("failed to query book by id")?;
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     /// Get a book by file path.
@@ -1669,7 +2002,7 @@ impl Library {
         .await
         .context("failed to query book by path")?;
 
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     async fn get_by_hash(&self, content_hash: &str) -> Result<Option<Book>> {
@@ -1683,7 +2016,7 @@ impl Library {
         .fetch_optional(&self.pool)
         .await
         .context("failed to query book by fingerprint")?;
-        Ok(row.as_ref().and_then(row_to_book))
+        row.as_ref().map(row_to_book).transpose()
     }
 
     async fn update_location(
@@ -1732,6 +2065,23 @@ impl Library {
         path: &Path,
         plan: OpenDocumentPlan,
     ) -> Result<(OpenDocument, String)> {
+        self.open_book_document_with_plan_cancellable(
+            book_id,
+            path,
+            plan,
+            crate::bridge::Cancellation::new(),
+        )
+        .await
+    }
+
+    #[doc(hidden)]
+    pub async fn open_book_document_with_plan_cancellable(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+        cancellation: crate::bridge::Cancellation,
+    ) -> Result<(OpenDocument, String)> {
         let book = self
             .get(book_id)
             .await?
@@ -1748,12 +2098,20 @@ impl Library {
             bail!("book format no longer matches the library identity");
         }
         tokio::task::spawn_blocking(move || {
-            let (format, data, title_hint) = plan.read_bytes()?;
-            let actual_hash = format!("{:x}", Sha256::digest(&data));
+            let is_cancelled = || cancellation.is_cancelled();
+            let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
+            let mut hasher = Sha256::new();
+            for chunk in admitted.data.chunks(64 * 1024) {
+                if cancellation.is_cancelled() {
+                    bail!("document open cancelled");
+                }
+                hasher.update(chunk);
+            }
+            let actual_hash = format!("{:x}", hasher.finalize());
             if actual_hash != expected_hash {
                 bail!("book contents no longer match the library identity");
             }
-            let document = OpenDocument::from_bytes(format, data, title_hint)?;
+            let document = OpenDocument::from_admitted_bytes_cancellable(admitted, &is_cancelled)?;
             Ok((document, actual_hash))
         })
         .await
@@ -1826,6 +2184,16 @@ async fn reconcile_identity(
     .await
     .context("failed to remove reading state aliases")?;
     if let Some(reading) = reading {
+        let page = reading.try_get::<i64, _>("page")?;
+        let location_offset = reading.try_get::<Option<i64>, _>("location_offset")?;
+        let zoom = reading.try_get::<f64, _>("zoom")?;
+        if page < 0
+            || location_offset.is_some_and(|offset| offset < 0)
+            || !zoom.is_finite()
+            || zoom <= 0.0
+        {
+            bail!("stored reading state is outside the supported range");
+        }
         sqlx::query(
             "INSERT INTO reading_state
                 (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
@@ -1834,11 +2202,11 @@ async fn reconcile_identity(
         .bind(new_path)
         .bind(&content_hash)
         .bind(book_id)
-        .bind(reading.get::<i64, _>("page"))
-        .bind(reading.get::<Option<i64>, _>("location_offset"))
-        .bind(reading.get::<f64, _>("zoom"))
-        .bind(reading.get::<String, _>("updated_at"))
-        .bind(reading.get::<i64, _>("revision"))
+        .bind(page)
+        .bind(location_offset)
+        .bind(zoom)
+        .bind(reading.try_get::<String, _>("updated_at")?)
+        .bind(reading.try_get::<i64, _>("revision")?)
         .execute(&mut **transaction)
         .await
         .context("failed to merge reading state aliases")?;
@@ -1941,28 +2309,31 @@ fn push_library_filters<'a>(
     }
 }
 
-fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Option<Book> {
-    let format_str: String = row.try_get("format").ok()?;
-    let format = BookFormat::from_db(&format_str)?;
-    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind").ok()?)?;
+fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Result<Book> {
+    let format_str: String = row.try_get("format")?;
+    let format = BookFormat::from_db(&format_str).context("stored book format is invalid")?;
+    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind")?)
+        .context("stored book storage kind is invalid")?;
+    let file_size = row
+        .try_get::<Option<i64>, _>("file_size")?
+        .map(u64::try_from)
+        .transpose()
+        .context("stored book file size is outside the supported range")?;
 
-    Some(Book {
-        id: row.try_get("id").ok()?,
-        title: row.try_get("title").ok()?,
-        author: row.try_get("author").ok()?,
+    Ok(Book {
+        id: row.try_get("id")?,
+        title: row.try_get("title")?,
+        author: row.try_get("author")?,
         format,
-        file_path: row.try_get("file_path").ok()?,
+        file_path: row.try_get("file_path")?,
         storage_kind,
-        original_path: row.try_get("original_path").ok()?,
-        content_hash: row.try_get("content_hash").ok()?,
-        file_size: row
-            .try_get::<Option<i64>, _>("file_size")
-            .ok()?
-            .map(|size| size as u64),
-        cover: row.try_get("cover_blob").ok()?,
-        progress: row.try_get("progress").ok()?,
-        date_added: row.try_get("date_added").ok()?,
-        last_read: row.try_get("last_read").ok()?,
+        original_path: row.try_get("original_path")?,
+        content_hash: row.try_get("content_hash")?,
+        file_size,
+        cover: row.try_get("cover_blob")?,
+        progress: row.try_get("progress")?,
+        date_added: row.try_get("date_added")?,
+        last_read: row.try_get("last_read")?,
     })
 }
 
@@ -1982,29 +2353,14 @@ fn extract_metadata_and_cover(
     path: &Path,
     title_path: &Path,
     format: BookFormat,
+    cancellation: Option<&ImportCancellation>,
 ) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
+    check_import_cancelled(cancellation)?;
     match format {
-        BookFormat::Pdf => extract_pdf_metadata(path, title_path),
-        BookFormat::Epub => extract_epub_metadata(path, title_path),
-        BookFormat::Cbz => extract_cbz_metadata(path, title_path),
+        BookFormat::Pdf => extract_pdf_metadata(path, title_path, cancellation),
+        BookFormat::Epub => extract_epub_metadata(path, title_path, cancellation),
+        BookFormat::Cbz => extract_cbz_metadata(path, title_path, cancellation),
     }
-}
-
-fn inspect_book(
-    path: &Path,
-    title_path: &Path,
-    format: BookFormat,
-    expected_hash: Option<&str>,
-    initial_fingerprint: Option<FileFingerprint>,
-) -> Result<BookInspection> {
-    inspect_book_cancellable(
-        path,
-        title_path,
-        format,
-        expected_hash,
-        initial_fingerprint,
-        None,
-    )
 }
 
 fn inspect_book_cancellable(
@@ -2020,7 +2376,7 @@ fn inspect_book_cancellable(
         title_path,
         expected_hash,
         initial_fingerprint,
-        || extract_metadata_and_cover(path, title_path, format),
+        || extract_metadata_and_cover(path, title_path, format, cancellation),
         |path| file_fingerprint_cancellable(path, cancellation),
     )
 }
@@ -2044,6 +2400,19 @@ fn inspect_book_with(
         bail!("file changed after review: {}", title_path.display());
     }
     let (title, author, cover) = extract()?;
+    if title.len() > MAX_IMPORT_METADATA_BYTES
+        || author
+            .as_ref()
+            .is_some_and(|author| author.len() > MAX_IMPORT_METADATA_BYTES)
+    {
+        bail!("book title or author exceeds import metadata byte limits");
+    }
+    if cover
+        .as_ref()
+        .is_some_and(|cover| cover.len() > MAX_IMPORT_COVER_BYTES)
+    {
+        bail!("book cover exceeds import retained byte limit");
+    }
     let fingerprint = fingerprint(path)?;
     if before.as_ref().is_some_and(|before| before != &fingerprint) {
         bail!("file changed after review: {}", title_path.display());
@@ -2278,10 +2647,10 @@ fn collect_fingerprint_result(
         Err(error) => {
             progress.hashed_file();
             progress.completed_file();
-            failures.push(ImportFailure {
-                path: PathBuf::new(),
-                error: format!("book fingerprint task failed: {error}"),
-            });
+            failures.push(ImportFailure::new(
+                PathBuf::new(),
+                format!("book fingerprint task failed: {error}"),
+            ));
         }
     }
 }
@@ -2307,12 +2676,12 @@ fn scan_import_candidates(
         }
         traversal_entries += 1;
         if traversal_entries > MAX_IMPORT_TRAVERSAL_ENTRIES {
-            let _ = sender.blocking_send(ScannedImport::Failure(ImportFailure {
-                path: PathBuf::new(),
-                error: format!(
+            let _ = sender.blocking_send(ScannedImport::Failure(ImportFailure::new(
+                PathBuf::new(),
+                format!(
                     "book discovery stopped after {MAX_IMPORT_TRAVERSAL_ENTRIES} filesystem entries"
                 ),
-            }));
+            )));
             break;
         }
         let original_path = match cursor {
@@ -2326,13 +2695,10 @@ fn scan_import_candidates(
                     Some(Err(error)) => {
                         pending.push(ScanCursor::Directory(path.clone(), entries));
                         if sender
-                            .blocking_send(ScannedImport::Failure(ImportFailure {
-                                path: path.clone(),
-                                error: format!(
-                                    "failed to read an entry in {}: {error}",
-                                    path.display()
-                                ),
-                            }))
+                            .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                                path.clone(),
+                                format!("failed to read an entry in {}: {error}", path.display()),
+                            )))
                             .is_err()
                         {
                             break;
@@ -2353,13 +2719,10 @@ fn scan_import_candidates(
                     .unwrap_or_default();
                 if (!recursive || BookFormat::from_extension(&extension).is_some())
                     && sender
-                        .blocking_send(ScannedImport::Failure(ImportFailure {
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
                             path,
-                            error: format!(
-                                "failed to inspect {}: {error}",
-                                original_path.display()
-                            ),
-                        }))
+                            format!("failed to inspect {}: {error}", original_path.display()),
+                        )))
                         .is_err()
                 {
                     break;
@@ -2375,10 +2738,10 @@ fn scan_import_candidates(
                 Ok(entries) => pending.push(ScanCursor::Directory(path, entries)),
                 Err(error) => {
                     if sender
-                        .blocking_send(ScannedImport::Failure(ImportFailure {
-                            path: path.clone(),
-                            error: format!("failed to read directory {}: {error}", path.display()),
-                        }))
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                            path.clone(),
+                            format!("failed to read directory {}: {error}", path.display()),
+                        )))
                         .is_err()
                     {
                         break;
@@ -2398,10 +2761,10 @@ fn scan_import_candidates(
         let Some(format) = BookFormat::from_extension(&extension) else {
             if !recursive
                 && sender
-                    .blocking_send(ScannedImport::Failure(ImportFailure {
+                    .blocking_send(ScannedImport::Failure(ImportFailure::new(
                         path,
-                        error: format!("unsupported format: .{extension}"),
-                    }))
+                        format!("unsupported format: .{extension}"),
+                    )))
                     .is_err()
             {
                 break;
@@ -2412,14 +2775,14 @@ fn scan_import_candidates(
         if metadata.len() > format.max_input_bytes() {
             progress.completed_file();
             if sender
-                .blocking_send(ScannedImport::Failure(ImportFailure {
+                .blocking_send(ScannedImport::Failure(ImportFailure::new(
                     path,
-                    error: format!(
+                    format!(
                         "{} input is larger than {} bytes",
                         format,
                         format.max_input_bytes()
                     ),
-                }))
+                )))
                 .is_err()
             {
                 break;
@@ -2442,12 +2805,10 @@ fn scan_import_candidates(
 
 /// Reject caller-supplied discovery DTOs that could bypass discovery bounds.
 fn validate_import_candidate(candidate: &ImportCandidate) -> Result<()> {
-    const MAX_IMPORT_TEXT_BYTES: usize = 4 * 1024;
-    const MAX_IMPORT_PATH_BYTES: usize = 16 * 1024;
     const MAX_IMPORT_HASH_BYTES: usize = 128;
 
-    if candidate.title.len() > MAX_IMPORT_TEXT_BYTES
-        || candidate.group_key.len() > MAX_IMPORT_TEXT_BYTES
+    if candidate.title.len() > MAX_IMPORT_METADATA_BYTES
+        || candidate.group_key.len() > MAX_IMPORT_METADATA_BYTES
         || candidate.content_hash.len() > MAX_IMPORT_HASH_BYTES
         || candidate.path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES
     {
@@ -2475,7 +2836,9 @@ fn validate_import_candidate(candidate: &ImportCandidate) -> Result<()> {
     }
     if let Some(duplicate) = &candidate.duplicate {
         match duplicate {
-            ImportDuplicate::ExistingBook { title, .. } if title.len() > MAX_IMPORT_TEXT_BYTES => {
+            ImportDuplicate::ExistingBook { title, .. }
+                if title.len() > MAX_IMPORT_METADATA_BYTES =>
+            {
                 bail!("import candidate duplicate metadata exceeds byte limits");
             }
             ImportDuplicate::SelectedFile { path }
@@ -2487,6 +2850,65 @@ fn validate_import_candidate(candidate: &ImportCandidate) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn validate_import_path(path: &Path) -> Result<()> {
+    if path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES {
+        bail!("import path exceeds byte limit");
+    }
+    Ok(())
+}
+
+fn truncate_utf8(value: String, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.as_str().to_owned();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_owned()
+}
+
+fn compact_string(value: &str) -> String {
+    value.to_owned()
+}
+
+fn compact_path(path: PathBuf) -> PathBuf {
+    if path.as_os_str().as_encoded_bytes().len() > MAX_IMPORT_PATH_BYTES {
+        PathBuf::new()
+    } else {
+        PathBuf::from(path.as_os_str())
+    }
+}
+
+fn imported_book_from_commit(
+    book_id: i64,
+    source_path_key: &str,
+    library_path_key: &str,
+    content_hash: &str,
+) -> ImportedBook {
+    ImportedBook {
+        book_id,
+        source_path: compact_path(path_from_key(source_path_key)),
+        library_path: compact_path(path_from_key(library_path_key)),
+        content_hash: compact_string(content_hash),
+    }
+}
+
+fn import_completion(
+    path: PathBuf,
+    result: Result<ImportedBook>,
+    cancellation: &ImportCancellation,
+    commit_started: bool,
+) -> ImportCompletion {
+    match result {
+        Ok(imported) => ImportCompletion::Completed(Ok(imported)),
+        Err(_) if cancellation.is_cancelled() && !commit_started => ImportCompletion::Cancelled,
+        Err(error) => {
+            ImportCompletion::Completed(Err(ImportFailure::new(path, format!("{error:#}"))))
+        }
+    }
 }
 
 /// Normalize user-visible import text for grouping and filtering.
@@ -2667,13 +3089,11 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
             break;
         }
         for row in rows {
-            let id: i64 = row.get("id");
+            let id: i64 = row.try_get("id")?;
             after_id = id;
-            let file_path: String = row.get("file_path");
-            let Some(format) = BookFormat::from_db(&row.get::<String, _>("format")) else {
-                eprintln!("warning: legacy book {file_path} has an unsupported format");
-                continue;
-            };
+            let file_path: String = row.try_get("file_path")?;
+            let format = BookFormat::from_db(&row.try_get::<String, _>("format")?)
+                .with_context(|| format!("legacy book {file_path} has an unsupported format"))?;
             let path = path_from_key(&file_path);
             if !path.is_file() {
                 continue;
@@ -2721,8 +3141,15 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
 fn extract_pdf_metadata(
     path: &Path,
     title_path: &Path,
+    cancellation: Option<&ImportCancellation>,
 ) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
-    let doc = PdfDoc::open(path)?;
+    let is_cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
+    let doc = if cancellation.is_some() {
+        PdfDoc::open_with_limit_cancellable(path, MAX_PDF_INPUT_BYTES, &is_cancelled)?
+    } else {
+        PdfDoc::open(path)?
+    };
+    check_import_cancelled(cancellation)?;
     let meta = doc.metadata();
     let title = meta.title.unwrap_or_else(|| filename_title(title_path));
     let author = meta.author;
@@ -2732,10 +3159,19 @@ fn extract_pdf_metadata(
     let scale = ((COVER_MAX_WIDTH - 1) as f32 / page_width)
         .min((COVER_MAX_HEIGHT - 1) as f32 / page_height)
         .min(1.0);
-    let cover = doc
-        .render_page(0, scale)
-        .ok()
-        .and_then(|page| encode_cover_png(page.width, page.height, &page.pixels));
+    check_import_cancelled(cancellation)?;
+    let rendered = if cancellation.is_some() {
+        doc.render_page_with_highlights_cancellable(0, scale, &[], &is_cancelled)
+    } else {
+        doc.render_page(0, scale)
+    };
+    let cover = rendered.ok().and_then(|page| {
+        check_import_cancelled(cancellation).ok()?;
+        let cover = encode_cover_png(page.width, page.height, &page.pixels);
+        check_import_cancelled(cancellation).ok()?;
+        cover
+    });
+    check_import_cancelled(cancellation)?;
 
     Ok((title, author, cover))
 }
@@ -2743,8 +3179,15 @@ fn extract_pdf_metadata(
 fn extract_epub_metadata(
     path: &Path,
     title_path: &Path,
+    cancellation: Option<&ImportCancellation>,
 ) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
-    let inspection = EpubDoc::inspect(path)?;
+    let is_cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
+    let inspection = if cancellation.is_some() {
+        EpubDoc::inspect_with_limits_cancellable(path, EpubLimits::default(), &is_cancelled)?
+    } else {
+        EpubDoc::inspect(path)?
+    };
+    check_import_cancelled(cancellation)?;
     let meta = inspection.metadata();
     let title = meta
         .title
@@ -2752,7 +3195,12 @@ fn extract_epub_metadata(
         .unwrap_or_else(|| filename_title(title_path));
     let author = meta.author.clone();
 
-    let cover = inspection.cover().and_then(resize_cover_image);
+    let cover = inspection.cover().and_then(|cover| {
+        check_import_cancelled(cancellation)
+            .ok()
+            .and_then(|()| resize_cover_image(cover, cancellation))
+    });
+    check_import_cancelled(cancellation)?;
 
     Ok((title, author, cover))
 }
@@ -2760,15 +3208,30 @@ fn extract_epub_metadata(
 fn extract_cbz_metadata(
     path: &Path,
     title_path: &Path,
+    cancellation: Option<&ImportCancellation>,
 ) -> Result<(String, Option<String>, Option<Vec<u8>>)> {
-    let doc = CbzDoc::open(path)?;
+    let is_cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
+    let doc = if cancellation.is_some() {
+        CbzDoc::open_with_limits_cancellable(path, CbzLimits::default(), &is_cancelled)?
+    } else {
+        CbzDoc::open(path)?
+    };
+    check_import_cancelled(cancellation)?;
     let title = filename_title(title_path);
 
     // Use first page as cover.
-    let cover = doc
-        .page_image_bytes(0)
-        .ok()
-        .and_then(|data| resize_cover_image(&data));
+    let cover = if cancellation.is_some() {
+        doc.page_image_bytes_cancellable(0, &is_cancelled)
+    } else {
+        doc.page_image_bytes(0)
+    }
+    .ok()
+    .and_then(|data| {
+        check_import_cancelled(cancellation)
+            .ok()
+            .and_then(|()| resize_cover_image(&data, cancellation))
+    });
+    check_import_cancelled(cancellation)?;
 
     Ok((title, None, cover))
 }
@@ -2779,15 +3242,25 @@ fn filename_title(path: &Path) -> String {
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
+fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<()> {
+    if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+        bail!("import cancelled");
+    }
+    Ok(())
+}
+
 /// Resize an image to fit within cover thumbnail bounds and encode as PNG.
-fn resize_cover_image(data: &[u8]) -> Option<Vec<u8>> {
+fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
     let img = image::load_from_memory(data).ok()?;
+    check_import_cancelled(cancellation).ok()?;
     let thumb = img.resize(
         COVER_MAX_WIDTH,
         COVER_MAX_HEIGHT,
         image::imageops::FilterType::Triangle,
     );
+    check_import_cancelled(cancellation).ok()?;
     let rgba = thumb.to_rgba8();
+    check_import_cancelled(cancellation).ok()?;
     encode_cover_png(rgba.width(), rgba.height(), rgba.as_raw())
 }
 
@@ -2809,6 +3282,134 @@ fn encode_cover_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_failure_intrinsically_discards_oversized_paths() {
+        let failure = ImportFailure::new(
+            PathBuf::from("x".repeat(MAX_IMPORT_PATH_BYTES + 1)),
+            "failed",
+        );
+
+        assert!(failure.path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn import_reports_keep_exact_counts_with_bounded_details() {
+        let mut report = ImportReport::default();
+        for index in 0..(MAX_IMPORT_DETAILS + 20) {
+            report.record_success(ImportedBook {
+                book_id: index as i64,
+                source_path: PathBuf::from(format!("source-{index}.epub")),
+                library_path: PathBuf::from(format!("library-{index}.epub")),
+                content_hash: "a".repeat(64),
+            });
+        }
+        for index in 0..(MAX_IMPORT_FAILURE_DETAILS + 20) {
+            report.record_failure(ImportFailure {
+                path: PathBuf::from(format!("failure-{index}.epub")),
+                error: "é".repeat(MAX_IMPORT_ERROR_BYTES),
+            });
+        }
+
+        assert_eq!(report.succeeded, MAX_IMPORT_DETAILS + 20);
+        assert_eq!(report.failed, MAX_IMPORT_FAILURE_DETAILS + 20);
+        assert!(report.imported.len() <= MAX_IMPORT_DETAILS);
+        assert!(report.failures.len() <= MAX_IMPORT_FAILURE_DETAILS);
+        assert!(report.imported_detail_bytes <= MAX_IMPORT_DETAIL_BYTES);
+        assert!(report.failure_detail_bytes <= MAX_IMPORT_FAILURE_DETAIL_BYTES);
+        assert!(
+            report
+                .failures
+                .iter()
+                .all(|failure| failure.error.len() <= MAX_IMPORT_ERROR_BYTES
+                    && failure.error.capacity() <= MAX_IMPORT_ERROR_BYTES)
+        );
+    }
+
+    #[test]
+    fn import_reports_rebuild_overallocated_details() {
+        let mut source_path = PathBuf::with_capacity(MAX_IMPORT_DETAIL_BYTES * 4);
+        source_path.push("source.epub");
+        let mut library_path = PathBuf::with_capacity(MAX_IMPORT_DETAIL_BYTES * 4);
+        library_path.push("library.epub");
+        let mut content_hash = String::with_capacity(MAX_IMPORT_DETAIL_BYTES * 4);
+        content_hash.push_str(&"a".repeat(64));
+        let imported = ImportedBook {
+            book_id: 1,
+            source_path,
+            library_path,
+            content_hash,
+        };
+
+        let mut failure_path = PathBuf::with_capacity(MAX_IMPORT_FAILURE_DETAIL_BYTES * 4);
+        failure_path.push("failure.epub");
+        let mut error = String::with_capacity(MAX_IMPORT_FAILURE_DETAIL_BYTES * 4);
+        error.push_str("failed");
+
+        let success_report = ImportReport::from_imported(imported);
+        let failure_report = ImportReport::from_failure(ImportFailure {
+            path: failure_path,
+            error,
+        });
+
+        assert!(success_report.imported[0].retained_byte_len() < 1024);
+        assert_eq!(
+            success_report.imported_detail_bytes,
+            success_report.imported[0].retained_byte_len()
+        );
+        assert!(failure_report.failures[0].retained_byte_len() < 1024);
+        assert_eq!(
+            failure_report.failure_detail_bytes,
+            failure_report.failures[0].retained_byte_len()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_before_available_commit_admission_is_polled() {
+        let cancellation = ImportCancellation::default();
+        cancellation.cancel();
+
+        let error = acquire_managed_storage(Some(&cancellation))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn extracted_metadata_is_bounded_before_persistence() {
+        let fingerprint = || FileFingerprint {
+            hash: "a".repeat(64),
+            size: 1,
+        };
+        let oversized_title = inspect_book_with(
+            Path::new("book.epub"),
+            Path::new("book.epub"),
+            None,
+            None,
+            || Ok(("x".repeat(MAX_IMPORT_METADATA_BYTES + 1), None, None)),
+            |_| Ok(fingerprint()),
+        )
+        .unwrap_err();
+        let oversized_cover = inspect_book_with(
+            Path::new("book.epub"),
+            Path::new("book.epub"),
+            None,
+            None,
+            || {
+                Ok((
+                    "Book".to_owned(),
+                    None,
+                    Some(vec![0; MAX_IMPORT_COVER_BYTES + 1]),
+                ))
+            },
+            |_| Ok(fingerprint()),
+        )
+        .unwrap_err();
+
+        assert!(oversized_title.to_string().contains("metadata byte limits"));
+        assert!(oversized_cover.to_string().contains("retained byte limit"));
+    }
 
     struct CancellingReader {
         cancellation: ImportCancellation,
@@ -3331,11 +3932,22 @@ mod tests {
     fn pdf_cover_is_rendered_within_thumbnail_bounds() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.pdf");
 
-        let (_, _, cover) = extract_pdf_metadata(&path, &path).unwrap();
+        let (_, _, cover) = extract_pdf_metadata(&path, &path, None).unwrap();
         let cover = image::load_from_memory(&cover.unwrap()).unwrap();
 
         assert!(cover.width() <= COVER_MAX_WIDTH);
         assert!(cover.height() <= COVER_MAX_HEIGHT);
+    }
+
+    #[test]
+    fn cancelled_pdf_metadata_extraction_does_not_render_a_cover() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.pdf");
+        let cancellation = ImportCancellation::default();
+        cancellation.cancel();
+
+        let error = extract_pdf_metadata(&path, &path, Some(&cancellation)).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 
     #[test]
