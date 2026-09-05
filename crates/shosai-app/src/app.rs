@@ -1952,6 +1952,7 @@ fn cancel_background_jobs_for_tab(state: &State, tab_id: u64) {
 }
 
 fn cancel_nondurable_work_for_close(state: &mut State) {
+    submit_pending_reading_state_saves(state);
     cancel_document_open(state);
     dispatch::cancel_add_books_discovery(state);
     state.add_books_generation = state.add_books_generation.wrapping_add(1);
@@ -2021,10 +2022,16 @@ fn close_tab(state: &mut State, index: usize) -> Task<Message> {
         return Task::none();
     }
     let closing_tab_id = state.tabs[index].id;
-    cancel_epub_jobs_for_tab(state, closing_tab_id);
-    cancel_background_jobs_for_tab(state, closing_tab_id);
     let previous_active = state.active_tab;
     save_active_tab(state);
+    if let Some(save) = state.tabs[index].pending_reading_state_save.clone() {
+        if !try_queue_reading_state_save(state, save) {
+            return Task::none();
+        }
+        state.tabs[index].pending_reading_state_save = None;
+    }
+    cancel_epub_jobs_for_tab(state, closing_tab_id);
+    cancel_background_jobs_for_tab(state, closing_tab_id);
     state.tabs.remove(index);
     if state.tabs.is_empty() {
         state.active_tab = None;
@@ -2409,9 +2416,17 @@ fn finish_open_document_with_permit(
         restore_reader_tab(state, relocated_tab);
         let retained_preferences = state.tabs[index].session.preferences;
         let retained_location = state.tabs[index].session.location;
+        let retained_reading_state_pending = state.tabs[index].reading_state_restore_pending;
         let retained_reading_state_failure = state.tabs[index].reading_state_restore_failed;
+        let retained_state_generation = state.tabs[index].document_state_load_generation;
+        let mut retained_pending_save = state.tabs[index].pending_reading_state_save.clone();
+        let retained_identity = (
+            state.tabs[index].session.book_id,
+            state.tabs[index].session.locator.path().to_path_buf(),
+        );
         let retained_bookmark_failure = state.tabs[index].bookmark_load_failed;
         let retained_bookmarks = state.tabs[index].bookmarks.clone();
+        let new_identity = (book_id, path.clone());
         state.active_tab = Some(index);
         state.continuous_activation = state.continuous_activation.wrapping_add(1);
         state.open_error = None;
@@ -2426,18 +2441,30 @@ fn finish_open_document_with_permit(
             .page
             .min(state.total_pages.saturating_sub(1));
         state.epub_offset = retained_location.offset.unwrap_or_default();
+        if let Some(save) = &mut retained_pending_save {
+            save.book_id = book_id;
+            save.path = new_identity.1.clone();
+        }
+        state.reading_state_restore_pending = retained_reading_state_pending;
         state.reading_state_restore_failed = retained_reading_state_failure;
+        state.document_state_load_generation = retained_state_generation;
+        state.pending_reading_state_save = retained_pending_save;
         state.bookmark_load_failed = retained_bookmark_failure;
         state.bookmarks = retained_bookmarks;
         update_bookmark_status(state);
         state.page_input = format!("{}", state.current_page + 1);
         state.display_title = display_title;
+        let state_task = if retained_reading_state_pending && retained_identity != new_identity {
+            load_document_state_task(state, false)
+        } else {
+            Task::none()
+        };
         let task = refresh_content(state);
         if let Some(tab) = capture_reader_tab(state) {
             state.tabs[index] = tab;
             state.screen = Screen::Reader;
         }
-        return task;
+        return Task::batch([task, state_task]);
     }
 
     save_active_tab(state);
@@ -3369,13 +3396,14 @@ fn decode_epub_image_task(
     };
     let path = job.path.clone();
     let cancellation = state.epub_image_cancellations.get(&job)?.clone();
+    let retained_budget = state.epub_image_budget.clone();
     let document_permit = retain_document_for_worker(state);
     Some(Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
                 let _document_permit = document_permit;
                 let _transient_permit = transient_permit;
-                decode_epub_images(&document, [(path, permit)], &cancellation)
+                decode_epub_images(&document, [(path, permit)], &retained_budget, &cancellation)
             })
             .await
             .unwrap_or_default()
@@ -5160,10 +5188,51 @@ fn save_reading_state(state: &mut State) {
 }
 
 fn queue_reading_state_save(state: &mut State, save: ReadingStateSave) {
+    let _ = try_queue_reading_state_save(state, save);
+}
+
+fn try_queue_reading_state_save(state: &mut State, save: ReadingStateSave) -> bool {
     if let Some(saves) = &state.reading_state_saves
         && let Err(error) = saves.send(ReadingStateWriterMessage::Save(save))
     {
         state.open_error = Some(state_writer_send_error(error));
+        return false;
+    }
+    true
+}
+
+fn submit_pending_reading_state_saves(state: &mut State) {
+    let mut failed = false;
+    if let Some(save) = state.pending_reading_state_save.clone() {
+        if try_queue_reading_state_save(state, save) {
+            state.pending_reading_state_save = None;
+            state.reading_state_restore_pending = false;
+        } else {
+            failed = true;
+        }
+    }
+    let pending_tabs = state
+        .tabs
+        .iter()
+        .enumerate()
+        .filter(|(_, tab)| Some(tab.id) != state.active_tab_id)
+        .filter_map(|(index, tab)| {
+            tab.pending_reading_state_save
+                .clone()
+                .map(|save| (index, save))
+        })
+        .collect::<Vec<_>>();
+    for (index, save) in pending_tabs {
+        if try_queue_reading_state_save(state, save) {
+            state.tabs[index].pending_reading_state_save = None;
+            state.tabs[index].reading_state_restore_pending = false;
+        } else {
+            failed = true;
+        }
+    }
+    if failed {
+        state.close_after_geometry_save = None;
+        state.close_flush_started = false;
     }
 }
 
@@ -9967,6 +10036,45 @@ mod tests {
         assert_eq!(state.raster_budget.used(), 0);
     }
 
+    #[tokio::test]
+    async fn closing_a_tab_submits_navigation_deferred_during_restore() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = directory.path().join("pending.epub");
+        let hash = "0".repeat(64);
+        state.file_path = Some(path.clone());
+        state.document_content_hash = Some(hash.clone());
+        state.reading_state_restore_pending = true;
+        state.pending_reading_state_save = Some(ReadingStateSave {
+            book_id: None,
+            path: path.clone(),
+            content_hash: Some(hash.clone()),
+            reading: FileReadingState {
+                page: 3,
+                location_offset: Some(17),
+                zoom: 1.0,
+            },
+        });
+        let writer = start_reading_state_writer(store.clone());
+        state.reading_state_saves = Some(writer.clone());
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.active_tab = Some(0);
+
+        let _ = update(&mut state, Message::CloseTab(0));
+        writer.flush().await.unwrap();
+
+        let saved = store.get_async(&path, &hash).await.unwrap().unwrap();
+        assert_eq!(saved.page, 3);
+        assert_eq!(saved.location_offset, Some(17));
+    }
+
     #[test]
     fn closing_an_epub_tab_cancels_its_pagination() {
         let epub = EpubDoc::from_bytes(
@@ -11352,6 +11460,43 @@ mod tests {
         assert!(!state.window_geometry_saving);
         assert_eq!(state.close_after_geometry_save, Some(id));
         assert!(state.close_flush_started);
+    }
+
+    #[tokio::test]
+    async fn window_close_submits_navigation_deferred_during_restore() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let writer = start_reading_state_writer(store.clone());
+        let (mut state, _) = boot();
+        let path = directory.path().join("pending.epub");
+        let hash = "0".repeat(64);
+        state.reading_state_saves = Some(writer.clone());
+        state.reading_state_restore_pending = true;
+        state.pending_reading_state_save = Some(ReadingStateSave {
+            book_id: None,
+            path: path.clone(),
+            content_hash: Some(hash.clone()),
+            reading: FileReadingState {
+                page: 5,
+                location_offset: Some(23),
+                zoom: 1.0,
+            },
+        });
+
+        let id = window::Id::unique();
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        writer.flush().await.unwrap();
+
+        assert_eq!(state.close_after_geometry_save, Some(id));
+        assert!(!state.reading_state_restore_pending);
+        let saved = store.get_async(&path, &hash).await.unwrap().unwrap();
+        assert_eq!(saved.page, 5);
+        assert_eq!(saved.location_offset, Some(23));
     }
 
     #[test]
@@ -12743,6 +12888,63 @@ mod tests {
             .expect("removal should persist path-backed reading state");
         assert_eq!(save.page, 3);
         assert_eq!(save.location_offset, Some(17));
+    }
+
+    #[tokio::test]
+    async fn book_removal_retargets_and_restarts_pending_reading_state_restore() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let old_path = PathBuf::from("managed.epub");
+        let detached_path = PathBuf::from("original.epub");
+        state.book_id = Some(42);
+        state.file_path = Some(old_path.clone());
+        state.reading_state = Some(store);
+        state.reading_state_restore_pending = true;
+        state.document_state_load_generation = 7;
+        state.pending_reading_state_save = Some(ReadingStateSave {
+            book_id: Some(42),
+            path: old_path,
+            content_hash: state.document_content_hash.clone(),
+            reading: FileReadingState {
+                page: 2,
+                location_offset: Some(9),
+                zoom: 1.0,
+            },
+        });
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.active_tab = Some(0);
+        state.removing_book = Some(42);
+
+        let task = update(
+            &mut state,
+            Message::BookRemoved {
+                id: 42,
+                result: Ok(Some(detached_path.clone())),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(state.reading_state_restore_pending);
+        assert!(state.document_state_load_generation > 7);
+        let save = state.pending_reading_state_save.as_ref().unwrap();
+        assert_eq!(save.book_id, None);
+        assert_eq!(save.path, detached_path);
+        assert_eq!(state.tabs[0].session.book_id, None);
+        assert_eq!(
+            state.tabs[0]
+                .pending_reading_state_save
+                .as_ref()
+                .unwrap()
+                .book_id,
+            None
+        );
     }
 
     #[tokio::test]
@@ -15180,6 +15382,23 @@ mod tests {
         assert_eq!(state.epub_image_budget.used(), 4);
         state.epub_image_handles.clear();
         assert_eq!(state.epub_image_budget.used(), 0);
+    }
+
+    #[test]
+    fn epub_raster_decode_replaces_conservative_retained_admission() {
+        let epub = EpubDoc::from_bytes(epub_with_image_chapters(1)).unwrap();
+        let path = "OPS/image-0.png".to_owned();
+        let budget = CacheBudget::new(EPUB_IMAGE_BYTE_CAPACITY);
+        let permit = budget
+            .try_reserve(epub_image_byte_len(&epub, &path).unwrap())
+            .unwrap();
+
+        let decoded = decode_epub_images(&epub, [(path, permit)], &budget, &Cancellation::new());
+
+        assert!(decoded[0].1.is_some());
+        assert_eq!(budget.used(), 4);
+        drop(decoded);
+        assert_eq!(budget.used(), 0);
     }
 
     #[test]

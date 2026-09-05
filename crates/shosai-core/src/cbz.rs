@@ -348,6 +348,7 @@ impl CbzDoc {
 
     pub fn page_probe_admission_byte_len(&self, index: usize) -> Option<usize> {
         self.page_source_byte_len(index)?
+            .checked_mul(2)?
             .checked_add(IMAGE_PROBE_METADATA_BYTES)
     }
 
@@ -616,6 +617,7 @@ impl CbzDoc {
         if !scale.is_finite() || scale <= 0.0 {
             return None;
         }
+        let source = self.page_source_byte_len(index)?;
         let (width, height) = self.cached_dimensions(index)?;
         let native_bytes_per_pixel = self
             .native_bytes_per_pixel
@@ -645,6 +647,7 @@ impl CbzDoc {
             0
         };
         decoder
+            .checked_add(source)?
             .checked_add(resized)?
             .checked_add(resize_intermediate)
     }
@@ -865,6 +868,18 @@ mod tests {
     }
 
     #[test]
+    fn image_probe_charges_source_and_decoder_owned_encoded_copy() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+        let source = document.page_source_byte_len(0).unwrap();
+
+        assert_eq!(
+            document.page_probe_admission_byte_len(0),
+            Some(source * 2 + IMAGE_PROBE_METADATA_BYTES)
+        );
+    }
+
+    #[test]
     fn page_work_honors_preexisting_cancellation() {
         let document =
             CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
@@ -921,7 +936,11 @@ mod tests {
 
         assert_eq!(
             document.render_transient_byte_len(0, 2.0),
-            Some(usize::try_from(document.limits.max_decoded_rgba_bytes).unwrap() + 256)
+            Some(
+                usize::try_from(document.limits.max_decoded_rgba_bytes).unwrap()
+                    + document.page_source_byte_len(0).unwrap()
+                    + 256
+            )
         );
     }
 }

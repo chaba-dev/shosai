@@ -121,7 +121,7 @@ fn reserve_cover_decode_replacing(
     }
 }
 
-fn acquire_cbz_cover_pipeline(
+fn acquire_cover_pipeline(
     cancellation: Option<&ImportCancellation>,
 ) -> Option<std::sync::MutexGuard<'static, ()>> {
     static PIPELINE: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
@@ -3805,6 +3805,10 @@ fn extract_epub_metadata(
         .unwrap_or_else(|| filename_title(title_path));
     let author = meta.author.clone();
 
+    // Keep the probe permit upgrade single-owner: otherwise several small
+    // probes can each retain capacity while waiting for the others to release
+    // enough capacity for their full decode admission.
+    let _pipeline = acquire_cover_pipeline(cancellation).context("import cancelled")?;
     let cover = inspection.cover().and_then(|cover| {
         check_import_cancelled(cancellation)
             .ok()
@@ -3830,7 +3834,7 @@ fn extract_cbz_metadata(
     let title = filename_title(title_path);
 
     // Use first page as cover.
-    let _pipeline = acquire_cbz_cover_pipeline(cancellation).context("import cancelled")?;
+    let _pipeline = acquire_cover_pipeline(cancellation).context("import cancelled")?;
     let probe_bytes = doc
         .page_probe_admission_byte_len(0)
         .context("CBZ cover probe admission overflowed")?;
@@ -3892,7 +3896,11 @@ fn resize_cover_image_inner(
 ) -> Option<Vec<u8>> {
     use image::ImageDecoder;
 
-    let probe_bytes = source_capacity.checked_add(COVER_DECODER_METADATA_BYTES)?;
+    // image's JPEG decoder owns a copy of the encoded input during
+    // construction, before its allocation limits take effect.
+    let probe_bytes = source_capacity
+        .checked_add(data.len())?
+        .checked_add(COVER_DECODER_METADATA_BYTES)?;
     if probe_bytes > COVER_DECODE_BYTE_CAPACITY {
         return None;
     }
@@ -3918,7 +3926,9 @@ fn resize_cover_image_inner(
         .checked_add(MAX_IMPORT_COVER_BYTES as u64)?;
     drop(decoder);
     let transient_bytes = usize::try_from(transient_bytes).ok()?;
-    let admitted_bytes = transient_bytes.checked_add(source_capacity)?;
+    let admitted_bytes = transient_bytes
+        .checked_add(source_capacity)?
+        .checked_add(data.len())?;
     if admitted_bytes > COVER_DECODE_BYTE_CAPACITY {
         return None;
     }

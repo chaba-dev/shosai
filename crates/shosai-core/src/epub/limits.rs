@@ -8,6 +8,7 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 
 const IMAGE_PROBE_METADATA_BYTES: u64 = 1024 * 1024;
+const MAX_SVG_REFERENCE_DEPTH: usize = 128;
 
 /// Configurable limits applied before EPUB resources reach renderer backends.
 #[derive(Debug, Clone, Copy)]
@@ -360,6 +361,7 @@ fn validate_svg_complexity(xml: &str, path: &str, limits: &EpubLimits) -> Result
         &ids,
         &mut HashMap::new(),
         &mut HashSet::new(),
+        0,
         path,
     )?;
     for (actual, limit, kind) in [
@@ -419,6 +421,7 @@ fn expanded_svg_cost<'a, 'input>(
     ids: &HashMap<String, roxmltree::Node<'a, 'input>>,
     memo: &mut HashMap<roxmltree::NodeId, SvgCost>,
     visiting: &mut HashSet<roxmltree::NodeId>,
+    reference_depth: usize,
     path: &str,
 ) -> Result<SvgCost> {
     if let Some(cost) = memo.get(&element.id()) {
@@ -449,7 +452,14 @@ fn expanded_svg_cost<'a, 'input>(
             .and_then(|reference| reference.strip_prefix('#'))
             .and_then(|id| ids.get(id))
         {
-            cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+            cost.add(expanded_svg_reference_cost(
+                *target,
+                ids,
+                memo,
+                visiting,
+                reference_depth,
+                path,
+            )?);
         }
     } else if name.starts_with("fe") {
         cost.filter_primitives = 1;
@@ -466,7 +476,16 @@ fn expanded_svg_cost<'a, 'input>(
         "stroke",
     ] {
         if let Some(value) = element.attribute(property) {
-            add_svg_rendering_reference(property, value, ids, memo, visiting, path, &mut cost)?;
+            add_svg_rendering_reference(
+                property,
+                value,
+                ids,
+                memo,
+                visiting,
+                reference_depth,
+                path,
+                &mut cost,
+            )?;
         }
     }
     if let Some(style) = element.attribute("style") {
@@ -491,6 +510,7 @@ fn expanded_svg_cost<'a, 'input>(
                     ids,
                     memo,
                     visiting,
+                    reference_depth,
                     path,
                     &mut cost,
                 )?;
@@ -506,19 +526,50 @@ fn expanded_svg_cost<'a, 'input>(
             anyhow::bail!("EPUB SVG contains unsafe external rendering reference: {path}");
         };
         if let Some(target) = ids.get(id) {
-            cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+            cost.add(expanded_svg_reference_cost(
+                *target,
+                ids,
+                memo,
+                visiting,
+                reference_depth,
+                path,
+            )?);
         }
     }
     for child in element.children().filter(roxmltree::Node::is_element) {
         if svg_definition_container(child.tag_name().name()) {
             continue;
         }
-        cost.add(expanded_svg_cost(child, ids, memo, visiting, path)?);
+        cost.add(expanded_svg_cost(
+            child,
+            ids,
+            memo,
+            visiting,
+            reference_depth,
+            path,
+        )?);
     }
 
     visiting.remove(&element.id());
     memo.insert(element.id(), cost);
     Ok(cost)
+}
+
+fn expanded_svg_reference_cost<'a, 'input>(
+    target: roxmltree::Node<'a, 'input>,
+    ids: &HashMap<String, roxmltree::Node<'a, 'input>>,
+    memo: &mut HashMap<roxmltree::NodeId, SvgCost>,
+    visiting: &mut HashSet<roxmltree::NodeId>,
+    reference_depth: usize,
+    path: &str,
+) -> Result<SvgCost> {
+    let reference_depth = reference_depth
+        .checked_add(1)
+        .context("EPUB SVG reference depth overflowed")?;
+    if reference_depth > MAX_SVG_REFERENCE_DEPTH {
+        crate::resource_limit!("EPUB SVG resource exceeds rendering reference depth limit: {path}");
+    }
+    expanded_svg_cost(target, ids, memo, visiting, reference_depth, path)
 }
 
 fn svg_definition_container(name: &str) -> bool {
@@ -542,6 +593,7 @@ fn add_svg_rendering_reference<'a, 'input>(
     ids: &HashMap<String, roxmltree::Node<'a, 'input>>,
     memo: &mut HashMap<roxmltree::NodeId, SvgCost>,
     visiting: &mut HashSet<roxmltree::NodeId>,
+    reference_depth: usize,
     path: &str,
     cost: &mut SvgCost,
 ) -> Result<()> {
@@ -567,7 +619,14 @@ fn add_svg_rendering_reference<'a, 'input>(
         anyhow::bail!("EPUB SVG contains unsafe external rendering reference: {path}");
     };
     if let Some(target) = ids.get(id) {
-        cost.add(expanded_svg_cost(*target, ids, memo, visiting, path)?);
+        cost.add(expanded_svg_reference_cost(
+            *target,
+            ids,
+            memo,
+            visiting,
+            reference_depth,
+            path,
+        )?);
     }
     Ok(())
 }
@@ -800,7 +859,7 @@ fn mime_essence(media_type: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{EpubLimits, validate_resource, validate_xml_shape};
+    use super::{EpubLimits, MAX_SVG_REFERENCE_DEPTH, validate_resource, validate_xml_shape};
 
     #[test]
     fn empty_xml_elements_count_toward_depth() {
@@ -1076,6 +1135,33 @@ mod tests {
 
         assert!(error.is::<crate::application::ResourceLimitError>());
         assert!(error.to_string().contains("path command limit"));
+    }
+
+    #[test]
+    fn svg_long_acyclic_reference_chain_hits_typed_depth_limit() {
+        let mut svg =
+            String::from(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><defs>"#);
+        for index in 0..=MAX_SVG_REFERENCE_DEPTH {
+            svg.push_str(&format!(
+                r##"<g id="node{index}"><use href="#node{}"/></g>"##,
+                index + 1
+            ));
+        }
+        svg.push_str(&format!(
+            r##"<g id="node{}"/></defs><use href="#node0"/></svg>"##,
+            MAX_SVG_REFERENCE_DEPTH + 1
+        ));
+
+        let error = validate_resource(
+            "Images/chain.svg",
+            "image/svg+xml",
+            svg.as_bytes(),
+            &EpubLimits::default(),
+        )
+        .expect_err("deep acyclic SVG references must be rejected before renderer admission");
+
+        assert!(error.is::<crate::application::ResourceLimitError>());
+        assert!(error.to_string().contains("reference depth limit"));
     }
 
     #[test]

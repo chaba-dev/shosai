@@ -1398,7 +1398,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             } else {
                 Task::none()
             };
-            let reading_state = if active_promoted {
+            let reading_state = if active_promoted && state.reading_state_restore_pending {
                 load_document_state_task(state, false)
             } else {
                 Task::none()
@@ -1612,6 +1612,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     state.library_books.retain(|book| book.id != id);
                     state.library_cover_handles.remove(&id);
                     let mut refresh_detached_bookmarks = false;
+                    let mut restart_detached_reading_state = false;
                     let active_matches = state.book_id == Some(id)
                         || removal_target.as_ref().is_some_and(|target| {
                             state.file_path.as_deref().is_some_and(|path| {
@@ -1630,6 +1631,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             state.file_path = Some(path.clone());
                         }
                         state.book_id = None;
+                        if let Some(save) = &mut state.pending_reading_state_save {
+                            save.book_id = None;
+                            if let Some(path) = &state.file_path {
+                                save.path = path.clone();
+                            }
+                        }
+                        restart_detached_reading_state = state.reading_state_restore_pending;
                         state.bookmarks.clear();
                         state.bookmark_mutation_generation =
                             state.bookmark_mutation_generation.wrapping_add(1);
@@ -1653,6 +1661,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 .unwrap_or_else(|| tab.session.locator.path().to_path_buf());
                             tab.session.locator = DeviceFileLocator::from_path(&path);
                             tab.session.book_id = None;
+                            if let Some(save) = &mut tab.pending_reading_state_save {
+                                save.book_id = None;
+                                save.path = path;
+                            }
                             tab.bookmarks.clear();
                             tab.bookmark_mutation_generation =
                                 tab.bookmark_mutation_generation.wrapping_add(1);
@@ -1662,7 +1674,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     }
                     if let Some(mut save) = suppressed_save {
                         save.book_id = None;
-                        if let Some(path) = detached_path {
+                        if let Some(path) = detached_path.clone() {
                             save.path = path;
                         }
                         queue_reading_state_save(state, save);
@@ -1677,8 +1689,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     } else {
                         Task::none()
                     };
+                    let reading_state = if restart_detached_reading_state {
+                        load_document_state_task(state, false)
+                    } else {
+                        Task::none()
+                    };
                     return Task::batch([
                         bookmarks,
+                        reading_state,
                         reset_library(state),
                         continue_close_after_durable_mutations(state),
                     ]);
