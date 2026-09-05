@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Enforce phase one admission lifecycle (#82)
 - Bound phase one retention and persistence (#83)
 - *(core)* Enforce exact document admission (#84)
+- Finish phase one state and lifecycle reconciliation (#85)
 
 ### 🚜 Refactor
 
