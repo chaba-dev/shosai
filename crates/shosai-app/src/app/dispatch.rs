@@ -1,6 +1,6 @@
 use super::*;
 
-fn cancel_add_books_discovery(state: &mut State) {
+pub(super) fn cancel_add_books_discovery(state: &mut State) {
     if let Some(cancellation) = state.add_books_cancellation.take() {
         cancellation.cancel();
     }
@@ -17,7 +17,8 @@ fn update_book_import_progress(state: &mut State) {
     };
 }
 
-pub(super) fn record_book_import_report(state: &mut State, report: ImportReport) {
+pub(super) fn record_book_import_report(state: &mut State, report: ImportReport) -> bool {
+    let mut active_promoted = false;
     state.book_import_completed += report.succeeded + report.failed;
     update_book_import_progress(state);
     for imported in report.imported() {
@@ -25,6 +26,15 @@ pub(super) fn record_book_import_report(state: &mut State, report: ImportReport)
             opened_content_matches_import(path, state.document_content_hash.as_deref(), imported)
         }) {
             state.book_id = Some(imported.book_id());
+            if let Some(save) = &mut state.pending_reading_state_save {
+                save.book_id = Some(imported.book_id());
+            }
+            state.bookmark_load_generation = state.bookmark_load_generation.wrapping_add(1);
+            state.bookmark_load_failed = false;
+            if let Some(tab_id) = state.active_tab_id {
+                state.bookmark_refresh_needed.insert(tab_id);
+            }
+            active_promoted = true;
         }
         for tab in &mut state.tabs {
             if opened_content_matches_import(
@@ -33,10 +43,17 @@ pub(super) fn record_book_import_report(state: &mut State, report: ImportReport)
                 imported,
             ) {
                 tab.session.book_id = Some(imported.book_id());
+                if let Some(save) = &mut tab.pending_reading_state_save {
+                    save.book_id = Some(imported.book_id());
+                }
+                tab.bookmark_load_generation = tab.bookmark_load_generation.wrapping_add(1);
+                tab.bookmark_load_failed = false;
+                state.bookmark_refresh_needed.insert(tab.id);
             }
         }
     }
     state.book_import_report.merge(report);
+    active_promoted
 }
 
 fn opened_content_matches_import(
@@ -119,7 +136,7 @@ fn continue_book_import(state: &mut State) -> Task<Message> {
             state.book_import_next_commit += 1;
             match prepared {
                 Err(failure) => {
-                    record_book_import_report(state, ImportReport::from_failure(failure))
+                    record_book_import_report(state, ImportReport::from_failure(failure));
                 }
                 Ok((_path, prepared)) => {
                     state.book_import_committing = true;
@@ -191,6 +208,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             &message,
             Message::Initialized(_)
                 | Message::FingerprintBackfillFinished(_)
+                | Message::DocumentOpenPrepared { .. }
                 | Message::DocumentOpened { .. }
                 | Message::LibraryLoaded { .. }
                 | Message::LibraryCoversLoaded { .. }
@@ -332,6 +350,59 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::FileSelected(None) => {}
 
+        Message::DocumentOpenPrepared {
+            generation,
+            path,
+            book_id,
+            result,
+        } => {
+            if generation != state.document_open_generation {
+                state.document_open_cancellations.remove(&generation);
+                state.pending_document_permits.remove(&generation);
+                return Task::none();
+            }
+            let prepared = match result {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    state.document_open_cancellations.remove(&generation);
+                    state.pending_document_permits.remove(&generation);
+                    state.document_opening = false;
+                    state.document_open_book_id = None;
+                    state.document_open_notice_visible = false;
+                    state.document_open_preview = None;
+                    state.open_error = Some(error);
+                    return Task::none();
+                }
+            };
+            let Some(mut permits) = state.pending_document_permits.remove(&generation) else {
+                return Task::none();
+            };
+            let replacement = state
+                .document_admission
+                .bytes
+                .try_reserve_replacing(prepared.retained_bytes, vec![permits._bytes]);
+            let Ok(bytes) = replacement else {
+                state.document_open_cancellations.remove(&generation);
+                state.document_opening = false;
+                state.document_open_book_id = None;
+                state.document_open_notice_visible = false;
+                state.document_open_preview = None;
+                state.open_error = Some(AppError::Open {
+                    format: "document",
+                    detail: "retained document byte limit exceeded".to_owned(),
+                });
+                return Task::none();
+            };
+            permits._bytes = bytes;
+            state.pending_document_permits.insert(generation, permits);
+            if state.close_after_geometry_save.is_some()
+                && let Some(cancellation) = state.document_open_cancellations.get(&generation)
+            {
+                cancellation.cancel();
+            }
+            return start_document_open_worker(state, generation, path, book_id, prepared);
+        }
+
         Message::DocumentOpened {
             generation,
             path,
@@ -376,6 +447,161 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::ShowDocumentOpenNotice(_) => {}
 
+        Message::DocumentStateLoaded {
+            tab_id,
+            generation,
+            bookmark_generation,
+            path,
+            book_id,
+            content_hash,
+            reading_state,
+            bookmarks,
+        } => {
+            let active_matches = state.active_tab_id == Some(tab_id)
+                && state.document_state_load_generation == generation
+                && state.file_path.as_ref() == Some(&path)
+                && state.book_id == book_id
+                && state.document_content_hash == content_hash;
+            if active_matches {
+                let mut location_changed = false;
+                let deferred_save = state.pending_reading_state_save.take();
+                match reading_state {
+                    Ok(saved) => {
+                        state.reading_state_restore_pending = false;
+                        state.reading_state_restore_failed = false;
+                        if let Some(save) = deferred_save {
+                            queue_reading_state_save(state, save);
+                        } else if let (Some(saved), Some(document)) =
+                            (saved.as_ref(), &state.document)
+                        {
+                            let location = ReaderLocation::restored(Some(saved), state.total_pages)
+                                .clamped_for(document);
+                            state.current_page = location.page;
+                            state.epub_offset = location.offset.unwrap_or_default();
+                            state.epub_page = if uses_paginated_epub_layout(state)
+                                && !state.epub_pages.is_empty()
+                            {
+                                epub_page_for_location(state, state.current_page, state.epub_offset)
+                            } else {
+                                0
+                            };
+                            state.page_input = (state.current_page + 1).to_string();
+                            state.rendered_page = None;
+                            state.rendered_page_index = None;
+                            state.rendered_page_handle = None;
+                            state.rendered_facing_page = None;
+                            state.rendered_facing_page_handle = None;
+                            location_changed = true;
+                        }
+                    }
+                    Err(error) => {
+                        state.reading_state_restore_pending = false;
+                        state.reading_state_restore_failed = true;
+                        state.pending_reading_state_save = deferred_save;
+                        state.open_error = Some(AppError::Storage(format!(
+                            "failed to restore reading state: {error}"
+                        )));
+                    }
+                }
+                if state.bookmark_load_generation == bookmark_generation
+                    && let Some(bookmarks) = bookmarks
+                {
+                    match bookmarks {
+                        Ok(bookmarks) => {
+                            state.bookmarks = bookmarks;
+                            state.bookmark_load_failed = false;
+                        }
+                        Err(error) => {
+                            state.bookmarks.clear();
+                            state.bookmark_load_failed = true;
+                            state.error = Some(AppError::Storage(format!(
+                                "failed to load bookmarks: {error}"
+                            )));
+                        }
+                    }
+                }
+                update_bookmark_status(state);
+                if let Some(index) = state.active_tab
+                    && index < state.tabs.len()
+                    && let Some(tab) = capture_reader_tab(state)
+                {
+                    state.tabs[index] = tab;
+                }
+                if location_changed && state.document_permit.is_some() {
+                    return refresh_content(state);
+                }
+                return Task::none();
+            }
+
+            let Some(tab) = state.tabs.iter_mut().find(|tab| {
+                tab.id == tab_id
+                    && tab.document_state_load_generation == generation
+                    && tab.session.locator.path() == path
+                    && tab.session.book_id == book_id
+                    && tab.content_hash == content_hash
+            }) else {
+                return Task::none();
+            };
+            let deferred_save = tab.pending_reading_state_save.take();
+            let restoration_succeeded = reading_state.is_ok();
+            match reading_state {
+                Ok(saved) => {
+                    tab.reading_state_restore_pending = false;
+                    tab.reading_state_restore_failed = false;
+                    if deferred_save.is_none()
+                        && let Some(saved) = saved.as_ref()
+                    {
+                        tab.session.location = ReaderLocation::restored(
+                            Some(saved),
+                            tab.session.document.page_count(),
+                        )
+                        .clamped_for(&tab.session.document);
+                        tab.epub_page = 0;
+                        tab.epub_layout_key = None;
+                        tab.rendered_page = None;
+                        tab.rendered_page_index = None;
+                        tab.rendered_page_handle = None;
+                        tab.rendered_facing_page = None;
+                        tab.rendered_facing_page_handle = None;
+                        tab.page_input = (tab.session.location.page + 1).to_string();
+                    }
+                }
+                Err(error) => {
+                    tab.reading_state_restore_pending = false;
+                    tab.reading_state_restore_failed = true;
+                    tab.pending_reading_state_save = deferred_save.clone();
+                    tab.error = Some(AppError::Storage(format!(
+                        "failed to restore reading state: {error}"
+                    )));
+                }
+            }
+            if tab.bookmark_load_generation == bookmark_generation
+                && let Some(bookmarks) = bookmarks
+            {
+                match bookmarks {
+                    Ok(bookmarks) => {
+                        tab.bookmarks = bookmarks;
+                        tab.bookmark_load_failed = false;
+                        tab.current_page_bookmarked = tab.bookmarks.iter().any(|bookmark| {
+                            bookmark.page == tab.session.location.page
+                                && bookmark.location_offset == tab.session.location.offset
+                                && bookmark.note.is_none()
+                        });
+                    }
+                    Err(error) => {
+                        tab.bookmarks.clear();
+                        tab.bookmark_load_failed = true;
+                        tab.error = Some(AppError::Storage(format!(
+                            "failed to load bookmarks: {error}"
+                        )));
+                    }
+                }
+            }
+            if restoration_succeeded && let Some(save) = deferred_save {
+                queue_reading_state_save(state, save);
+            }
+        }
+
         Message::NextPage => {
             if uses_paginated_epub_layout(state) {
                 return turn_epub_page(state, true);
@@ -407,7 +633,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::PageInputChanged(value) => {
-            state.page_input = value;
+            if value.len() <= usize::MAX.to_string().len() {
+                state.page_input = value;
+            }
         }
 
         Message::GoToPage => {
@@ -722,6 +950,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             }
         }
 
+        Message::LoadPreviousLibrary => {
+            if state.library_page_start > 0 && !state.library_loading {
+                state.library_offset = state
+                    .library_page_start
+                    .saturating_sub(LIBRARY_PAGE_SIZE as usize);
+                return load_library_page(state, true);
+            }
+        }
+
         Message::LibraryLoaded {
             generation,
             offset,
@@ -744,12 +981,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 .iter_mut()
                 .filter_map(|book| book.cover.take().map(|cover| (book.id, cover)))
                 .collect();
-            if offset > 0 {
-                state.library_books.extend(page.books);
-            } else {
-                state.library_books = page.books;
+            state.library_books = page.books;
+            if offset == 0 {
                 state.library_cover_handles.clear();
             }
+            state.library_page_start = offset;
             state.library_offset = next_offset;
             state.library_has_more = page.has_more;
             state.library_loading = false;
@@ -786,6 +1022,46 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .insert_weighted(book_id, handle, retained_bytes);
                 }
             }
+        }
+
+        Message::LoadLibraryCover(book_id) => {
+            let generation = state.library_generation;
+            if state.library_cover_handles.get(&book_id).is_some()
+                || !state.library_covers_pending.insert((generation, book_id))
+            {
+                return Task::none();
+            }
+            if state.library_cover_reload_queue.len() >= LIBRARY_COVER_RELOAD_QUEUE_CAPACITY {
+                state.library_covers_pending.remove(&(generation, book_id));
+                return Task::none();
+            }
+            state
+                .library_cover_reload_queue
+                .push_back((generation, book_id));
+            return start_library_cover_reload(state);
+        }
+
+        Message::LibraryCoverLoaded {
+            generation,
+            book_id,
+            cover,
+        } => {
+            state.library_covers_pending.remove(&(generation, book_id));
+            if state.library_cover_reload_active.as_ref().is_some_and(
+                |(active_generation, active_book, _)| {
+                    *active_generation == generation && *active_book == book_id
+                },
+            ) {
+                state.library_cover_reload_active = None;
+            }
+            if generation == state.library_generation
+                && let Some((handle, retained_bytes, _permit)) = cover
+            {
+                state
+                    .library_cover_handles
+                    .insert_weighted(book_id, handle, retained_bytes);
+            }
+            return start_library_cover_reload(state);
         }
 
         Message::OpenAddBooks => {
@@ -952,7 +1228,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::AddBooksReviewSearchChanged(query) => {
-            if state.add_books_open && !state.add_books_discovering {
+            if query.len() <= MAX_UI_SEARCH_QUERY_BYTES
+                && state.add_books_open
+                && !state.add_books_discovering
+            {
                 state.add_books_review_search = query;
                 rebuild_add_books_review_rows(state);
                 return iced::widget::operation::snap_to(
@@ -1103,8 +1382,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             completion,
         } if generation == state.book_import_generation && state.adding_books => {
             state.book_import_committing = false;
-            match completion {
-                ImportCompletion::Cancelled => {}
+            let active_promoted = match completion {
+                ImportCompletion::Cancelled => false,
                 ImportCompletion::Completed(result) => match result {
                     Ok(imported) => {
                         record_book_import_report(state, ImportReport::from_imported(imported))
@@ -1113,8 +1392,18 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         record_book_import_report(state, ImportReport::from_failure(failure))
                     }
                 },
-            }
-            return continue_book_import(state);
+            };
+            let bookmarks = if active_promoted {
+                refresh_bookmarks(state)
+            } else {
+                Task::none()
+            };
+            let reading_state = if active_promoted {
+                load_document_state_task(state, false)
+            } else {
+                Task::none()
+            };
+            return Task::batch([continue_book_import(state), bookmarks, reading_state]);
         }
 
         Message::BookAddedToBatch { .. } => {}
@@ -1413,6 +1702,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibrarySearchChanged(query) => {
+            if query.len() > MAX_UI_SEARCH_QUERY_BYTES {
+                return Task::none();
+            }
             state.library_search = query;
             state.library_generation = state.library_generation.wrapping_add(1);
             let generation = state.library_generation;
@@ -1697,12 +1989,20 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             match result {
                 Ok(changes) => {
                     apply_managed_path_changes(state, &changes);
+                    let bookmarks = refresh_bookmarks(state);
+                    let reading_state = if state.reading_state_restore_pending {
+                        load_document_state_task(state, false)
+                    } else {
+                        Task::none()
+                    };
                     let destination = destination.canonicalize().unwrap_or(destination);
                     if let Some(library) = &state.library {
                         state.library = Some(library.with_managed_dir(destination));
                     }
                     state.pending_library_move = None;
                     return Task::batch([
+                        bookmarks,
+                        reading_state,
                         reset_library(state),
                         continue_close_after_durable_mutations(state),
                     ]);
@@ -1835,7 +2135,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::EditNoteChanged(text) => {
-            state.editing_note_text = text;
+            if text.len() <= MAX_BOOKMARK_NOTE_BYTES {
+                state.editing_note_text = text;
+            }
         }
 
         Message::SaveNote => {
@@ -1971,6 +2273,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SearchQueryChanged(query) => {
+            if query.len() > SearchLimits::default().max_query_bytes {
+                return Task::none();
+            }
             let previous_highlights = current_page_search_highlights(state);
             cancel_active_search(state);
             state.search_query = query;

@@ -92,34 +92,65 @@ impl BookmarkStore {
         validate_bookmark_fields(&key, title, note, color)?;
         validate_content_hash(content_hash)?;
 
-        let id = sqlx::query(
-            "INSERT INTO bookmarks
-                (file_path, content_hash, page, location_offset, title, note, color)
-             SELECT ?, ?, ?, ?, ?, ?, ?
-             WHERE (SELECT COUNT(*) FROM bookmarks
-                    WHERE file_path = ? AND content_hash = ?) < ?
-             RETURNING id",
+        let page = i64::try_from(page).context("bookmark page exceeds database range")?;
+        let location_offset = location_offset
+            .map(i64::try_from)
+            .transpose()
+            .context("bookmark location exceeds database range")?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let owner: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id, file_path FROM books WHERE content_hash = ? AND file_path = ?
+             UNION ALL
+             SELECT books.id, books.file_path
+             FROM book_path_aliases
+             JOIN books ON books.id = book_path_aliases.book_id
+             WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+               AND books.content_hash = book_path_aliases.content_hash
+               AND NOT EXISTS (
+                   SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+               )
+             LIMIT 1",
         )
+        .bind(content_hash)
         .bind(&key)
         .bind(content_hash)
-        .bind(i64::try_from(page).context("bookmark page exceeds database range")?)
-        .bind(
-            location_offset
-                .map(i64::try_from)
-                .transpose()
-                .context("bookmark location exceeds database range")?,
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve bookmark path owner")?;
+        let (book_id, current_key) = owner
+            .map(|(book_id, current_key)| (Some(book_id), current_key))
+            .unwrap_or((None, key));
+        validate_bookmark_path(&current_key)?;
+
+        let id = sqlx::query(
+            "INSERT INTO bookmarks
+                (file_path, content_hash, book_id, page, location_offset, title, note, color)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?
+             WHERE (SELECT COUNT(*) FROM bookmarks
+                    WHERE file_path = ? AND content_hash = ? AND book_id IS ?) < ?
+             RETURNING id",
         )
+        .bind(&current_key)
+        .bind(content_hash)
+        .bind(book_id)
+        .bind(page)
+        .bind(location_offset)
         .bind(title)
         .bind(note)
         .bind(color)
-        .bind(&key)
+        .bind(&current_key)
         .bind(content_hash)
+        .bind(book_id)
         .bind(MAX_BOOKMARKS_PER_BOOK as i64)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *transaction)
         .await
         .context("failed to add bookmark")?
         .context("bookmark count limit exceeded")?
         .get::<i64, _>("id");
+        transaction.commit().await?;
 
         self.get_by_id_async(id)
             .await?
@@ -158,13 +189,57 @@ impl BookmarkStore {
             .context("bookmark location exceeds database range")?;
 
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let existing = sqlx::query(
-            "SELECT id FROM bookmarks
-             WHERE file_path = ? AND content_hash = ? AND page = ?
-               AND location_offset IS ? AND note IS NULL",
+        // A queued path mutation may run after an import has promoted this document. Resolve
+        // both referenced paths and managed-import source paths while holding the write fence.
+        let owner: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id, file_path FROM books WHERE content_hash = ? AND file_path = ?
+             UNION ALL
+             SELECT books.id, books.file_path
+             FROM book_path_aliases
+             JOIN books ON books.id = book_path_aliases.book_id
+             WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+               AND books.content_hash = book_path_aliases.content_hash
+               AND NOT EXISTS (
+                   SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+               )
+             LIMIT 1",
         )
+        .bind(content_hash)
         .bind(&key)
         .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve bookmark path owner")?;
+        let (book_id, current_key) = owner
+            .map(|(book_id, current_key)| (Some(book_id), current_key))
+            .unwrap_or((None, key));
+        validate_bookmark_path(&current_key)?;
+        if let Some(book_id) = book_id {
+            sqlx::query(
+                "UPDATE bookmarks SET file_path = ?, book_id = ?
+                 WHERE book_id IS NULL AND content_hash = ?
+                   AND (file_path = ? OR file_path = ?)",
+            )
+            .bind(&current_key)
+            .bind(book_id)
+            .bind(content_hash)
+            .bind(&current_key)
+            .bind(canonical_key(file_path))
+            .execute(&mut *transaction)
+            .await
+            .context("failed to reconcile promoted bookmark aliases")?;
+        }
+        let existing = sqlx::query(
+            "SELECT id FROM bookmarks
+             WHERE file_path = ? AND content_hash = ? AND book_id IS ? AND page = ?
+               AND location_offset IS ? AND note IS NULL",
+        )
+        .bind(&current_key)
+        .bind(content_hash)
+        .bind(book_id)
         .bind(page_db)
         .bind(location_offset_db)
         .fetch_optional(&mut *transaction)
@@ -182,10 +257,12 @@ impl BookmarkStore {
             Ok(None)
         } else {
             let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM bookmarks WHERE file_path = ? AND content_hash = ?",
+                "SELECT COUNT(*) FROM bookmarks
+                 WHERE file_path = ? AND content_hash = ? AND book_id IS ?",
             )
-            .bind(&key)
+            .bind(&current_key)
             .bind(content_hash)
+            .bind(book_id)
             .fetch_one(&mut *transaction)
             .await
             .context("failed to count bookmarks")?;
@@ -194,13 +271,14 @@ impl BookmarkStore {
             }
             let row = sqlx::query(
                 "INSERT INTO bookmarks
-                    (file_path, content_hash, page, location_offset, title, note, color)
-                 VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
+                    (file_path, content_hash, book_id, page, location_offset, title, note, color)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
                            created_at, 1 AS fields_valid",
             )
-            .bind(&key)
+            .bind(&current_key)
             .bind(content_hash)
+            .bind(book_id)
             .bind(page_db)
             .bind(location_offset_db)
             .bind(title)
@@ -326,12 +404,32 @@ impl BookmarkStore {
         validate_content_hash(content_hash)?;
 
         let query = format!(
-            "SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
-             WHERE file_path = ? AND content_hash = ?
+            "WITH owner AS (
+                SELECT id FROM books WHERE content_hash = ? AND file_path = ?
+                UNION ALL
+                SELECT books.id
+                FROM book_path_aliases
+                JOIN books ON books.id = book_path_aliases.book_id
+                WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+                  AND books.content_hash = book_path_aliases.content_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+                  )
+                LIMIT 1
+             )
+             SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
+             WHERE (book_id = (SELECT id FROM owner))
+                OR ((SELECT id FROM owner) IS NULL AND file_path = ? AND content_hash = ?)
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
              LIMIT ?"
         );
         let rows = sqlx::query(&query)
+            .bind(content_hash)
+            .bind(&key)
+            .bind(content_hash)
+            .bind(&key)
+            .bind(content_hash)
+            .bind(&key)
             .bind(&key)
             .bind(content_hash)
             .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
@@ -356,13 +454,32 @@ impl BookmarkStore {
         validate_bookmark_path(&key)?;
         validate_content_hash(content_hash)?;
         let query = format!(
-            "SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
-             WHERE file_path = ? AND content_hash = ?
+            "WITH owner AS (
+                SELECT id FROM books WHERE content_hash = ? AND file_path = ?
+                UNION ALL
+                SELECT books.id FROM book_path_aliases
+                JOIN books ON books.id = book_path_aliases.book_id
+                WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+                  AND books.content_hash = book_path_aliases.content_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+                  )
+                LIMIT 1
+             )
+             SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
+             WHERE (book_id = (SELECT id FROM owner))
+                OR ((SELECT id FROM owner) IS NULL AND file_path = ? AND content_hash = ?)
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
              LIMIT ? OFFSET ?"
         );
         let rows = sqlx::query(&query)
-            .bind(key)
+            .bind(content_hash)
+            .bind(&key)
+            .bind(content_hash)
+            .bind(&key)
+            .bind(content_hash)
+            .bind(&key)
+            .bind(&key)
             .bind(content_hash)
             .bind(i64::from(limit.clamp(1, MAX_BOOKMARK_PAGE_SIZE)))
             .bind(i64::from(offset))
@@ -455,11 +572,31 @@ impl BookmarkStore {
             .context("bookmark location exceeds database range")?;
 
         Ok(sqlx::query(
-            "SELECT 1 FROM bookmarks
-             WHERE file_path = ? AND content_hash = ? AND page = ?
+            "WITH owner AS (
+                SELECT id FROM books WHERE content_hash = ? AND file_path = ?
+                UNION ALL
+                SELECT books.id FROM book_path_aliases
+                JOIN books ON books.id = book_path_aliases.book_id
+                WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+                  AND books.content_hash = book_path_aliases.content_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+                  )
+                LIMIT 1
+             )
+             SELECT 1 FROM bookmarks
+             WHERE ((book_id = (SELECT id FROM owner))
+                    OR ((SELECT id FROM owner) IS NULL AND file_path = ? AND content_hash = ?))
+               AND page = ?
                AND location_offset IS ? AND note IS NULL
              LIMIT 1",
         )
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
         .bind(&key)
         .bind(content_hash)
         .bind(page)
@@ -519,12 +656,34 @@ impl BookmarkStore {
         let key = canonical_key(file_path);
         validate_bookmark_path(&key)?;
         validate_content_hash(content_hash)?;
-        sqlx::query("DELETE FROM bookmarks WHERE file_path = ? AND content_hash = ?")
-            .bind(&key)
-            .bind(content_hash)
-            .execute(&self.pool)
-            .await
-            .context("failed to remove bookmarks")?;
+        sqlx::query(
+            "WITH owner AS (
+                SELECT id FROM books WHERE content_hash = ? AND file_path = ?
+                UNION ALL
+                SELECT books.id FROM book_path_aliases
+                JOIN books ON books.id = book_path_aliases.book_id
+                WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+                  AND books.content_hash = book_path_aliases.content_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+                  )
+                LIMIT 1
+             )
+             DELETE FROM bookmarks
+             WHERE (book_id = (SELECT id FROM owner))
+                OR ((SELECT id FROM owner) IS NULL AND file_path = ? AND content_hash = ?)",
+        )
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .bind(&key)
+        .bind(content_hash)
+        .execute(&self.pool)
+        .await
+        .context("failed to remove bookmarks")?;
         Ok(())
     }
 

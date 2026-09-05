@@ -788,7 +788,7 @@ async fn stable_save_replaces_a_path_only_alias() {
 }
 
 #[tokio::test]
-async fn stable_save_does_not_overwrite_a_row_owned_by_another_book() {
+async fn stable_save_coexists_with_different_content_owned_at_the_same_path() {
     let (store, _dir) = temp_store().await;
     let target_id: i64 = sqlx::query_scalar(
         "INSERT INTO books (title, format, file_path, content_hash)
@@ -816,7 +816,7 @@ async fn stable_save_does_not_overwrite_a_row_owned_by_another_book() {
     .await
     .unwrap();
 
-    let result = store
+    store
         .set_for_book_async(
             target_id,
             &FileReadingState {
@@ -825,16 +825,19 @@ async fn stable_save_does_not_overwrite_a_row_owned_by_another_book() {
                 zoom: 1.0,
             },
         )
-        .await;
+        .await
+        .unwrap();
 
-    assert!(result.is_err());
-    let owner: i64 = sqlx::query_scalar(
-        "SELECT book_id FROM reading_state WHERE file_path = '/books/target.epub'",
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT book_id, page FROM reading_state
+         WHERE file_path = '/books/target.epub' ORDER BY book_id",
     )
-    .fetch_one(store.pool())
+    .fetch_all(store.pool())
     .await
     .unwrap();
-    assert_eq!(owner, other_id);
+    let mut expected = vec![(other_id, 4), (target_id, 9)];
+    expected.sort_unstable();
+    assert_eq!(rows, expected);
 }
 
 // ---------------------------------------------------------------------------

@@ -229,6 +229,7 @@ struct BridgeAdmission {
     request_slots: Arc<Semaphore>,
     render_slots: Arc<Semaphore>,
     buffer_bytes: Arc<Semaphore>,
+    planning_slots: Arc<Semaphore>,
     open_slots: Arc<Semaphore>,
     document_slots: Arc<Semaphore>,
     buffer_slots: Arc<Semaphore>,
@@ -242,6 +243,7 @@ impl BridgeAdmission {
             request_slots: Arc::new(Semaphore::new(MAX_BRIDGE_REQUESTS)),
             render_slots: Arc::new(Semaphore::new(render_workers)),
             buffer_bytes: Arc::new(Semaphore::new(buffer_bytes)),
+            planning_slots: Arc::new(Semaphore::new(MAX_BRIDGE_OPEN_WORKERS)),
             open_slots: Arc::new(Semaphore::new(MAX_BRIDGE_OPEN_WORKERS)),
             document_slots: Arc::new(Semaphore::new(MAX_BRIDGE_DOCUMENTS)),
             buffer_slots: Arc::new(Semaphore::new(MAX_BRIDGE_BUFFERS)),
@@ -324,12 +326,26 @@ impl Bridge {
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
-        let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
-        // Reserve the parser's conservative retained ceiling before parsing so concurrently
-        // opening documents cannot allocate outside the process document budget.
-        let maximum_retained_bytes = OpenDocument::maximum_retained_byte_len(format)
+        let planning_slot =
+            acquire_permits(Arc::clone(&self.admission.planning_slots), 1, &cancellation).await?;
+        let planning_cancellation = cancellation.clone();
+        let (plan, guards) = tokio::task::spawn_blocking(move || {
+            let plan = guarded(|| {
+                OpenDocumentPlan::prepare_cancellable(&locator, &planning_cancellation)
+                    .map_err(map_open_error)
+            });
+            (plan, (_request_slot, document_slot, planning_slot))
+        })
+        .await
+        .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, document_slot, planning_slot) = guards;
+        check_cancelled(&cancellation)?;
+        let plan = plan?;
+        drop(planning_slot);
+        let maximum_retained_bytes = plan
+            .retained_admission_byte_len()
             .filter(|bytes| *bytes <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES)
             .ok_or(BridgeError::DocumentLimit)?;
         let maximum_byte_permits =
@@ -345,7 +361,6 @@ impl Bridge {
         let worker_cancellation = cancellation.clone();
         let (document, guards) = tokio::task::spawn_blocking(move || {
             let document = guarded(|| {
-                let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
                 plan.open_cancellable(worker_cancellation)
                     .map_err(map_open_error)
             });
@@ -458,18 +473,24 @@ impl Bridge {
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
-        let pdf_transient_byte_len = match &retained_document.document {
+        let render_transient_byte_len = match &retained_document.document {
             OpenDocument::Pdf(_) => byte_len,
-            OpenDocument::Cbz(_) => 0,
+            OpenDocument::Cbz(document) => document
+                .render_admission_byte_len_at_scale(request.page, request.scale)
+                .ok_or(BridgeError::BufferLimit)?,
             OpenDocument::Epub(_) => {
                 return Err(BridgeError::UnsupportedOperation(BookFormat::Epub));
             }
         };
-        let pdf_transient_permits =
-            u32::try_from(pdf_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
-        let pdf_transient_bytes = acquire_permits(
+        drop(probe_bytes);
+        if render_transient_byte_len > MAX_BRIDGE_PROBE_BYTES {
+            return Err(BridgeError::BufferLimit);
+        }
+        let render_transient_permits =
+            u32::try_from(render_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
+        let render_transient_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
-            pdf_transient_permits,
+            render_transient_permits,
             &cancellation,
         )
         .await?;
@@ -498,27 +519,19 @@ impl Bridge {
                     _request_slot,
                     buffer_slot,
                     render_slot,
-                    probe_bytes,
-                    pdf_transient_bytes,
+                    render_transient_bytes,
                     buffer_bytes,
                 ),
             )
         })
         .await
         .map_err(|_| BridgeError::Worker)?;
-        let (
-            _request_slot,
-            buffer_slot,
-            render_slot,
-            probe_bytes,
-            pdf_transient_bytes,
-            buffer_bytes,
-        ) = guards;
+        let (_request_slot, buffer_slot, render_slot, render_transient_bytes, buffer_bytes) =
+            guards;
         check_cancelled(&cancellation)?;
         let rendered = rendered?;
         drop(render_slot);
-        drop(probe_bytes);
-        drop(pdf_transient_bytes);
+        drop(render_transient_bytes);
         let _publication = cancellation
             .0
             .publication

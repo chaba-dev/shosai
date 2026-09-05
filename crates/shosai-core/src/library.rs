@@ -18,6 +18,7 @@ use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentPlan};
+use crate::bookmarks::MAX_BOOKMARKS_PER_BOOK;
 use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
@@ -45,6 +46,7 @@ const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
 const COVER_DECODE_BYTE_CAPACITY: usize = 256 * 1024 * 1024;
+const COVER_DECODER_METADATA_BYTES: usize = 1024 * 1024;
 const BOOK_SELECT_COLUMNS: &str = "id,
     CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096 THEN title END AS title,
     CASE WHEN author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096) THEN author END AS author,
@@ -96,6 +98,47 @@ fn reserve_cover_decode(
             return Some(permit);
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+fn reserve_cover_decode_replacing(
+    bytes: usize,
+    mut permit: CachePermit,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<CachePermit> {
+    let budget = cover_decode_budget();
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        match budget.try_reserve_replacing(bytes, vec![permit]) {
+            Ok(replacement) => return Some(replacement),
+            Err(mut permits) => {
+                permit = permits.pop().expect("replacement returns its input permit");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+}
+
+fn acquire_cbz_cover_pipeline(
+    cancellation: Option<&ImportCancellation>,
+) -> Option<std::sync::MutexGuard<'static, ()>> {
+    static PIPELINE: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    let pipeline = PIPELINE.get_or_init(|| std::sync::Mutex::new(()));
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        match pipeline.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                return Some(poisoned.into_inner());
+            }
+        }
     }
 }
 
@@ -881,9 +924,8 @@ impl Library {
                 .with_context(|| format!("unsupported managed format: .{extension}"))?;
             let source = old_path.clone();
             let destination_dir = new_dir.clone();
-            let (relocation, next_guards) = run_blocking_with(
-                guards,
-                move || -> Result<(PathBuf, ManagedPublication, FileFingerprint)> {
+            let (fingerprint, next_guards) =
+                run_blocking_with(guards, move || -> Result<FileFingerprint> {
                     let fingerprint = file_fingerprint(&source)?;
                     if expected_hash
                         .as_ref()
@@ -891,11 +933,33 @@ impl Library {
                     {
                         bail!("managed book failed verification: {}", source.display());
                     }
-                    let destination =
-                        destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
+                    Ok(fingerprint)
+                })
+                .await
+                .context("managed book verification task failed")?;
+            guards = next_guards;
+            let fingerprint = fingerprint?;
+            let destination = destination_dir.join(format!("{}.{}", fingerprint.hash, extension));
+            let destination_key = canonical_path_key(&canonical_path(&destination));
+            if let Some(row) =
+                sqlx::query("SELECT content_hash, storage_kind FROM books WHERE file_path = ?")
+                    .bind(&destination_key)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .context("failed to check relocation destination ownership")?
+                && (row.try_get::<Option<String>, _>("content_hash")?.as_deref()
+                    != Some(fingerprint.hash.as_str())
+                    || row.try_get::<String, _>("storage_kind")? != StorageKind::Managed.as_str())
+            {
+                bail!("managed relocation destination is owned by an incompatible library book");
+            }
+            let publish_source = old_path.clone();
+            let publish_fingerprint = fingerprint.clone();
+            let (relocation, next_guards) =
+                run_blocking_with(guards, move || -> Result<(PathBuf, ManagedPublication)> {
                     let existed = destination.exists();
                     let staged = stage_managed_file(
-                        &source,
+                        &publish_source,
                         &destination_dir,
                         format.max_input_bytes(),
                         None,
@@ -908,14 +972,13 @@ impl Library {
                             ManagedPublicationRollback::Remove
                         },
                     };
-                    publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
-                    Ok((canonical_path(&destination), publication, fingerprint))
-                },
-            )
-            .await
-            .context("managed book relocation task failed")?;
+                    publish_managed_file(&staged.path, &destination, &publish_fingerprint.hash)?;
+                    Ok((canonical_path(&destination), publication))
+                })
+                .await
+                .context("managed book relocation task failed")?;
             guards = next_guards;
-            let (new_path, publication, fingerprint) = relocation?;
+            let (new_path, publication) = relocation?;
             if canonical_path_key(&new_path).len() > MAX_IMPORT_PATH_BYTES {
                 bail!("managed book path exceeds byte limit");
             }
@@ -1041,6 +1104,13 @@ impl Library {
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             verify_fingerprinted_path(&path, &source_file, "import")?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
+            record_book_path_alias(
+                &mut transaction,
+                book.id,
+                &path_str,
+                &source_file.fingerprint.hash,
+            )
+            .await?;
             transaction.commit().await?;
             return Ok(imported_book_from_commit(
                 book.id,
@@ -1069,12 +1139,27 @@ impl Library {
         .execute(&mut *transaction)
         .await
         .context("failed to insert book")?;
-        let book_id: i64 = sqlx::query_scalar("SELECT id FROM books WHERE file_path = ?")
-            .bind(&path_str)
-            .fetch_one(&mut *transaction)
-            .await
-            .context("book not found after insert")?;
+        let row =
+            sqlx::query("SELECT id, content_hash, storage_kind FROM books WHERE file_path = ?")
+                .bind(&path_str)
+                .fetch_one(&mut *transaction)
+                .await
+                .context("book not found after insert")?;
+        let book_id = row.try_get::<i64, _>("id")?;
+        if row.try_get::<Option<String>, _>("content_hash")?.as_deref()
+            != Some(source_file.fingerprint.hash.as_str())
+            || row.try_get::<String, _>("storage_kind")? != StorageKind::Referenced.as_str()
+        {
+            bail!("existing library path has an incompatible storage identity");
+        }
         reconcile_identity(&mut transaction, book_id, &path_str, &path_str).await?;
+        record_book_path_alias(
+            &mut transaction,
+            book_id,
+            &path_str,
+            &source_file.fingerprint.hash,
+        )
+        .await?;
         transaction.commit().await?;
         Ok(imported_book_from_commit(
             book_id,
@@ -1275,6 +1360,20 @@ impl Library {
             .managed_dir
             .join(format!("{}.{extension}", inspection.fingerprint.hash));
         validate_import_path(&destination)?;
+        let destination_str = canonical_path_key(&canonical_path(&destination));
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        if let Some(row) =
+            sqlx::query("SELECT content_hash, storage_kind FROM books WHERE file_path = ?")
+                .bind(&destination_str)
+                .fetch_optional(&mut *transaction)
+                .await
+                .context("failed to check managed destination ownership")?
+            && (row.try_get::<Option<String>, _>("content_hash")?.as_deref()
+                != Some(inspection.fingerprint.hash.as_str())
+                || row.try_get::<String, _>("storage_kind")? != StorageKind::Managed.as_str())
+        {
+            bail!("managed destination is owned by an incompatible library book");
+        }
         let destination_existed = destination.exists();
         let publish_stage = staged.path.clone();
         let copy_destination = destination.clone();
@@ -1304,6 +1403,7 @@ impl Library {
         tokio::spawn(async move {
             commit_managed_publication(
                 library,
+                transaction,
                 source_str,
                 format,
                 inspection,
@@ -2101,6 +2201,33 @@ impl Library {
         path: &Path,
         cancellation: crate::bridge::Cancellation,
     ) -> Result<(OpenDocument, String)> {
+        let requested_path = canonical_path(path);
+        let plan_path = requested_path.clone();
+        let plan_cancellation = cancellation.clone();
+        let plan = tokio::task::spawn_blocking(move || {
+            if plan_cancellation.is_cancelled() {
+                bail!("document open cancelled");
+            }
+            OpenDocumentPlan::prepare_cancellable(
+                &DeviceFileLocator::from_path(plan_path),
+                &plan_cancellation,
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .context("book open preparation task failed")??;
+        self.open_book_document_plan_cancellable(book_id, &requested_path, plan, cancellation)
+            .await
+    }
+
+    #[doc(hidden)]
+    pub async fn open_book_document_plan_cancellable(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+        cancellation: crate::bridge::Cancellation,
+    ) -> Result<(OpenDocument, String)> {
         let book = self
             .get(book_id)
             .await?
@@ -2109,13 +2236,15 @@ impl Library {
         if canonical_path_key(&requested_path) != book.file_path {
             bail!("book location changed before it could be opened");
         }
+        if canonical_path(plan.source_path()) != requested_path {
+            bail!("prepared document location does not match the library identity");
+        }
         let expected_hash = book
             .content_hash
             .context("cannot verify this legacy book; remove it and import it again")?;
         let format = book.format;
         tokio::task::spawn_blocking(move || {
             let is_cancelled = || cancellation.is_cancelled();
-            let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(&requested_path))?;
             if plan.format() != format {
                 bail!("book format no longer matches the library identity");
             }
@@ -2306,7 +2435,8 @@ async fn commit_managed_transaction(
 }
 
 async fn commit_managed_publication(
-    library: Library,
+    _library: Library,
+    mut transaction: Transaction<'_, Sqlite>,
     source_str: String,
     format: BookFormat,
     inspection: BookInspection,
@@ -2315,18 +2445,33 @@ async fn commit_managed_publication(
 ) -> Result<ImportedBook> {
     let destination = canonical_path(&destination);
     let destination_str = canonical_path_key(&destination);
-    let existing_hash = library.get_by_hash(&inspection.fingerprint.hash).await?;
+    let hash_query = format!(
+        "SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE content_hash = ?
+         ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1"
+    );
+    let existing_hash_row = sqlx::query(&hash_query)
+        .bind(&inspection.fingerprint.hash)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to query book by fingerprint")?;
+    let existing_hash = existing_hash_row.as_ref().map(row_to_book).transpose()?;
 
     if let Some(existing) = &existing_hash
         && existing.storage_kind == StorageKind::Managed
     {
         validate_import_path(&path_from_key(&existing.file_path))?;
-        let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
         reconcile_identity(
             &mut transaction,
             existing.id,
             &source_str,
             &existing.file_path,
+        )
+        .await?;
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &source_str,
+            &inspection.fingerprint.hash,
         )
         .await?;
         commit_managed_transaction(transaction, &mut ownership).await?;
@@ -2338,8 +2483,18 @@ async fn commit_managed_publication(
         ));
     }
 
-    if let Some(existing) = library.get_by_path(&source_str).await?.or(existing_hash) {
-        let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
+    let path_query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE file_path = ?");
+    let matching_path_row = sqlx::query(&path_query)
+        .bind(&source_str)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to query book by path")?;
+    let matching_path = matching_path_row
+        .as_ref()
+        .map(row_to_book)
+        .transpose()?
+        .filter(|book| book.content_hash.as_deref() == Some(inspection.fingerprint.hash.as_str()));
+    if let Some(existing) = matching_path.or(existing_hash) {
         sqlx::query(
             "UPDATE books SET file_path = ?, storage_kind = 'managed', original_path = ?,
                               content_hash = ?, file_size = ? WHERE id = ?",
@@ -2359,6 +2514,24 @@ async fn commit_managed_publication(
             &destination_str,
         )
         .await?;
+        if source_str != existing.file_path {
+            reconcile_identity(&mut transaction, existing.id, &source_str, &destination_str)
+                .await?;
+        }
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &existing.file_path,
+            &inspection.fingerprint.hash,
+        )
+        .await?;
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &source_str,
+            &inspection.fingerprint.hash,
+        )
+        .await?;
         commit_managed_transaction(transaction, &mut ownership).await?;
         return Ok(imported_book_from_commit(
             existing.id,
@@ -2368,7 +2541,6 @@ async fn commit_managed_publication(
         ));
     }
 
-    let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
     sqlx::query(
         "INSERT OR IGNORE INTO books
             (title, author, format, file_path, cover_blob, storage_kind,
@@ -2386,8 +2558,9 @@ async fn commit_managed_publication(
     .execute(&mut *transaction)
     .await
     .context("failed to insert managed book")?;
-    let book_id: i64 = sqlx::query_scalar(
-        "SELECT id FROM books WHERE file_path = ? OR content_hash = ?
+    let row = sqlx::query(
+        "SELECT id, file_path, content_hash, storage_kind
+         FROM books WHERE file_path = ? OR content_hash = ?
          ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
     )
     .bind(&destination_str)
@@ -2395,7 +2568,22 @@ async fn commit_managed_publication(
     .fetch_one(&mut *transaction)
     .await
     .context("managed book not found after insert")?;
+    let book_id = row.try_get::<i64, _>("id")?;
+    if row.try_get::<String, _>("file_path")? != destination_str
+        || row.try_get::<Option<String>, _>("content_hash")?.as_deref()
+            != Some(inspection.fingerprint.hash.as_str())
+        || row.try_get::<String, _>("storage_kind")? != StorageKind::Managed.as_str()
+    {
+        bail!("managed book insert resolved to an incompatible storage identity");
+    }
     reconcile_identity(&mut transaction, book_id, &source_str, &destination_str).await?;
+    record_book_path_alias(
+        &mut transaction,
+        book_id,
+        &source_str,
+        &inspection.fingerprint.hash,
+    )
+    .await?;
     commit_managed_transaction(transaction, &mut ownership).await?;
     Ok(imported_book_from_commit(
         book_id,
@@ -2403,6 +2591,26 @@ async fn commit_managed_publication(
         &destination_str,
         &inspection.fingerprint.hash,
     ))
+}
+
+async fn record_book_path_alias(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+    file_path: &str,
+    content_hash: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO book_path_aliases (file_path, content_hash, book_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT(file_path, content_hash) DO UPDATE SET book_id = excluded.book_id",
+    )
+    .bind(file_path)
+    .bind(content_hash)
+    .bind(book_id)
+    .execute(&mut **transaction)
+    .await
+    .context("failed to record book path alias")?;
+    Ok(())
 }
 
 async fn reconcile_identity(
@@ -2425,6 +2633,7 @@ async fn reconcile_identity(
     if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("stored book content hash is invalid");
     }
+    record_book_path_alias(transaction, book_id, old_path, &content_hash).await?;
     let reading = sqlx::query(
         "SELECT page, location_offset, zoom,
                 CASE WHEN typeof(updated_at) = 'text'
@@ -2541,6 +2750,21 @@ async fn reconcile_identity(
     .execute(&mut **transaction)
     .await
     .context("failed to deduplicate bookmark aliases")?;
+    let bookmark_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bookmarks
+         WHERE book_id = ?
+            OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))",
+    )
+    .bind(book_id)
+    .bind(&content_hash)
+    .bind(old_path)
+    .bind(new_path)
+    .fetch_one(&mut **transaction)
+    .await
+    .context("failed to count merged bookmark aliases")?;
+    if bookmark_count > MAX_BOOKMARKS_PER_BOOK as i64 {
+        bail!("bookmark count limit exceeded");
+    }
     sqlx::query(
         "UPDATE bookmarks SET file_path = ?, content_hash = ?, book_id = ?
          WHERE book_id = ?
@@ -3606,16 +3830,27 @@ fn extract_cbz_metadata(
     let title = filename_title(title_path);
 
     // Use first page as cover.
-    let cover = if cancellation.is_some() {
+    let _pipeline = acquire_cbz_cover_pipeline(cancellation).context("import cancelled")?;
+    let probe_bytes = doc
+        .page_probe_admission_byte_len(0)
+        .context("CBZ cover probe admission overflowed")?;
+    if probe_bytes > COVER_DECODE_BYTE_CAPACITY {
+        crate::resource_limit!("CBZ cover probe exceeds transient byte limit");
+    }
+    let Some(probe_permit) = reserve_cover_decode(probe_bytes, cancellation) else {
+        bail!("import cancelled");
+    };
+    let cover_source = if cancellation.is_some() {
         doc.page_image_bytes_cancellable(0, &is_cancelled)
     } else {
         doc.page_image_bytes(0)
     }
-    .ok()
-    .and_then(|data| {
-        check_import_cancelled(cancellation)
-            .ok()
-            .and_then(|()| resize_cover_image(&data, cancellation))
+    .ok();
+    let cover = cover_source.and_then(|data| {
+        check_import_cancelled(cancellation).ok().and_then(|()| {
+            let source_capacity = data.capacity();
+            resize_cover_image_replacing(&data, source_capacity, probe_permit, cancellation)
+        })
     });
     check_import_cancelled(cancellation)?;
 
@@ -3637,28 +3872,66 @@ fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<(
 
 /// Resize an image to fit within cover thumbnail bounds and encode as PNG.
 fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
+    resize_cover_image_inner(data, 0, None, cancellation)
+}
+
+fn resize_cover_image_replacing(
+    data: &[u8],
+    source_capacity: usize,
+    permit: CachePermit,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<Vec<u8>> {
+    resize_cover_image_inner(data, source_capacity, Some(permit), cancellation)
+}
+
+fn resize_cover_image_inner(
+    data: &[u8],
+    source_capacity: usize,
+    replaced: Option<CachePermit>,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<Vec<u8>> {
     use image::ImageDecoder;
 
-    let decoder = image::ImageReader::new(std::io::Cursor::new(data))
-        .with_guessed_format()
-        .ok()?
-        .into_decoder()
-        .ok()?;
-    let transient_bytes = decoder
-        .total_bytes()
-        .checked_add(u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT) * 4 * 2)?;
-    let transient_bytes = usize::try_from(transient_bytes).ok()?;
-    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+    let probe_bytes = source_capacity.checked_add(COVER_DECODER_METADATA_BYTES)?;
+    if probe_bytes > COVER_DECODE_BYTE_CAPACITY {
         return None;
     }
-    let _permit = reserve_cover_decode(transient_bytes, cancellation)?;
-    let img = image::load_from_memory(data).ok()?;
+    let probe_permit = if let Some(permit) = replaced {
+        reserve_cover_decode_replacing(probe_bytes, permit, cancellation)?
+    } else {
+        reserve_cover_decode(probe_bytes, cancellation)?
+    };
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(COVER_DECODER_METADATA_BYTES as u64);
+    reader.limits(limits);
+    let decoder = reader.into_decoder().ok()?;
+    let native_bytes_per_pixel = u64::from(decoder.color_type().bytes_per_pixel());
+    let target_pixels = u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT);
+    let decoded_bytes = decoder.total_bytes();
+    let transient_bytes = decoded_bytes
+        .checked_add(COVER_DECODER_METADATA_BYTES as u64)?
+        .checked_add(target_pixels.checked_mul(native_bytes_per_pixel)?)?
+        .checked_add(target_pixels.checked_mul(4)?)?
+        .checked_add(MAX_IMPORT_COVER_BYTES as u64)?;
+    drop(decoder);
+    let transient_bytes = usize::try_from(transient_bytes).ok()?;
+    let admitted_bytes = transient_bytes.checked_add(source_capacity)?;
+    if admitted_bytes > COVER_DECODE_BYTE_CAPACITY {
+        return None;
+    }
+    let _permit = reserve_cover_decode_replacing(admitted_bytes, probe_permit, cancellation)?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(decoded_bytes.checked_add(COVER_DECODER_METADATA_BYTES as u64)?);
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
     check_import_cancelled(cancellation).ok()?;
-    let thumb = img.resize(
-        COVER_MAX_WIDTH,
-        COVER_MAX_HEIGHT,
-        image::imageops::FilterType::Triangle,
-    );
+    let thumb = img.thumbnail(COVER_MAX_WIDTH, COVER_MAX_HEIGHT);
     check_import_cancelled(cancellation).ok()?;
     let rgba = thumb.to_rgba8();
     check_import_cancelled(cancellation).ok()?;
@@ -4345,13 +4618,12 @@ mod tests {
                 .await
         });
 
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while !destination.exists() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("managed publication should finish before the blocked database commit");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        assert!(
+            !destination.exists(),
+            "publication must wait for the destination ownership transaction"
+        );
         task.abort();
         assert!(matches!(task.await, Err(error) if error.is_cancelled()));
         sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
