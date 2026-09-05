@@ -4412,6 +4412,9 @@ fn prefetch_next_paginated_spread(state: &mut State) -> Task<Message> {
                 state.raster_jobs.insert(job, permit);
             }
             Some(OpenDocument::Cbz(document)) => {
+                if document.cached_page_size(page).is_none() {
+                    continue;
+                }
                 let document = Arc::clone(document);
                 let permit = match reserve_raster(state, page, scale) {
                     RasterAdmission::Ready(permit) => permit,
@@ -9186,6 +9189,7 @@ mod tests {
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
         cbz.page_size(0).unwrap();
+        cbz.page_size(2).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;
@@ -9217,6 +9221,24 @@ mod tests {
     }
 
     #[test]
+    fn cbz_prefetch_skips_pages_without_cached_dimensions() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        let total_pages = cbz.page_count();
+        cbz.page_size(0).unwrap();
+        let document = Arc::new(cbz);
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.total_pages = total_pages;
+        state.zoom = ZoomMode::FitPage;
+
+        assert!(document.cached_page_size(2).is_none());
+        assert_eq!(prefetch_next_paginated_spread(&mut state).units(), 0);
+        assert!(document.cached_page_size(2).is_none());
+    }
+
+    #[test]
     fn failed_spread_prefetch_preserves_the_visible_spread() {
         let cbz = CbzDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
@@ -9224,6 +9246,7 @@ mod tests {
         .expect("fixture should be a valid CBZ");
         let total_pages = cbz.page_count();
         cbz.page_size(0).unwrap();
+        cbz.page_size(2).unwrap();
         let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
         state.total_pages = total_pages;
         state.zoom = ZoomMode::FitPage;

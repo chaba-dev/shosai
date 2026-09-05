@@ -469,18 +469,24 @@ impl Bridge {
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
-        let pdf_transient_byte_len = match &retained_document.document {
+        let render_transient_byte_len = match &retained_document.document {
             OpenDocument::Pdf(_) => byte_len,
-            OpenDocument::Cbz(_) => 0,
+            OpenDocument::Cbz(document) => document
+                .render_admission_byte_len_at_scale(request.page, request.scale)
+                .ok_or(BridgeError::BufferLimit)?,
             OpenDocument::Epub(_) => {
                 return Err(BridgeError::UnsupportedOperation(BookFormat::Epub));
             }
         };
-        let pdf_transient_permits =
-            u32::try_from(pdf_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
-        let pdf_transient_bytes = acquire_permits(
+        drop(probe_bytes);
+        if render_transient_byte_len > MAX_BRIDGE_PROBE_BYTES {
+            return Err(BridgeError::BufferLimit);
+        }
+        let render_transient_permits =
+            u32::try_from(render_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
+        let render_transient_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
-            pdf_transient_permits,
+            render_transient_permits,
             &cancellation,
         )
         .await?;
@@ -509,27 +515,19 @@ impl Bridge {
                     _request_slot,
                     buffer_slot,
                     render_slot,
-                    probe_bytes,
-                    pdf_transient_bytes,
+                    render_transient_bytes,
                     buffer_bytes,
                 ),
             )
         })
         .await
         .map_err(|_| BridgeError::Worker)?;
-        let (
-            _request_slot,
-            buffer_slot,
-            render_slot,
-            probe_bytes,
-            pdf_transient_bytes,
-            buffer_bytes,
-        ) = guards;
+        let (_request_slot, buffer_slot, render_slot, render_transient_bytes, buffer_bytes) =
+            guards;
         check_cancelled(&cancellation)?;
         let rendered = rendered?;
         drop(render_slot);
-        drop(probe_bytes);
-        drop(pdf_transient_bytes);
+        drop(render_transient_bytes);
         let _publication = cancellation
             .0
             .publication
