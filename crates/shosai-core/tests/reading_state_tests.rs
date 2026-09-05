@@ -493,6 +493,36 @@ async fn preference_reads_surface_storage_and_malformed_row_failures() {
 }
 
 #[tokio::test]
+async fn loading_preferences_enforces_row_and_aggregate_limits_before_values() {
+    let (store, _dir) = temp_store().await;
+    let mut transaction = store.pool().begin().await.unwrap();
+    for index in 0..=shosai_core::reading_state::MAX_PREFERENCE_ROWS {
+        sqlx::query("INSERT INTO preferences (key, value) VALUES (?, 'x')")
+            .bind(format!("key-{index}"))
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+    }
+    transaction.commit().await.unwrap();
+    assert!(store.get_prefs_async().await.is_err());
+
+    sqlx::query("DELETE FROM preferences")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let value = "x".repeat(shosai_core::reading_state::MAX_PREFERENCE_VALUE_BYTES);
+    for index in 0..17 {
+        sqlx::query("INSERT INTO preferences (key, value) VALUES (?, ?)")
+            .bind(format!("large-{index}"))
+            .bind(&value)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    assert!(store.get_prefs_async().await.is_err());
+}
+
+#[tokio::test]
 async fn test_multiple_preferences_are_saved_atomically() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");

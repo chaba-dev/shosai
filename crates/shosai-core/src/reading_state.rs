@@ -50,6 +50,8 @@ const DB_FILE: &str = "shosai.db";
 pub const MAX_READING_STATE_PATH_BYTES: usize = 16 * 1024;
 pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
 pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
+pub const MAX_PREFERENCE_ROWS: usize = 1024;
+pub const MAX_PREFERENCE_TOTAL_BYTES: usize = 1024 * 1024;
 
 /// Storage locations supplied by the platform host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -518,29 +520,90 @@ impl ReadingStateStore {
     /// Get a stored preference value.
     pub async fn get_pref_async(&self, key: &str) -> Result<Option<String>> {
         validate_preference_key(key)?;
-        let value = sqlx::query("SELECT value FROM preferences WHERE key = ?")
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await
-            .context("failed to load preference")?
-            .map(|row| row.try_get::<String, _>("value"))
-            .transpose()?;
-        if let Some(value) = &value {
-            validate_preference(key, value)?;
-        }
-        Ok(value)
+        let row = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value,
+             length(CAST(value AS BLOB)) AS value_bytes
+             FROM preferences WHERE key = ?",
+        )
+        .bind(MAX_PREFERENCE_VALUE_BYTES as i64)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load preference")?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let value_bytes = row.try_get::<i64, _>("value_bytes")?;
+        let value = row
+            .try_get::<Option<String>, _>("bounded_value")?
+            .context("stored preference value is malformed or exceeds its byte limit")?;
+        let value_bytes = usize::try_from(value_bytes)
+            .context("stored preference value has an invalid byte length")?;
+        debug_assert!(value_bytes <= MAX_PREFERENCE_VALUE_BYTES);
+        validate_preference(key, &value)?;
+        Ok(Some(value))
     }
 
     /// Get all stored preferences in one query.
     pub async fn get_prefs_async(&self) -> Result<HashMap<String, String>> {
-        let rows = sqlx::query("SELECT key, value FROM preferences")
-            .fetch_all(&self.pool)
-            .await
-            .context("failed to load preferences")?;
+        let mut transaction = self.pool.begin().await?;
+        let summary = sqlx::query(
+            "SELECT COUNT(*) AS row_count,
+                    COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0)
+                        AS total_bytes
+             FROM preferences",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .context("failed to summarize preferences")?;
+        let row_count = usize::try_from(summary.try_get::<i64, _>("row_count")?)
+            .context("stored preferences have an invalid row count")?;
+        let total_bytes = usize::try_from(summary.try_get::<i64, _>("total_bytes")?)
+            .context("stored preferences have an invalid byte count")?;
+        if row_count > MAX_PREFERENCE_ROWS {
+            bail!("stored preferences exceed {MAX_PREFERENCE_ROWS} rows");
+        }
+        if total_bytes > MAX_PREFERENCE_TOTAL_BYTES {
+            bail!("stored preferences exceed {MAX_PREFERENCE_TOTAL_BYTES} total bytes");
+        }
+        let rows = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(key) = 'text' AND length(CAST(key AS BLOB)) <= ? THEN key
+             END AS bounded_key,
+             CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value,
+             length(CAST(key AS BLOB)) + length(CAST(value AS BLOB)) AS row_bytes
+             FROM preferences LIMIT ?",
+        )
+        .bind(MAX_PREFERENCE_KEY_BYTES as i64)
+        .bind(MAX_PREFERENCE_VALUE_BYTES as i64)
+        .bind(MAX_PREFERENCE_ROWS as i64 + 1)
+        .fetch_all(&mut *transaction)
+        .await
+        .context("failed to load preferences")?;
+        if rows.len() > MAX_PREFERENCE_ROWS {
+            bail!("stored preferences exceed {MAX_PREFERENCE_ROWS} rows");
+        }
         let mut preferences = HashMap::with_capacity(rows.len());
+        let mut loaded_bytes = 0_usize;
         for row in rows {
-            let key = row.try_get::<String, _>("key")?;
-            let value = row.try_get::<String, _>("value")?;
+            let key = row
+                .try_get::<Option<String>, _>("bounded_key")?
+                .context("stored preference key is malformed or exceeds its byte limit")?;
+            let value = row
+                .try_get::<Option<String>, _>("bounded_value")?
+                .context("stored preference value is malformed or exceeds its byte limit")?;
+            let row_bytes = usize::try_from(row.try_get::<i64, _>("row_bytes")?)
+                .context("stored preference has an invalid byte length")?;
+            loaded_bytes = loaded_bytes
+                .checked_add(row_bytes)
+                .context("stored preference byte count overflowed")?;
+            if loaded_bytes > MAX_PREFERENCE_TOTAL_BYTES {
+                bail!("stored preferences exceed {MAX_PREFERENCE_TOTAL_BYTES} total bytes");
+            }
             validate_preference(&key, &value)?;
             preferences.insert(key, value);
         }

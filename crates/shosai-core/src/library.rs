@@ -706,6 +706,35 @@ impl Library {
         Self::new(self.pool.clone(), managed_dir)
     }
 
+    async fn ensure_current_managed_dir(&self) -> Result<()> {
+        let row = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value
+             FROM preferences WHERE key = ?",
+        )
+        .bind(MAX_IMPORT_PATH_BYTES as i64)
+        .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load managed library location")?;
+        let configured_exists = row.is_some();
+        let configured = row
+            .map(|row| row.try_get::<Option<String>, _>("bounded_value"))
+            .transpose()?
+            .flatten();
+        if configured_exists && configured.is_none() {
+            bail!("stored managed library location is malformed or exceeds its byte limit");
+        }
+        if configured
+            .as_deref()
+            .is_some_and(|configured| configured != canonical_path_key(&self.managed_dir))
+        {
+            bail!("managed library location changed; refresh the library and try again");
+        }
+        Ok(())
+    }
+
     pub async fn managed_storage_summary(&self) -> Result<ManagedStorageSummary> {
         let row = sqlx::query(
             "SELECT COUNT(*) AS book_count, COALESCE(SUM(file_size), 0) AS total_bytes
@@ -730,6 +759,7 @@ impl Library {
     pub async fn relocate_managed_books(&self, new_dir: &Path) -> Result<Vec<ManagedPathChange>> {
         let work_permit = acquire_import_work(None).await?;
         let storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
         let mut guards = (work_permit, storage_guard);
         let new_dir = new_dir.to_path_buf();
         let create_dir = new_dir.clone();
@@ -1007,6 +1037,8 @@ impl Library {
         cancellation: Option<&ImportCancellation>,
     ) -> Result<PreparedManagedImport> {
         let preparation_permit = acquire_import_work(cancellation).await?;
+        let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         let source = canonical_path(source);
         validate_import_path(&source)?;
         let source_str = canonical_path_key(&source);
@@ -1019,17 +1051,19 @@ impl Library {
         let stage_source = source.clone();
         let stage_dir = self.managed_dir.clone();
         let stage_cancellation = cancellation.cloned();
-        let (staged, preparation_permit) = run_blocking_with(preparation_permit, move || {
-            stage_managed_file(
-                &stage_source,
-                &stage_dir,
-                format.max_input_bytes(),
-                stage_cancellation.as_ref(),
-            )
-        })
-        .await
-        .context("managed book staging task failed")?;
+        let (staged, (preparation_permit, storage_guard)) =
+            run_blocking_with((preparation_permit, storage_guard), move || {
+                stage_managed_file(
+                    &stage_source,
+                    &stage_dir,
+                    format.max_input_bytes(),
+                    stage_cancellation.as_ref(),
+                )
+            })
+            .await
+            .context("managed book staging task failed")?;
         let staged = staged?;
+        drop(storage_guard);
         if cancellation.is_some_and(ImportCancellation::is_cancelled) {
             bail!("managed preparation cancelled");
         }
@@ -1119,6 +1153,7 @@ impl Library {
         // Acquiring this lock is the commit point. Publication and the database mutation must
         // finish definitively after this point, even if cancellation arrives.
         let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         if let Some(commit_started) = commit_started {
             commit_started.store(true, Ordering::Release);
         }
@@ -1454,6 +1489,7 @@ impl Library {
         let mut discovery = ImportDiscovery::default();
         let mut scanning = true;
         let mut received_results = 0_usize;
+        let mut truncated = false;
 
         while scanning || !fingerprint_tasks.is_empty() {
             if cancellation.is_cancelled() {
@@ -1479,12 +1515,7 @@ impl Library {
                     Some(_item) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure::new(
-                            PathBuf::new(),
-                            format!(
-                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
-                            ),
-                        ));
+                        truncated = true;
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1508,12 +1539,7 @@ impl Library {
                     Some(_) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure::new(
-                            PathBuf::new(),
-                            format!(
-                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
-                            ),
-                        ));
+                        truncated = true;
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1552,12 +1578,12 @@ impl Library {
                 &mut discovery.failures,
             );
         }
-        if let Err(error) = scan_task.await {
-            discovery.failures.push(ImportFailure::new(
+        let scanner_failure = scan_task.await.err().map(|error| {
+            ImportFailure::new(
                 PathBuf::new(),
                 format!("book discovery task failed: {error}"),
-            ));
-        }
+            )
+        });
 
         fingerprinted.sort_by(|left, right| left.0.path.cmp(&right.0.path));
         discovery.candidates.reserve(fingerprinted.len());
@@ -1622,6 +1648,7 @@ impl Library {
             });
             progress.completed_file();
         }
+        bound_discovery_results(&mut discovery, truncated, scanner_failure);
         discovery.candidates.sort_by(|left, right| {
             left.group_key
                 .cmp(&right.group_key)
@@ -1972,34 +1999,16 @@ impl Library {
 
     /// Open the current bytes for a stable library identity after verifying its stored hash.
     pub async fn open_book_document_at(&self, book_id: i64, path: &Path) -> Result<OpenDocument> {
-        let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path))?;
-        self.open_book_document_with_plan(book_id, path, plan)
+        self.open_book_document_cancellable(book_id, path, crate::bridge::Cancellation::new())
             .await
             .map(|(document, _)| document)
     }
 
     #[doc(hidden)]
-    pub async fn open_book_document_with_plan(
+    pub async fn open_book_document_cancellable(
         &self,
         book_id: i64,
         path: &Path,
-        plan: OpenDocumentPlan,
-    ) -> Result<(OpenDocument, String)> {
-        self.open_book_document_with_plan_cancellable(
-            book_id,
-            path,
-            plan,
-            crate::bridge::Cancellation::new(),
-        )
-        .await
-    }
-
-    #[doc(hidden)]
-    pub async fn open_book_document_with_plan_cancellable(
-        &self,
-        book_id: i64,
-        path: &Path,
-        plan: OpenDocumentPlan,
         cancellation: crate::bridge::Cancellation,
     ) -> Result<(OpenDocument, String)> {
         let book = self
@@ -2014,11 +2023,12 @@ impl Library {
             .content_hash
             .context("cannot verify this legacy book; remove it and import it again")?;
         let format = book.format;
-        if plan.format() != format {
-            bail!("book format no longer matches the library identity");
-        }
         tokio::task::spawn_blocking(move || {
             let is_cancelled = || cancellation.is_cancelled();
+            let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(&requested_path))?;
+            if plan.format() != format {
+                bail!("book format no longer matches the library identity");
+            }
             let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
             let mut hasher = Sha256::new();
             for chunk in admitted.data.chunks(64 * 1024) {
@@ -2804,6 +2814,30 @@ fn collect_fingerprint_result(
                 format!("book fingerprint task failed: {error}"),
             ));
         }
+    }
+}
+
+fn bound_discovery_results(
+    discovery: &mut ImportDiscovery,
+    truncated: bool,
+    scanner_failure: Option<ImportFailure>,
+) {
+    let reserved = usize::from(truncated) + usize::from(scanner_failure.is_some());
+    let retained_before_terminal_failures = MAX_IMPORT_DISCOVERY_RESULTS.saturating_sub(reserved);
+    while discovery.candidates.len() + discovery.failures.len() > retained_before_terminal_failures
+    {
+        if discovery.failures.pop().is_none() {
+            discovery.candidates.pop();
+        }
+    }
+    if truncated {
+        discovery.failures.push(ImportFailure::new(
+            PathBuf::new(),
+            format!("book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"),
+        ));
+    }
+    if let Some(failure) = scanner_failure {
+        discovery.failures.push(failure);
     }
 }
 
@@ -4256,5 +4290,41 @@ mod tests {
         assert!(!stage.exists());
         assert!(destination.exists());
         publish_managed_file(&stage, &destination, &expected_hash).unwrap();
+    }
+
+    #[test]
+    fn truncated_discovery_retains_at_most_the_documented_result_limit() {
+        let mut discovery = ImportDiscovery {
+            failures: (0..MAX_IMPORT_DISCOVERY_RESULTS)
+                .map(|index| ImportFailure::new(PathBuf::new(), index.to_string()))
+                .collect(),
+            ..ImportDiscovery::default()
+        };
+
+        bound_discovery_results(
+            &mut discovery,
+            true,
+            Some(ImportFailure::new(
+                PathBuf::new(),
+                "book discovery task failed: worker panicked",
+            )),
+        );
+
+        assert_eq!(
+            discovery.candidates.len() + discovery.failures.len(),
+            MAX_IMPORT_DISCOVERY_RESULTS
+        );
+        assert!(
+            discovery
+                .failures
+                .iter()
+                .any(|failure| failure.error().contains("discovery stopped"))
+        );
+        assert!(
+            discovery
+                .failures
+                .iter()
+                .any(|failure| failure.error().contains("worker panicked"))
+        );
     }
 }

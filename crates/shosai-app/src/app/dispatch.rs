@@ -1741,20 +1741,58 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarksLoaded {
             tab_id,
-            generation,
+            load_generation,
             file_path,
             book_id,
-            bookmarks,
+            result,
         } => {
-            if state.active_tab_id != Some(tab_id)
-                || state.bookmark_mutation_generation != generation
-                || state.file_path.as_ref() != Some(&file_path)
-                || state.book_id != book_id
-            {
+            if state.active_tab_id == Some(tab_id) {
+                if state.bookmark_load_generation != load_generation
+                    || state.file_path.as_ref() != Some(&file_path)
+                    || state.book_id != book_id
+                {
+                    return Task::none();
+                }
+                match result {
+                    Ok(bookmarks) => {
+                        state.bookmarks = bookmarks;
+                        state.bookmark_load_failed = false;
+                        update_bookmark_status(state);
+                    }
+                    Err(error) => {
+                        state.bookmark_load_failed = true;
+                        state.error = Some(AppError::Storage(format!(
+                            "failed to load bookmarks: {error}"
+                        )));
+                    }
+                }
                 return Task::none();
             }
-            state.bookmarks = bookmarks;
-            update_bookmark_status(state);
+            let Some(tab) = state.tabs.iter_mut().find(|tab| {
+                tab.id == tab_id
+                    && tab.bookmark_load_generation == load_generation
+                    && tab.session.locator.path() == file_path
+                    && tab.session.book_id == book_id
+            }) else {
+                return Task::none();
+            };
+            match result {
+                Ok(bookmarks) => {
+                    tab.bookmarks = bookmarks;
+                    tab.bookmark_load_failed = false;
+                    tab.current_page_bookmarked = tab.bookmarks.iter().any(|bookmark| {
+                        bookmark.page == tab.session.location.page
+                            && bookmark.location_offset == tab.session.location.offset
+                            && bookmark.note.is_none()
+                    });
+                }
+                Err(error) => {
+                    tab.bookmark_load_failed = true;
+                    tab.error = Some(AppError::Storage(format!(
+                        "failed to load bookmarks: {error}"
+                    )));
+                }
+            }
         }
 
         Message::GoToBookmark(page, location_offset) => {

@@ -11,9 +11,7 @@ use iced::widget::{
 use iced::{Element, Length, Point, Size, Subscription, Task, window};
 use tokio::sync::oneshot;
 
-use shosai_core::application::{
-    DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan,
-};
+use shosai_core::application::{DeviceFileLocator, OpenDocument, OpenDocumentError};
 use shosai_core::bookmarks::{Bookmark, BookmarkStore, MAX_BOOKMARK_NOTE_BYTES};
 use shosai_core::bridge::Cancellation;
 use shosai_core::cbz::CbzDoc;
@@ -687,6 +685,8 @@ struct ReaderTab {
     session: ReaderSession,
     content_hash: Option<String>,
     reading_state_restore_failed: bool,
+    bookmark_load_failed: bool,
+    bookmark_load_generation: u64,
     display_title: String,
     total_pages: usize,
     rendered_page: Option<RenderedPage>,
@@ -1037,6 +1037,8 @@ pub struct State {
 
     // -- Bookmarks --
     bookmarks: Vec<Bookmark>,
+    bookmark_load_failed: bool,
+    bookmark_load_generation: u64,
     bookmark_mutation_generation: u64,
     bookmark_mutation_queues: HashMap<u64, VecDeque<BookmarkMutation>>,
     bookmark_mutations_active: HashSet<u64>,
@@ -1222,6 +1224,8 @@ pub fn boot() -> (State, Task<Message>) {
         library: None,
 
         bookmarks: Vec::new(),
+        bookmark_load_failed: false,
+        bookmark_load_generation: 0,
         bookmark_mutation_generation: 0,
         bookmark_mutation_queues: HashMap::new(),
         bookmark_mutations_active: HashSet::new(),
@@ -1530,6 +1534,8 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
         },
         content_hash: state.document_content_hash.clone(),
         reading_state_restore_failed: state.reading_state_restore_failed,
+        bookmark_load_failed: state.bookmark_load_failed,
+        bookmark_load_generation: state.bookmark_load_generation,
         display_title: state
             .display_title
             .clone()
@@ -1585,6 +1591,8 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.book_id = tab.session.book_id;
     state.document_content_hash = tab.content_hash;
     state.reading_state_restore_failed = tab.reading_state_restore_failed;
+    state.bookmark_load_failed = tab.bookmark_load_failed;
+    state.bookmark_load_generation = tab.bookmark_load_generation;
     state.display_title = Some(tab.display_title);
     state.file_path = Some(tab.session.locator.path().to_path_buf());
     state.document = Some(tab.session.document);
@@ -1911,14 +1919,13 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.document_open_notice_visible = false;
     state.document_open_preview = None;
     let locator = DeviceFileLocator::from_path(&path);
-    let plan = match OpenDocumentPlan::prepare(&locator) {
-        Ok(plan) => plan,
+    let format = match locator.format() {
+        Ok(format) => format,
         Err(error) => {
             state.open_error = Some(app_document_open_error(error));
             return Task::none();
         }
     };
-    let format = plan.format();
     let Some(maximum_retained_bytes) = OpenDocument::maximum_retained_byte_len(format) else {
         state.open_error = Some(AppError::Open {
             format: format.display_name(),
@@ -1993,12 +2000,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     detail: "library is unavailable".to_owned(),
                 })?;
                 return library
-                    .open_book_document_with_plan_cancellable(
-                        book_id,
-                        &task_path,
-                        plan,
-                        open_cancellation,
-                    )
+                    .open_book_document_cancellable(book_id, &task_path, open_cancellation)
                     .await
                     .map_err(|error| AppError::Open {
                         format: "document",
@@ -2006,6 +2008,10 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     });
             }
             tokio::task::spawn_blocking(move || {
+                let plan = shosai_core::application::OpenDocumentPlan::prepare(
+                    &DeviceFileLocator::from_path(&task_path),
+                )
+                .map_err(app_document_open_error)?;
                 plan.open_with_content_hash_cancellable(open_cancellation)
                     .map_err(app_document_open_error)
             })
@@ -2456,16 +2462,29 @@ fn install_document(
     state.document = Some(session.document);
 
     state.page_input = format!("{}", state.current_page + 1);
+    state.bookmarks.clear();
+    state.bookmark_load_failed = false;
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-        state.bookmarks = book_id
+        match book_id
             .map(|id| store.list_for_book(id))
             .unwrap_or_else(|| {
                 state.document_content_hash.as_deref().map_or_else(
                     || Ok(Vec::new()),
                     |content_hash| store.list_for_file(path, content_hash),
                 )
-            })
-            .unwrap_or_default();
+            }) {
+            Ok(bookmarks) => {
+                state.bookmarks = bookmarks;
+                state.bookmark_load_failed = false;
+            }
+            Err(error) => {
+                state.bookmarks.clear();
+                state.bookmark_load_failed = true;
+                state.error = Some(AppError::Storage(format!(
+                    "failed to load bookmarks: {error:#}"
+                )));
+            }
+        }
     }
     update_bookmark_status(state);
 }
@@ -4358,6 +4377,15 @@ fn queue_bookmark_mutation(
     tab_id: u64,
     mutation: BookmarkMutation,
 ) -> Task<Message> {
+    if state.bookmark_load_failed {
+        if let BookmarkMutation::UpdateNote { id, note, .. } = mutation {
+            restore_bookmark_edit(state, tab_id, id, note.unwrap_or_default());
+        }
+        state.error = Some(AppError::Storage(
+            "bookmark data is unavailable; reload bookmarks before making changes".to_owned(),
+        ));
+        return Task::none();
+    }
     let removal_blocks_mutation = [state.removing_book, state.pending_remove_book]
         .into_iter()
         .flatten()
@@ -4720,7 +4748,7 @@ fn restore_bookmark_edit(state: &mut State, tab_id: u64, id: i64, note: String) 
     }
 }
 
-fn refresh_bookmarks(state: &State) -> Task<Message> {
+fn refresh_bookmarks(state: &mut State) -> Task<Message> {
     if let (Some(tab_id), Some(path), Some(store)) =
         (state.active_tab_id, &state.file_path, &state.bookmark_store)
     {
@@ -4736,28 +4764,33 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
         let path = path.clone();
         let book_id = state.book_id;
         let content_hash = state.document_content_hash.clone();
-        let generation = state.bookmark_mutation_generation;
+        state.bookmark_load_generation = state.bookmark_load_generation.wrapping_add(1);
+        let load_generation = state.bookmark_load_generation;
+        state.bookmark_load_failed = true;
         let result_path = path.clone();
         Task::perform(
             async move {
                 if let Some(book_id) = book_id {
-                    store.list_for_book_async(book_id).await.unwrap_or_default()
+                    store
+                        .list_for_book_async(book_id)
+                        .await
+                        .map_err(|error| format!("{error:#}"))
                 } else {
                     match content_hash.as_deref() {
                         Some(content_hash) => store
                             .list_for_file_async(&path, content_hash)
                             .await
-                            .unwrap_or_default(),
-                        None => Vec::new(),
+                            .map_err(|error| format!("{error:#}")),
+                        None => Ok(Vec::new()),
                     }
                 }
             },
-            move |bookmarks| Message::BookmarksLoaded {
+            move |result| Message::BookmarksLoaded {
                 tab_id,
-                generation,
+                load_generation,
                 file_path: result_path.clone(),
                 book_id,
-                bookmarks,
+                result,
             },
         )
     } else {
@@ -10333,10 +10366,10 @@ mod tests {
             &mut state,
             Message::BookmarksLoaded {
                 tab_id: 1,
-                generation: 0,
+                load_generation: 0,
                 file_path: PathBuf::from("first.epub"),
                 book_id: None,
-                bookmarks: vec![Bookmark {
+                result: Ok(vec![Bookmark {
                     id: 1,
                     file_path: "first.epub".to_string(),
                     book_id: None,
@@ -10346,11 +10379,98 @@ mod tests {
                     note: None,
                     color: "yellow".to_string(),
                     created_at: "now".to_string(),
-                }],
+                }]),
             },
         );
 
         assert!(state.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn failed_bookmark_load_preserves_snapshot_and_blocks_mutation() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.bookmarks.push(Bookmark {
+            id: 1,
+            file_path: "book.epub".to_owned(),
+            book_id: None,
+            page: 0,
+            location_offset: None,
+            title: None,
+            note: None,
+            color: "yellow".to_owned(),
+            created_at: "now".to_owned(),
+        });
+
+        let _ = update(
+            &mut state,
+            Message::BookmarksLoaded {
+                tab_id: 1,
+                load_generation: 0,
+                file_path: PathBuf::from("book.epub"),
+                book_id: None,
+                result: Err("database unavailable".to_owned()),
+            },
+        );
+        let mutation = queue_bookmark_mutation(
+            &mut state,
+            1,
+            BookmarkMutation::Toggle {
+                generation: 1,
+                file_path: PathBuf::from("book.epub"),
+                content_hash: Some("0".repeat(64)),
+                book_id: None,
+                page: 0,
+                location_offset: None,
+            },
+        );
+
+        assert_eq!(state.bookmarks.len(), 1);
+        assert!(state.bookmark_load_failed);
+        assert_eq!(mutation.units(), 0);
+        assert!(!state.bookmark_mutation_queues.contains_key(&1));
+    }
+
+    #[test]
+    fn rejected_mutation_does_not_invalidate_pending_bookmark_reload() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        state.file_path = Some(PathBuf::from("book.epub"));
+        state.bookmark_load_generation = 7;
+        state.bookmark_load_failed = true;
+
+        state.bookmark_mutation_generation = state.bookmark_mutation_generation.wrapping_add(1);
+        let _ = queue_bookmark_mutation(
+            &mut state,
+            1,
+            BookmarkMutation::Toggle {
+                generation: 1,
+                file_path: PathBuf::from("book.epub"),
+                content_hash: Some("0".repeat(64)),
+                book_id: None,
+                page: 0,
+                location_offset: None,
+            },
+        );
+        let _ = update(
+            &mut state,
+            Message::BookmarksLoaded {
+                tab_id: 1,
+                load_generation: 7,
+                file_path: PathBuf::from("book.epub"),
+                book_id: None,
+                result: Ok(Vec::new()),
+            },
+        );
+
+        assert!(!state.bookmark_load_failed);
     }
 
     #[test]
@@ -10705,10 +10825,10 @@ mod tests {
             &mut state,
             Message::BookmarksLoaded {
                 tab_id: 1,
-                generation: 0,
+                load_generation: 0,
                 file_path: PathBuf::from("removed.epub"),
                 book_id: Some(42),
-                bookmarks: vec![Bookmark {
+                result: Ok(vec![Bookmark {
                     id: 1,
                     file_path: "removed.epub".to_string(),
                     book_id: Some(42),
@@ -10718,7 +10838,7 @@ mod tests {
                     note: None,
                     color: "yellow".to_string(),
                     created_at: "now".to_string(),
-                }],
+                }]),
             },
         );
 

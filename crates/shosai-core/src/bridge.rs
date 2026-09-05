@@ -324,8 +324,7 @@ impl Bridge {
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
-        let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
-        let format = plan.format();
+        let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
         // Reserve the parser's conservative retained ceiling before parsing so concurrently
@@ -346,6 +345,7 @@ impl Bridge {
         let worker_cancellation = cancellation.clone();
         let (document, guards) = tokio::task::spawn_blocking(move || {
             let document = guarded(|| {
+                let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
                 plan.open_cancellable(worker_cancellation)
                     .map_err(map_open_error)
             });

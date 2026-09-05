@@ -960,6 +960,27 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
     );
 }
 
+#[tokio::test]
+async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    lib.import_managed_file(&source).await.unwrap();
+    let old_dir = lib.managed_dir().to_path_buf();
+    let destination = dir.path().join("external").join("Shosai");
+    lib.relocate_managed_books(&destination).await.unwrap();
+
+    let next = dir.path().join("next.cbz");
+    std::fs::copy(fixture_path("sample.cbz"), &next).unwrap();
+    let error = lib.import_managed_file(&next).await.unwrap_err();
+
+    assert!(error.to_string().contains("location changed"));
+    assert!(!old_dir.exists());
+    let current = Library::new(store.pool().clone(), destination.canonicalize().unwrap());
+    let imported = current.import_managed_file(&next).await.unwrap();
+    assert!(path_from_key(&imported.file_path).starts_with(destination.canonicalize().unwrap()));
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 #[tokio::test]
 async fn non_unicode_managed_directory_survives_persistence() {

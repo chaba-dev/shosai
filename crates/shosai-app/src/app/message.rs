@@ -205,10 +205,10 @@ pub enum Message {
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
-        generation: u64,
+        load_generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
-        bookmarks: Vec<Bookmark>,
+        result: Result<Vec<Bookmark>, String>,
     },
     GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
     StartEditNote(i64, String),
