@@ -156,9 +156,10 @@ pub(crate) struct AdmittedDocumentBytes {
 fn planned_retained_admission_byte_len<R: Read + Seek>(
     format: BookFormat,
     encoded_byte_len: usize,
-    epub_reader: Option<R>,
+    archive_reader: Option<R>,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<usize, OpenDocumentError> {
-    if format != BookFormat::Epub {
+    if format == BookFormat::Pdf {
         return OpenDocument::retained_admission_byte_len(format, encoded_byte_len).ok_or_else(
             || OpenDocumentError::LimitExceeded {
                 format,
@@ -166,11 +167,35 @@ fn planned_retained_admission_byte_len<R: Read + Seek>(
             },
         );
     }
+    let reader = archive_reader.expect("ZIP admission requires its archive reader");
+    let max_entries = match format {
+        BookFormat::Epub => EpubLimits::default().max_archive_entries,
+        BookFormat::Cbz => crate::cbz::CbzLimits::default().max_entries,
+        BookFormat::Pdf => unreachable!(),
+    };
+    let preflight = crate::zip_preflight::preflight(reader, max_entries, is_cancelled)
+        .map_err(|error| classify_open_error(format, error))?;
+    if format == BookFormat::Cbz {
+        let metadata =
+            crate::zip_preflight::metadata_allocation_ceiling(preflight).ok_or_else(|| {
+                OpenDocumentError::LimitExceeded {
+                    format,
+                    detail: "archive metadata admission cannot be represented".to_owned(),
+                }
+            })?;
+        return crate::document_admission::cbz_retained_ceiling(
+            encoded_byte_len,
+            max_entries,
+            metadata,
+            preflight.copied_filename_ceiling,
+        )
+        .ok_or_else(|| OpenDocumentError::LimitExceeded {
+            format,
+            detail: "retained-memory admission cannot be represented".to_owned(),
+        });
+    }
     let limits = EpubLimits::default();
-    let reader = epub_reader.expect("EPUB admission requires its archive reader");
-    let (declared_uncompressed, central_directory_bytes) =
-        probe_epub_central_directory(reader, limits.max_archive_entries)?;
-    if declared_uncompressed > limits.max_total_uncompressed_bytes {
+    if preflight.declared_uncompressed_bytes > limits.max_total_uncompressed_bytes {
         return Err(OpenDocumentError::LimitExceeded {
             format,
             detail: "archive exceeds aggregate uncompressed byte limit".to_owned(),
@@ -178,13 +203,15 @@ fn planned_retained_admission_byte_len<R: Read + Seek>(
     }
     crate::document_admission::epub_retained_ceiling(
         encoded_byte_len,
-        usize::try_from(declared_uncompressed).map_err(|_| OpenDocumentError::LimitExceeded {
-            format,
-            detail: "archive uncompressed size cannot be represented".to_owned(),
+        usize::try_from(preflight.declared_uncompressed_bytes).map_err(|_| {
+            OpenDocumentError::LimitExceeded {
+                format,
+                detail: "archive uncompressed size cannot be represented".to_owned(),
+            }
         })?,
         limits.max_total_decoded_font_bytes,
         limits.max_total_presentation_nodes,
-        central_directory_bytes,
+        preflight.central_directory_bytes,
     )
     .ok_or_else(|| OpenDocumentError::LimitExceeded {
         format,
@@ -192,6 +219,7 @@ fn planned_retained_admission_byte_len<R: Read + Seek>(
     })
 }
 
+#[cfg(test)]
 fn probe_epub_central_directory<R: Read + Seek>(
     mut reader: R,
     max_entries: usize,
@@ -356,6 +384,7 @@ fn probe_epub_central_directory<R: Read + Seek>(
     Ok((declared_uncompressed, central_directory_bytes))
 }
 
+#[cfg(test)]
 fn contains_plausible_eocd_before<R: Read + Seek>(
     reader: &mut R,
     end: u64,
@@ -390,6 +419,7 @@ fn contains_plausible_eocd_before<R: Read + Seek>(
     Ok(false)
 }
 
+#[cfg(test)]
 fn is_plausible_eocd<R: Read + Seek>(
     reader: &mut R,
     position: u64,
@@ -456,6 +486,7 @@ fn is_plausible_eocd<R: Read + Seek>(
     contains_signature_between(reader, central_offset, position, *b"PK\x01\x02")
 }
 
+#[cfg(test)]
 fn contains_signature_between<R: Read + Seek>(
     reader: &mut R,
     start: u64,
@@ -494,6 +525,7 @@ fn contains_signature_between<R: Read + Seek>(
     Ok(found)
 }
 
+#[cfg(test)]
 fn zip64_uncompressed_size(extra: &[u8]) -> Option<u64> {
     let mut offset = 0_usize;
     while offset.checked_add(4)? <= extra.len() {
@@ -508,18 +540,21 @@ fn zip64_uncompressed_size(extra: &[u8]) -> Option<u64> {
     None
 }
 
+#[cfg(test)]
 fn read_le_u16(data: &[u8], offset: usize) -> Option<u16> {
     Some(u16::from_le_bytes(
         data.get(offset..offset.checked_add(2)?)?.try_into().ok()?,
     ))
 }
 
+#[cfg(test)]
 fn read_le_u32(data: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes(
         data.get(offset..offset.checked_add(4)?)?.try_into().ok()?,
     ))
 }
 
+#[cfg(test)]
 fn read_le_u64(data: &[u8], offset: usize) -> Option<u64> {
     Some(u64::from_le_bytes(
         data.get(offset..offset.checked_add(8)?)?.try_into().ok()?,
@@ -528,6 +563,27 @@ fn read_le_u64(data: &[u8], offset: usize) -> Option<u64> {
 
 impl OpenDocumentPlan {
     pub fn prepare(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
+        Self::prepare_inner(locator, None)
+    }
+
+    pub fn prepare_cancellable(
+        locator: &DeviceFileLocator,
+        cancellation: &crate::bridge::Cancellation,
+    ) -> Result<Self, OpenDocumentError> {
+        let is_cancelled = || cancellation.is_cancelled();
+        Self::prepare_inner(locator, Some(&is_cancelled))
+    }
+
+    fn prepare_inner(
+        locator: &DeviceFileLocator,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self, OpenDocumentError> {
+        if is_cancelled.is_some_and(|cancelled| cancelled()) {
+            return Err(classify_open_error(
+                locator.format()?,
+                anyhow::anyhow!("document open cancelled"),
+            ));
+        }
         let format = locator.format()?;
         let mut file = std::fs::File::open(locator.path()).map_err(|error| match error.kind() {
             std::io::ErrorKind::NotFound => OpenDocumentError::NotFound,
@@ -552,7 +608,8 @@ impl OpenDocumentPlan {
         let retained_admission_byte_len = planned_retained_admission_byte_len(
             format,
             encoded_byte_len,
-            (format == BookFormat::Epub).then_some(&file),
+            (format != BookFormat::Pdf).then_some(&file),
+            is_cancelled,
         )?;
         file.seek(std::io::SeekFrom::Start(0))
             .map_err(|error| OpenDocumentError::Inaccessible(error.to_string()))?;
@@ -625,11 +682,12 @@ impl OpenDocumentPlan {
                 detail: "document changed after admission".to_owned(),
             });
         }
-        let required = if self.format == BookFormat::Epub {
+        let required = if self.format != BookFormat::Pdf {
             planned_retained_admission_byte_len(
                 self.format,
                 data.capacity(),
                 Some(std::io::Cursor::new(&data)),
+                is_cancelled,
             )?
         } else {
             OpenDocument::retained_admission_byte_len(self.format, data.capacity()).ok_or_else(
@@ -738,6 +796,9 @@ impl OpenDocument {
             BookFormat::Cbz => {
                 let limits = crate::cbz::CbzLimits::default();
                 encoded_byte_len
+                    .checked_mul(16)?
+                    .checked_add(limits.max_entries.checked_mul(512)?)?
+                    .checked_add(64 * 1024)?
                     .checked_add(limits.max_entries.checked_mul(
                         std::mem::size_of::<String>()
                             + std::mem::size_of::<usize>()
@@ -1032,7 +1093,6 @@ mod tests {
         archive[28..30].copy_from_slice(&(name_len as u16).to_le_bytes());
         archive[30..32].copy_from_slice(&(extra_len as u16).to_le_bytes());
         archive[32..34].copy_from_slice(&(comment_len as u16).to_le_bytes());
-        archive[46..50].copy_from_slice(b"PK\x05\x06");
         archive[central_len..central_len + 4].copy_from_slice(b"PK\x05\x06");
         archive[central_len + 8..central_len + 10].copy_from_slice(&1_u16.to_le_bytes());
         archive[central_len + 10..central_len + 12].copy_from_slice(&1_u16.to_le_bytes());
@@ -1043,6 +1103,7 @@ mod tests {
             BookFormat::Epub,
             archive.len(),
             Some(std::io::Cursor::new(&archive)),
+            None,
         )
         .unwrap();
         let limits = EpubLimits::default();

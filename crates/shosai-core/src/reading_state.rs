@@ -37,6 +37,13 @@ async fn next_reading_state_revision(transaction: &mut Transaction<'_, Sqlite>) 
     .context("failed to allocate reading state revision")
 }
 
+pub(crate) async fn reserve_reading_state_revision(pool: &SqlitePool) -> Result<i64> {
+    let mut transaction = pool.begin().await?;
+    let revision = next_reading_state_revision(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(revision)
+}
+
 async fn bounded_book_locator(
     transaction: &mut Transaction<'_, Sqlite>,
     book_id: i64,
@@ -395,9 +402,29 @@ impl ReadingStateStore {
         validate_content_hash(content_hash)?;
 
         let row = sqlx::query(
-            "SELECT page, location_offset, zoom FROM reading_state
-             WHERE file_path = ? AND content_hash = ?",
+            "WITH owner AS (
+                SELECT id FROM books WHERE content_hash = ? AND file_path = ?
+                UNION ALL
+                SELECT books.id
+                FROM book_path_aliases
+                JOIN books ON books.id = book_path_aliases.book_id
+                WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+                  AND books.content_hash = book_path_aliases.content_hash
+                  AND NOT EXISTS (
+                      SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+                  )
+                LIMIT 1
+             )
+             SELECT page, location_offset, zoom FROM reading_state
+             WHERE (book_id = (SELECT id FROM owner))
+                OR ((SELECT id FROM owner) IS NULL AND file_path = ? AND content_hash = ?)",
         )
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
+        .bind(content_hash)
+        .bind(&key)
         .bind(&key)
         .bind(content_hash)
         .fetch_optional(&self.pool)
@@ -414,7 +441,41 @@ impl ReadingStateStore {
         state: &FileReadingState,
     ) -> Result<()> {
         let key = canonical_key(file_path);
-        self.set_key_async(&key, content_hash, state).await
+        self.set_key_async(&key, content_hash, state)
+            .await
+            .map(|_| ())
+    }
+
+    pub(crate) async fn resolve_path_owner_async(
+        &self,
+        key: &str,
+        content_hash: &str,
+    ) -> Result<Option<(i64, String)>> {
+        validate_path_key(key)?;
+        validate_content_hash(content_hash)?;
+        if let Some(owner) = sqlx::query_as(
+            "SELECT id, file_path FROM books WHERE content_hash = ? AND file_path = ?",
+        )
+        .bind(content_hash)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to resolve current reading state path owner")?
+        {
+            return Ok(Some(owner));
+        }
+        sqlx::query_as(
+            "SELECT books.id, books.file_path
+             FROM book_path_aliases
+             JOIN books ON books.id = book_path_aliases.book_id
+             WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+               AND books.content_hash = book_path_aliases.content_hash",
+        )
+        .bind(content_hash)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to resolve historical reading state path owner")
     }
 
     pub(crate) async fn set_key_async(
@@ -422,14 +483,115 @@ impl ReadingStateStore {
         key: &str,
         content_hash: &str,
         state: &FileReadingState,
-    ) -> Result<()> {
+    ) -> Result<Option<i64>> {
+        self.set_key_at_revision_async(key, content_hash, state, None)
+            .await
+    }
+
+    pub(crate) async fn set_key_at_revision_async(
+        &self,
+        key: &str,
+        content_hash: &str,
+        state: &FileReadingState,
+        reserved_revision: Option<i64>,
+    ) -> Result<Option<i64>> {
         validate_path_key(key)?;
         validate_content_hash(content_hash)?;
         let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self.pool.begin().await?;
-        let revision = next_reading_state_revision(&mut transaction).await?;
-        let result = sqlx::query(
-            "INSERT INTO reading_state
+        let revision = match reserved_revision {
+            Some(revision) => revision,
+            None => next_reading_state_revision(&mut transaction).await?,
+        };
+        // Imports and path-only saves are serialized by the revision write above. If the
+        // import committed first, finish the already-admitted save against the stable identity;
+        // if this save committed first, import reconciliation will claim it.
+        let owner: Option<(i64, String)> = sqlx::query_as(
+            "SELECT id, file_path FROM books WHERE content_hash = ? AND file_path = ?
+             UNION ALL
+             SELECT books.id, books.file_path
+             FROM book_path_aliases
+             JOIN books ON books.id = book_path_aliases.book_id
+             WHERE book_path_aliases.content_hash = ? AND book_path_aliases.file_path = ?
+               AND books.content_hash = book_path_aliases.content_hash
+               AND NOT EXISTS (
+                   SELECT 1 FROM books WHERE content_hash = ? AND file_path = ?
+               )
+             LIMIT 1",
+        )
+        .bind(content_hash)
+        .bind(key)
+        .bind(content_hash)
+        .bind(key)
+        .bind(content_hash)
+        .bind(key)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve reading state path owner")?;
+        let owner_id = owner.as_ref().map(|(book_id, _)| *book_id);
+        if let Some((book_id, current_key)) = owner {
+            validate_path_key(&current_key)?;
+            let newer_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM reading_state
+                    WHERE (book_id = ? OR file_path = ?) AND revision > ?
+                 )",
+            )
+            .bind(book_id)
+            .bind(&current_key)
+            .bind(revision)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to check for newer promoted reading state")?;
+            if newer_exists {
+                transaction.commit().await?;
+                return Ok(owner_id);
+            }
+            sqlx::query(
+                "DELETE FROM reading_state
+                 WHERE book_id = ? OR (book_id IS NULL AND
+                    (file_path = ? OR (content_hash = ? AND file_path = ?)))",
+            )
+            .bind(book_id)
+            .bind(&current_key)
+            .bind(content_hash)
+            .bind(key)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to reconcile promoted reading state")?;
+            sqlx::query(
+                "INSERT INTO reading_state
+                    (file_path, content_hash, book_id, page, location_offset, zoom, updated_at, revision)
+                 VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
+            )
+            .bind(current_key)
+            .bind(content_hash)
+            .bind(book_id)
+            .bind(page)
+            .bind(location_offset)
+            .bind(zoom)
+            .bind(revision)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to save promoted reading state")?;
+        } else {
+            let newer_unowned_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM reading_state
+                    WHERE file_path = ? AND book_id IS NULL AND revision > ?
+                 )",
+            )
+            .bind(key)
+            .bind(revision)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to check for newer unowned reading state")?;
+            if newer_unowned_exists {
+                transaction.commit().await?;
+                return Ok(None);
+            }
+            let result = sqlx::query(
+                "INSERT INTO reading_state
                 (file_path, content_hash, page, location_offset, zoom, updated_at, revision)
              VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
              ON CONFLICT(file_path) DO UPDATE SET
@@ -440,21 +602,22 @@ impl ReadingStateStore {
                 updated_at = excluded.updated_at,
                 revision = excluded.revision
              WHERE reading_state.book_id IS NULL",
-        )
-        .bind(key)
-        .bind(content_hash)
-        .bind(page)
-        .bind(location_offset)
-        .bind(zoom)
-        .bind(revision)
-        .execute(&mut *transaction)
-        .await
-        .context("failed to save reading state")?;
-        if result.rows_affected() == 0 {
-            bail!("reading state path is owned by a library book");
+            )
+            .bind(key)
+            .bind(content_hash)
+            .bind(page)
+            .bind(location_offset)
+            .bind(zoom)
+            .bind(revision)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to save reading state")?;
+            if result.rows_affected() == 0 {
+                bail!("reading state path is owned by a different library book");
+            }
         }
         transaction.commit().await?;
-        Ok(())
+        Ok(owner_id)
     }
 
     /// Get reading state using a stable library book identity.
@@ -490,11 +653,10 @@ impl ReadingStateStore {
         sqlx::query(
             "DELETE FROM reading_state
              WHERE book_id = ?
-                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
+                OR (file_path = ? AND book_id IS NULL)",
         )
         .bind(book_id)
         .bind(&current_key)
-        .bind(&content_hash)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile reading state aliases")?;
@@ -517,10 +679,11 @@ impl ReadingStateStore {
         Ok(())
     }
 
-    pub(crate) async fn set_for_book_current_path_async(
+    pub(crate) async fn set_for_book_current_path_at_revision_async(
         &self,
         book_id: i64,
         state: &FileReadingState,
+        reserved_revision: Option<i64>,
     ) -> std::result::Result<String, CurrentBookPathSaveError> {
         let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self
@@ -528,7 +691,10 @@ impl ReadingStateStore {
             .begin()
             .await
             .context("failed to begin reading state transaction")?;
-        let revision = next_reading_state_revision(&mut transaction).await?;
+        let revision = match reserved_revision {
+            Some(revision) => revision,
+            None => next_reading_state_revision(&mut transaction).await?,
+        };
         let current = bounded_book_locator(&mut transaction, book_id)
             .await
             .context("failed to resolve current book path for reading state")?;
@@ -536,14 +702,32 @@ impl ReadingStateStore {
         let content_hash = content_hash.context("book has no stable content hash")?;
         validate_path_key(&key)?;
         validate_content_hash(&content_hash)?;
-        sqlx::query(
-            "DELETE FROM reading_state
-             WHERE book_id = ?
-                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
+        let newer_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM reading_state
+                WHERE (book_id = ? OR file_path = ?) AND revision > ?
+             )",
         )
         .bind(book_id)
         .bind(&key)
-        .bind(&content_hash)
+        .bind(revision)
+        .fetch_one(&mut *transaction)
+        .await
+        .context("failed to check for newer stable reading state")?;
+        if newer_exists {
+            transaction
+                .commit()
+                .await
+                .context("failed to finish superseded stable reading state save")?;
+            return Ok(key);
+        }
+        sqlx::query(
+            "DELETE FROM reading_state
+             WHERE book_id = ?
+                OR (file_path = ? AND book_id IS NULL)",
+        )
+        .bind(book_id)
+        .bind(&key)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile reading state aliases")?;

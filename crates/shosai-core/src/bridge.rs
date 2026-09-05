@@ -330,8 +330,12 @@ impl Bridge {
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
         let planning_slot =
             acquire_permits(Arc::clone(&self.admission.planning_slots), 1, &cancellation).await?;
+        let planning_cancellation = cancellation.clone();
         let (plan, guards) = tokio::task::spawn_blocking(move || {
-            let plan = guarded(|| OpenDocumentPlan::prepare(&locator).map_err(map_open_error));
+            let plan = guarded(|| {
+                OpenDocumentPlan::prepare_cancellable(&locator, &planning_cancellation)
+                    .map_err(map_open_error)
+            });
             (plan, (_request_slot, document_slot, planning_slot))
         })
         .await

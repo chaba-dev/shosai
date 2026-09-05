@@ -2092,11 +2092,13 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.open_error = None;
     state.missing_book_id = None;
     let task_path = path.clone();
+    let prepare_cancellation = cancellation.clone();
     let prepare = Task::perform(
         async move {
             tokio::task::spawn_blocking(move || {
-                let plan = shosai_core::application::OpenDocumentPlan::prepare(
+                let plan = shosai_core::application::OpenDocumentPlan::prepare_cancellable(
                     &DeviceFileLocator::from_path(&task_path),
+                    &prepare_cancellation,
                 )
                 .map_err(app_document_open_error)?;
                 let retained_bytes =
@@ -3041,16 +3043,27 @@ fn schedule_cbz_dimension(
     }) else {
         return Task::none();
     };
-    let Some(byte_len) = document.page_source_byte_len(page) else {
-        return Task::none();
-    };
-    let Some(permit) = reserve_raster_bytes(state, byte_len) else {
-        return Task::none();
-    };
     let job = CbzDimensionJob {
         tab_id,
         generation,
         page,
+    };
+    let Some(byte_len) = document.page_probe_admission_byte_len(page) else {
+        state.cbz_dimension_failures.insert(job);
+        state.error = Some(AppError::Render(
+            "CBZ dimension probe admission overflowed".to_owned(),
+        ));
+        return Task::none();
+    };
+    if byte_len > state.transient_decode_budget.limit() {
+        state.cbz_dimension_failures.insert(job);
+        state.error = Some(AppError::Render(
+            "CBZ dimension probe exceeds the transient decode limit".to_owned(),
+        ));
+        return Task::none();
+    }
+    let Some(permit) = state.transient_decode_budget.try_reserve(byte_len) else {
+        return Task::none();
     };
     state.cbz_dimension_jobs.insert(job, permit);
     let cancellation = Cancellation::new();
@@ -8808,6 +8821,27 @@ mod tests {
         assert_eq!(task.units(), 0);
         assert!(state.raster_jobs.is_empty());
         assert!(state.paginated_pending.is_empty());
+    }
+
+    #[test]
+    fn intrinsically_oversized_cbz_dimension_probe_becomes_a_render_failure() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .expect("fixture should open"),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.total_pages = document.page_count();
+        state.transient_decode_budget = CacheBudget::new(1);
+
+        let task = refresh_content(&mut state);
+
+        assert_eq!(task.units(), 0);
+        assert!(state.cbz_dimension_jobs.is_empty());
+        assert_eq!(state.cbz_dimension_failures.len(), 1);
+        assert!(matches!(state.error, Some(AppError::Render(_))));
     }
 
     #[test]

@@ -99,6 +99,47 @@ fn reserve_cover_decode(
     }
 }
 
+fn reserve_cover_decode_replacing(
+    bytes: usize,
+    mut permit: CachePermit,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<CachePermit> {
+    let budget = cover_decode_budget();
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        match budget.try_reserve_replacing(bytes, vec![permit]) {
+            Ok(replacement) => return Some(replacement),
+            Err(mut permits) => {
+                permit = permits.pop().expect("replacement returns its input permit");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+    }
+}
+
+fn acquire_cbz_cover_pipeline(
+    cancellation: Option<&ImportCancellation>,
+) -> Option<std::sync::MutexGuard<'static, ()>> {
+    static PIPELINE: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    let pipeline = PIPELINE.get_or_init(|| std::sync::Mutex::new(()));
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        match pipeline.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                return Some(poisoned.into_inner());
+            }
+        }
+    }
+}
+
 async fn acquire_scanner(
     cancellation: &ImportCancellation,
 ) -> Option<tokio::sync::OwnedSemaphorePermit> {
@@ -1041,6 +1082,13 @@ impl Library {
             let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             verify_fingerprinted_path(&path, &source_file, "import")?;
             reconcile_identity(&mut transaction, book.id, &path_str, &path_str).await?;
+            record_book_path_alias(
+                &mut transaction,
+                book.id,
+                &path_str,
+                &source_file.fingerprint.hash,
+            )
+            .await?;
             transaction.commit().await?;
             return Ok(imported_book_from_commit(
                 book.id,
@@ -1075,6 +1123,13 @@ impl Library {
             .await
             .context("book not found after insert")?;
         reconcile_identity(&mut transaction, book_id, &path_str, &path_str).await?;
+        record_book_path_alias(
+            &mut transaction,
+            book_id,
+            &path_str,
+            &source_file.fingerprint.hash,
+        )
+        .await?;
         transaction.commit().await?;
         Ok(imported_book_from_commit(
             book_id,
@@ -1991,8 +2046,30 @@ impl Library {
                 .as_deref()
                 .context("managed book has no original path")?;
             validate_import_path(&path_from_key(original_path))?;
-            reconcile_identity(&mut transaction, book_id, &book.file_path, original_path).await?;
-            Some(original_path.to_owned())
+            let destination_occupied: bool = sqlx::query_scalar(
+                "SELECT EXISTS(
+                    SELECT 1 FROM books WHERE file_path = ? AND id != ?
+                    UNION ALL
+                    SELECT 1 FROM reading_state
+                    WHERE file_path = ?
+                      AND (book_id IS NOT ? OR content_hash IS NOT ?)
+                 )",
+            )
+            .bind(original_path)
+            .bind(book_id)
+            .bind(original_path)
+            .bind(book_id)
+            .bind(&book.content_hash)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to inspect managed detachment destination")?;
+            let state_path = if destination_occupied {
+                book.file_path.as_str()
+            } else {
+                original_path
+            };
+            reconcile_identity(&mut transaction, book_id, &book.file_path, state_path).await?;
+            Some(state_path.to_owned())
         } else {
             None
         };
@@ -2108,8 +2185,11 @@ impl Library {
             if plan_cancellation.is_cancelled() {
                 bail!("document open cancelled");
             }
-            OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(plan_path))
-                .map_err(anyhow::Error::from)
+            OpenDocumentPlan::prepare_cancellable(
+                &DeviceFileLocator::from_path(plan_path),
+                &plan_cancellation,
+            )
+            .map_err(anyhow::Error::from)
         })
         .await
         .context("book open preparation task failed")??;
@@ -2355,6 +2435,13 @@ async fn commit_managed_publication(
             &existing.file_path,
         )
         .await?;
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &source_str,
+            &inspection.fingerprint.hash,
+        )
+        .await?;
         commit_managed_transaction(transaction, &mut ownership).await?;
         return Ok(imported_book_from_commit(
             existing.id,
@@ -2364,7 +2451,11 @@ async fn commit_managed_publication(
         ));
     }
 
-    if let Some(existing) = library.get_by_path(&source_str).await?.or(existing_hash) {
+    let matching_path = library
+        .get_by_path(&source_str)
+        .await?
+        .filter(|book| book.content_hash.as_deref() == Some(inspection.fingerprint.hash.as_str()));
+    if let Some(existing) = matching_path.or(existing_hash) {
         let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
             "UPDATE books SET file_path = ?, storage_kind = 'managed', original_path = ?,
@@ -2389,6 +2480,20 @@ async fn commit_managed_publication(
             reconcile_identity(&mut transaction, existing.id, &source_str, &destination_str)
                 .await?;
         }
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &existing.file_path,
+            &inspection.fingerprint.hash,
+        )
+        .await?;
+        record_book_path_alias(
+            &mut transaction,
+            existing.id,
+            &source_str,
+            &inspection.fingerprint.hash,
+        )
+        .await?;
         commit_managed_transaction(transaction, &mut ownership).await?;
         return Ok(imported_book_from_commit(
             existing.id,
@@ -2426,6 +2531,13 @@ async fn commit_managed_publication(
     .await
     .context("managed book not found after insert")?;
     reconcile_identity(&mut transaction, book_id, &source_str, &destination_str).await?;
+    record_book_path_alias(
+        &mut transaction,
+        book_id,
+        &source_str,
+        &inspection.fingerprint.hash,
+    )
+    .await?;
     commit_managed_transaction(transaction, &mut ownership).await?;
     Ok(imported_book_from_commit(
         book_id,
@@ -2433,6 +2545,26 @@ async fn commit_managed_publication(
         &destination_str,
         &inspection.fingerprint.hash,
     ))
+}
+
+async fn record_book_path_alias(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+    file_path: &str,
+    content_hash: &str,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO book_path_aliases (file_path, content_hash, book_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT(file_path, content_hash) DO UPDATE SET book_id = excluded.book_id",
+    )
+    .bind(file_path)
+    .bind(content_hash)
+    .bind(book_id)
+    .execute(&mut **transaction)
+    .await
+    .context("failed to record book path alias")?;
+    Ok(())
 }
 
 async fn reconcile_identity(
@@ -2455,6 +2587,7 @@ async fn reconcile_identity(
     if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("stored book content hash is invalid");
     }
+    record_book_path_alias(transaction, book_id, old_path, &content_hash).await?;
     let reading = sqlx::query(
         "SELECT page, location_offset, zoom,
                 CASE WHEN typeof(updated_at) = 'text'
@@ -3636,16 +3769,27 @@ fn extract_cbz_metadata(
     let title = filename_title(title_path);
 
     // Use first page as cover.
-    let cover = if cancellation.is_some() {
+    let _pipeline = acquire_cbz_cover_pipeline(cancellation).context("import cancelled")?;
+    let probe_bytes = doc
+        .page_probe_admission_byte_len(0)
+        .context("CBZ cover probe admission overflowed")?;
+    if probe_bytes > COVER_DECODE_BYTE_CAPACITY {
+        crate::resource_limit!("CBZ cover probe exceeds transient byte limit");
+    }
+    let Some(probe_permit) = reserve_cover_decode(probe_bytes, cancellation) else {
+        bail!("import cancelled");
+    };
+    let cover_source = if cancellation.is_some() {
         doc.page_image_bytes_cancellable(0, &is_cancelled)
     } else {
         doc.page_image_bytes(0)
     }
-    .ok()
-    .and_then(|data| {
-        check_import_cancelled(cancellation)
-            .ok()
-            .and_then(|()| resize_cover_image(&data, cancellation))
+    .ok();
+    let cover = cover_source.and_then(|data| {
+        check_import_cancelled(cancellation).ok().and_then(|()| {
+            let source_capacity = data.capacity();
+            resize_cover_image_replacing(&data, source_capacity, probe_permit, cancellation)
+        })
     });
     check_import_cancelled(cancellation)?;
 
@@ -3667,6 +3811,24 @@ fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<(
 
 /// Resize an image to fit within cover thumbnail bounds and encode as PNG.
 fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
+    resize_cover_image_inner(data, 0, None, cancellation)
+}
+
+fn resize_cover_image_replacing(
+    data: &[u8],
+    source_capacity: usize,
+    permit: CachePermit,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<Vec<u8>> {
+    resize_cover_image_inner(data, source_capacity, Some(permit), cancellation)
+}
+
+fn resize_cover_image_inner(
+    data: &[u8],
+    source_capacity: usize,
+    replaced: Option<CachePermit>,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<Vec<u8>> {
     use image::ImageDecoder;
 
     let decoder = image::ImageReader::new(std::io::Cursor::new(data))
@@ -3682,10 +3844,15 @@ fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) ->
         .checked_add(target_pixels.checked_mul(4)?)?
         .checked_add(MAX_IMPORT_COVER_BYTES as u64)?;
     let transient_bytes = usize::try_from(transient_bytes).ok()?;
-    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+    let admitted_bytes = transient_bytes.checked_add(source_capacity)?;
+    if admitted_bytes > COVER_DECODE_BYTE_CAPACITY {
         return None;
     }
-    let _permit = reserve_cover_decode(transient_bytes, cancellation)?;
+    let _permit = if let Some(permit) = replaced {
+        reserve_cover_decode_replacing(admitted_bytes, permit, cancellation)?
+    } else {
+        reserve_cover_decode(admitted_bytes, cancellation)?
+    };
     let img = image::load_from_memory(data).ok()?;
     check_import_cancelled(cancellation).ok()?;
     let thumb = img.thumbnail(COVER_MAX_WIDTH, COVER_MAX_HEIGHT);
