@@ -46,6 +46,7 @@ All notable changes to this project will be documented in this file.
 - *(app)* Fade completed library activity (#73)
 - *(core)* Harden document identity, persistence, and lifecycle (#80)
 - *(core)* Bind phase one state and library identities (#81)
+- *(core)* Enforce phase one admission lifecycle (#82)
 
 ### 🚜 Refactor
 
