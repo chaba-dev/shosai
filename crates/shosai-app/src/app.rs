@@ -426,6 +426,10 @@ const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
 const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
+const LIBRARY_COVER_SOURCE_MAX_DIMENSION: u32 = 8_192;
+const LIBRARY_COVER_DECODE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const LIBRARY_COVER_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const LIBRARY_COVER_CACHE_ENTRIES: usize = 128;
 const SEARCH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 const DOCUMENT_OPEN_NOTICE_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 const LIBRARY_ACTIVITY_TICK: std::time::Duration = std::time::Duration::from_millis(16);
@@ -1061,7 +1065,7 @@ pub struct State {
 
     // -- Library state --
     library_books: Vec<Book>,
-    library_cover_handles: HashMap<i64, RasterImageHandle>,
+    library_cover_handles: BoundedCache<i64, RasterImageHandle>,
     library_search: String,
     library_search_pending: bool,
     library_filter: Option<shosai_core::library::BookFormat>,
@@ -1246,7 +1250,10 @@ pub fn boot() -> (State, Task<Message>) {
         search_query_generation: 0,
 
         library_books: Vec::new(),
-        library_cover_handles: HashMap::new(),
+        library_cover_handles: BoundedCache::with_weight_limit(
+            LIBRARY_COVER_CACHE_ENTRIES,
+            LIBRARY_COVER_CACHE_BYTES,
+        ),
         library_search: String::new(),
         library_search_pending: false,
         library_filter: None,
@@ -1452,7 +1459,7 @@ fn decode_library_covers_task(
                 covers
                     .into_iter()
                     .filter_map(|(id, data)| {
-                        decode_library_cover(Some(&data)).map(|cover| (id, cover))
+                        decode_library_cover(Some(&data)).map(|(cover, bytes)| (id, cover, bytes))
                     })
                     .collect()
             })
@@ -1467,17 +1474,47 @@ fn decode_library_covers_task(
     )
 }
 
-fn decode_library_cover(data: Option<&[u8]>) -> Option<RasterImageHandle> {
-    let image = ::image::load_from_memory(data?)
+fn decode_library_cover(data: Option<&[u8]>) -> Option<(RasterImageHandle, usize)> {
+    use std::io::Cursor;
+
+    let data = data?;
+    let decode_limits = || {
+        let mut limits = ::image::Limits::default();
+        limits.max_image_width = Some(LIBRARY_COVER_SOURCE_MAX_DIMENSION);
+        limits.max_image_height = Some(LIBRARY_COVER_SOURCE_MAX_DIMENSION);
+        limits.max_alloc = Some(LIBRARY_COVER_DECODE_MAX_BYTES);
+        limits
+    };
+    let mut probe = ::image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    probe.limits(decode_limits());
+    let (source_width, source_height) = probe.into_dimensions().ok()?;
+    let decoded_bytes = u64::from(source_width)
+        .checked_mul(u64::from(source_height))?
+        .checked_mul(4)?;
+    if source_width > LIBRARY_COVER_SOURCE_MAX_DIMENSION
+        || source_height > LIBRARY_COVER_SOURCE_MAX_DIMENSION
+        || decoded_bytes > LIBRARY_COVER_DECODE_MAX_BYTES
+    {
+        return None;
+    }
+    let mut reader = ::image::ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(decode_limits());
+    let image = reader
+        .decode()
         .ok()?
         .thumbnail(LIBRARY_COVER_MAX_WIDTH, LIBRARY_COVER_MAX_HEIGHT);
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    Some(RasterImageHandle(image::Handle::from_rgba(
-        width,
-        height,
-        rgba.into_raw(),
-    )))
+    let pixels = rgba.into_raw();
+    let retained_bytes = pixels.len();
+    Some((
+        RasterImageHandle(image::Handle::from_rgba(width, height, pixels)),
+        retained_bytes,
+    ))
 }
 
 fn reset_library(state: &mut State) -> Task<Message> {
@@ -12778,25 +12815,49 @@ mod tests {
         assert_eq!(state.library_books.len(), 1);
         assert!(state.library_cover_handles.is_empty());
 
-        let cover = decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
-            .expect("application icon should decode as a cover");
+        let (cover, retained_bytes) =
+            decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
+                .expect("application icon should decode as a cover");
         let cover_id = cover.0.id();
         let _ = update(
             &mut state,
             Message::LibraryCoversLoaded {
                 generation,
                 offset: 0,
-                cover_handles: HashMap::from([(1, cover)]),
+                cover_handles: vec![(1, cover, retained_bytes)],
             },
         );
 
-        assert_eq!(state.library_cover_handles[&1].0.id(), cover_id);
+        assert_eq!(
+            state.library_cover_handles.get(&1).unwrap().0.id(),
+            cover_id
+        );
     }
 
     #[test]
     fn malformed_library_cover_is_rejected_before_view_construction() {
         assert!(decode_library_cover(Some(b"not an image")).is_none());
         assert!(decode_library_cover(None).is_none());
+    }
+
+    #[test]
+    fn library_cover_decode_and_retention_are_bounded() {
+        use std::io::Cursor;
+
+        let image = ::image::RgbaImage::new(LIBRARY_COVER_SOURCE_MAX_DIMENSION + 1, 1);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+        assert!(decode_library_cover(Some(encoded.get_ref())).is_none());
+
+        let mut cache = BoundedCache::with_weight_limit(2, 6);
+        let handle = || RasterImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]));
+        assert!(cache.insert_weighted(1, handle(), 4));
+        assert!(cache.insert_weighted(2, handle(), 4));
+        assert!(cache.get(&1).is_none());
+        assert!(cache.get(&2).is_some());
+        assert_eq!(cache.retained_weight(), 4);
     }
 
     #[test]

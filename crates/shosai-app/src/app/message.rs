@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -97,7 +96,7 @@ pub enum Message {
     LibraryCoversLoaded {
         generation: u64,
         offset: usize,
-        cover_handles: HashMap<i64, RasterImageHandle>,
+        cover_handles: Vec<(i64, RasterImageHandle, usize)>,
     },
     OpenAddBooks,
     CancelAddBooks,

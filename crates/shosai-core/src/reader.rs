@@ -403,6 +403,20 @@ impl<K: PartialEq, V> BoundedCache<K, V> {
         self.entries.iter().map(|(entry, _)| entry)
     }
 
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.entries
+            .iter()
+            .find_map(|((candidate, value), _)| (candidate == key).then_some(value))
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        let position = self
+            .entries
+            .iter()
+            .position(|((candidate, _), _)| candidate == key)?;
+        self.entries.remove(position).map(|((_, value), _)| value)
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
     }

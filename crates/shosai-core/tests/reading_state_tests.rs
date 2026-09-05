@@ -523,6 +523,26 @@ async fn loading_preferences_enforces_row_and_aggregate_limits_before_values() {
 }
 
 #[tokio::test]
+async fn preference_writes_preserve_loader_aggregate_invariants() {
+    let (store, _dir) = temp_store().await;
+    let value = "x".repeat(shosai_core::reading_state::MAX_PREFERENCE_VALUE_BYTES);
+    let mut rejected = false;
+    for index in 0..=16 {
+        if store
+            .set_pref_async(&format!("large-{index}"), &value)
+            .await
+            .is_err()
+        {
+            rejected = true;
+            break;
+        }
+    }
+
+    assert!(rejected);
+    assert!(store.get_prefs_async().await.is_ok());
+}
+
+#[tokio::test]
 async fn test_multiple_preferences_are_saved_atomically() {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");

@@ -754,7 +754,11 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             cover_handles,
         } => {
             if generation == state.library_generation && offset < state.library_offset {
-                state.library_cover_handles.extend(cover_handles);
+                for (book_id, handle, retained_bytes) in cover_handles {
+                    state
+                        .library_cover_handles
+                        .insert_weighted(book_id, handle, retained_bytes);
+                }
             }
         }
 

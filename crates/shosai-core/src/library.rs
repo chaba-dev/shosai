@@ -796,6 +796,11 @@ impl Library {
         self.ensure_current_managed_dir().await?;
         let mut guards = (work_permit, storage_guard);
         let new_dir = new_dir.to_path_buf();
+        validate_import_path(&new_dir)?;
+        crate::reading_state::validate_preference(
+            MANAGED_LIBRARY_DIR_PREFERENCE,
+            &canonical_path_key(&new_dir),
+        )?;
         let create_dir = new_dir.clone();
         let (create_result, next_guards) =
             run_blocking_with(guards, move || std::fs::create_dir_all(&create_dir))
@@ -804,9 +809,20 @@ impl Library {
         guards = next_guards;
         create_result.with_context(|| format!("failed to create {}", new_dir.display()))?;
         let new_dir = canonical_path(&new_dir);
+        let new_dir_key = canonical_path_key(&new_dir);
+        if new_dir_key.len() > MAX_IMPORT_PATH_BYTES {
+            bail!("managed library path exceeds byte limit");
+        }
+        crate::reading_state::validate_preference(MANAGED_LIBRARY_DIR_PREFERENCE, &new_dir_key)?;
 
         let rows = sqlx::query(
-            "SELECT id, file_path, content_hash FROM books
+            "SELECT id,
+                    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+                         THEN file_path END AS file_path,
+                    CASE WHEN content_hash IS NULL OR
+                                   (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64)
+                         THEN content_hash END AS content_hash
+             FROM books
              WHERE storage_kind = 'managed' ORDER BY id LIMIT ?",
         )
         .bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64 + 1)
@@ -818,12 +834,20 @@ impl Library {
         }
         let mut changes = Vec::with_capacity(rows.len());
         let mut publications = Vec::new();
-        let mut destination_hashes = HashMap::with_capacity(rows.len());
+        let mut destination_fingerprints = HashMap::with_capacity(rows.len());
 
         for row in rows {
             let book_id = row.try_get::<i64, _>("id")?;
-            let old_path = path_from_key(&row.try_get::<String, _>("file_path")?);
+            let old_path = path_from_key(
+                &row.try_get::<Option<String>, _>("file_path")?
+                    .context("stored managed book path is malformed or oversized")?,
+            );
             let expected_hash = row.try_get::<Option<String>, _>("content_hash")?;
+            if expected_hash.as_ref().is_some_and(|hash| {
+                hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }) {
+                bail!("stored managed book hash is invalid");
+            }
             let extension = old_path
                 .extension()
                 .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -834,7 +858,7 @@ impl Library {
             let destination_dir = new_dir.clone();
             let (relocation, next_guards) = run_blocking_with(
                 guards,
-                move || -> Result<(PathBuf, ManagedPublication, String)> {
+                move || -> Result<(PathBuf, ManagedPublication, FileFingerprint)> {
                     let fingerprint = file_fingerprint(&source)?;
                     if expected_hash
                         .as_ref()
@@ -860,20 +884,23 @@ impl Library {
                         },
                     };
                     publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
-                    Ok((canonical_path(&destination), publication, fingerprint.hash))
+                    Ok((canonical_path(&destination), publication, fingerprint))
                 },
             )
             .await
             .context("managed book relocation task failed")?;
             guards = next_guards;
-            let (new_path, publication, content_hash) = relocation?;
+            let (new_path, publication, fingerprint) = relocation?;
+            if canonical_path_key(&new_path).len() > MAX_IMPORT_PATH_BYTES {
+                bail!("managed book path exceeds byte limit");
+            }
             publications.push(publication);
             changes.push(ManagedPathChange {
                 book_id,
                 old_path,
                 new_path,
             });
-            destination_hashes.insert(book_id, content_hash);
+            destination_fingerprints.insert(book_id, fingerprint);
         }
 
         let (work_permit, storage_guard) = guards;
@@ -884,8 +911,14 @@ impl Library {
         };
         let library = self.clone();
         tokio::spawn(async move {
-            commit_managed_relocation(library, new_dir, changes, destination_hashes, ownership)
-                .await
+            commit_managed_relocation(
+                library,
+                new_dir,
+                changes,
+                destination_fingerprints,
+                ownership,
+            )
+            .await
         })
         .await
         .context("managed relocation commit task failed")?
@@ -1886,6 +1919,9 @@ impl Library {
 
     /// Update reading progress (0.0 to 1.0) and last_read timestamp.
     pub async fn update_progress(&self, book_id: i64, progress: f64) -> Result<()> {
+        if !progress.is_finite() {
+            bail!("book progress must be finite");
+        }
         let progress = progress.clamp(0.0, 1.0);
         sqlx::query("UPDATE books SET progress = ?, last_read = datetime('now') WHERE id = ?")
             .bind(progress)
@@ -1899,6 +1935,9 @@ impl Library {
     /// Update reading progress using a file path (0.0 to 1.0).
     pub async fn update_progress_by_path(&self, path: &Path, progress: f64) -> Result<()> {
         // Use canonical paths so the reader and library always converge on one row.
+        if !progress.is_finite() {
+            bail!("book progress must be finite");
+        }
         let progress = progress.clamp(0.0, 1.0);
         let key = canonical_path_key(path);
 
@@ -2105,18 +2144,23 @@ async fn commit_managed_relocation(
     library: Library,
     new_dir: PathBuf,
     changes: Vec<ManagedPathChange>,
-    destination_hashes: HashMap<i64, String>,
+    destination_fingerprints: HashMap<i64, FileFingerprint>,
     mut ownership: RelocationCommitOwnership,
 ) -> Result<Vec<ManagedPathChange>> {
     let mut transaction = library.pool.begin().await?;
     for change in &changes {
         let old_path = canonical_path_key(&change.old_path);
         let new_path = canonical_path_key(&change.new_path);
+        let fingerprint = destination_fingerprints
+            .get(&change.book_id)
+            .context("missing relocation fingerprint")?;
         let result = sqlx::query(
-            "UPDATE books SET file_path = ?
+            "UPDATE books SET file_path = ?, content_hash = ?, file_size = ?
              WHERE id = ? AND file_path = ? AND storage_kind = 'managed'",
         )
         .bind(&new_path)
+        .bind(&fingerprint.hash)
+        .bind(fingerprint.size as i64)
         .bind(change.book_id)
         .bind(&old_path)
         .execute(&mut *transaction)
@@ -2137,6 +2181,7 @@ async fn commit_managed_relocation(
     .execute(&mut *transaction)
     .await
     .context("failed to save managed library location")?;
+    crate::reading_state::validate_preference_totals(&mut transaction).await?;
     let mut rollback = Vec::with_capacity(ownership.publications.len());
     for publication in &mut ownership.publications {
         rollback.push(publication.disarm());
@@ -2178,7 +2223,9 @@ async fn commit_managed_relocation(
         }
         let destination = change.new_path.clone();
         let old_path = change.old_path.clone();
-        let expected_hash = destination_hashes.get(&change.book_id).cloned();
+        let expected_hash = destination_fingerprints
+            .get(&change.book_id)
+            .map(|fingerprint| fingerprint.hash.clone());
         let cleanup = match run_blocking_with(guards, move || -> Result<()> {
             let expected_hash = expected_hash.context("missing relocation fingerprint")?;
             let fingerprint = file_fingerprint(&destination)?;
@@ -2339,14 +2386,26 @@ async fn reconcile_identity(
     old_path: &str,
     new_path: &str,
 ) -> Result<()> {
-    let content_hash: String = sqlx::query_scalar("SELECT content_hash FROM books WHERE id = ?")
-        .bind(book_id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .context("failed to resolve book content identity")?
-        .context("book has no stable content hash")?;
+    let content_hash: String = sqlx::query_scalar(
+        "SELECT CASE WHEN typeof(content_hash) = 'text'
+                               AND length(CAST(content_hash AS BLOB)) <= 64
+                     THEN content_hash END
+         FROM books WHERE id = ?",
+    )
+    .bind(book_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .context("failed to resolve book content identity")?
+    .context("book has no stable content hash")?;
+    if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("stored book content hash is invalid");
+    }
     let reading = sqlx::query(
-        "SELECT page, location_offset, zoom, updated_at, revision
+        "SELECT page, location_offset, zoom,
+                CASE WHEN typeof(updated_at) = 'text'
+                               AND length(CAST(updated_at AS BLOB)) <= 64
+                     THEN updated_at END AS updated_at,
+                revision
          FROM reading_state
          WHERE book_id = ?
             OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))
@@ -2393,7 +2452,11 @@ async fn reconcile_identity(
         .bind(page)
         .bind(location_offset)
         .bind(zoom)
-        .bind(reading.try_get::<String, _>("updated_at")?)
+        .bind(
+            reading
+                .try_get::<Option<String>, _>("updated_at")?
+                .context("stored reading state timestamp is malformed or oversized")?,
+        )
         .bind(reading.try_get::<i64, _>("revision")?)
         .execute(&mut **transaction)
         .await
@@ -3353,7 +3416,12 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
     let mut after_id = i64::MIN;
     loop {
         let rows = sqlx::query(
-            "SELECT id, file_path, format FROM books
+            "SELECT id,
+                    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+                         THEN file_path END AS file_path,
+                    CASE WHEN typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16
+                         THEN format END AS format
+             FROM books
              WHERE content_hash IS NULL AND id > ? ORDER BY id LIMIT ?",
         )
         .bind(after_id)
@@ -3367,8 +3435,13 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
         for row in rows {
             let id: i64 = row.try_get("id")?;
             after_id = id;
-            let file_path: String = row.try_get("file_path")?;
-            let format = BookFormat::from_db(&row.try_get::<String, _>("format")?)
+            let file_path = row
+                .try_get::<Option<String>, _>("file_path")?
+                .context("legacy book path is malformed or oversized")?;
+            let format_value = row
+                .try_get::<Option<String>, _>("format")?
+                .context("legacy book format is malformed or oversized")?;
+            let format = BookFormat::from_db(&format_value)
                 .with_context(|| format!("legacy book {file_path} has an unsupported format"))?;
             let path = path_from_key(&file_path);
             if !path.is_file() {

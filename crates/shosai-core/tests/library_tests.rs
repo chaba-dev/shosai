@@ -988,6 +988,38 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
 }
 
 #[tokio::test]
+async fn relocation_persists_verified_identity_for_legacy_managed_books() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("legacy.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    sqlx::query("UPDATE books SET content_hash = NULL, file_size = NULL WHERE id = ?")
+        .bind(book.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    lib.relocate_managed_books(&dir.path().join("relocated"))
+        .await
+        .unwrap();
+
+    let relocated = lib.get(book.id).await.unwrap().unwrap();
+    assert!(relocated.content_hash.is_some());
+    assert!(relocated.file_size.is_some());
+}
+
+#[tokio::test]
+async fn progress_updates_reject_non_finite_values() {
+    let (lib, _, _dir) = temp_library().await;
+    assert!(lib.update_progress(1, f64::NAN).await.is_err());
+    assert!(
+        lib.update_progress_by_path(&PathBuf::from("book.pdf"), f64::INFINITY)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
     let (lib, store, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
