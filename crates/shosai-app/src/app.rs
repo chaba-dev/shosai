@@ -2115,6 +2115,10 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     )
             })
     }) {
+        save_active_tab(state);
+        let identity_changed = state.tabs[index].session.book_id != book_id;
+        let reading_state_pending = state.tabs[index].reading_state_restore_pending;
+        let bookmark_load_pending = state.tabs[index].bookmark_load_failed;
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
         state.document_open_book_id = None;
@@ -2122,6 +2126,9 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         state.document_open_preview = None;
         if let Some(book_id) = book_id {
             state.tabs[index].session.book_id = Some(book_id);
+            if let Some(save) = &mut state.tabs[index].pending_reading_state_save {
+                save.book_id = Some(book_id);
+            }
             if let Some(title) = state
                 .library_books
                 .iter()
@@ -2133,8 +2140,20 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             }
             if state.active_tab == Some(index) {
                 state.book_id = Some(book_id);
+                if let Some(save) = &mut state.pending_reading_state_save {
+                    save.book_id = Some(book_id);
+                }
                 state.display_title = Some(state.tabs[index].display_title.clone());
             }
+        }
+        if identity_changed && state.active_tab == Some(index) {
+            return if reading_state_pending {
+                load_document_state_task(state, bookmark_load_pending)
+            } else if bookmark_load_pending {
+                refresh_bookmarks(state)
+            } else {
+                Task::none()
+            };
         }
         return select_tab(state, index);
     }
@@ -13145,6 +13164,40 @@ mod tests {
         assert!(!state.bookmark_load_failed);
         assert_eq!(state.tabs[0].bookmark_load_generation, 8);
         assert!(!state.tabs[0].bookmark_load_failed);
+    }
+
+    #[tokio::test]
+    async fn active_existing_tab_promotion_restarts_pending_state_loads() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = PathBuf::from("/books/imported.epub");
+        state.file_path = Some(path.clone());
+        state.reading_state = Some(store.clone());
+        state.bookmark_store = Some(BookmarkStore::new(store.pool().clone()));
+        state.reading_state_restore_pending = true;
+        state.bookmark_load_failed = true;
+        state.document_state_load_generation = 7;
+        let mut book = test_book(42);
+        book.file_path = shosai_core::path_key(&path);
+        book.content_hash = state.document_content_hash.clone();
+        state.library_books.push(book);
+        state.tabs = vec![capture_reader_tab(&state).unwrap()];
+        state.active_tab = Some(0);
+
+        let task = open_document(&mut state, path, Some(42));
+
+        assert!(task.units() > 0);
+        assert_eq!(state.book_id, Some(42));
+        assert_eq!(state.tabs[0].session.book_id, Some(42));
+        assert!(state.document_state_load_generation > 7);
+        assert!(state.bookmark_load_generation > 0);
     }
 
     #[test]

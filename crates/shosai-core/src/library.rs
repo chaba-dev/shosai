@@ -3810,9 +3810,10 @@ fn extract_epub_metadata(
     // enough capacity for their full decode admission.
     let _pipeline = acquire_cover_pipeline(cancellation).context("import cancelled")?;
     let cover = inspection.cover().and_then(|cover| {
-        check_import_cancelled(cancellation)
-            .ok()
-            .and_then(|()| resize_cover_image(cover, cancellation))
+        check_import_cancelled(cancellation).ok().and_then(|()| {
+            let permit = reserve_cover_decode(COVER_DECODE_BYTE_CAPACITY, cancellation)?;
+            resize_cover_image_replacing(cover, 0, permit, cancellation)
+        })
     });
     check_import_cancelled(cancellation)?;
 
@@ -3835,13 +3836,10 @@ fn extract_cbz_metadata(
 
     // Use first page as cover.
     let _pipeline = acquire_cover_pipeline(cancellation).context("import cancelled")?;
-    let probe_bytes = doc
-        .page_probe_admission_byte_len(0)
-        .context("CBZ cover probe admission overflowed")?;
-    if probe_bytes > COVER_DECODE_BYTE_CAPACITY {
-        crate::resource_limit!("CBZ cover probe exceeds transient byte limit");
-    }
-    let Some(probe_permit) = reserve_cover_decode(probe_bytes, cancellation) else {
+    // Reserve the complete job ceiling before extracting the source. The job
+    // can only shrink this reservation, so it never waits while holding a
+    // partial permit that blocks another cover producer.
+    let Some(cover_permit) = reserve_cover_decode(COVER_DECODE_BYTE_CAPACITY, cancellation) else {
         bail!("import cancelled");
     };
     let cover_source = if cancellation.is_some() {
@@ -3853,7 +3851,7 @@ fn extract_cbz_metadata(
     let cover = cover_source.and_then(|data| {
         check_import_cancelled(cancellation).ok().and_then(|()| {
             let source_capacity = data.capacity();
-            resize_cover_image_replacing(&data, source_capacity, probe_permit, cancellation)
+            resize_cover_image_replacing(&data, source_capacity, cover_permit, cancellation)
         })
     });
     check_import_cancelled(cancellation)?;
@@ -3872,11 +3870,6 @@ fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<(
         bail!("import cancelled");
     }
     Ok(())
-}
-
-/// Resize an image to fit within cover thumbnail bounds and encode as PNG.
-fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
-    resize_cover_image_inner(data, 0, None, cancellation)
 }
 
 fn resize_cover_image_replacing(
@@ -3905,7 +3898,11 @@ fn resize_cover_image_inner(
         return None;
     }
     let probe_permit = if let Some(permit) = replaced {
-        reserve_cover_decode_replacing(probe_bytes, permit, cancellation)?
+        if permit.weight() >= probe_bytes {
+            permit
+        } else {
+            reserve_cover_decode_replacing(probe_bytes, permit, cancellation)?
+        }
     } else {
         reserve_cover_decode(probe_bytes, cancellation)?
     };
