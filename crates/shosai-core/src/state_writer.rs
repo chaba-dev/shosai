@@ -436,7 +436,9 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 .write_keys()
                 .is_empty();
             if worker.stopped.load(Ordering::Acquire) {
-                if let Some(error) = error {
+                if let Some(error) = error
+                    && worker.handles.load(Ordering::Acquire) != 0
+                {
                     *worker
                         .completion
                         .lock()
@@ -1022,7 +1024,7 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if store.get_pref_async("language").await.as_deref() == Some("en") {
+                if store.get_pref_async("language").await.unwrap().as_deref() == Some("en") {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1066,7 +1068,7 @@ mod tests {
             .unwrap();
         writer.shutdown().await.unwrap();
         assert_eq!(
-            store.get_pref_async("language").await.as_deref(),
+            store.get_pref_async("language").await.unwrap().as_deref(),
             Some("en")
         );
     }
@@ -1105,7 +1107,10 @@ mod tests {
             .await
             .unwrap();
         writer.quiesce_and_shutdown().await.unwrap();
-        assert_eq!(store.get_pref_async("theme").await.as_deref(), Some("dark"));
+        assert_eq!(
+            store.get_pref_async("theme").await.unwrap().as_deref(),
+            Some("dark")
+        );
     }
 
     #[tokio::test]
@@ -1154,8 +1159,8 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if store.get_pref_async("first").await.as_deref() == Some("one")
-                    && store.get_pref_async("second").await.as_deref() == Some("two")
+                if store.get_pref_async("first").await.unwrap().as_deref() == Some("one")
+                    && store.get_pref_async("second").await.unwrap().as_deref() == Some("two")
                 {
                     break;
                 }
@@ -1164,6 +1169,49 @@ mod tests {
         })
         .await
         .expect("the final writer drop must drain every accepted write");
+    }
+
+    #[tokio::test]
+    async fn final_drop_retries_a_transient_write_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let writer = start_state_writer(store.clone());
+        writer
+            .send(StateWriterMessage::Preference(
+                "language".to_owned(),
+                "en".to_owned(),
+            ))
+            .unwrap();
+        let (flushed, wait) = oneshot::channel();
+        writer.send(StateWriterMessage::Flush(flushed)).unwrap();
+        drop(writer);
+
+        assert!(wait.await.unwrap().is_err());
+        sqlx::query("DROP TRIGGER reject_test_preference")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if store.get_pref_async("language").await.unwrap().as_deref() == Some("en") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the final writer drop must retry a transient failure");
     }
 
     #[tokio::test]
@@ -1195,7 +1243,7 @@ mod tests {
         sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
         shutdown.await.unwrap().unwrap();
         assert_eq!(
-            store.get_pref_async("language").await.as_deref(),
+            store.get_pref_async("language").await.unwrap().as_deref(),
             Some("en")
         );
         assert_eq!(

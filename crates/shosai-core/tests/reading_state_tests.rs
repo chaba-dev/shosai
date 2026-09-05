@@ -451,10 +451,13 @@ async fn test_preferences_persist_across_opens() {
 
     {
         let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
-        let value = store.get_pref_int_async("library.cards_per_row").await;
+        let value = store
+            .get_pref_int_async("library.cards_per_row")
+            .await
+            .unwrap();
         assert_eq!(value, Some(6));
         assert_eq!(
-            store.get_pref_async("language").await.as_deref(),
+            store.get_pref_async("language").await.unwrap().as_deref(),
             Some("ja")
         );
     }
@@ -466,10 +469,77 @@ async fn all_preferences_are_loaded_together() {
     store.set_pref_async("first", "one").await.unwrap();
     store.set_pref_async("second", "2").await.unwrap();
 
-    let preferences = store.get_prefs_async().await;
+    let preferences = store.get_prefs_async().await.unwrap();
 
     assert_eq!(preferences.get("first").map(String::as_str), Some("one"));
     assert_eq!(preferences.get("second").map(String::as_str), Some("2"));
+}
+
+#[tokio::test]
+async fn preference_reads_surface_storage_and_malformed_row_failures() {
+    let (store, _dir) = temp_store().await;
+    sqlx::query("INSERT INTO preferences (key, value) VALUES ('oversized', ?)")
+        .bind("x".repeat(shosai_core::reading_state::MAX_PREFERENCE_VALUE_BYTES + 1))
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    assert!(store.get_pref_async("oversized").await.is_err());
+    assert!(store.get_prefs_async().await.is_err());
+
+    store.pool().close().await;
+    assert!(store.get_pref_async("missing").await.is_err());
+    assert!(store.get_prefs_async().await.is_err());
+}
+
+#[tokio::test]
+async fn loading_preferences_enforces_row_and_aggregate_limits_before_values() {
+    let (store, _dir) = temp_store().await;
+    let mut transaction = store.pool().begin().await.unwrap();
+    for index in 0..=shosai_core::reading_state::MAX_PREFERENCE_ROWS {
+        sqlx::query("INSERT INTO preferences (key, value) VALUES (?, 'x')")
+            .bind(format!("key-{index}"))
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+    }
+    transaction.commit().await.unwrap();
+    assert!(store.get_prefs_async().await.is_err());
+
+    sqlx::query("DELETE FROM preferences")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let value = "x".repeat(shosai_core::reading_state::MAX_PREFERENCE_VALUE_BYTES);
+    for index in 0..17 {
+        sqlx::query("INSERT INTO preferences (key, value) VALUES (?, ?)")
+            .bind(format!("large-{index}"))
+            .bind(&value)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    assert!(store.get_prefs_async().await.is_err());
+}
+
+#[tokio::test]
+async fn preference_writes_preserve_loader_aggregate_invariants() {
+    let (store, _dir) = temp_store().await;
+    let value = "x".repeat(shosai_core::reading_state::MAX_PREFERENCE_VALUE_BYTES);
+    let mut rejected = false;
+    for index in 0..=16 {
+        if store
+            .set_pref_async(&format!("large-{index}"), &value)
+            .await
+            .is_err()
+        {
+            rejected = true;
+            break;
+        }
+    }
+
+    assert!(rejected);
+    assert!(store.get_prefs_async().await.is_ok());
 }
 
 #[tokio::test]
@@ -483,8 +553,14 @@ async fn test_multiple_preferences_are_saved_atomically() {
         .await
         .unwrap();
 
-    assert_eq!(store.get_pref_int_async("window.width").await, Some(900));
-    assert_eq!(store.get_pref_int_async("window.height").await, Some(700));
+    assert_eq!(
+        store.get_pref_int_async("window.width").await.unwrap(),
+        Some(900)
+    );
+    assert_eq!(
+        store.get_pref_int_async("window.height").await.unwrap(),
+        Some(700)
+    );
 }
 
 #[tokio::test]

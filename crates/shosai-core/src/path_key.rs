@@ -36,7 +36,8 @@ pub fn path_key(path: &Path) -> String {
     key
 }
 
-pub(crate) fn canonical_path_key(path: &Path) -> String {
+#[doc(hidden)]
+pub fn canonical_path_key(path: &Path) -> String {
     path_key(&path.canonicalize().unwrap_or_else(|_| PathBuf::from(path)))
 }
 

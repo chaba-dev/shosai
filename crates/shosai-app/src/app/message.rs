@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,6 +7,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::{
     Book, BookPage, ImportCompletion, ImportDiscovery, ImportFailure, PreparedManagedImport,
 };
+use shosai_core::reader::CachePermit;
 use shosai_core::search::{SearchError, SearchMatch};
 
 use super::{
@@ -97,7 +97,7 @@ pub enum Message {
     LibraryCoversLoaded {
         generation: u64,
         offset: usize,
-        cover_handles: HashMap<i64, RasterImageHandle>,
+        cover_handles: Vec<(i64, RasterImageHandle, usize, CachePermit)>,
     },
     OpenAddBooks,
     CancelAddBooks,
@@ -156,7 +156,7 @@ pub enum Message {
     RemoveBook(i64),
     BookRemoved {
         id: i64,
-        result: Result<(), String>,
+        result: Result<Option<PathBuf>, String>,
     },
     LibrarySearchChanged(String),
     LibrarySearchDebounced(u64),
@@ -205,10 +205,10 @@ pub enum Message {
     ToggleBookmarksPanel,
     BookmarksLoaded {
         tab_id: u64,
-        generation: u64,
+        load_generation: u64,
         file_path: PathBuf,
         book_id: Option<i64>,
-        bookmarks: Vec<Bookmark>,
+        result: Result<Vec<Bookmark>, String>,
     },
     GoToBookmark(usize, Option<usize>), // page/chapter and EPUB character offset
     StartEditNote(i64, String),
@@ -289,7 +289,7 @@ pub enum Message {
         scale_factor: f32,
     },
     PersistWindowGeometry(u64),
-    WindowGeometryPersisted,
+    WindowGeometryPersisted(Result<(), String>),
     ReadingStateFlushed {
         id: window::Id,
         result: Result<(), String>,

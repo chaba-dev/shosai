@@ -191,15 +191,26 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             &message,
             Message::Initialized(_)
                 | Message::FingerprintBackfillFinished(_)
+                | Message::DocumentOpened { .. }
+                | Message::LibraryLoaded { .. }
+                | Message::LibraryCoversLoaded { .. }
                 | Message::ManagedBookPrepared { .. }
                 | Message::BookAddedToBatch { .. }
                 | Message::BookRelinked { .. }
                 | Message::BookRemoved { .. }
                 | Message::ManagedLibraryMoved { .. }
                 | Message::BookmarkToggled { .. }
+                | Message::BookmarksLoaded { .. }
                 | Message::BookmarkMutationFinished { .. }
+                | Message::SearchPerformed { .. }
+                | Message::EpubPaginated { .. }
+                | Message::EpubImagesDecoded { .. }
+                | Message::EpubImageSizeLoaded { .. }
+                | Message::CbzDimensionsLoaded { .. }
+                | Message::PageRendered { .. }
+                | Message::ContinuousPageRendered { .. }
                 | Message::PersistWindowGeometry(_)
-                | Message::WindowGeometryPersisted
+                | Message::WindowGeometryPersisted(_)
                 | Message::ReadingStateFlushed { .. }
         )
     {
@@ -286,6 +297,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::OpenFile => {
+            if state.removing_book.is_some() {
+                return Task::none();
+            }
             let ebooks = state.i18n.text("ebooks");
             let open_file = state.i18n.text("open-file");
             return Task::perform(
@@ -306,6 +320,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FileSelected(Some(path)) => {
+            if state.removing_book.is_some() {
+                return Task::none();
+            }
             if state.storage_initializing {
                 state.pending_open = Some(path);
                 return Task::none();
@@ -327,6 +344,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             state.document_opening = false;
+            state.document_open_book_id = None;
             state.document_open_notice_visible = false;
             state.document_open_preview = None;
             match result {
@@ -721,7 +739,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             };
             let next_offset = offset + page.books.len();
-            let covers = page
+            let covers: Vec<_> = page
                 .books
                 .iter_mut()
                 .filter_map(|book| book.cover.take().map(|cover| (book.id, cover)))
@@ -738,7 +756,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if offset == 0 {
                 state.library_activity_progress = 1.0;
             }
-            return decode_library_covers_task(generation, offset, covers);
+            if let Some(cancellation) = state.library_cover_cancellation.take() {
+                cancellation.cancel();
+            }
+            state.library_cover_offset = None;
+            if covers.is_empty() {
+                return Task::none();
+            }
+            let cancellation = Cancellation::default();
+            state.library_cover_cancellation = Some(cancellation.clone());
+            state.library_cover_offset = Some(offset);
+            return decode_library_covers_task(generation, offset, covers, cancellation);
         }
 
         Message::LibraryCoversLoaded {
@@ -746,8 +774,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             offset,
             cover_handles,
         } => {
-            if generation == state.library_generation && offset < state.library_offset {
-                state.library_cover_handles.extend(cover_handles);
+            if generation == state.library_generation
+                && state.library_cover_offset == Some(offset)
+                && offset < state.library_offset
+            {
+                state.library_cover_cancellation = None;
+                state.library_cover_offset = None;
+                for (book_id, handle, retained_bytes, _permit) in cover_handles {
+                    state
+                        .library_cover_handles
+                        .insert_weighted(book_id, handle, retained_bytes);
+                }
             }
         }
 
@@ -1083,7 +1120,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::BookAddedToBatch { .. } => {}
 
         Message::OpenLibraryBook(book_id, file_path) => {
-            if state.moving_library {
+            if state.moving_library
+                || state.removing_book.is_some()
+                || state.relinking_book.is_some()
+            {
                 return Task::none();
             }
             state.book_menu = None;
@@ -1137,6 +1177,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(lib) = state.library.clone() else {
                 return Task::none();
             };
+            if state.document_open_book_id == Some(book_id) {
+                cancel_document_open(state);
+            }
             state.relinking_book = Some((generation, book_id));
             return Task::perform(
                 async move {
@@ -1211,89 +1254,142 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 return Task::none();
             }
-            let Some(lib) = state.library.clone() else {
+            if state.library.is_none() {
+                return Task::none();
+            }
+            let Some(mut removal_target) = state
+                .library_books
+                .iter()
+                .find(|book| book.id == id)
+                .map(BookRemovalTarget::from_book)
+            else {
+                state.pending_remove_book = None;
+                state.library_error = Some(AppError::Library(
+                    "book metadata is unavailable; refresh the library and try again".to_owned(),
+                ));
                 return Task::none();
             };
             state.book_menu = None;
             state.pending_remove_book = None;
+            if state.document_opening {
+                cancel_document_open(state);
+            }
+            if state.file_path.as_deref().is_some_and(|path| {
+                removal_target.matches_session(
+                    state.active_tab_id,
+                    state.book_id,
+                    path,
+                    state.document_content_hash.as_deref(),
+                )
+            }) && let Some(tab_id) = state.active_tab_id
+            {
+                removal_target.tab_ids.insert(tab_id);
+            }
+            for tab in &state.tabs {
+                if removal_target.matches_session(
+                    Some(tab.id),
+                    tab.session.book_id,
+                    tab.session.locator.path(),
+                    tab.content_hash.as_deref(),
+                ) {
+                    removal_target.tab_ids.insert(tab.id);
+                }
+            }
+            state.book_removal_target = Some(removal_target);
             state.removing_book = Some(id);
             state.library_error = None;
-            let saves = state.reading_state_saves.clone();
-            return Task::perform(
-                async move {
-                    if let Some(saves) = saves {
-                        saves.flush().await.map_err(|error| error.to_string())?;
-                    }
-                    lib.remove(id).await.map_err(|error| format!("{error:#}"))
-                },
-                move |result| Message::BookRemoved { id, result },
-            );
+            if bookmark_mutations_target_book(state, id) {
+                state.deferred_remove_book = Some(id);
+                return Task::none();
+            }
+            return start_book_removal(state, id);
         }
 
         Message::BookRemoved { id, result } => {
-            if state.removing_book == Some(id) {
-                state.removing_book = None;
+            if state.deferred_remove_book == Some(id) {
+                state.deferred_remove_book = None;
             }
+            let mut removal_target = if state.removing_book == Some(id) {
+                state.removing_book = None;
+                state.book_removal_target.take()
+            } else {
+                None
+            };
+            let suppressed_save = removal_target
+                .as_mut()
+                .and_then(|target| target.suppressed_save.take());
             match result {
-                Ok(()) => {
+                Ok(detached_path) => {
                     state.library_books.retain(|book| book.id != id);
                     state.library_cover_handles.remove(&id);
-                    let mut detached_paths = BTreeSet::new();
-                    let mut detached_saves = Vec::new();
-                    if state.book_id == Some(id) {
-                        if let Some(path) = &state.file_path {
-                            detached_paths.insert(path.clone());
-                            detached_saves.push(ReadingStateSave {
-                                book_id: None,
-                                path: path.clone(),
-                                content_hash: state.document_content_hash.clone(),
-                                reading: FileReadingState {
-                                    page: state.current_page,
-                                    location_offset: current_epub_offset(state),
-                                    zoom: state.zoom.scale(),
-                                },
-                            });
+                    let mut refresh_detached_bookmarks = false;
+                    let active_matches = state.book_id == Some(id)
+                        || removal_target.as_ref().is_some_and(|target| {
+                            state.file_path.as_deref().is_some_and(|path| {
+                                target.matches_session(
+                                    state.active_tab_id,
+                                    state.book_id,
+                                    path,
+                                    state.document_content_hash.as_deref(),
+                                )
+                            })
+                        });
+                    if active_matches {
+                        if let Some(path) =
+                            detached_path.clone().or_else(|| state.file_path.clone())
+                        {
+                            state.file_path = Some(path.clone());
                         }
                         state.book_id = None;
-                        for bookmark in &mut state.bookmarks {
-                            bookmark.book_id = None;
-                        }
+                        state.bookmarks.clear();
+                        state.bookmark_mutation_generation =
+                            state.bookmark_mutation_generation.wrapping_add(1);
+                        state.editing_note_id = None;
+                        state.editing_note_text.clear();
+                        refresh_detached_bookmarks = true;
                     }
                     for tab in &mut state.tabs {
-                        if tab.session.book_id == Some(id) {
-                            let path = tab.session.locator.path().to_path_buf();
-                            if detached_paths.insert(path.clone()) {
-                                detached_saves.push(ReadingStateSave {
-                                    book_id: None,
-                                    path,
-                                    content_hash: tab.content_hash.clone(),
-                                    reading: FileReadingState {
-                                        page: tab.session.location.page,
-                                        location_offset: tab.session.location.offset,
-                                        zoom: tab.session.preferences.pdf_zoom.scale(),
-                                    },
-                                });
-                            }
+                        let tab_matches = tab.session.book_id == Some(id)
+                            || removal_target.as_ref().is_some_and(|target| {
+                                target.matches_session(
+                                    Some(tab.id),
+                                    tab.session.book_id,
+                                    tab.session.locator.path(),
+                                    tab.content_hash.as_deref(),
+                                )
+                            });
+                        if tab_matches {
+                            let path = detached_path
+                                .clone()
+                                .unwrap_or_else(|| tab.session.locator.path().to_path_buf());
+                            tab.session.locator = DeviceFileLocator::from_path(&path);
                             tab.session.book_id = None;
-                            for bookmark in &mut tab.bookmarks {
-                                bookmark.book_id = None;
-                            }
+                            tab.bookmarks.clear();
+                            tab.bookmark_mutation_generation =
+                                tab.bookmark_mutation_generation.wrapping_add(1);
+                            tab.editing_note_id = None;
+                            tab.editing_note_text.clear();
                         }
                     }
-                    if let Some(saves) = &state.reading_state_saves {
-                        for save in detached_saves {
-                            if saves.send(ReadingStateWriterMessage::Save(save)).is_err() {
-                                eprintln!("warning: reading state writer stopped unexpectedly");
-                                break;
-                            }
+                    if let Some(mut save) = suppressed_save {
+                        save.book_id = None;
+                        if let Some(path) = detached_path {
+                            save.path = path;
                         }
+                        queue_reading_state_save(state, save);
                     }
                     if state.missing_book_id == Some(id) {
                         state.missing_book_id = None;
                         state.open_error = None;
                         state.screen = Screen::Library;
                     }
+                    let bookmarks = if refresh_detached_bookmarks {
+                        refresh_bookmarks(state)
+                    } else {
+                        Task::none()
+                    };
                     return Task::batch([
+                        bookmarks,
                         reset_library(state),
                         continue_close_after_durable_mutations(state),
                     ]);
@@ -1302,9 +1398,15 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     if state.screen == Screen::Reader && state.missing_book_id == Some(id) =>
                 {
                     state.open_error = Some(AppError::Library(error));
+                    if let Some(save) = suppressed_save {
+                        queue_reading_state_save(state, save);
+                    }
                 }
                 Err(error) => {
                     state.library_error = Some(AppError::Library(error));
+                    if let Some(save) = suppressed_save {
+                        queue_reading_state_save(state, save);
+                    }
                 }
             }
             return continue_close_after_durable_mutations(state);
@@ -1553,6 +1655,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let generation = state.managed_library_move_generation;
             let relocation_destination = destination.clone();
             let saves = state.reading_state_saves.clone();
+            if state.document_open_book_id.is_some() {
+                cancel_document_open(state);
+            }
             state.moving_library = true;
             state.settings_error = None;
             return Task::perform(
@@ -1648,6 +1753,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let _ = (page, location_offset);
             if let Err(error) = result {
                 eprintln!("warning: failed to toggle bookmark: {error}");
+                cancel_close_after_bookmark_failure(state, tab_id, generation, error);
             }
             return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
@@ -1665,20 +1771,58 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::BookmarksLoaded {
             tab_id,
-            generation,
+            load_generation,
             file_path,
             book_id,
-            bookmarks,
+            result,
         } => {
-            if state.active_tab_id != Some(tab_id)
-                || state.bookmark_mutation_generation != generation
-                || state.file_path.as_ref() != Some(&file_path)
-                || state.book_id != book_id
-            {
+            if state.active_tab_id == Some(tab_id) {
+                if state.bookmark_load_generation != load_generation
+                    || state.file_path.as_ref() != Some(&file_path)
+                    || state.book_id != book_id
+                {
+                    return Task::none();
+                }
+                match result {
+                    Ok(bookmarks) => {
+                        state.bookmarks = bookmarks;
+                        state.bookmark_load_failed = false;
+                        update_bookmark_status(state);
+                    }
+                    Err(error) => {
+                        state.bookmark_load_failed = true;
+                        state.error = Some(AppError::Storage(format!(
+                            "failed to load bookmarks: {error}"
+                        )));
+                    }
+                }
                 return Task::none();
             }
-            state.bookmarks = bookmarks;
-            update_bookmark_status(state);
+            let Some(tab) = state.tabs.iter_mut().find(|tab| {
+                tab.id == tab_id
+                    && tab.bookmark_load_generation == load_generation
+                    && tab.session.locator.path() == file_path
+                    && tab.session.book_id == book_id
+            }) else {
+                return Task::none();
+            };
+            match result {
+                Ok(bookmarks) => {
+                    tab.bookmarks = bookmarks;
+                    tab.bookmark_load_failed = false;
+                    tab.current_page_bookmarked = tab.bookmarks.iter().any(|bookmark| {
+                        bookmark.page == tab.session.location.page
+                            && bookmark.location_offset == tab.session.location.offset
+                            && bookmark.note.is_none()
+                    });
+                }
+                Err(error) => {
+                    tab.bookmark_load_failed = true;
+                    tab.error = Some(AppError::Storage(format!(
+                        "failed to load bookmarks: {error}"
+                    )));
+                }
+            }
         }
 
         Message::GoToBookmark(page, location_offset) => {
@@ -1766,6 +1910,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Err(error) = result {
                 eprintln!("warning: failed to update bookmark: {error}");
                 restore_failed_bookmark_edit(state, tab_id, generation);
+                cancel_close_after_bookmark_failure(state, tab_id, generation, error);
             }
             return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
@@ -1877,6 +2022,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             query_generation,
             result,
         } => {
+            if state.close_after_geometry_save.is_some() {
+                state.search_cancellation = None;
+                state.search_loading = false;
+                state.search_waiting = false;
+                return Task::none();
+            }
             if state.active_tab_id == Some(tab_id)
                 && document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
@@ -1961,6 +2112,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.epub_jobs.remove(&job);
             }
             if cancelled {
+                if complete {
+                    if state.active_tab_id == Some(tab_id)
+                        && state.epub_layout_pending == Some(layout_key)
+                    {
+                        state.epub_layout_pending = None;
+                    } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                        && tab.epub_layout_pending == Some(layout_key)
+                    {
+                        tab.epub_layout_pending = None;
+                    }
+                }
                 if complete
                     && state.epub_jobs.is_empty()
                     && matches!(state.document, Some(OpenDocument::Epub(_)))
@@ -2463,6 +2625,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::CloseRequested => {
                     state.close_after_geometry_save = Some(id);
                     state.close_flush_started = false;
+                    cancel_nondurable_work_for_close(state);
                     state.window_geometry_generation =
                         state.window_geometry_generation.wrapping_add(1);
                     state.window_geometry_dirty = true;
@@ -2497,12 +2660,19 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             return persist_window_geometry(state);
         }
 
-        Message::WindowGeometryPersisted => {
+        Message::WindowGeometryPersisted(Ok(())) => {
             state.window_geometry_saving = false;
             if state.window_geometry_dirty {
                 return persist_window_geometry(state);
             }
             return continue_close_after_durable_mutations(state);
+        }
+
+        Message::WindowGeometryPersisted(Err(error)) => {
+            state.window_geometry_saving = false;
+            state.close_after_geometry_save = None;
+            state.close_flush_started = false;
+            state.open_error = Some(AppError::Storage(error));
         }
 
         Message::ReadingStateFlushed { id, result: Ok(()) } => return window::close(id),

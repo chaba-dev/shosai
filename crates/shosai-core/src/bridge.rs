@@ -9,7 +9,7 @@ use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan};
-use crate::document::{Document, RenderedPage};
+use crate::document::RenderedPage;
 #[cfg(test)]
 use crate::epub::EpubLimits;
 use crate::library::BookFormat;
@@ -324,8 +324,7 @@ impl Bridge {
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
-        let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
-        let format = plan.format();
+        let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
         // Reserve the parser's conservative retained ceiling before parsing so concurrently
@@ -335,7 +334,7 @@ impl Bridge {
             .ok_or(BridgeError::DocumentLimit)?;
         let maximum_byte_permits =
             u32::try_from(maximum_retained_bytes).map_err(|_| BridgeError::DocumentLimit)?;
-        let mut document_bytes = acquire_permits(
+        let document_bytes = acquire_permits(
             Arc::clone(&self.admission.document_bytes),
             maximum_byte_permits,
             &cancellation,
@@ -343,12 +342,22 @@ impl Bridge {
         .await?;
         let open_slot =
             acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
-        let (document, open_slot) = tokio::task::spawn_blocking(move || {
-            let document = guarded(|| plan.open().map_err(map_open_error));
-            (document, open_slot)
+        let worker_cancellation = cancellation.clone();
+        let (document, guards) = tokio::task::spawn_blocking(move || {
+            let document = guarded(|| {
+                let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
+                plan.open_cancellable(worker_cancellation)
+                    .map_err(map_open_error)
+            });
+            (
+                document,
+                (_request_slot, document_slot, document_bytes, open_slot),
+            )
         })
         .await
         .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, document_slot, mut document_bytes, open_slot) = guards;
+        check_cancelled(&cancellation)?;
         let document = document?;
         let actual_retained_bytes = document
             .retained_byte_len()
@@ -420,7 +429,7 @@ impl Bridge {
             u32::try_from(probe_byte_len).map_err(|_| BridgeError::BufferLimit)?;
         let render_slot =
             acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
-        let _probe_bytes = acquire_permits(
+        let probe_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
             probe_byte_permits,
             &cancellation,
@@ -429,11 +438,23 @@ impl Bridge {
         let preflight_document = Arc::clone(&retained_document);
         let page = request.page;
         let scale = request.scale;
-        let byte_len = tokio::task::spawn_blocking(move || {
-            guarded(|| render_byte_len(&preflight_document.document, page, scale))
+        let preflight_cancellation = cancellation.clone();
+        let (byte_len, guards) = tokio::task::spawn_blocking(move || {
+            let byte_len = guarded(|| {
+                render_byte_len(&preflight_document.document, page, scale, &|| {
+                    preflight_cancellation.is_cancelled()
+                })
+            });
+            (
+                byte_len,
+                (_request_slot, buffer_slot, render_slot, probe_bytes),
+            )
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, buffer_slot, render_slot, probe_bytes) = guards;
+        check_cancelled(&cancellation)?;
+        let byte_len = byte_len?;
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
@@ -446,7 +467,7 @@ impl Bridge {
         };
         let pdf_transient_permits =
             u32::try_from(pdf_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
-        let _pdf_transient_bytes = acquire_permits(
+        let pdf_transient_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
             pdf_transient_permits,
             &cancellation,
@@ -461,18 +482,43 @@ impl Bridge {
         )
         .await?;
         check_cancelled(&cancellation)?;
-        let rendered = tokio::task::spawn_blocking(move || {
-            let _render_slot = render_slot;
-            guarded(|| {
+        let render_cancellation = cancellation.clone();
+        let (rendered, guards) = tokio::task::spawn_blocking(move || {
+            let rendered = guarded(|| {
                 render(
                     retained_document.document.clone(),
                     request.page,
                     request.scale,
+                    &|| render_cancellation.is_cancelled(),
                 )
-            })
+            });
+            (
+                rendered,
+                (
+                    _request_slot,
+                    buffer_slot,
+                    render_slot,
+                    probe_bytes,
+                    pdf_transient_bytes,
+                    buffer_bytes,
+                ),
+            )
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let (
+            _request_slot,
+            buffer_slot,
+            render_slot,
+            probe_bytes,
+            pdf_transient_bytes,
+            buffer_bytes,
+        ) = guards;
+        check_cancelled(&cancellation)?;
+        let rendered = rendered?;
+        drop(render_slot);
+        drop(probe_bytes);
+        drop(pdf_transient_bytes);
         let _publication = cancellation
             .0
             .publication
@@ -682,26 +728,50 @@ fn render_probe_byte_len(document: &OpenDocument, page: usize) -> Result<usize, 
     Ok(byte_len)
 }
 
-fn render_byte_len(document: &OpenDocument, page: usize, scale: f32) -> Result<usize, BridgeError> {
+fn render_byte_len(
+    document: &OpenDocument,
+    page: usize,
+    scale: f32,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<usize, BridgeError> {
+    if is_cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
     let page_count = document.page_count();
     if page >= page_count {
         return Err(BridgeError::InvalidPage { page, page_count });
     }
     match document {
-        OpenDocument::Pdf(document) => document
-            .rendered_byte_len(page, scale)
-            .map_err(map_preflight_error),
+        OpenDocument::Pdf(document) => {
+            let byte_len = document
+                .rendered_byte_len(page, scale)
+                .map_err(map_preflight_error)?;
+            if is_cancelled() {
+                Err(BridgeError::Cancelled)
+            } else {
+                Ok(byte_len)
+            }
+        }
         OpenDocument::Cbz(document) => document
-            .rendered_byte_len(page, scale)
+            .rendered_byte_len_cancellable(page, scale, is_cancelled)
             .map_err(map_preflight_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }
 
-fn render(document: OpenDocument, page: usize, scale: f32) -> Result<RenderedPage, BridgeError> {
+fn render(
+    document: OpenDocument,
+    page: usize,
+    scale: f32,
+    is_cancelled: &dyn Fn() -> bool,
+) -> Result<RenderedPage, BridgeError> {
     match document {
-        OpenDocument::Pdf(document) => document.render_page(page, scale).map_err(map_render_error),
-        OpenDocument::Cbz(document) => document.render_page(page, scale).map_err(map_render_error),
+        OpenDocument::Pdf(document) => document
+            .render_page_with_highlights_cancellable(page, scale, &[], is_cancelled)
+            .map_err(map_render_error),
+        OpenDocument::Cbz(document) => document
+            .render_page_cancellable(page, scale, is_cancelled)
+            .map_err(map_render_error),
         OpenDocument::Epub(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Epub)),
     }
 }
