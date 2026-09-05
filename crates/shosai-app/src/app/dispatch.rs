@@ -191,13 +191,24 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             &message,
             Message::Initialized(_)
                 | Message::FingerprintBackfillFinished(_)
+                | Message::DocumentOpened { .. }
+                | Message::LibraryLoaded { .. }
+                | Message::LibraryCoversLoaded { .. }
                 | Message::ManagedBookPrepared { .. }
                 | Message::BookAddedToBatch { .. }
                 | Message::BookRelinked { .. }
                 | Message::BookRemoved { .. }
                 | Message::ManagedLibraryMoved { .. }
                 | Message::BookmarkToggled { .. }
+                | Message::BookmarksLoaded { .. }
                 | Message::BookmarkMutationFinished { .. }
+                | Message::SearchPerformed { .. }
+                | Message::EpubPaginated { .. }
+                | Message::EpubImagesDecoded { .. }
+                | Message::EpubImageSizeLoaded { .. }
+                | Message::CbzDimensionsLoaded { .. }
+                | Message::PageRendered { .. }
+                | Message::ContinuousPageRendered { .. }
                 | Message::PersistWindowGeometry(_)
                 | Message::WindowGeometryPersisted(_)
                 | Message::ReadingStateFlushed { .. }
@@ -728,7 +739,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 }
             };
             let next_offset = offset + page.books.len();
-            let covers = page
+            let covers: Vec<_> = page
                 .books
                 .iter_mut()
                 .filter_map(|book| book.cover.take().map(|cover| (book.id, cover)))
@@ -745,7 +756,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if offset == 0 {
                 state.library_activity_progress = 1.0;
             }
-            return decode_library_covers_task(generation, offset, covers);
+            if let Some(cancellation) = state.library_cover_cancellation.take() {
+                cancellation.cancel();
+            }
+            state.library_cover_offset = None;
+            if covers.is_empty() {
+                return Task::none();
+            }
+            let cancellation = Cancellation::default();
+            state.library_cover_cancellation = Some(cancellation.clone());
+            state.library_cover_offset = Some(offset);
+            return decode_library_covers_task(generation, offset, covers, cancellation);
         }
 
         Message::LibraryCoversLoaded {
@@ -753,8 +774,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             offset,
             cover_handles,
         } => {
-            if generation == state.library_generation && offset < state.library_offset {
-                for (book_id, handle, retained_bytes) in cover_handles {
+            if generation == state.library_generation
+                && state.library_cover_offset == Some(offset)
+                && offset < state.library_offset
+            {
+                state.library_cover_cancellation = None;
+                state.library_cover_offset = None;
+                for (book_id, handle, retained_bytes, _permit) in cover_handles {
                     state
                         .library_cover_handles
                         .insert_weighted(book_id, handle, retained_bytes);
@@ -1996,6 +2022,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             query_generation,
             result,
         } => {
+            if state.close_after_geometry_save.is_some() {
+                state.search_cancellation = None;
+                state.search_loading = false;
+                state.search_waiting = false;
+                return Task::none();
+            }
             if state.active_tab_id == Some(tab_id)
                 && document_generation == state.search_document_generation
                 && query_generation == state.search_query_generation
@@ -2080,6 +2112,17 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state.epub_jobs.remove(&job);
             }
             if cancelled {
+                if complete {
+                    if state.active_tab_id == Some(tab_id)
+                        && state.epub_layout_pending == Some(layout_key)
+                    {
+                        state.epub_layout_pending = None;
+                    } else if let Some(tab) = state.tabs.iter_mut().find(|tab| tab.id == tab_id)
+                        && tab.epub_layout_pending == Some(layout_key)
+                    {
+                        tab.epub_layout_pending = None;
+                    }
+                }
                 if complete
                     && state.epub_jobs.is_empty()
                     && matches!(state.document, Some(OpenDocument::Epub(_)))
@@ -2582,6 +2625,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 window::Event::CloseRequested => {
                     state.close_after_geometry_save = Some(id);
                     state.close_flush_started = false;
+                    cancel_nondurable_work_for_close(state);
                     state.window_geometry_generation =
                         state.window_geometry_generation.wrapping_add(1);
                     state.window_geometry_dirty = true;

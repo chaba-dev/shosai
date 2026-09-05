@@ -7,6 +7,7 @@ use shosai_core::document::RenderedPage;
 use shosai_core::library::{
     Book, BookPage, ImportCompletion, ImportDiscovery, ImportFailure, PreparedManagedImport,
 };
+use shosai_core::reader::CachePermit;
 use shosai_core::search::{SearchError, SearchMatch};
 
 use super::{
@@ -96,7 +97,7 @@ pub enum Message {
     LibraryCoversLoaded {
         generation: u64,
         offset: usize,
-        cover_handles: Vec<(i64, RasterImageHandle, usize)>,
+        cover_handles: Vec<(i64, RasterImageHandle, usize, CachePermit)>,
     },
     OpenAddBooks,
     CancelAddBooks,

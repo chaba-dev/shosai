@@ -1074,6 +1074,8 @@ pub struct State {
     library_activity_progress: f32,
     library_activity_opacity: f32,
     library_generation: u64,
+    library_cover_cancellation: Option<Cancellation>,
+    library_cover_offset: Option<usize>,
     library_offset: usize,
     book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
@@ -1262,6 +1264,8 @@ pub fn boot() -> (State, Task<Message>) {
         library_activity_progress: 0.0,
         library_activity_opacity: 1.0,
         library_generation: 0,
+        library_cover_cancellation: None,
+        library_cover_offset: None,
         library_offset: 0,
         book_menu: None,
         pending_remove_book: None,
@@ -1449,6 +1453,7 @@ fn decode_library_covers_task(
     generation: u64,
     offset: usize,
     covers: Vec<(i64, Vec<u8>)>,
+    cancellation: Cancellation,
 ) -> Task<Message> {
     if covers.is_empty() {
         return Task::none();
@@ -1458,8 +1463,10 @@ fn decode_library_covers_task(
             tokio::task::spawn_blocking(move || {
                 covers
                     .into_iter()
+                    .take_while(|_| !cancellation.is_cancelled())
                     .filter_map(|(id, data)| {
-                        decode_library_cover(Some(&data)).map(|(cover, bytes)| (id, cover, bytes))
+                        decode_library_cover(Some(&data), Some(&cancellation))
+                            .map(|(cover, bytes, permit)| (id, cover, bytes, permit))
                     })
                     .collect()
             })
@@ -1474,7 +1481,11 @@ fn decode_library_covers_task(
     )
 }
 
-fn decode_library_cover(data: Option<&[u8]>) -> Option<(RasterImageHandle, usize)> {
+fn decode_library_cover(
+    data: Option<&[u8]>,
+    cancellation: Option<&Cancellation>,
+) -> Option<(RasterImageHandle, usize, CachePermit)> {
+    use ::image::ImageDecoder;
     use std::io::Cursor;
 
     let data = data?;
@@ -1489,35 +1500,55 @@ fn decode_library_cover(data: Option<&[u8]>) -> Option<(RasterImageHandle, usize
         .with_guessed_format()
         .ok()?;
     probe.limits(decode_limits());
-    let (source_width, source_height) = probe.into_dimensions().ok()?;
-    let decoded_bytes = u64::from(source_width)
-        .checked_mul(u64::from(source_height))?
-        .checked_mul(4)?;
+    let decoder = probe.into_decoder().ok()?;
+    let (source_width, source_height) = decoder.dimensions();
+    let decoded_bytes = decoder.total_bytes();
+    let transient_bytes = decoded_bytes.checked_add(
+        u64::from(LIBRARY_COVER_MAX_WIDTH) * u64::from(LIBRARY_COVER_MAX_HEIGHT) * 4 * 2,
+    )?;
     if source_width > LIBRARY_COVER_SOURCE_MAX_DIMENSION
         || source_height > LIBRARY_COVER_SOURCE_MAX_DIMENSION
-        || decoded_bytes > LIBRARY_COVER_DECODE_MAX_BYTES
+        || transient_bytes > LIBRARY_COVER_DECODE_MAX_BYTES
     {
         return None;
     }
+    let budget = shosai_core::library::cover_decode_budget();
+    let permit = loop {
+        if cancellation.is_some_and(Cancellation::is_cancelled) {
+            return None;
+        }
+        if let Some(permit) = budget.try_reserve(usize::try_from(transient_bytes).ok()?) {
+            break permit;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
     let mut reader = ::image::ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .ok()?;
     reader.limits(decode_limits());
-    let image = reader
-        .decode()
-        .ok()?
-        .thumbnail(LIBRARY_COVER_MAX_WIDTH, LIBRARY_COVER_MAX_HEIGHT);
-    let rgba = image.to_rgba8();
+    let image = reader.decode().ok()?;
+    let rgba = image
+        .thumbnail(LIBRARY_COVER_MAX_WIDTH, LIBRARY_COVER_MAX_HEIGHT)
+        .to_rgba8();
+    drop(image);
     let (width, height) = rgba.dimensions();
     let pixels = rgba.into_raw();
     let retained_bytes = pixels.len();
+    let permit = budget
+        .try_reserve_replacing(retained_bytes, vec![permit])
+        .ok()?;
     Some((
         RasterImageHandle(image::Handle::from_rgba(width, height, pixels)),
         retained_bytes,
+        permit,
     ))
 }
 
 fn reset_library(state: &mut State) -> Task<Message> {
+    if let Some(cancellation) = state.library_cover_cancellation.take() {
+        cancellation.cancel();
+    }
+    state.library_cover_offset = None;
     state.library_generation = state.library_generation.wrapping_add(1);
     state.library_search_pending = false;
     state.library_offset = 0;
@@ -1810,6 +1841,30 @@ fn cancel_background_jobs_for_tab(state: &State, tab_id: u64) {
             cancellation.cancel();
         }
     }
+}
+
+fn cancel_nondurable_work_for_close(state: &mut State) {
+    cancel_document_open(state);
+    for cancellation in state.epub_jobs.values() {
+        cancellation.cancel();
+    }
+    for cancellation in state.raster_cancellations.values() {
+        cancellation.cancel();
+    }
+    for cancellation in state.cbz_dimension_cancellations.values() {
+        cancellation.cancel();
+    }
+    for cancellation in state.epub_image_cancellations.values() {
+        cancellation.cancel();
+    }
+    cancel_active_search(state);
+    state.epub_layout_requested = None;
+    if let Some(cancellation) = state.library_cover_cancellation.take() {
+        cancellation.cancel();
+    }
+    state.library_cover_offset = None;
+    state.library_generation = state.library_generation.wrapping_add(1);
+    state.library_loading = false;
 }
 
 fn cancel_superseded_raster_jobs(state: &State, tab_id: u64, generation: u64) {
@@ -2623,6 +2678,9 @@ fn handle_key_event(state: &State, event: keyboard::Event) -> Task<Message> {
 
 /// Refresh the visible content for the current page/chapter.
 fn refresh_content(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     retain_relevant_raster_failures(state);
     update_bookmark_status(state);
 
@@ -2961,6 +3019,9 @@ fn schedule_cbz_dimension(
 }
 
 fn pump_cbz_dimension_queue(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     let Some(OpenDocument::Cbz(document)) = &state.document else {
         return Task::none();
     };
@@ -2979,6 +3040,9 @@ fn pump_cbz_dimension_queue(state: &mut State) -> Task<Message> {
 }
 
 pub(super) fn load_epub_images_task(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     let Some(OpenDocument::Epub(document)) = &state.document else {
         return Task::none();
     };
@@ -3648,6 +3712,9 @@ fn start_continuous_page_task(
 }
 
 fn pump_raster_queue(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     retain_relevant_raster_failures(state);
     if state.reading_mode == ReadingMode::Continuous
         && matches!(
@@ -3856,6 +3923,9 @@ fn reserve_render_transient(state: &State, page: usize, scale: f32) -> RenderTra
 }
 
 pub(super) fn pump_background_work(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     Task::batch([pump_raster_queue(state), load_epub_images_task(state)])
 }
 
@@ -4996,6 +5066,9 @@ fn persist_window_geometry(state: &mut State) -> Task<Message> {
 }
 
 fn perform_search(state: &mut State) -> Task<Message> {
+    if state.close_after_geometry_save.is_some() {
+        return Task::none();
+    }
     let query = state.search_query.clone();
     let document_generation = state.search_document_generation;
     let query_generation = state.search_query_generation;
@@ -11002,6 +11075,102 @@ mod tests {
     }
 
     #[test]
+    fn failed_close_retires_cancelled_raster_work_and_reopens_admission() {
+        let cbz = CbzDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+        )
+        .expect("fixture should be a valid CBZ");
+        cbz.page_size(0).unwrap();
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::new(cbz)));
+        let render_task = refresh_content(&mut state);
+        let (job, cancellation) = state
+            .raster_cancellations
+            .iter()
+            .next()
+            .map(|(job, cancellation)| (job.clone(), cancellation.clone()))
+            .expect("a raster worker should be pending");
+        let RasterJob::Paginated {
+            tab_id,
+            generation,
+            key,
+        } = job
+        else {
+            panic!("expected a paginated raster worker");
+        };
+        let id = window::Id::unique();
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        assert!(cancellation.is_cancelled());
+
+        let completion = update(
+            &mut state,
+            Message::PageRendered {
+                tab_id,
+                generation,
+                key,
+                result: Err("cancelled".to_owned()),
+            },
+        );
+        assert_eq!(
+            completion.units(),
+            0,
+            "closing must not pump replacement work"
+        );
+        assert!(state.raster_jobs.is_empty());
+        assert!(state.raster_cancellations.is_empty());
+        assert!(state.paginated_pending.is_empty());
+
+        let _ = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+        assert_eq!(state.close_after_geometry_save, None);
+        assert!(refresh_content(&mut state).units() > 0);
+        drop(render_task);
+    }
+
+    #[test]
+    fn failed_close_retires_cancelled_epub_pagination() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let pagination_task = refresh_content(&mut state);
+        let job = *state.epub_jobs.keys().next().unwrap();
+        let cancellation = state.epub_jobs.get(&job).unwrap().clone();
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(window::Id::unique(), window::Event::CloseRequested),
+        );
+        assert!(cancellation.is_cancelled());
+        let completion = update(
+            &mut state,
+            Message::EpubPaginated {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                layout_key: job.layout_key,
+                complete: true,
+                pages: Arc::new(Vec::new()),
+            },
+        );
+        assert_eq!(completion.units(), 0);
+        assert!(state.epub_jobs.is_empty());
+        assert_eq!(state.epub_layout_pending, None);
+
+        let _ = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+        assert!(refresh_content(&mut state).units() > 0);
+        drop(pagination_task);
+    }
+
+    #[test]
     fn close_drains_accepted_bookmark_mutations_and_rejects_new_ones() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -12815,16 +12984,18 @@ mod tests {
         assert_eq!(state.library_books.len(), 1);
         assert!(state.library_cover_handles.is_empty());
 
-        let (cover, retained_bytes) =
-            decode_library_cover(Some(include_bytes!("../../../assets/shosai-icon.png")))
-                .expect("application icon should decode as a cover");
+        let (cover, retained_bytes, permit) = decode_library_cover(
+            Some(include_bytes!("../../../assets/shosai-icon.png")),
+            None,
+        )
+        .expect("application icon should decode as a cover");
         let cover_id = cover.0.id();
         let _ = update(
             &mut state,
             Message::LibraryCoversLoaded {
                 generation,
                 offset: 0,
-                cover_handles: vec![(1, cover, retained_bytes)],
+                cover_handles: vec![(1, cover, retained_bytes, permit)],
             },
         );
 
@@ -12835,9 +13006,60 @@ mod tests {
     }
 
     #[test]
+    fn newer_library_cover_batch_cancels_and_replaces_the_previous_batch() {
+        let (mut state, _) = boot();
+        let generation = state.library_generation;
+        let mut first = test_book(1);
+        first.cover = Some(include_bytes!("../../../assets/shosai-icon.png").to_vec());
+        let first_task = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation,
+                offset: 0,
+                result: Ok(BookPage {
+                    books: vec![first],
+                    has_more: true,
+                }),
+            },
+        );
+        let first_cancellation = state.library_cover_cancellation.clone().unwrap();
+
+        let mut second = test_book(2);
+        second.cover = Some(include_bytes!("../../../assets/shosai-icon.png").to_vec());
+        let second_task = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation,
+                offset: 1,
+                result: Ok(BookPage {
+                    books: vec![second],
+                    has_more: false,
+                }),
+            },
+        );
+
+        assert!(first_cancellation.is_cancelled());
+        assert_eq!(state.library_cover_offset, Some(1));
+        let _ = update(
+            &mut state,
+            Message::LibraryCoversLoaded {
+                generation,
+                offset: 0,
+                cover_handles: Vec::new(),
+            },
+        );
+        assert_eq!(
+            state.library_cover_offset,
+            Some(1),
+            "a stale completion must not retire the replacement batch"
+        );
+        drop((first_task, second_task));
+    }
+
+    #[test]
     fn malformed_library_cover_is_rejected_before_view_construction() {
-        assert!(decode_library_cover(Some(b"not an image")).is_none());
-        assert!(decode_library_cover(None).is_none());
+        assert!(decode_library_cover(Some(b"not an image"), None).is_none());
+        assert!(decode_library_cover(None, None).is_none());
     }
 
     #[test]
@@ -12849,7 +13071,7 @@ mod tests {
         image
             .write_to(&mut encoded, ::image::ImageFormat::Png)
             .unwrap();
-        assert!(decode_library_cover(Some(encoded.get_ref())).is_none());
+        assert!(decode_library_cover(Some(encoded.get_ref()), None).is_none());
 
         let mut cache = BoundedCache::with_weight_limit(2, 6);
         let handle = || RasterImageHandle(image::Handle::from_rgba(1, 1, vec![0, 0, 0, 255]));
@@ -12858,6 +13080,22 @@ mod tests {
         assert!(cache.get(&1).is_none());
         assert!(cache.get(&2).is_some());
         assert_eq!(cache.retained_weight(), 4);
+    }
+
+    #[test]
+    fn high_bit_depth_library_cover_is_charged_at_native_decode_size() {
+        use std::io::Cursor;
+
+        let image = ::image::ImageBuffer::<::image::Rgba<u16>, Vec<u16>>::new(2048, 4096);
+        let mut encoded = Cursor::new(Vec::new());
+        ::image::DynamicImage::ImageRgba16(image)
+            .write_to(&mut encoded, ::image::ImageFormat::Png)
+            .unwrap();
+
+        assert!(
+            decode_library_cover(Some(encoded.get_ref()), None).is_none(),
+            "the native 16-bit allocation exceeds the per-decode limit"
+        );
     }
 
     #[test]

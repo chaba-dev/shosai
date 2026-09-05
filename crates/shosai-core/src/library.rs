@@ -23,6 +23,7 @@ use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
 use crate::path_key::{canonical_path_key, path_from_key};
 use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
+use crate::reader::{CacheBudget, CachePermit};
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
@@ -43,6 +44,7 @@ const MAX_IMPORT_DETAIL_BYTES: usize = 512 * 1024;
 const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
+const COVER_DECODE_BYTE_CAPACITY: usize = 256 * 1024 * 1024;
 const BOOK_SELECT_COLUMNS: &str = "id,
     CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096 THEN title END AS title,
     CASE WHEN author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096) THEN author END AS author,
@@ -72,6 +74,29 @@ const BOOK_SELECT_COLUMNS: &str = "id,
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
     static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
     ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+}
+
+pub fn cover_decode_budget() -> CacheBudget {
+    static BUDGET: OnceLock<CacheBudget> = OnceLock::new();
+    BUDGET
+        .get_or_init(|| CacheBudget::new(COVER_DECODE_BYTE_CAPACITY))
+        .clone()
+}
+
+fn reserve_cover_decode(
+    bytes: usize,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<CachePermit> {
+    let budget = cover_decode_budget();
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        if let Some(permit) = budget.try_reserve(bytes) {
+            return Some(permit);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 async fn acquire_scanner(
@@ -3509,6 +3534,18 @@ fn extract_pdf_metadata(
         .min((COVER_MAX_HEIGHT - 1) as f32 / page_height)
         .min(1.0);
     check_import_cancelled(cancellation)?;
+    let transient_bytes = doc
+        .rendered_byte_len(0, scale)?
+        .checked_add(doc.render_transient_byte_len(0, scale)?)
+        .and_then(|bytes| bytes.checked_add(MAX_IMPORT_COVER_BYTES))
+        .context("PDF cover transient byte size overflow")?;
+    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+        return Ok((title, author, None));
+    }
+    let Some(_permit) = reserve_cover_decode(transient_bytes, cancellation) else {
+        check_import_cancelled(cancellation)?;
+        return Ok((title, author, None));
+    };
     let rendered = if cancellation.is_some() {
         doc.render_page_with_highlights_cancellable(0, scale, &[], &is_cancelled)
     } else {
@@ -3600,6 +3637,21 @@ fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<(
 
 /// Resize an image to fit within cover thumbnail bounds and encode as PNG.
 fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
+    use image::ImageDecoder;
+
+    let decoder = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let transient_bytes = decoder
+        .total_bytes()
+        .checked_add(u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT) * 4 * 2)?;
+    let transient_bytes = usize::try_from(transient_bytes).ok()?;
+    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+        return None;
+    }
+    let _permit = reserve_cover_decode(transient_bytes, cancellation)?;
     let img = image::load_from_memory(data).ok()?;
     check_import_cancelled(cancellation).ok()?;
     let thumb = img.resize(
