@@ -1066,10 +1066,11 @@ async fn removing_managed_books_with_a_reused_source_preserves_both_states() {
         .await
         .unwrap();
 
+    let canonical_source = source.canonicalize().unwrap();
     let first_detached = lib.remove(first.id).await.unwrap().unwrap();
     let second_detached = lib.remove(second.id).await.unwrap().unwrap();
-    assert_eq!(first_detached, source);
-    assert_eq!(second_detached, source);
+    assert_eq!(first_detached, canonical_source);
+    assert_eq!(second_detached, canonical_source);
     store
         .set_async(
             &second_detached,
@@ -1092,7 +1093,7 @@ async fn removing_managed_books_with_a_reused_source_preserves_both_states() {
     assert_eq!(states[0].0, 3);
     assert_eq!(states[1].0, 19);
     assert_eq!(states[0].1, states[1].1);
-    assert_eq!(states[0].1, source.to_string_lossy());
+    assert_eq!(states[0].1, canonical_source.to_string_lossy());
     assert_eq!(
         store
             .get_async(&source, first.content_hash.as_deref().unwrap())
