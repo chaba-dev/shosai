@@ -8,6 +8,7 @@ use shosai_core::library::{
     Book, BookPage, ImportCompletion, ImportDiscovery, ImportFailure, PreparedManagedImport,
 };
 use shosai_core::reader::CachePermit;
+use shosai_core::reading_state::FileReadingState;
 use shosai_core::search::{SearchError, SearchMatch};
 
 use super::{
@@ -36,6 +37,16 @@ pub enum Message {
         result: Result<(super::OpenDocument, String), super::AppError>,
     },
     ShowDocumentOpenNotice(u64),
+    DocumentStateLoaded {
+        tab_id: u64,
+        generation: u64,
+        bookmark_generation: u64,
+        path: PathBuf,
+        book_id: Option<i64>,
+        content_hash: Option<String>,
+        reading_state: Result<Option<FileReadingState>, String>,
+        bookmarks: Option<Result<Vec<Bookmark>, String>>,
+    },
 
     // Navigation
     NextPage,
@@ -95,6 +106,7 @@ pub enum Message {
     ShowSettings,
     RefreshLibrary,
     LoadMoreLibrary,
+    LoadPreviousLibrary,
     LibraryLoaded {
         generation: u64,
         offset: usize,
@@ -104,6 +116,12 @@ pub enum Message {
         generation: u64,
         offset: usize,
         cover_handles: Vec<(i64, RasterImageHandle, usize, CachePermit)>,
+    },
+    LoadLibraryCover(i64),
+    LibraryCoverLoaded {
+        generation: u64,
+        book_id: i64,
+        cover: Option<(RasterImageHandle, usize, CachePermit)>,
     },
     OpenAddBooks,
     CancelAddBooks,

@@ -35,7 +35,13 @@ pub(crate) fn preflight<R: Read + Seek>(
         })
         .context("ZIP end-of-central-directory record is missing")?;
     let eocd_position = archive_len - tail_len as u64 + eocd as u64;
-    if has_earlier_zip_candidate(&mut reader, eocd_position, archive_len, is_cancelled)? {
+    if has_earlier_zip_candidate(
+        &mut reader,
+        eocd_position,
+        archive_len,
+        max_entries,
+        is_cancelled,
+    )? {
         bail!("multiple ZIP end-of-central-directory records are not supported");
     }
     let disk = le16(&tail, eocd + 4).unwrap();
@@ -164,6 +170,7 @@ fn has_earlier_zip_candidate<R: Read + Seek>(
     reader: &mut R,
     selected: u64,
     archive_len: u64,
+    max_entries: usize,
     cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<bool> {
     reader.seek(SeekFrom::Start(0))?;
@@ -193,10 +200,27 @@ fn has_earlier_zip_candidate<R: Read + Seek>(
                 let mut header = [0_u8; 22];
                 let read = reader.read_exact(&mut header);
                 reader.seek(SeekFrom::Start(resume))?;
-                if read.is_ok()
+                let entries = usize::from(le16(&header, 10).unwrap());
+                let files_on_disk = usize::from(le16(&header, 8).unwrap());
+                let directory_end = u64::from(le32(&header, 16).unwrap())
+                    .checked_add(u64::from(le32(&header, 12).unwrap()));
+                let candidate_fits = read.is_ok()
                     && position
                         .checked_add(22 + u64::from(le16(&header, 20).unwrap()))
-                        .is_some_and(|candidate_end| candidate_end <= archive_len)
+                        .is_some_and(|candidate_end| candidate_end <= archive_len);
+                // zip 8.4 allocates from this field before rejecting a
+                // disagreeing alternate candidate and falling back.
+                if candidate_fits && files_on_disk > max_entries {
+                    crate::resource_limit!(
+                        "ZIP alternate footer has too many entries: {files_on_disk}"
+                    );
+                }
+                if read.is_ok()
+                    && le16(&header, 4) == Some(0)
+                    && le16(&header, 6) == Some(0)
+                    && le16(&header, 8) == Some(entries as u16)
+                    && directory_end == Some(position)
+                    && candidate_fits
                 {
                     return Ok(true);
                 }
@@ -363,6 +387,24 @@ mod tests {
         let error = preflight(Cursor::new(bytes), 10, None).unwrap_err();
 
         assert!(error.to_string().contains("multiple ZIP"));
+    }
+
+    #[test]
+    fn alternate_comment_candidate_bounds_files_on_disk_before_fallback() {
+        let mut bytes = archive(b"page");
+        bytes.truncate(bytes.len() - 22);
+        let mut candidate = [0_u8; 22];
+        candidate[..4].copy_from_slice(b"PK\x05\x06");
+        candidate[8..10].copy_from_slice(&u16::MAX.to_le_bytes());
+        candidate[10..12].copy_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&candidate);
+        bytes.extend_from_slice(&[0; 22]);
+        let selected = bytes.len() - 22;
+        bytes[selected..selected + 4].copy_from_slice(b"PK\x05\x06");
+
+        let error = preflight(Cursor::new(bytes), 10, None).unwrap_err();
+
+        assert!(error.to_string().contains("too many entries"));
     }
 
     #[test]

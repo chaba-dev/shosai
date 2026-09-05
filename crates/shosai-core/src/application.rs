@@ -4,6 +4,7 @@ use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use anyhow::Context;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -173,7 +174,14 @@ fn planned_retained_admission_byte_len<R: Read + Seek>(
         BookFormat::Cbz => crate::cbz::CbzLimits::default().max_entries,
         BookFormat::Pdf => unreachable!(),
     };
+    let archive_label = match format {
+        BookFormat::Epub => "EPUB",
+        BookFormat::Cbz => "CBZ",
+        BookFormat::Pdf => unreachable!(),
+    };
     let preflight = crate::zip_preflight::preflight(reader, max_entries, is_cancelled)
+        .context("invalid ZIP archive")
+        .with_context(|| format!("{archive_label} archive is corrupt"))
         .map_err(|error| classify_open_error(format, error))?;
     if format == BookFormat::Cbz {
         let metadata =

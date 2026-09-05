@@ -14,6 +14,7 @@ use crate::document::{DocumentMetadata, RenderedPage};
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
 const MIB: u64 = 1024 * 1024;
+pub(crate) const IMAGE_PROBE_METADATA_BYTES: usize = 1024 * 1024;
 
 /// Resource limits applied while opening and reading a CBZ.
 #[derive(Clone, Copy, Debug)]
@@ -346,7 +347,8 @@ impl CbzDoc {
     }
 
     pub fn page_probe_admission_byte_len(&self, index: usize) -> Option<usize> {
-        self.page_source_byte_len(index)
+        self.page_source_byte_len(index)?
+            .checked_add(IMAGE_PROBE_METADATA_BYTES)
     }
 
     /// Worst-case source and decode admission used by non-rendering callers.
@@ -435,9 +437,15 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let decoder = image::ImageReader::new(Cursor::new(bytes))
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
-            .with_context(|| format!("failed to identify image: {path}"))?
+            .with_context(|| format!("failed to identify image: {path}"))?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(self.limits.max_image_width);
+        limits.max_image_height = Some(self.limits.max_image_height);
+        limits.max_alloc = Some(IMAGE_PROBE_METADATA_BYTES as u64);
+        reader.limits(limits);
+        let decoder = reader
             .into_decoder()
             .with_context(|| format!("failed to inspect image dimensions: {path}"))?;
         let (width, height) = decoder.dimensions();
@@ -621,6 +629,7 @@ impl CbzDoc {
             .ok()?
             .checked_mul(usize::try_from(height).ok()?)?
             .checked_mul(native_bytes_per_pixel)?;
+        let decoder = decoded.max(usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?);
         let resized = usize::try_from(target_width)
             .ok()?
             .checked_mul(usize::try_from(target_height).ok()?)?
@@ -635,7 +644,7 @@ impl CbzDoc {
         } else {
             0
         };
-        decoded
+        decoder
             .checked_add(resized)?
             .checked_add(resize_intermediate)
     }
@@ -910,6 +919,9 @@ mod tests {
 
         document.page_size(0).unwrap();
 
-        assert_eq!(document.render_transient_byte_len(0, 2.0), Some(288));
+        assert_eq!(
+            document.render_transient_byte_len(0, 2.0),
+            Some(usize::try_from(document.limits.max_decoded_rgba_bytes).unwrap() + 256)
+        );
     }
 }

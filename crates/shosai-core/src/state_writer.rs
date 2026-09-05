@@ -149,6 +149,13 @@ impl Pending {
             .collect()
     }
 
+    fn is_empty(&self) -> bool {
+        self.saves.is_empty()
+            && self.progress.is_empty()
+            && self.preferences.is_empty()
+            && self.flushes.is_empty()
+    }
+
     fn contains(&self, key: &WriteKey) -> bool {
         match key {
             WriteKey::Save(key) => self.saves.contains_key(key),
@@ -261,7 +268,13 @@ impl Clone for StateWriter {
 impl Drop for StateWriter {
     fn drop(&mut self) {
         if self.inner.handles.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             self.inner.stopped.store(true, Ordering::Release);
+            drop(state);
             self.inner.notify.notify_one();
         }
     }
@@ -367,7 +380,13 @@ impl StateWriter {
     /// Stop accepting writes and wait until every accepted write has either
     /// persisted or produced a persistence error.
     pub async fn shutdown(&self) -> Result<(), PersistError> {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.inner.stopped.store(true, Ordering::Release);
+        drop(state);
         self.inner.notify.notify_one();
         loop {
             let completed = self.inner.completed.notified();
@@ -430,17 +449,31 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 let _ = flush.send(error.clone().map_or(Ok(()), Err));
                 worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
             }
-            let pending_is_empty = worker
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .pending
-                .write_keys()
-                .is_empty();
-            if worker.stopped.load(Ordering::Acquire) {
+            let (pending_is_empty, stopped) = {
+                let state = worker
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                (
+                    state.pending.is_empty(),
+                    worker.stopped.load(Ordering::Acquire),
+                )
+            };
+            if stopped {
                 if let Some(error) = error
                     && worker.handles.load(Ordering::Acquire) != 0
                 {
+                    let flushes = {
+                        let mut state = worker
+                            .state
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        std::mem::take(&mut state.pending.flushes)
+                    };
+                    for flush in flushes {
+                        let _ = flush.send(Err(error.clone()));
+                        worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
+                    }
                     *worker
                         .completion
                         .lock()
@@ -486,6 +519,10 @@ fn prepare_message_with(
             Err(StateWriterSendError::Full)
         }
         StateWriterMessage::Preference(key, value) => {
+            // Admission is based on retained bytes, so discard caller-provided
+            // spare capacity before these strings enter the pending maps.
+            let key = key.into_boxed_str().into_string();
+            let value = value.into_boxed_str().into_string();
             let byte_len = key
                 .len()
                 .checked_mul(2)
@@ -869,6 +906,24 @@ mod tests {
                 "small".to_owned(),
             ))
             .expect("coalescing a smaller value must release aggregate admission");
+    }
+
+    #[test]
+    fn preference_admission_discards_oversized_spare_capacity() {
+        let mut key = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES * 2);
+        key.push('k');
+        let mut value = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES * 2);
+        value.push('v');
+        let mut state = WriterState::default();
+
+        state
+            .insert(StateWriterMessage::Preference(key, value))
+            .unwrap();
+
+        let (key, value) = state.pending.preferences.iter().next().unwrap();
+        assert_eq!(key.capacity(), key.len());
+        assert_eq!(value.capacity(), value.len());
+        assert_eq!(state.total_admitted_bytes, 3);
     }
 
     #[test]
@@ -1415,6 +1470,50 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn shutdown_answers_flush_queued_behind_a_failing_in_flight_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'terminal failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let mut blocker = store.pool().acquire().await.unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let writer = start_state_writer(store);
+        writer
+            .send(StateWriterMessage::Preference("key".into(), "value".into()))
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let (flushed, wait) = oneshot::channel();
+        writer.send(StateWriterMessage::Flush(flushed)).unwrap();
+        let shutdown = {
+            let writer = writer.clone();
+            tokio::spawn(async move { writer.shutdown().await })
+        };
+        sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), wait)
+            .await
+            .expect("accepted flush must be answered")
+            .unwrap()
+            .unwrap_err();
+        tokio::time::timeout(std::time::Duration::from_secs(2), shutdown)
+            .await
+            .expect("shutdown must finish")
+            .unwrap()
+            .unwrap_err();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn untracked_save_persists_the_path_identity_prepared_at_admission() {
@@ -1718,6 +1817,68 @@ mod tests {
                 .unwrap()
                 .page,
             17
+        );
+    }
+
+    #[tokio::test]
+    async fn retried_tracked_save_ignores_newer_untracked_different_content_at_same_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let path = directory.path().join("shared.epub");
+        let key = canonical_path_key(&path);
+        let other_hash = "1111111111111111111111111111111111111111111111111111111111111111";
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, content_hash)
+             VALUES ('tracked', 'epub', ?, ?) RETURNING id",
+        )
+        .bind(&key)
+        .bind(CONTENT_HASH)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        store
+            .set_key_at_revision_async(
+                &key,
+                other_hash,
+                &FileReadingState {
+                    page: 22,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+                Some(2),
+            )
+            .await
+            .unwrap();
+
+        store
+            .set_for_book_current_path_at_revision_async(
+                book_id,
+                &FileReadingState {
+                    page: 11,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+                Some(1),
+            )
+            .await
+            .unwrap();
+
+        let rows: Vec<(Option<i64>, String, i64)> = sqlx::query_as(
+            "SELECT book_id, content_hash, page FROM reading_state
+             WHERE file_path = ? ORDER BY book_id IS NULL",
+        )
+        .bind(&key)
+        .fetch_all(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (Some(book_id), CONTENT_HASH.to_owned(), 11),
+                (None, other_hash.to_owned(), 22),
+            ]
         );
     }
 

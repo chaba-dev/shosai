@@ -534,10 +534,13 @@ impl ReadingStateStore {
             let newer_exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(
                     SELECT 1 FROM reading_state
-                    WHERE (book_id = ? OR file_path = ?) AND revision > ?
+                    WHERE (book_id = ? OR (book_id IS NULL AND content_hash = ?
+                        AND (file_path = ? OR file_path = ?))) AND revision > ?
                  )",
             )
             .bind(book_id)
+            .bind(content_hash)
+            .bind(key)
             .bind(&current_key)
             .bind(revision)
             .fetch_one(&mut *transaction)
@@ -550,12 +553,12 @@ impl ReadingStateStore {
             sqlx::query(
                 "DELETE FROM reading_state
                  WHERE book_id = ? OR (book_id IS NULL AND
-                    (file_path = ? OR (content_hash = ? AND file_path = ?)))",
+                    content_hash = ? AND (file_path = ? OR file_path = ?))",
             )
             .bind(book_id)
-            .bind(&current_key)
             .bind(content_hash)
             .bind(key)
+            .bind(&current_key)
             .execute(&mut *transaction)
             .await
             .context("failed to reconcile promoted reading state")?;
@@ -578,10 +581,12 @@ impl ReadingStateStore {
             let newer_unowned_exists: bool = sqlx::query_scalar(
                 "SELECT EXISTS(
                     SELECT 1 FROM reading_state
-                    WHERE file_path = ? AND book_id IS NULL AND revision > ?
+                    WHERE file_path = ? AND content_hash = ?
+                        AND book_id IS NULL AND revision > ?
                  )",
             )
             .bind(key)
+            .bind(content_hash)
             .bind(revision)
             .fetch_one(&mut *transaction)
             .await
@@ -594,14 +599,13 @@ impl ReadingStateStore {
                 "INSERT INTO reading_state
                 (file_path, content_hash, page, location_offset, zoom, updated_at, revision)
              VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
-             ON CONFLICT(file_path) DO UPDATE SET
-                content_hash = excluded.content_hash,
+             ON CONFLICT(file_path, content_hash) WHERE book_id IS NULL DO UPDATE SET
                 page = excluded.page,
                 location_offset = excluded.location_offset,
                 zoom = excluded.zoom,
                 updated_at = excluded.updated_at,
                 revision = excluded.revision
-             WHERE reading_state.book_id IS NULL",
+             ",
             )
             .bind(key)
             .bind(content_hash)
@@ -612,9 +616,7 @@ impl ReadingStateStore {
             .execute(&mut *transaction)
             .await
             .context("failed to save reading state")?;
-            if result.rows_affected() == 0 {
-                bail!("reading state path is owned by a different library book");
-            }
+            debug_assert_eq!(result.rows_affected(), 1);
         }
         transaction.commit().await?;
         Ok(owner_id)
@@ -653,10 +655,11 @@ impl ReadingStateStore {
         sqlx::query(
             "DELETE FROM reading_state
              WHERE book_id = ?
-                OR (file_path = ? AND book_id IS NULL)",
+                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
         )
         .bind(book_id)
         .bind(&current_key)
+        .bind(&content_hash)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile reading state aliases")?;
@@ -705,11 +708,13 @@ impl ReadingStateStore {
         let newer_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(
                 SELECT 1 FROM reading_state
-                WHERE (book_id = ? OR file_path = ?) AND revision > ?
+                WHERE (book_id = ? OR (book_id IS NULL AND file_path = ? AND content_hash = ?))
+                    AND revision > ?
              )",
         )
         .bind(book_id)
         .bind(&key)
+        .bind(&content_hash)
         .bind(revision)
         .fetch_one(&mut *transaction)
         .await
@@ -724,10 +729,11 @@ impl ReadingStateStore {
         sqlx::query(
             "DELETE FROM reading_state
              WHERE book_id = ?
-                OR (file_path = ? AND book_id IS NULL)",
+                OR (file_path = ? AND content_hash = ? AND book_id IS NULL)",
         )
         .bind(book_id)
         .bind(&key)
+        .bind(&content_hash)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile reading state aliases")?;
