@@ -23,6 +23,7 @@ use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
 use crate::path_key::{canonical_path_key, path_from_key};
 use crate::pdf::{MAX_PDF_INPUT_BYTES, PdfDoc};
+use crate::reader::{CacheBudget, CachePermit};
 
 pub const MANAGED_LIBRARY_DIR_PREFERENCE: &str = "library.managed_books_dir";
 const DISCOVERY_HASH_CONCURRENCY: usize = 4;
@@ -42,10 +43,60 @@ const MAX_IMPORT_FAILURE_DETAILS: usize = 32;
 const MAX_IMPORT_DETAIL_BYTES: usize = 512 * 1024;
 const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
+const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
+const COVER_DECODE_BYTE_CAPACITY: usize = 256 * 1024 * 1024;
+const BOOK_SELECT_COLUMNS: &str = "id,
+    CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096 THEN title END AS title,
+    CASE WHEN author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096) THEN author END AS author,
+    CASE WHEN typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16 THEN format END AS format,
+    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384 THEN file_path END AS file_path,
+    CASE WHEN typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16 THEN storage_kind END AS storage_kind,
+    CASE WHEN original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384) THEN original_path END AS original_path,
+    CASE WHEN content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64) THEN content_hash END AS content_hash,
+    file_size,
+    CASE WHEN cover_blob IS NULL OR (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288) THEN cover_blob END AS cover_blob,
+    progress,
+    CASE WHEN typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64 THEN date_added END AS date_added,
+    CASE WHEN last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64) THEN last_read END AS last_read,
+    CASE WHEN
+        typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096
+        AND (author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096))
+        AND typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16
+        AND typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+        AND typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16
+        AND (original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384))
+        AND (content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64))
+        AND (cover_blob IS NULL OR (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288))
+        AND typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64
+        AND (last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64))
+    THEN 1 ELSE 0 END AS fields_valid";
 
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
     static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
     ADMISSION.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+}
+
+pub fn cover_decode_budget() -> CacheBudget {
+    static BUDGET: OnceLock<CacheBudget> = OnceLock::new();
+    BUDGET
+        .get_or_init(|| CacheBudget::new(COVER_DECODE_BYTE_CAPACITY))
+        .clone()
+}
+
+fn reserve_cover_decode(
+    bytes: usize,
+    cancellation: Option<&ImportCancellation>,
+) -> Option<CachePermit> {
+    let budget = cover_decode_budget();
+    loop {
+        if cancellation.is_some_and(ImportCancellation::is_cancelled) {
+            return None;
+        }
+        if let Some(permit) = budget.try_reserve(bytes) {
+            return Some(permit);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }
 
 async fn acquire_scanner(
@@ -92,14 +143,14 @@ async fn acquire_import_work(
     }
 }
 
-fn managed_storage_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+fn managed_storage_lock() -> &'static Arc<tokio::sync::Mutex<()>> {
+    static LOCK: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    LOCK.get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
 }
 
 async fn acquire_managed_storage(
     cancellation: Option<&ImportCancellation>,
-) -> Result<tokio::sync::MutexGuard<'static, ()>> {
+) -> Result<tokio::sync::OwnedMutexGuard<()>> {
     if let Some(cancellation) = cancellation {
         if cancellation.is_cancelled() {
             bail!("import cancelled");
@@ -107,11 +158,23 @@ async fn acquire_managed_storage(
         tokio::select! {
             biased;
             () = cancellation.cancelled() => bail!("import cancelled"),
-            guard = managed_storage_lock().lock() => Ok(guard),
+            guard = managed_storage_lock().clone().lock_owned() => Ok(guard),
         }
     } else {
-        Ok(managed_storage_lock().lock().await)
+        Ok(managed_storage_lock().clone().lock_owned().await)
     }
+}
+
+async fn run_blocking_with<G, R, F>(
+    guards: G,
+    operation: F,
+) -> Result<(R, G), tokio::task::JoinError>
+where
+    G: Send + 'static,
+    R: Send + 'static,
+    F: FnOnce() -> R + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || (operation(), guards)).await
 }
 
 /// Supported book format.
@@ -367,6 +430,14 @@ impl ImportDiscoveryProgress {
     }
 }
 
+struct ImportEnumerationGuard(ImportDiscoveryProgress);
+
+impl Drop for ImportEnumerationGuard {
+    fn drop(&mut self) {
+        self.0.finish_enumerating();
+    }
+}
+
 /// Minimal successful-import detail retained by batch reports and frontends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedBook {
@@ -561,7 +632,7 @@ pub struct ManagedPathChange {
     pub new_path: PathBuf,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct FileFingerprint {
     hash: String,
     size: u64,
@@ -601,7 +672,7 @@ struct FileVersion {
     modified: Option<std::time::SystemTime>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct BookInspection {
     title: String,
     author: Option<String>,
@@ -622,36 +693,54 @@ pub struct PreparedManagedImport {
     format: BookFormat,
     staged: ManagedStage,
     inspection: BookInspection,
-    retention_permit: std::sync::Mutex<Option<tokio::sync::OwnedSemaphorePermit>>,
-}
-
-impl PreparedManagedImport {
-    fn release_admission(&self) {
-        drop(
-            self.retention_permit
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .take(),
-        );
-    }
+    retention_permit: Arc<std::sync::Mutex<Option<tokio::sync::OwnedSemaphorePermit>>>,
 }
 
 struct ManagedPublication {
     path: PathBuf,
-    remove_on_drop: bool,
+    rollback_action: ManagedPublicationRollback,
+}
+
+enum ManagedPublicationRollback {
+    None,
+    Remove,
+    Restore(PathBuf),
 }
 
 impl ManagedPublication {
-    fn keep(&mut self) {
-        self.remove_on_drop = false;
+    fn disarm(&mut self) -> ManagedPublicationRollback {
+        std::mem::replace(&mut self.rollback_action, ManagedPublicationRollback::None)
     }
+
+    fn rollback(&mut self, action: ManagedPublicationRollback) {
+        match action {
+            ManagedPublicationRollback::None => {}
+            ManagedPublicationRollback::Remove => {
+                let _ = std::fs::remove_file(&self.path);
+            }
+            ManagedPublicationRollback::Restore(stage) => {
+                let _ = std::fs::rename(&self.path, stage);
+            }
+        }
+    }
+}
+
+struct ManagedCommitOwnership {
+    publication: ManagedPublication,
+    _storage_guard: tokio::sync::OwnedMutexGuard<()>,
+    retention_permit: Arc<std::sync::Mutex<Option<tokio::sync::OwnedSemaphorePermit>>>,
+}
+
+struct RelocationCommitOwnership {
+    publications: Vec<ManagedPublication>,
+    storage_guard: tokio::sync::OwnedMutexGuard<()>,
+    work_permit: tokio::sync::OwnedSemaphorePermit,
 }
 
 impl Drop for ManagedPublication {
     fn drop(&mut self) {
-        if self.remove_on_drop {
-            let _ = std::fs::remove_file(&self.path);
-        }
+        let action = self.disarm();
+        self.rollback(action);
     }
 }
 
@@ -676,6 +765,35 @@ impl Library {
         Self::new(self.pool.clone(), managed_dir)
     }
 
+    async fn ensure_current_managed_dir(&self) -> Result<()> {
+        let row = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value
+             FROM preferences WHERE key = ?",
+        )
+        .bind(MAX_IMPORT_PATH_BYTES as i64)
+        .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load managed library location")?;
+        let configured_exists = row.is_some();
+        let configured = row
+            .map(|row| row.try_get::<Option<String>, _>("bounded_value"))
+            .transpose()?
+            .flatten();
+        if configured_exists && configured.is_none() {
+            bail!("stored managed library location is malformed or exceeds its byte limit");
+        }
+        if configured
+            .as_deref()
+            .is_some_and(|configured| configured != canonical_path_key(&self.managed_dir))
+        {
+            bail!("managed library location changed; refresh the library and try again");
+        }
+        Ok(())
+    }
+
     pub async fn managed_storage_summary(&self) -> Result<ManagedStorageSummary> {
         let row = sqlx::query(
             "SELECT COUNT(*) AS book_count, COALESCE(SUM(file_size), 0) AS total_bytes
@@ -698,18 +816,38 @@ impl Library {
     /// removed after the database commit, so interruption may leave harmless duplicates but never
     /// database rows pointing at incomplete files.
     pub async fn relocate_managed_books(&self, new_dir: &Path) -> Result<Vec<ManagedPathChange>> {
-        let _work_permit = acquire_import_work(None).await?;
-        let _storage_guard = managed_storage_lock().lock().await;
+        let work_permit = acquire_import_work(None).await?;
+        let storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
+        let mut guards = (work_permit, storage_guard);
         let new_dir = new_dir.to_path_buf();
+        validate_import_path(&new_dir)?;
+        crate::reading_state::validate_preference(
+            MANAGED_LIBRARY_DIR_PREFERENCE,
+            &canonical_path_key(&new_dir),
+        )?;
         let create_dir = new_dir.clone();
-        tokio::task::spawn_blocking(move || std::fs::create_dir_all(&create_dir))
-            .await
-            .context("managed library directory task failed")?
-            .with_context(|| format!("failed to create {}", new_dir.display()))?;
+        let (create_result, next_guards) =
+            run_blocking_with(guards, move || std::fs::create_dir_all(&create_dir))
+                .await
+                .context("managed library directory task failed")?;
+        guards = next_guards;
+        create_result.with_context(|| format!("failed to create {}", new_dir.display()))?;
         let new_dir = canonical_path(&new_dir);
+        let new_dir_key = canonical_path_key(&new_dir);
+        if new_dir_key.len() > MAX_IMPORT_PATH_BYTES {
+            bail!("managed library path exceeds byte limit");
+        }
+        crate::reading_state::validate_preference(MANAGED_LIBRARY_DIR_PREFERENCE, &new_dir_key)?;
 
         let rows = sqlx::query(
-            "SELECT id, file_path, content_hash FROM books
+            "SELECT id,
+                    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+                         THEN file_path END AS file_path,
+                    CASE WHEN content_hash IS NULL OR
+                                   (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64)
+                         THEN content_hash END AS content_hash
+             FROM books
              WHERE storage_kind = 'managed' ORDER BY id LIMIT ?",
         )
         .bind(MAX_LIBRARY_SNAPSHOT_SIZE as i64 + 1)
@@ -720,13 +858,21 @@ impl Library {
             bail!("managed relocation exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
         }
         let mut changes = Vec::with_capacity(rows.len());
-        let mut created_destinations = Vec::new();
-        let mut destination_hashes = HashMap::with_capacity(rows.len());
+        let mut publications = Vec::new();
+        let mut destination_fingerprints = HashMap::with_capacity(rows.len());
 
         for row in rows {
             let book_id = row.try_get::<i64, _>("id")?;
-            let old_path = path_from_key(&row.try_get::<String, _>("file_path")?);
+            let old_path = path_from_key(
+                &row.try_get::<Option<String>, _>("file_path")?
+                    .context("stored managed book path is malformed or oversized")?,
+            );
             let expected_hash = row.try_get::<Option<String>, _>("content_hash")?;
+            if expected_hash.as_ref().is_some_and(|hash| {
+                hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }) {
+                bail!("stored managed book hash is invalid");
+            }
             let extension = old_path
                 .extension()
                 .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -735,8 +881,9 @@ impl Library {
                 .with_context(|| format!("unsupported managed format: .{extension}"))?;
             let source = old_path.clone();
             let destination_dir = new_dir.clone();
-            let relocation =
-                tokio::task::spawn_blocking(move || -> Result<(PathBuf, bool, String)> {
+            let (relocation, next_guards) = run_blocking_with(
+                guards,
+                move || -> Result<(PathBuf, ManagedPublication, FileFingerprint)> {
                     let fingerprint = file_fingerprint(&source)?;
                     if expected_hash
                         .as_ref()
@@ -753,131 +900,53 @@ impl Library {
                         format.max_input_bytes(),
                         None,
                     )?;
+                    let publication = ManagedPublication {
+                        path: destination.clone(),
+                        rollback_action: if existed {
+                            ManagedPublicationRollback::None
+                        } else {
+                            ManagedPublicationRollback::Remove
+                        },
+                    };
                     publish_managed_file(&staged.path, &destination, &fingerprint.hash)?;
-                    Ok((canonical_path(&destination), !existed, fingerprint.hash))
-                })
-                .await
-                .context("managed book relocation task failed");
-            let (new_path, created, content_hash) = match relocation {
-                Ok(Ok(relocation)) => relocation,
-                Ok(Err(error)) | Err(error) => {
-                    for path in created_destinations {
-                        let _ = std::fs::remove_file(path);
-                    }
-                    return Err(error);
-                }
-            };
-            if created {
-                created_destinations.push(new_path.clone());
+                    Ok((canonical_path(&destination), publication, fingerprint))
+                },
+            )
+            .await
+            .context("managed book relocation task failed")?;
+            guards = next_guards;
+            let (new_path, publication, fingerprint) = relocation?;
+            if canonical_path_key(&new_path).len() > MAX_IMPORT_PATH_BYTES {
+                bail!("managed book path exceeds byte limit");
             }
+            publications.push(publication);
             changes.push(ManagedPathChange {
                 book_id,
                 old_path,
                 new_path,
             });
-            destination_hashes.insert(book_id, content_hash);
+            destination_fingerprints.insert(book_id, fingerprint);
         }
 
-        let database_result = async {
-            let mut transaction = self.pool.begin().await?;
-            for change in &changes {
-                let old_path = canonical_path_key(&change.old_path);
-                let new_path = canonical_path_key(&change.new_path);
-                let result = sqlx::query(
-                    "UPDATE books SET file_path = ?
-                     WHERE id = ? AND file_path = ? AND storage_kind = 'managed'",
-                )
-                    .bind(&new_path)
-                    .bind(change.book_id)
-                    .bind(&old_path)
-                    .execute(&mut *transaction)
-                    .await
-                    .context("failed to update managed book path")?;
-                if result.rows_affected() != 1 {
-                    bail!("managed book changed during relocation: {}", change.book_id);
-                }
-                reconcile_identity(
-                    &mut transaction,
-                    change.book_id,
-                    &old_path,
-                    &new_path,
-                )
-                .await?;
-            }
-            sqlx::query(
-                "INSERT INTO preferences (key, value, updated_at)
-                 VALUES (?, ?, datetime('now'))
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        let (work_permit, storage_guard) = guards;
+        let ownership = RelocationCommitOwnership {
+            publications,
+            storage_guard,
+            work_permit,
+        };
+        let library = self.clone();
+        tokio::spawn(async move {
+            commit_managed_relocation(
+                library,
+                new_dir,
+                changes,
+                destination_fingerprints,
+                ownership,
             )
-            .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
-            .bind(canonical_path_key(&new_dir))
-            .execute(&mut *transaction)
             .await
-            .context("failed to save managed library location")?;
-            transaction
-                .commit()
-                .await
-                .context("failed to commit managed library relocation")?;
-            Ok::<(), anyhow::Error>(())
-        }
-        .await;
-        if let Err(error) = database_result {
-            for path in created_destinations {
-                let _ = std::fs::remove_file(path);
-            }
-            return Err(error);
-        }
-
-        for change in &changes {
-            if change.old_path == change.new_path {
-                continue;
-            }
-            let reference_count =
-                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM books WHERE file_path = ?")
-                    .bind(canonical_path_key(&change.old_path))
-                    .fetch_one(&self.pool)
-                    .await;
-            let reference_count = match reference_count {
-                Ok(count) => count,
-                Err(error) => {
-                    eprintln!(
-                        "warning: retained old managed book {} because references could not be checked: {error:#}",
-                        change.old_path.display()
-                    );
-                    continue;
-                }
-            };
-            if reference_count != 0 {
-                continue;
-            }
-            let destination = change.new_path.clone();
-            let old_path = change.old_path.clone();
-            let expected_hash = destination_hashes.get(&change.book_id).cloned();
-            let cleanup = tokio::task::spawn_blocking(move || -> Result<()> {
-                let expected_hash = expected_hash.context("missing relocation fingerprint")?;
-                let fingerprint = file_fingerprint(&destination)?;
-                if fingerprint.hash != expected_hash {
-                    bail!("relocated copy does not match its staged content");
-                }
-                std::fs::remove_file(&old_path).context("failed to remove old managed book")
-            })
-            .await;
-            let error = match cleanup {
-                Ok(Ok(())) => None,
-                Ok(Err(error)) => Some(format!("{error:#}")),
-                Err(error) => Some(format!("relocation cleanup task failed: {error}")),
-            };
-            if let Some(error) = error {
-                eprintln!(
-                    "warning: retained old managed book {}: {error}",
-                    change.old_path.display()
-                );
-            }
-        }
-        if self.managed_dir != new_dir {
-            let _ = std::fs::remove_dir(&self.managed_dir);
-        }
-        Ok(changes)
+        })
+        .await
+        .context("managed relocation commit task failed")?
     }
 
     /// Import a single book file into the library.
@@ -909,11 +978,13 @@ impl Library {
             .unwrap_or_default();
         let format = BookFormat::from_extension(&ext)
             .with_context(|| format!("unsupported format: .{ext}"))?;
-        let _work_permit = acquire_import_work(cancellation).await?;
+        let work_permit = acquire_import_work(cancellation).await?;
+        let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         let stage_source = path.clone();
         let stage_dir = self.managed_dir.clone();
         let stage_cancellation = cancellation.cloned();
-        let staged = tokio::task::spawn_blocking(move || {
+        let (staged, mut guards) = run_blocking_with((work_permit, storage_guard), move || {
             stage_managed_file(
                 &stage_source,
                 &stage_dir,
@@ -922,12 +993,13 @@ impl Library {
             )
         })
         .await
-        .context("referenced book staging task failed")??;
+        .context("referenced book staging task failed")?;
+        let staged = staged?;
         let inspection_path = staged.path.clone();
         let title_path = path.clone();
         let expected_hash = expected_hash.map(str::to_owned);
         let inspection_cancellation = cancellation.cloned();
-        let inspection = tokio::task::spawn_blocking(move || {
+        let (inspection, next_guards) = run_blocking_with(guards, move || {
             inspect_book_cancellable(
                 &inspection_path,
                 &title_path,
@@ -938,21 +1010,23 @@ impl Library {
             )
         })
         .await
-        .context("metadata extraction task failed")??;
+        .context("metadata extraction task failed")?;
+        guards = next_guards;
+        let inspection = inspection?;
         // Serialize final source verification and identity reconciliation with managed removal,
         // relinking, and relocation. The source may itself be a currently managed path.
         // Acquiring this lock is the commit point. From here the source verification and
         // database mutation run to a definitive result even if cancellation arrives.
-        let _storage_guard = acquire_managed_storage(cancellation).await?;
         if let Some(commit_started) = commit_started {
             commit_started.store(true, Ordering::Release);
         }
         let source_path = path.clone();
-        let source_file = tokio::task::spawn_blocking(move || {
+        let (source_file, _guards) = run_blocking_with(guards, move || {
             fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
         })
         .await
-        .context("book verification task failed")??;
+        .context("book verification task failed")?;
+        let source_file = source_file?;
         if source_file.fingerprint != inspection.fingerprint {
             bail!("file changed during import: {}", path.display());
         }
@@ -1057,6 +1131,8 @@ impl Library {
         cancellation: Option<&ImportCancellation>,
     ) -> Result<PreparedManagedImport> {
         let preparation_permit = acquire_import_work(cancellation).await?;
+        let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         let source = canonical_path(source);
         validate_import_path(&source)?;
         let source_str = canonical_path_key(&source);
@@ -1069,16 +1145,19 @@ impl Library {
         let stage_source = source.clone();
         let stage_dir = self.managed_dir.clone();
         let stage_cancellation = cancellation.cloned();
-        let staged = tokio::task::spawn_blocking(move || {
-            stage_managed_file(
-                &stage_source,
-                &stage_dir,
-                format.max_input_bytes(),
-                stage_cancellation.as_ref(),
-            )
-        })
-        .await
-        .context("managed book staging task failed")??;
+        let (staged, (preparation_permit, storage_guard)) =
+            run_blocking_with((preparation_permit, storage_guard), move || {
+                stage_managed_file(
+                    &stage_source,
+                    &stage_dir,
+                    format.max_input_bytes(),
+                    stage_cancellation.as_ref(),
+                )
+            })
+            .await
+            .context("managed book staging task failed")?;
+        let staged = staged?;
+        drop(storage_guard);
         if cancellation.is_some_and(ImportCancellation::is_cancelled) {
             bail!("managed preparation cancelled");
         }
@@ -1086,7 +1165,7 @@ impl Library {
         let title_path = source.clone();
         let expected_hash = expected_hash.map(str::to_owned);
         let inspection_cancellation = cancellation.cloned();
-        let inspection = tokio::task::spawn_blocking(move || {
+        let (inspection, preparation_permit) = run_blocking_with(preparation_permit, move || {
             if inspection_cancellation
                 .as_ref()
                 .is_some_and(ImportCancellation::is_cancelled)
@@ -1112,7 +1191,8 @@ impl Library {
             })
         })
         .await
-        .context("book inspection task failed")??;
+        .context("book inspection task failed")?;
+        let inspection = inspection?;
 
         Ok(PreparedManagedImport {
             source_str,
@@ -1120,7 +1200,7 @@ impl Library {
             format,
             staged,
             inspection,
-            retention_permit: std::sync::Mutex::new(Some(preparation_permit)),
+            retention_permit: Arc::new(std::sync::Mutex::new(Some(preparation_permit))),
         })
     }
 
@@ -1166,9 +1246,18 @@ impl Library {
     ) -> Result<ImportedBook> {
         // Acquiring this lock is the commit point. Publication and the database mutation must
         // finish definitively after this point, even if cancellation arrives.
-        let _storage_guard = acquire_managed_storage(cancellation).await?;
+        let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         if let Some(commit_started) = commit_started {
             commit_started.store(true, Ordering::Release);
+        }
+        let retention_permit = Arc::clone(&prepared.retention_permit);
+        if retention_permit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_none()
+        {
+            bail!("managed import was already committed");
         }
         let PreparedManagedImport {
             source_str,
@@ -1178,6 +1267,9 @@ impl Library {
             inspection,
             retention_permit: _,
         } = prepared;
+        let source_str = source_str.clone();
+        let format = *format;
+        let inspection = inspection.clone();
 
         let destination = self
             .managed_dir
@@ -1187,110 +1279,49 @@ impl Library {
         let publish_stage = staged.path.clone();
         let copy_destination = destination.clone();
         let expected_hash = inspection.fingerprint.hash.clone();
-        tokio::task::spawn_blocking(move || {
-            publish_managed_file(&publish_stage, &copy_destination, &expected_hash)
+        let (publication, (storage_guard, retention_permit)) =
+            run_blocking_with((storage_guard, retention_permit), move || {
+                let publication = ManagedPublication {
+                    path: copy_destination.clone(),
+                    rollback_action: if destination_existed {
+                        ManagedPublicationRollback::None
+                    } else {
+                        ManagedPublicationRollback::Restore(publish_stage.clone())
+                    },
+                };
+                publish_managed_file(&publish_stage, &copy_destination, &expected_hash)?;
+                Ok::<ManagedPublication, anyhow::Error>(publication)
+            })
+            .await
+            .context("managed book publication task failed")?;
+        let publication = publication?;
+        let ownership = ManagedCommitOwnership {
+            publication,
+            _storage_guard: storage_guard,
+            retention_permit,
+        };
+        let library = self.clone();
+        tokio::spawn(async move {
+            commit_managed_publication(
+                library,
+                source_str,
+                format,
+                inspection,
+                destination,
+                ownership,
+            )
+            .await
         })
         .await
-        .context("managed book publication task failed")??;
-        let mut publication = ManagedPublication {
-            path: destination.clone(),
-            remove_on_drop: !destination_existed,
-        };
-        let destination = canonical_path(&destination);
-        let destination_str = canonical_path_key(&destination);
-        let existing_hash = self.get_by_hash(&inspection.fingerprint.hash).await?;
-
-        if let Some(existing) = &existing_hash
-            && existing.storage_kind == StorageKind::Managed
-        {
-            validate_import_path(&path_from_key(&existing.file_path))?;
-            // Repair identity attachment if an earlier attempt committed the book row but was
-            // interrupted before reconciliation (or if this source is a newly seen alias).
-            let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-            reconcile_identity(
-                &mut transaction,
-                existing.id,
-                source_str,
-                &existing.file_path,
-            )
-            .await?;
-            transaction.commit().await?;
-            publication.keep();
-            prepared.release_admission();
-            return Ok(imported_book_from_commit(
-                existing.id,
-                source_str,
-                &existing.file_path,
-                &inspection.fingerprint.hash,
-            ));
-        }
-
-        if let Some(existing) = self.get_by_path(source_str).await?.or(existing_hash) {
-            self.update_location(
-                existing.id,
-                &existing.file_path,
-                &destination_str,
-                StorageKind::Managed,
-                Some(source_str),
-                LocationIdentity {
-                    fingerprint: &inspection.fingerprint,
-                    verified_file: None,
-                },
-            )
-            .await?;
-            publication.keep();
-            prepared.release_admission();
-            return Ok(imported_book_from_commit(
-                existing.id,
-                source_str,
-                &destination_str,
-                &inspection.fingerprint.hash,
-            ));
-        }
-
-        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query(
-            "INSERT OR IGNORE INTO books
-                (title, author, format, file_path, cover_blob, storage_kind,
-                 original_path, content_hash, file_size)
-             VALUES (?, ?, ?, ?, ?, 'managed', ?, ?, ?)",
-        )
-        .bind(&inspection.title)
-        .bind(&inspection.author)
-        .bind(format.as_str())
-        .bind(&destination_str)
-        .bind(&inspection.cover)
-        .bind(source_str)
-        .bind(&inspection.fingerprint.hash)
-        .bind(inspection.fingerprint.size as i64)
-        .execute(&mut *transaction)
-        .await
-        .context("failed to insert managed book")?;
-        let book_id: i64 = sqlx::query_scalar(
-            "SELECT id FROM books WHERE file_path = ? OR content_hash = ?
-             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
-        )
-        .bind(&destination_str)
-        .bind(&inspection.fingerprint.hash)
-        .fetch_one(&mut *transaction)
-        .await
-        .context("managed book not found after insert")?;
-        reconcile_identity(&mut transaction, book_id, source_str, &destination_str).await?;
-        transaction.commit().await?;
-        publication.keep();
-        prepared.release_admission();
-        Ok(imported_book_from_commit(
-            book_id,
-            source_str,
-            &destination_str,
-            &inspection.fingerprint.hash,
-        ))
+        .context("managed book commit task failed")?
     }
 
     /// Relink a missing referenced book while preserving its stable identity and reader data.
     pub async fn relink(&self, book_id: i64, replacement: &Path) -> Result<Book> {
-        let _work_permit = acquire_import_work(None).await?;
-        let _storage_guard = managed_storage_lock().lock().await;
+        let work_permit = acquire_import_work(None).await?;
+        let storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
+        let mut guards = (work_permit, storage_guard);
         let book = self
             .get(book_id)
             .await?
@@ -1306,15 +1337,20 @@ impl Library {
         let stage_source = replacement.clone();
         let stage_dir = self.managed_dir.clone();
         let format = book.format;
-        let staged = tokio::task::spawn_blocking(move || {
+        let (staged, next_guards) = run_blocking_with(guards, move || {
             stage_managed_file(&stage_source, &stage_dir, format.max_input_bytes(), None)
         })
         .await
-        .context("replacement staging task failed")??;
+        .context("replacement staging task failed")?;
+        guards = next_guards;
+        let staged = staged?;
         let fingerprint_path = staged.path.clone();
-        let fingerprint = tokio::task::spawn_blocking(move || file_fingerprint(&fingerprint_path))
-            .await
-            .context("book fingerprint task failed")??;
+        let (fingerprint, next_guards) =
+            run_blocking_with(guards, move || file_fingerprint(&fingerprint_path))
+                .await
+                .context("book fingerprint task failed")?;
+        guards = next_guards;
+        let fingerprint = fingerprint?;
         let Some(expected) = &book.content_hash else {
             bail!("cannot verify this legacy book; remove it and import it again");
         };
@@ -1322,11 +1358,12 @@ impl Library {
             bail!("selected file does not match this book");
         }
         let source_path = replacement.clone();
-        let source_file = tokio::task::spawn_blocking(move || {
+        let (source_file, _guards) = run_blocking_with(guards, move || {
             fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
         })
         .await
-        .context("replacement verification task failed")??;
+        .context("replacement verification task failed")?;
+        let source_file = source_file?;
         if source_file.fingerprint != fingerprint {
             bail!("selected file changed during relink");
         }
@@ -1517,6 +1554,7 @@ impl Library {
         cancellation: ImportCancellation,
         progress: ImportDiscoveryProgress,
     ) -> ImportDiscovery {
+        let _enumeration_guard = ImportEnumerationGuard(progress.clone());
         if roots.len() > MAX_IMPORT_ROOTS {
             return ImportDiscovery {
                 failures: vec![ImportFailure::new(
@@ -1547,6 +1585,7 @@ impl Library {
         let mut discovery = ImportDiscovery::default();
         let mut scanning = true;
         let mut received_results = 0_usize;
+        let mut truncated = false;
 
         while scanning || !fingerprint_tasks.is_empty() {
             if cancellation.is_cancelled() {
@@ -1572,12 +1611,7 @@ impl Library {
                     Some(_item) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure::new(
-                            PathBuf::new(),
-                            format!(
-                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
-                            ),
-                        ));
+                        truncated = true;
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1601,12 +1635,7 @@ impl Library {
                     Some(_) if received_results >= MAX_IMPORT_DISCOVERY_RESULTS => {
                         scan_receiver.close();
                         scanning = false;
-                        discovery.failures.push(ImportFailure::new(
-                            PathBuf::new(),
-                            format!(
-                                "book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"
-                            ),
-                        ));
+                        truncated = true;
                     }
                     Some(ScannedImport::Candidate(candidate)) => {
                         received_results += 1;
@@ -1645,12 +1674,12 @@ impl Library {
                 &mut discovery.failures,
             );
         }
-        if let Err(error) = scan_task.await {
-            discovery.failures.push(ImportFailure::new(
+        let scanner_failure = scan_task.await.err().map(|error| {
+            ImportFailure::new(
                 PathBuf::new(),
                 format!("book discovery task failed: {error}"),
-            ));
-        }
+            )
+        });
 
         fingerprinted.sort_by(|left, right| left.0.path.cmp(&right.0.path));
         discovery.candidates.reserve(fingerprinted.len());
@@ -1715,6 +1744,7 @@ impl Library {
             });
             progress.completed_file();
         }
+        bound_discovery_results(&mut discovery, truncated, scanner_failure);
         discovery.candidates.sort_by(|left, right| {
             left.group_key
                 .cmp(&right.group_key)
@@ -1814,11 +1844,7 @@ impl Library {
             bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
         }
         let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
-        let mut builder = QueryBuilder::new(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path, \
-             content_hash, file_size, cover_blob, progress, \
-             date_added, last_read FROM books",
-        );
+        let mut builder = QueryBuilder::new(format!("SELECT {BOOK_SELECT_COLUMNS} FROM books"));
 
         let query = query.filter(|query| !query.is_empty());
         if query.is_some() || format.is_some() {
@@ -1887,8 +1913,8 @@ impl Library {
 
     /// Load books from a previously captured ordered ID snapshot.
     pub async fn books_by_ids(&self, ids: &[i64]) -> Result<Vec<Book>> {
-        if ids.len() > MAX_LIBRARY_SNAPSHOT_SIZE {
-            bail!("library snapshot exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
+        if ids.len() > MAX_LIBRARY_PAGE_SIZE as usize {
+            bail!("library page exceeds {MAX_LIBRARY_PAGE_SIZE} books");
         }
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -1896,11 +1922,9 @@ impl Library {
 
         let mut books_by_id = HashMap::new();
         for chunk in ids.chunks(SQLITE_ID_CHUNK_SIZE) {
-            let mut builder = QueryBuilder::new(
-                "SELECT id, title, author, format, file_path, storage_kind, original_path, \
-                 content_hash, file_size, cover_blob, progress, \
-                 date_added, last_read FROM books WHERE id IN (",
-            );
+            let mut builder = QueryBuilder::new(format!(
+                "SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE id IN ("
+            ));
             let mut separated = builder.separated(", ");
             for id in chunk {
                 separated.push_bind(id);
@@ -1920,6 +1944,9 @@ impl Library {
 
     /// Update reading progress (0.0 to 1.0) and last_read timestamp.
     pub async fn update_progress(&self, book_id: i64, progress: f64) -> Result<()> {
+        if !progress.is_finite() {
+            bail!("book progress must be finite");
+        }
         let progress = progress.clamp(0.0, 1.0);
         sqlx::query("UPDATE books SET progress = ?, last_read = datetime('now') WHERE id = ?")
             .bind(progress)
@@ -1933,6 +1960,9 @@ impl Library {
     /// Update reading progress using a file path (0.0 to 1.0).
     pub async fn update_progress_by_path(&self, path: &Path, progress: f64) -> Result<()> {
         // Use canonical paths so the reader and library always converge on one row.
+        if !progress.is_finite() {
+            bail!("book progress must be finite");
+        }
         let progress = progress.clamp(0.0, 1.0);
         let key = canonical_path_key(path);
 
@@ -1948,10 +1978,24 @@ impl Library {
     }
 
     /// Remove a book from the library and delete its private managed copy, if any.
-    pub async fn remove(&self, book_id: i64) -> Result<()> {
-        let _storage_guard = managed_storage_lock().lock().await;
+    pub async fn remove(&self, book_id: i64) -> Result<Option<PathBuf>> {
+        let _storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
         let book = self.get(book_id).await?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let detached_path = if let Some(book) = &book
+            && book.storage_kind == StorageKind::Managed
+        {
+            let original_path = book
+                .original_path
+                .as_deref()
+                .context("managed book has no original path")?;
+            validate_import_path(&path_from_key(original_path))?;
+            reconcile_identity(&mut transaction, book_id, &book.file_path, original_path).await?;
+            Some(original_path.to_owned())
+        } else {
+            None
+        };
         sqlx::query("UPDATE bookmarks SET book_id = NULL WHERE book_id = ?")
             .bind(book_id)
             .execute(&mut *transaction)
@@ -1973,49 +2017,42 @@ impl Library {
         {
             self.remove_unreferenced_managed_file(&book.file_path).await;
         }
-        Ok(())
+        Ok(detached_path.map(|path| path_from_key(&path)))
     }
 
     /// Get a book by stable ID.
     pub async fn get(&self, book_id: i64) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE id = ?",
-        )
-        .bind(book_id)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by id")?;
+        let query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE id = ?");
+        let row = sqlx::query(&query)
+            .bind(book_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by id")?;
         row.as_ref().map(row_to_book).transpose()
     }
 
     /// Get a book by file path.
     async fn get_by_path(&self, path: &str) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE file_path = ?",
-        )
-        .bind(path)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by path")?;
+        let query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE file_path = ?");
+        let row = sqlx::query(&query)
+            .bind(path)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by path")?;
 
         row.as_ref().map(row_to_book).transpose()
     }
 
     async fn get_by_hash(&self, content_hash: &str) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE content_hash = ?
-             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
-        )
-        .bind(content_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by fingerprint")?;
+        let query = format!(
+            "SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE content_hash = ?
+             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1"
+        );
+        let row = sqlx::query(&query)
+            .bind(content_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by fingerprint")?;
         row.as_ref().map(row_to_book).transpose()
     }
 
@@ -2052,34 +2089,16 @@ impl Library {
 
     /// Open the current bytes for a stable library identity after verifying its stored hash.
     pub async fn open_book_document_at(&self, book_id: i64, path: &Path) -> Result<OpenDocument> {
-        let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path))?;
-        self.open_book_document_with_plan(book_id, path, plan)
+        self.open_book_document_cancellable(book_id, path, crate::bridge::Cancellation::new())
             .await
             .map(|(document, _)| document)
     }
 
     #[doc(hidden)]
-    pub async fn open_book_document_with_plan(
+    pub async fn open_book_document_cancellable(
         &self,
         book_id: i64,
         path: &Path,
-        plan: OpenDocumentPlan,
-    ) -> Result<(OpenDocument, String)> {
-        self.open_book_document_with_plan_cancellable(
-            book_id,
-            path,
-            plan,
-            crate::bridge::Cancellation::new(),
-        )
-        .await
-    }
-
-    #[doc(hidden)]
-    pub async fn open_book_document_with_plan_cancellable(
-        &self,
-        book_id: i64,
-        path: &Path,
-        plan: OpenDocumentPlan,
         cancellation: crate::bridge::Cancellation,
     ) -> Result<(OpenDocument, String)> {
         let book = self
@@ -2094,11 +2113,12 @@ impl Library {
             .content_hash
             .context("cannot verify this legacy book; remove it and import it again")?;
         let format = book.format;
-        if plan.format() != format {
-            bail!("book format no longer matches the library identity");
-        }
         tokio::task::spawn_blocking(move || {
             let is_cancelled = || cancellation.is_cancelled();
+            let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(&requested_path))?;
+            if plan.format() != format {
+                bail!("book format no longer matches the library identity");
+            }
             let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
             let mut hasher = Sha256::new();
             for chunk in admitted.data.chunks(64 * 1024) {
@@ -2145,20 +2165,272 @@ impl Library {
     }
 }
 
+async fn commit_managed_relocation(
+    library: Library,
+    new_dir: PathBuf,
+    changes: Vec<ManagedPathChange>,
+    destination_fingerprints: HashMap<i64, FileFingerprint>,
+    mut ownership: RelocationCommitOwnership,
+) -> Result<Vec<ManagedPathChange>> {
+    let mut transaction = library.pool.begin().await?;
+    for change in &changes {
+        let old_path = canonical_path_key(&change.old_path);
+        let new_path = canonical_path_key(&change.new_path);
+        let fingerprint = destination_fingerprints
+            .get(&change.book_id)
+            .context("missing relocation fingerprint")?;
+        let result = sqlx::query(
+            "UPDATE books SET file_path = ?, content_hash = ?, file_size = ?
+             WHERE id = ? AND file_path = ? AND storage_kind = 'managed'",
+        )
+        .bind(&new_path)
+        .bind(&fingerprint.hash)
+        .bind(fingerprint.size as i64)
+        .bind(change.book_id)
+        .bind(&old_path)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to update managed book path")?;
+        if result.rows_affected() != 1 {
+            bail!("managed book changed during relocation: {}", change.book_id);
+        }
+        reconcile_identity(&mut transaction, change.book_id, &old_path, &new_path).await?;
+    }
+    sqlx::query(
+        "INSERT INTO preferences (key, value, updated_at)
+         VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(MANAGED_LIBRARY_DIR_PREFERENCE)
+    .bind(canonical_path_key(&new_dir))
+    .execute(&mut *transaction)
+    .await
+    .context("failed to save managed library location")?;
+    crate::reading_state::validate_preference_totals(&mut transaction).await?;
+    let mut rollback = Vec::with_capacity(ownership.publications.len());
+    for publication in &mut ownership.publications {
+        rollback.push(publication.disarm());
+    }
+    if let Err(error) = transaction.commit().await {
+        for (publication, remove) in ownership.publications.iter_mut().zip(rollback) {
+            publication.rollback(remove);
+        }
+        return Err(error).context("failed to commit managed library relocation");
+    }
+    let RelocationCommitOwnership {
+        publications: _,
+        storage_guard,
+        work_permit,
+    } = ownership;
+    let mut guards = (work_permit, storage_guard);
+
+    for change in &changes {
+        if change.old_path == change.new_path {
+            continue;
+        }
+        let reference_count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM books WHERE file_path = ?")
+                .bind(canonical_path_key(&change.old_path))
+                .fetch_one(&library.pool)
+                .await;
+        let reference_count = match reference_count {
+            Ok(count) => count,
+            Err(error) => {
+                eprintln!(
+                    "warning: retained old managed book {} because references could not be checked: {error:#}",
+                    change.old_path.display()
+                );
+                continue;
+            }
+        };
+        if reference_count != 0 {
+            continue;
+        }
+        let destination = change.new_path.clone();
+        let old_path = change.old_path.clone();
+        let expected_hash = destination_fingerprints
+            .get(&change.book_id)
+            .map(|fingerprint| fingerprint.hash.clone());
+        let cleanup = match run_blocking_with(guards, move || -> Result<()> {
+            let expected_hash = expected_hash.context("missing relocation fingerprint")?;
+            let fingerprint = file_fingerprint(&destination)?;
+            if fingerprint.hash != expected_hash {
+                bail!("relocated copy does not match its staged content");
+            }
+            std::fs::remove_file(&old_path).context("failed to remove old managed book")
+        })
+        .await
+        {
+            Ok((cleanup, next_guards)) => {
+                guards = next_guards;
+                cleanup
+            }
+            Err(error) => {
+                eprintln!(
+                    "warning: retained old managed book {} because the cleanup task failed: {error}",
+                    change.old_path.display()
+                );
+                break;
+            }
+        };
+        if let Err(error) = cleanup {
+            eprintln!(
+                "warning: retained old managed book {}: {error:#}",
+                change.old_path.display()
+            );
+        }
+    }
+    if library.managed_dir != new_dir {
+        let _ = std::fs::remove_dir(&library.managed_dir);
+    }
+    Ok(changes)
+}
+
+async fn commit_managed_transaction(
+    transaction: Transaction<'_, Sqlite>,
+    ownership: &mut ManagedCommitOwnership,
+) -> Result<()> {
+    let rollback = ownership.publication.disarm();
+    if let Err(error) = transaction.commit().await {
+        ownership.publication.rollback(rollback);
+        return Err(error).context("failed to commit managed library mutation");
+    }
+    drop(
+        ownership
+            .retention_permit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take(),
+    );
+    Ok(())
+}
+
+async fn commit_managed_publication(
+    library: Library,
+    source_str: String,
+    format: BookFormat,
+    inspection: BookInspection,
+    destination: PathBuf,
+    mut ownership: ManagedCommitOwnership,
+) -> Result<ImportedBook> {
+    let destination = canonical_path(&destination);
+    let destination_str = canonical_path_key(&destination);
+    let existing_hash = library.get_by_hash(&inspection.fingerprint.hash).await?;
+
+    if let Some(existing) = &existing_hash
+        && existing.storage_kind == StorageKind::Managed
+    {
+        validate_import_path(&path_from_key(&existing.file_path))?;
+        let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
+        reconcile_identity(
+            &mut transaction,
+            existing.id,
+            &source_str,
+            &existing.file_path,
+        )
+        .await?;
+        commit_managed_transaction(transaction, &mut ownership).await?;
+        return Ok(imported_book_from_commit(
+            existing.id,
+            &source_str,
+            &existing.file_path,
+            &inspection.fingerprint.hash,
+        ));
+    }
+
+    if let Some(existing) = library.get_by_path(&source_str).await?.or(existing_hash) {
+        let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query(
+            "UPDATE books SET file_path = ?, storage_kind = 'managed', original_path = ?,
+                              content_hash = ?, file_size = ? WHERE id = ?",
+        )
+        .bind(&destination_str)
+        .bind(&source_str)
+        .bind(&inspection.fingerprint.hash)
+        .bind(inspection.fingerprint.size as i64)
+        .bind(existing.id)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to update managed book location")?;
+        reconcile_identity(
+            &mut transaction,
+            existing.id,
+            &existing.file_path,
+            &destination_str,
+        )
+        .await?;
+        commit_managed_transaction(transaction, &mut ownership).await?;
+        return Ok(imported_book_from_commit(
+            existing.id,
+            &source_str,
+            &destination_str,
+            &inspection.fingerprint.hash,
+        ));
+    }
+
+    let mut transaction = library.pool.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query(
+        "INSERT OR IGNORE INTO books
+            (title, author, format, file_path, cover_blob, storage_kind,
+             original_path, content_hash, file_size)
+         VALUES (?, ?, ?, ?, ?, 'managed', ?, ?, ?)",
+    )
+    .bind(&inspection.title)
+    .bind(&inspection.author)
+    .bind(format.as_str())
+    .bind(&destination_str)
+    .bind(&inspection.cover)
+    .bind(&source_str)
+    .bind(&inspection.fingerprint.hash)
+    .bind(inspection.fingerprint.size as i64)
+    .execute(&mut *transaction)
+    .await
+    .context("failed to insert managed book")?;
+    let book_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM books WHERE file_path = ? OR content_hash = ?
+         ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
+    )
+    .bind(&destination_str)
+    .bind(&inspection.fingerprint.hash)
+    .fetch_one(&mut *transaction)
+    .await
+    .context("managed book not found after insert")?;
+    reconcile_identity(&mut transaction, book_id, &source_str, &destination_str).await?;
+    commit_managed_transaction(transaction, &mut ownership).await?;
+    Ok(imported_book_from_commit(
+        book_id,
+        &source_str,
+        &destination_str,
+        &inspection.fingerprint.hash,
+    ))
+}
+
 async fn reconcile_identity(
     transaction: &mut Transaction<'_, Sqlite>,
     book_id: i64,
     old_path: &str,
     new_path: &str,
 ) -> Result<()> {
-    let content_hash: String = sqlx::query_scalar("SELECT content_hash FROM books WHERE id = ?")
-        .bind(book_id)
-        .fetch_optional(&mut **transaction)
-        .await
-        .context("failed to resolve book content identity")?
-        .context("book has no stable content hash")?;
+    let content_hash: String = sqlx::query_scalar(
+        "SELECT CASE WHEN typeof(content_hash) = 'text'
+                               AND length(CAST(content_hash AS BLOB)) <= 64
+                     THEN content_hash END
+         FROM books WHERE id = ?",
+    )
+    .bind(book_id)
+    .fetch_optional(&mut **transaction)
+    .await
+    .context("failed to resolve book content identity")?
+    .context("book has no stable content hash")?;
+    if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("stored book content hash is invalid");
+    }
     let reading = sqlx::query(
-        "SELECT page, location_offset, zoom, updated_at, revision
+        "SELECT page, location_offset, zoom,
+                CASE WHEN typeof(updated_at) = 'text'
+                               AND length(CAST(updated_at AS BLOB)) <= 64
+                     THEN updated_at END AS updated_at,
+                revision
          FROM reading_state
          WHERE book_id = ?
             OR (book_id IS NULL AND content_hash = ? AND (file_path = ? OR file_path = ?))
@@ -2205,7 +2477,11 @@ async fn reconcile_identity(
         .bind(page)
         .bind(location_offset)
         .bind(zoom)
-        .bind(reading.try_get::<String, _>("updated_at")?)
+        .bind(
+            reading
+                .try_get::<Option<String>, _>("updated_at")?
+                .context("stored reading state timestamp is malformed or oversized")?,
+        )
         .bind(reading.try_get::<i64, _>("revision")?)
         .execute(&mut **transaction)
         .await
@@ -2310,30 +2586,90 @@ fn push_library_filters<'a>(
 }
 
 fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Result<Book> {
-    let format_str: String = row.try_get("format")?;
+    if row.try_get::<i64, _>("fields_valid")? != 1 {
+        bail!("stored book contains malformed or oversized fields");
+    }
+    let title = row
+        .try_get::<Option<String>, _>("title")?
+        .context("stored book title is invalid")?;
+    let author = row.try_get::<Option<String>, _>("author")?;
+    if title.len() > MAX_IMPORT_METADATA_BYTES
+        || author
+            .as_ref()
+            .is_some_and(|author| author.len() > MAX_IMPORT_METADATA_BYTES)
+    {
+        bail!("stored book metadata exceeds byte limits");
+    }
+    let format_str = row
+        .try_get::<Option<String>, _>("format")?
+        .context("stored book format is invalid")?;
     let format = BookFormat::from_db(&format_str).context("stored book format is invalid")?;
-    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind")?)
+    let file_path = row
+        .try_get::<Option<String>, _>("file_path")?
+        .context("stored book path is invalid")?;
+    let decoded_path = crate::path_key::try_path_from_key(&file_path)
+        .map_err(|_| anyhow::anyhow!("stored book path is invalid"))?;
+    validate_import_path(&decoded_path)?;
+    let storage_kind_value = row
+        .try_get::<Option<String>, _>("storage_kind")?
         .context("stored book storage kind is invalid")?;
+    let storage_kind =
+        StorageKind::from_db(&storage_kind_value).context("stored book storage kind is invalid")?;
+    let original_path = row.try_get::<Option<String>, _>("original_path")?;
+    if let Some(original_path) = &original_path {
+        let decoded_path = crate::path_key::try_path_from_key(original_path)
+            .map_err(|_| anyhow::anyhow!("stored original book path is invalid"))?;
+        validate_import_path(&decoded_path)?;
+    }
+    let content_hash = row.try_get::<Option<String>, _>("content_hash")?;
+    if content_hash
+        .as_ref()
+        .is_some_and(|hash| hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        bail!("stored book content hash is invalid");
+    }
     let file_size = row
         .try_get::<Option<i64>, _>("file_size")?
         .map(u64::try_from)
         .transpose()
         .context("stored book file size is outside the supported range")?;
+    let cover = row.try_get::<Option<Vec<u8>>, _>("cover_blob")?;
+    if cover
+        .as_ref()
+        .is_some_and(|cover| cover.len() > MAX_IMPORT_COVER_BYTES)
+    {
+        bail!("stored book cover exceeds byte limit");
+    }
+    let progress = row.try_get::<f64, _>("progress")?;
+    if !progress.is_finite() || !(0.0..=1.0).contains(&progress) {
+        bail!("stored book progress is invalid");
+    }
+    let date_added = row
+        .try_get::<Option<String>, _>("date_added")?
+        .context("stored book date is invalid")?;
+    let last_read = row.try_get::<Option<String>, _>("last_read")?;
+    if date_added.len() > MAX_LIBRARY_TIMESTAMP_BYTES
+        || last_read
+            .as_ref()
+            .is_some_and(|timestamp| timestamp.len() > MAX_LIBRARY_TIMESTAMP_BYTES)
+    {
+        bail!("stored book timestamp exceeds byte limit");
+    }
 
     Ok(Book {
         id: row.try_get("id")?,
-        title: row.try_get("title")?,
-        author: row.try_get("author")?,
+        title,
+        author,
         format,
-        file_path: row.try_get("file_path")?,
+        file_path,
         storage_kind,
-        original_path: row.try_get("original_path")?,
-        content_hash: row.try_get("content_hash")?,
+        original_path,
+        content_hash,
         file_size,
-        cover: row.try_get("cover_blob")?,
-        progress: row.try_get("progress")?,
-        date_added: row.try_get("date_added")?,
-        last_read: row.try_get("last_read")?,
+        cover,
+        progress,
+        date_added,
+        last_read,
     })
 }
 
@@ -2652,6 +2988,30 @@ fn collect_fingerprint_result(
                 format!("book fingerprint task failed: {error}"),
             ));
         }
+    }
+}
+
+fn bound_discovery_results(
+    discovery: &mut ImportDiscovery,
+    truncated: bool,
+    scanner_failure: Option<ImportFailure>,
+) {
+    let reserved = usize::from(truncated) + usize::from(scanner_failure.is_some());
+    let retained_before_terminal_failures = MAX_IMPORT_DISCOVERY_RESULTS.saturating_sub(reserved);
+    while discovery.candidates.len() + discovery.failures.len() > retained_before_terminal_failures
+    {
+        if discovery.failures.pop().is_none() {
+            discovery.candidates.pop();
+        }
+    }
+    if truncated {
+        discovery.failures.push(ImportFailure::new(
+            PathBuf::new(),
+            format!("book discovery stopped after {MAX_IMPORT_DISCOVERY_RESULTS} results"),
+        ));
+    }
+    if let Some(failure) = scanner_failure {
+        discovery.failures.push(failure);
     }
 }
 
@@ -3008,16 +3368,20 @@ fn copy_managed_file(
 }
 
 fn publish_managed_file(stage: &Path, destination: &Path, expected_hash: &str) -> Result<()> {
+    if destination.exists() && file_fingerprint(destination)?.hash == expected_hash {
+        if let Err(error) = std::fs::remove_file(stage)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(error).context("failed to discard duplicate managed book");
+        }
+        return Ok(());
+    }
+
     if file_fingerprint(stage)?.hash != expected_hash {
         bail!(
             "managed book staging verification failed: {}",
             stage.display()
         );
-    }
-
-    if destination.exists() && file_fingerprint(destination)?.hash == expected_hash {
-        std::fs::remove_file(stage).context("failed to discard duplicate managed book")?;
-        return Ok(());
     }
 
     let quarantine = destination
@@ -3077,7 +3441,12 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
     let mut after_id = i64::MIN;
     loop {
         let rows = sqlx::query(
-            "SELECT id, file_path, format FROM books
+            "SELECT id,
+                    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+                         THEN file_path END AS file_path,
+                    CASE WHEN typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16
+                         THEN format END AS format
+             FROM books
              WHERE content_hash IS NULL AND id > ? ORDER BY id LIMIT ?",
         )
         .bind(after_id)
@@ -3091,22 +3460,27 @@ pub(crate) async fn backfill_missing_fingerprints(pool: &SqlitePool) -> Result<(
         for row in rows {
             let id: i64 = row.try_get("id")?;
             after_id = id;
-            let file_path: String = row.try_get("file_path")?;
-            let format = BookFormat::from_db(&row.try_get::<String, _>("format")?)
+            let file_path = row
+                .try_get::<Option<String>, _>("file_path")?
+                .context("legacy book path is malformed or oversized")?;
+            let format_value = row
+                .try_get::<Option<String>, _>("format")?
+                .context("legacy book format is malformed or oversized")?;
+            let format = BookFormat::from_db(&format_value)
                 .with_context(|| format!("legacy book {file_path} has an unsupported format"))?;
             let path = path_from_key(&file_path);
             if !path.is_file() {
                 continue;
             }
-            let _work_permit = acquire_import_work(None).await?;
+            let work_permit = acquire_import_work(None).await?;
             let fingerprint_path = path.clone();
-            let file = match tokio::task::spawn_blocking(move || {
+            let (file, _work_permit) = match run_blocking_with(work_permit, move || {
                 fingerprint_file_with_limit(&fingerprint_path, Some(format.max_input_bytes()), None)
             })
             .await
             {
-                Ok(Ok(file)) => file,
-                Ok(Err(error)) => {
+                Ok((Ok(file), permit)) => (file, permit),
+                Ok((Err(error), _permit)) => {
                     eprintln!("warning: failed to fingerprint legacy book {file_path}: {error}");
                     continue;
                 }
@@ -3160,6 +3534,18 @@ fn extract_pdf_metadata(
         .min((COVER_MAX_HEIGHT - 1) as f32 / page_height)
         .min(1.0);
     check_import_cancelled(cancellation)?;
+    let transient_bytes = doc
+        .rendered_byte_len(0, scale)?
+        .checked_add(doc.render_transient_byte_len(0, scale)?)
+        .and_then(|bytes| bytes.checked_add(MAX_IMPORT_COVER_BYTES))
+        .context("PDF cover transient byte size overflow")?;
+    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+        return Ok((title, author, None));
+    }
+    let Some(_permit) = reserve_cover_decode(transient_bytes, cancellation) else {
+        check_import_cancelled(cancellation)?;
+        return Ok((title, author, None));
+    };
     let rendered = if cancellation.is_some() {
         doc.render_page_with_highlights_cancellable(0, scale, &[], &is_cancelled)
     } else {
@@ -3251,6 +3637,21 @@ fn check_import_cancelled(cancellation: Option<&ImportCancellation>) -> Result<(
 
 /// Resize an image to fit within cover thumbnail bounds and encode as PNG.
 fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) -> Option<Vec<u8>> {
+    use image::ImageDecoder;
+
+    let decoder = image::ImageReader::new(std::io::Cursor::new(data))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let transient_bytes = decoder
+        .total_bytes()
+        .checked_add(u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT) * 4 * 2)?;
+    let transient_bytes = usize::try_from(transient_bytes).ok()?;
+    if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
+        return None;
+    }
+    let _permit = reserve_cover_decode(transient_bytes, cancellation)?;
     let img = image::load_from_memory(data).ok()?;
     check_import_cancelled(cancellation).ok()?;
     let thumb = img.resize(
@@ -3374,6 +3775,46 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[tokio::test]
+    async fn aborted_blocking_wrapper_retains_guards_and_rolls_back_its_output() {
+        let admission = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = admission.clone().acquire_owned().await.unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let publication_path = directory.path().join("published.epub");
+        std::fs::write(&publication_path, b"published").unwrap();
+        let worker_path = publication_path.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let task = tokio::spawn(async move {
+            run_blocking_with(permit, move || {
+                let publication = ManagedPublication {
+                    path: worker_path,
+                    rollback_action: ManagedPublicationRollback::Remove,
+                };
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                publication
+            })
+            .await
+        });
+        tokio::task::spawn_blocking(move || started_rx.recv().unwrap())
+            .await
+            .unwrap();
+
+        task.abort();
+        assert!(matches!(task.await, Err(error) if error.is_cancelled()));
+        assert!(admission.clone().try_acquire_owned().is_err());
+        assert!(publication_path.exists());
+
+        release_tx.send(()).unwrap();
+        let _permit =
+            tokio::time::timeout(std::time::Duration::from_secs(2), admission.acquire_owned())
+                .await
+                .expect("the blocking worker should eventually release its guard")
+                .unwrap();
+        assert!(!publication_path.exists());
     }
 
     #[test]
@@ -3871,6 +4312,73 @@ mod tests {
         drop(prepared);
     }
 
+    #[tokio::test]
+    async fn aborting_a_managed_commit_preserves_the_publication_invariant() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::reading_state::ReadingStateStore::open_at_async(
+            &directory.path().join("state.db"),
+        )
+        .await
+        .unwrap();
+        let library = Library::new(store.pool().clone(), directory.path().join("managed"));
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let prepared = Arc::new(
+            library
+                .prepare_managed_file(&source, None, None)
+                .await
+                .unwrap(),
+        );
+        let content_hash = prepared.inspection.fingerprint.hash.clone();
+        let destination = library
+            .managed_dir
+            .join(format!("{content_hash}.{}", prepared.extension));
+        let mut blocker = store.pool().acquire().await.unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let task_library = library.clone();
+        let task_prepared = Arc::clone(&prepared);
+        let task = tokio::spawn(async move {
+            task_library
+                .commit_prepared_managed_file(&task_prepared)
+                .await
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !destination.exists() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("managed publication should finish before the blocked database commit");
+        task.abort();
+        assert!(matches!(task.await, Err(error) if error.is_cancelled()));
+        sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
+
+        let book = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let book = library.get_by_hash(&content_hash).await.unwrap();
+                if book.is_some() || !destination.exists() {
+                    break book;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("publication rollback or detached commit should finish");
+        assert_eq!(book.is_some(), destination.exists());
+        if let Some(book) = &book {
+            assert_eq!(book.file_path, canonical_path_key(&destination));
+        }
+        let preparation_retained = prepared
+            .retention_permit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some();
+        assert_eq!(preparation_retained, book.is_none());
+    }
+
     #[test]
     fn caller_supplied_import_candidate_strings_are_bounded() {
         let candidate = ImportCandidate {
@@ -3969,5 +4477,65 @@ mod tests {
             b"existing destination"
         );
         assert!(stage.exists());
+    }
+
+    #[test]
+    fn managed_publication_rollback_restores_the_stage_for_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("stage.tmp");
+        let destination = directory.path().join("managed.epub");
+        std::fs::write(&stage, b"expected bytes").unwrap();
+        let expected_hash = file_fingerprint(&stage).unwrap().hash;
+
+        {
+            let _publication = ManagedPublication {
+                path: destination.clone(),
+                rollback_action: ManagedPublicationRollback::Restore(stage.clone()),
+            };
+            publish_managed_file(&stage, &destination, &expected_hash).unwrap();
+        }
+
+        assert!(stage.exists());
+        assert!(!destination.exists());
+        publish_managed_file(&stage, &destination, &expected_hash).unwrap();
+        assert!(!stage.exists());
+        assert!(destination.exists());
+        publish_managed_file(&stage, &destination, &expected_hash).unwrap();
+    }
+
+    #[test]
+    fn truncated_discovery_retains_at_most_the_documented_result_limit() {
+        let mut discovery = ImportDiscovery {
+            failures: (0..MAX_IMPORT_DISCOVERY_RESULTS)
+                .map(|index| ImportFailure::new(PathBuf::new(), index.to_string()))
+                .collect(),
+            ..ImportDiscovery::default()
+        };
+
+        bound_discovery_results(
+            &mut discovery,
+            true,
+            Some(ImportFailure::new(
+                PathBuf::new(),
+                "book discovery task failed: worker panicked",
+            )),
+        );
+
+        assert_eq!(
+            discovery.candidates.len() + discovery.failures.len(),
+            MAX_IMPORT_DISCOVERY_RESULTS
+        );
+        assert!(
+            discovery
+                .failures
+                .iter()
+                .any(|failure| failure.error().contains("discovery stopped"))
+        );
+        assert!(
+            discovery
+                .failures
+                .iter()
+                .any(|failure| failure.error().contains("worker panicked"))
+        );
     }
 }

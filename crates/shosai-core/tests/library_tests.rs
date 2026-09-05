@@ -38,6 +38,23 @@ async fn malformed_library_rows_return_an_error_instead_of_being_omitted() {
 }
 
 #[tokio::test]
+async fn oversized_persisted_book_fields_are_rejected_before_dto_decode() {
+    let (library, store, _dir) = temp_library().await;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, storage_kind, cover_blob)
+         VALUES ('Oversized', 'pdf', '/books/oversized.pdf', 'referenced', ?)
+         RETURNING id",
+    )
+    .bind(vec![0_u8; 512 * 1024 + 1])
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    assert!(library.get(id).await.is_err());
+    assert!(library.page(None, None, 10, 0).await.is_err());
+}
+
+#[tokio::test]
 async fn discovery_failures_do_not_retain_oversized_root_paths() {
     let (library, _, _dir) = temp_library().await;
     let oversized = PathBuf::from("x".repeat(20 * 1024));
@@ -273,16 +290,16 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
             .contains("use page()")
     );
     let ids = lib.matching_ids(None, None).await.unwrap();
-    let books = lib.books_by_ids(&ids).await.unwrap();
-    assert_eq!(books.len(), 1_005);
+    let books = lib.books_by_ids(&ids[..500]).await.unwrap();
+    assert_eq!(books.len(), 500);
     assert_eq!(books.first().unwrap().id, ids[0]);
-    assert_eq!(books.last().unwrap().id, *ids.last().unwrap());
+    assert_eq!(books.last().unwrap().id, ids[499]);
     assert!(
-        lib.books_by_ids(&vec![0; 10_001])
+        lib.books_by_ids(&vec![0; 501])
             .await
             .unwrap_err()
             .to_string()
-            .contains("snapshot exceeds")
+            .contains("page exceeds")
     );
     assert!(
         lib.page(Some(&"q".repeat(4 * 1024 + 1)), None, 10, 0)
@@ -297,10 +314,14 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
 async fn discovery_caps_selected_roots_before_starting_scanners() {
     let (lib, _, _dir) = temp_library().await;
     let roots = vec![fixture_path("sample.epub"); 10_001];
+    let progress = ImportDiscoveryProgress::default();
 
-    let discovery = lib.discover_files(&roots).await;
+    let discovery = lib
+        .discover_files_with_progress(roots, ImportCancellation::default(), progress.clone())
+        .await;
 
     assert!(discovery.candidates.is_empty());
+    assert!(!progress.snapshot().enumerating);
     assert_eq!(discovery.failures.len(), 1);
     assert!(
         discovery.failures[0]
@@ -765,13 +786,19 @@ async fn cancelled_discovery_stops_before_scanning_candidates() {
     let (lib, _, _dir) = temp_library().await;
     let cancellation = ImportCancellation::default();
     cancellation.cancel();
+    let progress = ImportDiscoveryProgress::default();
 
     let discovery = lib
-        .discover_files_cancellable(vec![fixture_path("sample.epub")], cancellation)
+        .discover_files_with_progress(
+            vec![fixture_path("sample.epub")],
+            cancellation,
+            progress.clone(),
+        )
         .await;
 
     assert!(discovery.candidates.is_empty());
     assert!(discovery.failures.is_empty());
+    assert!(!progress.snapshot().enumerating);
 }
 
 #[tokio::test]
@@ -954,9 +981,72 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
                 .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
                 .await
                 .unwrap()
+                .unwrap()
         ),
         destination.canonicalize().unwrap()
     );
+}
+
+#[tokio::test]
+async fn relocation_persists_verified_identity_for_legacy_managed_books() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("legacy.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = lib.import_managed_file(&source).await.unwrap();
+    sqlx::query("UPDATE books SET content_hash = NULL, file_size = NULL WHERE id = ?")
+        .bind(book.id)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    lib.relocate_managed_books(&dir.path().join("relocated"))
+        .await
+        .unwrap();
+
+    let relocated = lib.get(book.id).await.unwrap().unwrap();
+    assert!(relocated.content_hash.is_some());
+    assert!(relocated.file_size.is_some());
+}
+
+#[tokio::test]
+async fn progress_updates_reject_non_finite_values() {
+    let (lib, _, _dir) = temp_library().await;
+    assert!(lib.update_progress(1, f64::NAN).await.is_err());
+    assert!(
+        lib.update_progress_by_path(&PathBuf::from("book.pdf"), f64::INFINITY)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
+    let (lib, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let managed = lib.import_managed_file(&source).await.unwrap();
+    let referenced_source = dir.path().join("referenced.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &referenced_source).unwrap();
+    let referenced = lib.import_file(&referenced_source).await.unwrap();
+    let old_dir = lib.managed_dir().to_path_buf();
+    let destination = dir.path().join("external").join("Shosai");
+    lib.relocate_managed_books(&destination).await.unwrap();
+
+    let next = dir.path().join("next.cbz");
+    std::fs::copy(fixture_path("sample.cbz"), &next).unwrap();
+    let error = lib.import_managed_file(&next).await.unwrap_err();
+    assert!(error.to_string().contains("location changed"));
+    assert!(lib.import_file(&next).await.is_err());
+    let replacement = dir.path().join("replacement.pdf");
+    std::fs::copy(&referenced_source, &replacement).unwrap();
+    assert!(lib.relink(referenced.id, &replacement).await.is_err());
+    assert!(lib.remove(managed.id).await.is_err());
+    assert!(!old_dir.exists());
+    let current = Library::new(store.pool().clone(), destination.canonicalize().unwrap());
+    let retained = current.get(managed.id).await.unwrap().unwrap();
+    assert!(path_from_key(&retained.file_path).exists());
+    let imported = current.import_managed_file(&next).await.unwrap();
+    assert!(path_from_key(&imported.file_path).starts_with(destination.canonicalize().unwrap()));
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -979,6 +1069,7 @@ async fn non_unicode_managed_directory_survives_persistence() {
     let stored = store
         .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(path_from_key(&stored), destination.canonicalize().unwrap());
 }
@@ -1291,16 +1382,55 @@ async fn concurrent_identical_managed_imports_return_the_same_book() {
 
 #[tokio::test]
 async fn removing_a_managed_book_deletes_its_private_copy() {
-    let (lib, _, dir) = temp_library().await;
+    let (lib, store, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
     std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
     let book = lib.import_managed_file(&source).await.unwrap();
     let managed_path = PathBuf::from(&book.file_path);
+    let content_hash = book.content_hash.as_deref().unwrap();
+    store
+        .set_for_book_async(
+            book.id,
+            &FileReadingState {
+                page: 3,
+                location_offset: Some(42),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_for_book_at_async(book.id, &managed_path, 2, Some(7), None)
+        .await
+        .unwrap();
 
-    lib.remove(book.id).await.unwrap();
+    let detached_path = lib.remove(book.id).await.unwrap();
 
+    assert_eq!(
+        detached_path.as_deref(),
+        Some(source.canonicalize().unwrap().as_path())
+    );
     assert!(!managed_path.exists());
     assert!(source.exists());
+    assert_eq!(
+        store
+            .get_async(&source, content_hash)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        3
+    );
+    let bookmark = bookmarks
+        .list_for_file_async(&source, content_hash)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        path_from_key(&bookmark.file_path),
+        source.canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]

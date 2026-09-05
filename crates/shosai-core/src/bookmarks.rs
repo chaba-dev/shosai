@@ -18,6 +18,21 @@ pub const MAX_BOOKMARK_NOTE_BYTES: usize = 64 * 1024;
 pub const MAX_BOOKMARK_COLOR_BYTES: usize = 64;
 pub const MAX_BOOKMARK_PAGE_SIZE: u32 = 500;
 pub const MAX_BOOKMARK_EXPORT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_BOOKMARK_TIMESTAMP_BYTES: usize = 64;
+const BOOKMARK_SELECT_COLUMNS: &str = "id,
+    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 32768 THEN file_path END AS file_path,
+    book_id, page, location_offset,
+    CASE WHEN title IS NULL OR (typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096) THEN title END AS title,
+    CASE WHEN note IS NULL OR (typeof(note) = 'text' AND length(CAST(note AS BLOB)) <= 65536) THEN note END AS note,
+    CASE WHEN typeof(color) = 'text' AND length(CAST(color AS BLOB)) <= 64 THEN color END AS color,
+    CASE WHEN typeof(created_at) = 'text' AND length(CAST(created_at AS BLOB)) <= 64 THEN created_at END AS created_at,
+    CASE WHEN
+        typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 32768
+        AND (title IS NULL OR (typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096))
+        AND (note IS NULL OR (typeof(note) = 'text' AND length(CAST(note AS BLOB)) <= 65536))
+        AND typeof(color) = 'text' AND length(CAST(color AS BLOB)) <= 64
+        AND typeof(created_at) = 'text' AND length(CAST(created_at AS BLOB)) <= 64
+    THEN 1 ELSE 0 END AS fields_valid";
 
 /// A single bookmark entry.
 #[derive(Debug, Clone)]
@@ -182,7 +197,7 @@ impl BookmarkStore {
                     (file_path, content_hash, page, location_offset, title, note, color)
                  VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
-                           created_at",
+                           created_at, 1 AS fields_valid",
             )
             .bind(&key)
             .bind(content_hash)
@@ -214,15 +229,27 @@ impl BookmarkStore {
             .transpose()
             .context("bookmark location exceeds database range")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let (current_path, content_hash): (String, String) = sqlx::query_as(
-            "SELECT file_path, content_hash FROM books WHERE id = ? AND content_hash IS NOT NULL",
+        let book = sqlx::query(
+            "SELECT
+                CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 32768
+                     THEN file_path END AS file_path,
+                CASE WHEN typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64
+                     THEN content_hash END AS content_hash
+             FROM books WHERE id = ? AND content_hash IS NOT NULL",
         )
         .bind(book_id)
         .fetch_optional(&mut *transaction)
         .await
         .context("failed to resolve bookmark book")?
         .with_context(|| format!("book {book_id} not found"))?;
+        let current_path = book
+            .try_get::<Option<String>, _>("file_path")?
+            .context("stored bookmark book path is malformed or oversized")?;
+        let content_hash = book
+            .try_get::<Option<String>, _>("content_hash")?
+            .context("stored bookmark book hash is malformed or oversized")?;
         validate_bookmark_path(&current_path)?;
+        validate_content_hash(&content_hash)?;
 
         // Claim path-only aliases while holding the write lock so lookup, counting, and the
         // mutation all observe one identity set. Rows belonging to another stable book are not
@@ -271,7 +298,7 @@ impl BookmarkStore {
                     (file_path, content_hash, book_id, page, location_offset, title, note, color)
                  VALUES (?, ?, ?, ?, ?, ?, NULL, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
-                           created_at",
+                           created_at, 1 AS fields_valid",
             )
             .bind(current_path)
             .bind(content_hash)
@@ -298,19 +325,19 @@ impl BookmarkStore {
         validate_bookmark_path(&key)?;
         validate_content_hash(content_hash)?;
 
-        let rows = sqlx::query(
-            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
-             FROM bookmarks
+        let query = format!(
+            "SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
              WHERE file_path = ? AND content_hash = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
-             LIMIT ?",
-        )
-        .bind(&key)
-        .bind(content_hash)
-        .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to list bookmarks")?;
+             LIMIT ?"
+        );
+        let rows = sqlx::query(&query)
+            .bind(&key)
+            .bind(content_hash)
+            .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to list bookmarks")?;
 
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
             anyhow::bail!("bookmark count limit exceeded");
@@ -328,33 +355,47 @@ impl BookmarkStore {
         let key = canonical_key(file_path);
         validate_bookmark_path(&key)?;
         validate_content_hash(content_hash)?;
-        let rows = sqlx::query(
-            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
-             FROM bookmarks WHERE file_path = ? AND content_hash = ?
+        let query = format!(
+            "SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
+             WHERE file_path = ? AND content_hash = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
-             LIMIT ? OFFSET ?",
-        )
-        .bind(key)
-        .bind(content_hash)
-        .bind(i64::from(limit.clamp(1, MAX_BOOKMARK_PAGE_SIZE)))
-        .bind(i64::from(offset))
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to list bookmark page")?;
+             LIMIT ? OFFSET ?"
+        );
+        let rows = sqlx::query(&query)
+            .bind(key)
+            .bind(content_hash)
+            .bind(i64::from(limit.clamp(1, MAX_BOOKMARK_PAGE_SIZE)))
+            .bind(i64::from(offset))
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to list bookmark page")?;
         rows.iter().map(row_to_bookmark).collect()
     }
 
     /// List bookmarks using a stable library book identity.
     pub async fn list_for_book_async(&self, book_id: i64) -> Result<Vec<Bookmark>> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let (current_path, content_hash): (String, String) = sqlx::query_as(
-            "SELECT file_path, content_hash FROM books WHERE id = ? AND content_hash IS NOT NULL",
+        let book = sqlx::query(
+            "SELECT
+                CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 32768
+                     THEN file_path END AS file_path,
+                CASE WHEN typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64
+                     THEN content_hash END AS content_hash
+             FROM books WHERE id = ? AND content_hash IS NOT NULL",
         )
         .bind(book_id)
         .fetch_optional(&mut *transaction)
         .await
         .context("failed to resolve bookmark book")?
         .with_context(|| format!("book {book_id} not found"))?;
+        let current_path = book
+            .try_get::<Option<String>, _>("file_path")?
+            .context("stored bookmark book path is malformed or oversized")?;
+        let content_hash = book
+            .try_get::<Option<String>, _>("content_hash")?
+            .context("stored bookmark book hash is malformed or oversized")?;
+        validate_bookmark_path(&current_path)?;
+        validate_content_hash(&content_hash)?;
 
         sqlx::query(
             "UPDATE bookmarks SET book_id = ?
@@ -366,18 +407,18 @@ impl BookmarkStore {
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile bookmark aliases")?;
-        let rows = sqlx::query(
-            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
-             FROM bookmarks
+        let query = format!(
+            "SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks
              WHERE book_id = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
-             LIMIT ?",
-        )
-        .bind(book_id)
-        .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
-        .fetch_all(&mut *transaction)
-        .await
-        .context("failed to list bookmarks for book")?;
+             LIMIT ?"
+        );
+        let rows = sqlx::query(&query)
+            .bind(book_id)
+            .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
+            .fetch_all(&mut *transaction)
+            .await
+            .context("failed to list bookmarks for book")?;
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
             anyhow::bail!("bookmark count limit exceeded");
         }
@@ -489,14 +530,12 @@ impl BookmarkStore {
 
     /// Get a single bookmark by ID.
     async fn get_by_id_async(&self, id: i64) -> Result<Option<Bookmark>> {
-        let row = sqlx::query(
-            "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
-             FROM bookmarks WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to get bookmark")?;
+        let query = format!("SELECT {BOOKMARK_SELECT_COLUMNS} FROM bookmarks WHERE id = ?");
+        let row = sqlx::query(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to get bookmark")?;
 
         row.as_ref().map(row_to_bookmark).transpose()
     }
@@ -658,9 +697,30 @@ fn canonical_key(path: &Path) -> String {
 }
 
 fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Result<Bookmark> {
+    if row.try_get::<i64, _>("fields_valid")? != 1 {
+        anyhow::bail!("stored bookmark contains malformed or oversized fields");
+    }
+    let file_path = row
+        .try_get::<Option<String>, _>("file_path")?
+        .context("stored bookmark path is invalid")?;
+    validate_bookmark_path(&file_path)?;
+    crate::path_key::try_path_from_key(&file_path)
+        .map_err(|_| anyhow::anyhow!("stored bookmark path is invalid"))?;
+    let title = row.try_get::<Option<String>, _>("title")?;
+    let note = row.try_get::<Option<String>, _>("note")?;
+    let color = row
+        .try_get::<Option<String>, _>("color")?
+        .context("stored bookmark color is invalid")?;
+    validate_bookmark_fields(&file_path, title.as_deref(), note.as_deref(), &color)?;
+    let created_at = row
+        .try_get::<Option<String>, _>("created_at")?
+        .context("stored bookmark timestamp is invalid")?;
+    if created_at.len() > MAX_BOOKMARK_TIMESTAMP_BYTES {
+        anyhow::bail!("stored bookmark timestamp exceeds byte limit");
+    }
     Ok(Bookmark {
         id: row.try_get("id")?,
-        file_path: row.try_get("file_path")?,
+        file_path,
         book_id: row.try_get("book_id")?,
         page: usize::try_from(row.try_get::<i64, _>("page")?)
             .context("stored bookmark page is outside the supported range")?,
@@ -669,9 +729,9 @@ fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Result<Bookmark> {
             .map(usize::try_from)
             .transpose()
             .context("stored bookmark location is outside the supported range")?,
-        title: row.try_get("title")?,
-        note: row.try_get("note")?,
-        color: row.try_get("color")?,
-        created_at: row.try_get("created_at")?,
+        title,
+        note,
+        color,
+        created_at,
     })
 }

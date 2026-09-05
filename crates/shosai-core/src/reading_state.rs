@@ -37,6 +37,64 @@ async fn next_reading_state_revision(transaction: &mut Transaction<'_, Sqlite>) 
     .context("failed to allocate reading state revision")
 }
 
+async fn bounded_book_locator(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+) -> Result<Option<(String, Option<String>)>> {
+    let row = sqlx::query(
+        "SELECT
+            CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= ?
+                 THEN file_path END AS file_path,
+            CASE WHEN content_hash IS NULL OR
+                           (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64)
+                 THEN content_hash END AS content_hash,
+            CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= ?
+                       AND (content_hash IS NULL OR
+                            (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64))
+                 THEN 1 ELSE 0 END AS fields_valid
+         FROM books WHERE id = ?",
+    )
+    .bind(MAX_READING_STATE_PATH_BYTES as i64)
+    .bind(MAX_READING_STATE_PATH_BYTES as i64)
+    .bind(book_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    if row.try_get::<i64, _>("fields_valid")? != 1 {
+        bail!("stored book locator is malformed or oversized");
+    }
+    Ok(Some((
+        row.try_get::<Option<String>, _>("file_path")?
+            .context("stored book path is invalid")?,
+        row.try_get("content_hash")?,
+    )))
+}
+
+pub(crate) async fn validate_preference_totals(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> Result<()> {
+    let row: (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*),
+                COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0)
+         FROM preferences",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if usize::try_from(row.0)
+        .ok()
+        .is_none_or(|count| count > MAX_PREFERENCE_ROWS)
+    {
+        bail!("stored preferences exceed {MAX_PREFERENCE_ROWS} rows");
+    }
+    if usize::try_from(row.1)
+        .ok()
+        .is_none_or(|bytes| bytes > MAX_PREFERENCE_TOTAL_BYTES)
+    {
+        bail!("stored preferences exceed {MAX_PREFERENCE_TOTAL_BYTES} total bytes");
+    }
+    Ok(())
+}
+
 /// Data directory used by normal/release launches.
 pub const RELEASE_APP_DIR: &str = "shosai";
 /// Isolated data directory used when `SHOSAI_DEV_BUILD=1`.
@@ -50,6 +108,8 @@ const DB_FILE: &str = "shosai.db";
 pub const MAX_READING_STATE_PATH_BYTES: usize = 16 * 1024;
 pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
 pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
+pub const MAX_PREFERENCE_ROWS: usize = 1024;
+pub const MAX_PREFERENCE_TOTAL_BYTES: usize = 1024 * 1024;
 
 /// Storage locations supplied by the platform host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,12 +477,9 @@ impl ReadingStateStore {
     pub async fn set_for_book_async(&self, book_id: i64, state: &FileReadingState) -> Result<()> {
         let (page, location_offset, zoom) = reading_state_db_values(state)?;
         let mut transaction = self.pool.begin().await?;
-        let current: Option<(String, Option<String>)> =
-            sqlx::query_as("SELECT file_path, content_hash FROM books WHERE id = ?")
-                .bind(book_id)
-                .fetch_optional(&mut *transaction)
-                .await
-                .context("failed to resolve book path for reading state")?;
+        let current = bounded_book_locator(&mut transaction, book_id)
+            .await
+            .context("failed to resolve book path for reading state")?;
         let Some((current_key, content_hash)) = current else {
             bail!("book {book_id} not found");
         };
@@ -472,12 +529,9 @@ impl ReadingStateStore {
             .await
             .context("failed to begin reading state transaction")?;
         let revision = next_reading_state_revision(&mut transaction).await?;
-        let current: Option<(String, Option<String>)> =
-            sqlx::query_as("SELECT file_path, content_hash FROM books WHERE id = ?")
-                .bind(book_id)
-                .fetch_optional(&mut *transaction)
-                .await
-                .context("failed to resolve current book path for reading state")?;
+        let current = bounded_book_locator(&mut transaction, book_id)
+            .await
+            .context("failed to resolve current book path for reading state")?;
         let (key, content_hash) = current.ok_or(CurrentBookPathSaveError::MissingBook(book_id))?;
         let content_hash = content_hash.context("book has no stable content hash")?;
         validate_path_key(&key)?;
@@ -516,33 +570,102 @@ impl ReadingStateStore {
     }
 
     /// Get a stored preference value.
-    pub async fn get_pref_async(&self, key: &str) -> Option<String> {
-        if validate_preference_key(key).is_err() {
-            return None;
-        }
-        sqlx::query("SELECT value FROM preferences WHERE key = ?")
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await
-            .ok()
-            .flatten()
-            .map(|row| row.get::<String, _>("value"))
+    pub async fn get_pref_async(&self, key: &str) -> Result<Option<String>> {
+        validate_preference_key(key)?;
+        let row = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value,
+             length(CAST(value AS BLOB)) AS value_bytes
+             FROM preferences WHERE key = ?",
+        )
+        .bind(MAX_PREFERENCE_VALUE_BYTES as i64)
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load preference")?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let value_bytes = row.try_get::<i64, _>("value_bytes")?;
+        let value = row
+            .try_get::<Option<String>, _>("bounded_value")?
+            .context("stored preference value is malformed or exceeds its byte limit")?;
+        let value_bytes = usize::try_from(value_bytes)
+            .context("stored preference value has an invalid byte length")?;
+        debug_assert!(value_bytes <= MAX_PREFERENCE_VALUE_BYTES);
+        validate_preference(key, &value)?;
+        Ok(Some(value))
     }
 
     /// Get all stored preferences in one query.
-    pub async fn get_prefs_async(&self) -> HashMap<String, String> {
-        sqlx::query("SELECT key, value FROM preferences")
-            .fetch_all(&self.pool)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|row| (row.get::<String, _>("key"), row.get::<String, _>("value")))
-            .collect()
+    pub async fn get_prefs_async(&self) -> Result<HashMap<String, String>> {
+        let mut transaction = self.pool.begin().await?;
+        let summary = sqlx::query(
+            "SELECT COUNT(*) AS row_count,
+                    COALESCE(SUM(length(CAST(key AS BLOB)) + length(CAST(value AS BLOB))), 0)
+                        AS total_bytes
+             FROM preferences",
+        )
+        .fetch_one(&mut *transaction)
+        .await
+        .context("failed to summarize preferences")?;
+        let row_count = usize::try_from(summary.try_get::<i64, _>("row_count")?)
+            .context("stored preferences have an invalid row count")?;
+        let total_bytes = usize::try_from(summary.try_get::<i64, _>("total_bytes")?)
+            .context("stored preferences have an invalid byte count")?;
+        if row_count > MAX_PREFERENCE_ROWS {
+            bail!("stored preferences exceed {MAX_PREFERENCE_ROWS} rows");
+        }
+        if total_bytes > MAX_PREFERENCE_TOTAL_BYTES {
+            bail!("stored preferences exceed {MAX_PREFERENCE_TOTAL_BYTES} total bytes");
+        }
+        let rows = sqlx::query(
+            "SELECT CASE
+                 WHEN typeof(key) = 'text' AND length(CAST(key AS BLOB)) <= ? THEN key
+             END AS bounded_key,
+             CASE
+                 WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ? THEN value
+             END AS bounded_value,
+             length(CAST(key AS BLOB)) + length(CAST(value AS BLOB)) AS row_bytes
+             FROM preferences LIMIT ?",
+        )
+        .bind(MAX_PREFERENCE_KEY_BYTES as i64)
+        .bind(MAX_PREFERENCE_VALUE_BYTES as i64)
+        .bind(MAX_PREFERENCE_ROWS as i64 + 1)
+        .fetch_all(&mut *transaction)
+        .await
+        .context("failed to load preferences")?;
+        if rows.len() > MAX_PREFERENCE_ROWS {
+            bail!("stored preferences exceed {MAX_PREFERENCE_ROWS} rows");
+        }
+        let mut preferences = HashMap::with_capacity(rows.len());
+        let mut loaded_bytes = 0_usize;
+        for row in rows {
+            let key = row
+                .try_get::<Option<String>, _>("bounded_key")?
+                .context("stored preference key is malformed or exceeds its byte limit")?;
+            let value = row
+                .try_get::<Option<String>, _>("bounded_value")?
+                .context("stored preference value is malformed or exceeds its byte limit")?;
+            let row_bytes = usize::try_from(row.try_get::<i64, _>("row_bytes")?)
+                .context("stored preference has an invalid byte length")?;
+            loaded_bytes = loaded_bytes
+                .checked_add(row_bytes)
+                .context("stored preference byte count overflowed")?;
+            if loaded_bytes > MAX_PREFERENCE_TOTAL_BYTES {
+                bail!("stored preferences exceed {MAX_PREFERENCE_TOTAL_BYTES} total bytes");
+            }
+            validate_preference(&key, &value)?;
+            preferences.insert(key, value);
+        }
+        Ok(preferences)
     }
 
     /// Set a stored preference value.
     pub async fn set_pref_async(&self, key: &str, value: &str) -> Result<()> {
         validate_preference(key, value)?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         sqlx::query(
             "INSERT INTO preferences (key, value, updated_at)
              VALUES (?, ?, datetime('now'))
@@ -552,15 +675,16 @@ impl ReadingStateStore {
         )
         .bind(key)
         .bind(value)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await
         .context("failed to save preference")?;
-
+        validate_preference_totals(&mut transaction).await?;
+        transaction.commit().await?;
         Ok(())
     }
 
     /// Get a stored preference value as an integer.
-    pub fn get_pref_int(&self, key: &str) -> Option<i64> {
+    pub fn get_pref_int(&self, key: &str) -> Result<Option<i64>> {
         // Preferences are stored as strings to keep the table flexible.
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.get_pref_int_async(key))
@@ -573,10 +697,10 @@ impl ReadingStateStore {
     }
 
     /// Async: get a preference value as an integer.
-    pub async fn get_pref_int_async(&self, key: &str) -> Option<i64> {
+    pub async fn get_pref_int_async(&self, key: &str) -> Result<Option<i64>> {
         self.get_pref_async(key)
             .await
-            .and_then(|value| value.parse::<i64>().ok())
+            .map(|value| value.and_then(|value| value.parse::<i64>().ok()))
     }
 
     /// Async: set a preference value as an integer.
@@ -602,6 +726,7 @@ impl ReadingStateStore {
             .await
             .context("failed to save preference")?;
         }
+        validate_preference_totals(&mut transaction).await?;
         transaction.commit().await?;
 
         Ok(())
@@ -629,7 +754,7 @@ fn validate_preference_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_preference(key: &str, value: &str) -> Result<()> {
+pub(crate) fn validate_preference(key: &str, value: &str) -> Result<()> {
     validate_preference_key(key)?;
     if value.len() > MAX_PREFERENCE_VALUE_BYTES {
         bail!("preference value exceeds {MAX_PREFERENCE_VALUE_BYTES} bytes");

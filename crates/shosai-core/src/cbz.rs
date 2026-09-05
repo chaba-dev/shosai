@@ -348,17 +348,6 @@ impl CbzDoc {
         Ok(bytes)
     }
 
-    fn dimensions(&self, index: usize) -> Result<(u32, u32)> {
-        self.page_paths
-            .get(index)
-            .context("page index out of range")?;
-        if let Some(dimensions) = self.cached_dimensions(index) {
-            return Ok(dimensions);
-        }
-        let bytes = self.image_bytes(index)?;
-        self.inspect_dimensions(index, &bytes)
-    }
-
     fn cached_dimensions(&self, index: usize) -> Option<(u32, u32)> {
         self.dimensions.lock().expect("dimension cache poisoned")[index]
     }
@@ -492,15 +481,43 @@ impl CbzDoc {
 
     /// Exact byte length of the final RGBA render buffer.
     pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
-        let (width, height) = self.dimensions(index)?;
+        self.rendered_byte_len_inner(index, scale, None)
+    }
+
+    #[doc(hidden)]
+    pub fn rendered_byte_len_cancellable(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<usize> {
+        self.rendered_byte_len_inner(index, scale, Some(is_cancelled))
+    }
+
+    fn rendered_byte_len_inner(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<usize> {
+        check_cancelled(is_cancelled)?;
+        let (width, height) = if let Some(dimensions) = self.cached_dimensions(index) {
+            dimensions
+        } else {
+            let bytes = self.image_bytes_cancellable(index, is_cancelled)?;
+            check_cancelled(is_cancelled)?;
+            self.inspect_dimensions(index, &bytes)?
+        };
         let (width, height) = scaled_dimensions(width, height, scale)
             .context("scaled image dimensions must be finite, positive, and in range")?;
         self.validate_dimensions(width, height)?;
-        usize::try_from(width)
+        let byte_len = usize::try_from(width)
             .ok()
             .and_then(|width| width.checked_mul(usize::try_from(height).ok()?))
             .and_then(|pixels| pixels.checked_mul(4))
-            .context("rendered image byte length overflow")
+            .context("rendered image byte length overflow")?;
+        check_cancelled(is_cancelled)?;
+        Ok(byte_len)
     }
 
     /// Conservative temporary allocation charge for decoding and resizing a page.
@@ -677,6 +694,13 @@ mod tests {
         assert!(
             document
                 .render_page_cancellable(0, 1.0, &|| true)
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        assert!(
+            document
+                .rendered_byte_len_cancellable(0, 1.0, &|| true)
                 .unwrap_err()
                 .to_string()
                 .contains("cancelled")
