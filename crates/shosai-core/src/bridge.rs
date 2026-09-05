@@ -335,7 +335,7 @@ impl Bridge {
             .ok_or(BridgeError::DocumentLimit)?;
         let maximum_byte_permits =
             u32::try_from(maximum_retained_bytes).map_err(|_| BridgeError::DocumentLimit)?;
-        let mut document_bytes = acquire_permits(
+        let document_bytes = acquire_permits(
             Arc::clone(&self.admission.document_bytes),
             maximum_byte_permits,
             &cancellation,
@@ -343,12 +343,16 @@ impl Bridge {
         .await?;
         let open_slot =
             acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
-        let (document, open_slot) = tokio::task::spawn_blocking(move || {
+        let (document, guards) = tokio::task::spawn_blocking(move || {
             let document = guarded(|| plan.open().map_err(map_open_error));
-            (document, open_slot)
+            (
+                document,
+                (_request_slot, document_slot, document_bytes, open_slot),
+            )
         })
         .await
         .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, document_slot, mut document_bytes, open_slot) = guards;
         let document = document?;
         let actual_retained_bytes = document
             .retained_byte_len()
@@ -420,7 +424,7 @@ impl Bridge {
             u32::try_from(probe_byte_len).map_err(|_| BridgeError::BufferLimit)?;
         let render_slot =
             acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
-        let _probe_bytes = acquire_permits(
+        let probe_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
             probe_byte_permits,
             &cancellation,
@@ -429,11 +433,17 @@ impl Bridge {
         let preflight_document = Arc::clone(&retained_document);
         let page = request.page;
         let scale = request.scale;
-        let byte_len = tokio::task::spawn_blocking(move || {
-            guarded(|| render_byte_len(&preflight_document.document, page, scale))
+        let (byte_len, guards) = tokio::task::spawn_blocking(move || {
+            let byte_len = guarded(|| render_byte_len(&preflight_document.document, page, scale));
+            (
+                byte_len,
+                (_request_slot, buffer_slot, render_slot, probe_bytes),
+            )
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, buffer_slot, render_slot, probe_bytes) = guards;
+        let byte_len = byte_len?;
         if byte_len > MAX_BRIDGE_BUFFER_BYTES {
             return Err(BridgeError::BufferLimit);
         }
@@ -446,7 +456,7 @@ impl Bridge {
         };
         let pdf_transient_permits =
             u32::try_from(pdf_transient_byte_len).map_err(|_| BridgeError::BufferLimit)?;
-        let _pdf_transient_bytes = acquire_permits(
+        let pdf_transient_bytes = acquire_permits(
             Arc::clone(&self.admission.probe_bytes),
             pdf_transient_permits,
             &cancellation,
@@ -461,18 +471,40 @@ impl Bridge {
         )
         .await?;
         check_cancelled(&cancellation)?;
-        let rendered = tokio::task::spawn_blocking(move || {
-            let _render_slot = render_slot;
-            guarded(|| {
+        let (rendered, guards) = tokio::task::spawn_blocking(move || {
+            let rendered = guarded(|| {
                 render(
                     retained_document.document.clone(),
                     request.page,
                     request.scale,
                 )
-            })
+            });
+            (
+                rendered,
+                (
+                    _request_slot,
+                    buffer_slot,
+                    render_slot,
+                    probe_bytes,
+                    pdf_transient_bytes,
+                    buffer_bytes,
+                ),
+            )
         })
         .await
-        .map_err(|_| BridgeError::Worker)??;
+        .map_err(|_| BridgeError::Worker)?;
+        let (
+            _request_slot,
+            buffer_slot,
+            render_slot,
+            probe_bytes,
+            pdf_transient_bytes,
+            buffer_bytes,
+        ) = guards;
+        let rendered = rendered?;
+        drop(render_slot);
+        drop(probe_bytes);
+        drop(pdf_transient_bytes);
         let _publication = cancellation
             .0
             .publication

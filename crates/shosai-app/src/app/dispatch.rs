@@ -327,6 +327,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             state.document_opening = false;
+            state.document_open_book_id = None;
             state.document_open_notice_visible = false;
             state.document_open_preview = None;
             match result {
@@ -1083,7 +1084,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         Message::BookAddedToBatch { .. } => {}
 
         Message::OpenLibraryBook(book_id, file_path) => {
-            if state.moving_library {
+            if state.moving_library
+                || state.removing_book.is_some()
+                || state.relinking_book.is_some()
+            {
                 return Task::none();
             }
             state.book_menu = None;
@@ -1137,6 +1141,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let Some(lib) = state.library.clone() else {
                 return Task::none();
             };
+            if state.document_open_book_id == Some(book_id) {
+                cancel_document_open(state);
+            }
             state.relinking_book = Some((generation, book_id));
             return Task::perform(
                 async move {
@@ -1216,6 +1223,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             };
             state.book_menu = None;
             state.pending_remove_book = None;
+            if state.document_open_book_id == Some(id) {
+                cancel_document_open(state);
+            }
             state.removing_book = Some(id);
             state.library_error = None;
             let saves = state.reading_state_saves.clone();
@@ -1553,6 +1563,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let generation = state.managed_library_move_generation;
             let relocation_destination = destination.clone();
             let saves = state.reading_state_saves.clone();
+            if state.document_open_book_id.is_some() {
+                cancel_document_open(state);
+            }
             state.moving_library = true;
             state.settings_error = None;
             return Task::perform(
@@ -1648,6 +1661,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             let _ = (page, location_offset);
             if let Err(error) = result {
                 eprintln!("warning: failed to toggle bookmark: {error}");
+                cancel_close_after_bookmark_failure(state, tab_id, generation, error);
             }
             return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }
@@ -1766,6 +1780,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             if let Err(error) = result {
                 eprintln!("warning: failed to update bookmark: {error}");
                 restore_failed_bookmark_edit(state, tab_id, generation);
+                cancel_close_after_bookmark_failure(state, tab_id, generation, error);
             }
             return finish_bookmark_mutation(state, tab_id, generation, &file_path, book_id);
         }

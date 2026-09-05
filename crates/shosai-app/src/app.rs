@@ -962,6 +962,7 @@ pub struct State {
     open_error: Option<AppError>,
     document_open_generation: u64,
     document_opening: bool,
+    document_open_book_id: Option<i64>,
     document_open_notice_visible: bool,
     document_open_preview: Option<DocumentOpenPreview>,
     missing_book_id: Option<i64>,
@@ -1145,6 +1146,7 @@ pub fn boot() -> (State, Task<Message>) {
         open_error: None,
         document_open_generation: 0,
         document_opening: false,
+        document_open_book_id: None,
         document_open_notice_visible: false,
         document_open_preview: None,
         missing_book_id: None,
@@ -1730,6 +1732,7 @@ fn cancel_document_open(state: &mut State) {
     }
     state.document_open_generation = state.document_open_generation.wrapping_add(1);
     state.document_opening = false;
+    state.document_open_book_id = None;
     state.document_open_notice_visible = false;
     state.document_open_preview = None;
 }
@@ -1811,6 +1814,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     }) {
         state.document_open_generation = state.document_open_generation.wrapping_add(1);
         state.document_opening = false;
+        state.document_open_book_id = None;
         state.document_open_notice_visible = false;
         state.document_open_preview = None;
         if let Some(book_id) = book_id {
@@ -1891,6 +1895,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         .document_open_cancellations
         .insert(generation, cancellation.clone());
     state.document_opening = true;
+    state.document_open_book_id = book_id;
     state.document_open_notice_visible = false;
     let book =
         book_id.and_then(|book_id| state.library_books.iter().find(|book| book.id == book_id));
@@ -4486,6 +4491,23 @@ fn finish_bookmark_mutation(
         Task::none()
     };
     Task::batch([refresh, continue_close_after_durable_mutations(state)])
+}
+
+fn cancel_close_after_bookmark_failure(
+    state: &mut State,
+    tab_id: u64,
+    generation: u64,
+    error: String,
+) {
+    let is_current = state
+        .bookmark_mutation_queues
+        .get(&tab_id)
+        .and_then(|queue| queue.front())
+        .is_some_and(|mutation| mutation.generation() == generation);
+    if is_current && state.close_after_geometry_save.take().is_some() {
+        state.close_flush_started = false;
+        state.open_error = Some(AppError::Storage(error));
+    }
 }
 
 fn restore_failed_bookmark_edit(state: &mut State, tab_id: u64, generation: u64) {
@@ -10666,6 +10688,55 @@ mod tests {
     }
 
     #[test]
+    fn failed_bookmark_persistence_cancels_close_and_restores_the_draft() {
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let id = window::Id::unique();
+        let path = PathBuf::from("book.epub");
+        state.file_path = Some(path.clone());
+        state
+            .bookmark_mutation_queues
+            .entry(1)
+            .or_default()
+            .push_back(BookmarkMutation::UpdateNote {
+                generation: 1,
+                file_path: path.clone(),
+                book_id: None,
+                id: 42,
+                note: Some("unsaved draft".to_owned()),
+            });
+        state.bookmark_mutations_active.insert(1);
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        let task = update(
+            &mut state,
+            Message::BookmarkMutationFinished {
+                tab_id: 1,
+                generation: 1,
+                file_path: path,
+                book_id: None,
+                result: Err("database unavailable".to_owned()),
+            },
+        );
+
+        assert_eq!(task.units(), 0, "the failed mutation must not resume close");
+        assert_eq!(state.close_after_geometry_save, None);
+        assert!(!state.close_flush_started);
+        assert_eq!(state.editing_note_id, Some(42));
+        assert_eq!(state.editing_note_text, "unsaved draft");
+        assert_eq!(
+            state.open_error,
+            Some(AppError::Storage("database unavailable".to_owned()))
+        );
+    }
+
+    #[test]
     fn close_waits_for_every_library_mutation_kind() {
         let epub = EpubDoc::from_bytes(
             include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
@@ -11902,6 +11973,56 @@ mod tests {
         assert_eq!(locate.units(), 0);
         assert_eq!(state.pending_remove_book, None);
         assert_eq!(state.removing_book, Some(42));
+    }
+
+    #[tokio::test]
+    async fn library_mutations_cancel_pending_library_backed_opens() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let (mut removal_state, _) = boot();
+        removal_state.library = Some(library.clone());
+        removal_state.pending_remove_book = Some(42);
+        removal_state.document_opening = true;
+        removal_state.document_open_book_id = Some(42);
+        let removal_cancellation = Cancellation::new();
+        removal_state
+            .document_open_cancellations
+            .insert(1, removal_cancellation.clone());
+        let removal_generation = removal_state.document_open_generation;
+
+        let removal = update(&mut removal_state, Message::RemoveBook(42));
+
+        assert!(removal.units() > 0);
+        assert!(removal_cancellation.is_cancelled());
+        assert!(removal_state.document_open_generation > removal_generation);
+        assert_eq!(removal_state.document_open_book_id, None);
+
+        let (mut move_state, _) = boot();
+        move_state.library = Some(library);
+        move_state.pending_library_move = Some(LibraryMovePlan {
+            destination: directory.path().join("moved"),
+            summary: ManagedStorageSummary {
+                book_count: 1,
+                total_bytes: 1,
+            },
+        });
+        move_state.document_opening = true;
+        move_state.document_open_book_id = Some(7);
+        let move_cancellation = Cancellation::new();
+        move_state
+            .document_open_cancellations
+            .insert(1, move_cancellation.clone());
+        let move_generation = move_state.document_open_generation;
+
+        let relocation = update(&mut move_state, Message::ConfirmManagedLibraryMove);
+
+        assert!(relocation.units() > 0);
+        assert!(move_cancellation.is_cancelled());
+        assert!(move_state.document_open_generation > move_generation);
+        assert_eq!(move_state.document_open_book_id, None);
     }
 
     #[test]
