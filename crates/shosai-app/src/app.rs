@@ -452,6 +452,7 @@ const MAX_QUEUED_BOOKMARK_MUTATIONS_PER_TAB: usize = 64;
 const MAX_QUEUED_BOOKMARK_MUTATION_BYTES_PER_TAB: usize = 256 * 1024;
 const MAX_QUEUED_BOOKMARK_MUTATIONS: usize = 256;
 const MAX_QUEUED_BOOKMARK_MUTATION_BYTES: usize = 1024 * 1024;
+const MAX_UI_SEARCH_QUERY_BYTES: usize = 4 * 1024;
 const DOCUMENT_OPEN_WORKERS: usize = 2;
 const SEARCH_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
@@ -1845,6 +1846,8 @@ fn cancel_background_jobs_for_tab(state: &State, tab_id: u64) {
 
 fn cancel_nondurable_work_for_close(state: &mut State) {
     cancel_document_open(state);
+    dispatch::cancel_add_books_discovery(state);
+    state.add_books_generation = state.add_books_generation.wrapping_add(1);
     for cancellation in state.epub_jobs.values() {
         cancellation.cancel();
     }
@@ -11168,6 +11171,75 @@ mod tests {
         );
         assert!(refresh_content(&mut state).units() > 0);
         drop(pagination_task);
+    }
+
+    #[test]
+    fn failed_close_cancels_and_invalidates_add_books_discovery() {
+        let (mut state, _) = boot();
+        let generation = state.add_books_generation;
+        let cancellation = ImportCancellation::default();
+        state.add_books_open = true;
+        state.add_books_discovering = true;
+        state.add_books_cancellation = Some(cancellation.clone());
+        state.add_books_progress = Some(ImportDiscoveryProgress::default());
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(window::Id::unique(), window::Event::CloseRequested),
+        );
+        assert!(cancellation.is_cancelled());
+        assert!(!state.add_books_discovering);
+        assert!(state.add_books_progress.is_none());
+
+        let _ = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+        let _ = update(
+            &mut state,
+            Message::BooksDiscovered {
+                generation,
+                discovery: shosai_core::library::ImportDiscovery::default(),
+            },
+        );
+        assert!(state.staged_imports.is_empty());
+        assert!(!state.add_books_discovering);
+    }
+
+    #[test]
+    fn text_inputs_reject_values_above_their_retained_limits() {
+        let (mut state, _) = boot();
+        state.add_books_open = true;
+        state.page_input = "1".to_owned();
+        state.library_search = "library".to_owned();
+        state.add_books_review_search = "review".to_owned();
+        state.search_query = "document".to_owned();
+        state.editing_note_text = "note".to_owned();
+
+        let _ = update(
+            &mut state,
+            Message::PageInputChanged("1".repeat(usize::MAX.to_string().len() + 1)),
+        );
+        let oversized_search = "x".repeat(MAX_UI_SEARCH_QUERY_BYTES + 1);
+        let _ = update(
+            &mut state,
+            Message::LibrarySearchChanged(oversized_search.clone()),
+        );
+        let _ = update(
+            &mut state,
+            Message::AddBooksReviewSearchChanged(oversized_search.clone()),
+        );
+        let _ = update(&mut state, Message::SearchQueryChanged(oversized_search));
+        let _ = update(
+            &mut state,
+            Message::EditNoteChanged("x".repeat(MAX_BOOKMARK_NOTE_BYTES + 1)),
+        );
+
+        assert_eq!(state.page_input, "1");
+        assert_eq!(state.library_search, "library");
+        assert_eq!(state.add_books_review_search, "review");
+        assert_eq!(state.search_query, "document");
+        assert_eq!(state.editing_note_text, "note");
     }
 
     #[test]

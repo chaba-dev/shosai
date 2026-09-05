@@ -1,6 +1,6 @@
 use super::*;
 
-fn cancel_add_books_discovery(state: &mut State) {
+pub(super) fn cancel_add_books_discovery(state: &mut State) {
     if let Some(cancellation) = state.add_books_cancellation.take() {
         cancellation.cancel();
     }
@@ -407,7 +407,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::PageInputChanged(value) => {
-            state.page_input = value;
+            if value.len() <= usize::MAX.to_string().len() {
+                state.page_input = value;
+            }
         }
 
         Message::GoToPage => {
@@ -952,7 +954,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::AddBooksReviewSearchChanged(query) => {
-            if state.add_books_open && !state.add_books_discovering {
+            if query.len() <= MAX_UI_SEARCH_QUERY_BYTES
+                && state.add_books_open
+                && !state.add_books_discovering
+            {
                 state.add_books_review_search = query;
                 rebuild_add_books_review_rows(state);
                 return iced::widget::operation::snap_to(
@@ -1413,6 +1418,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LibrarySearchChanged(query) => {
+            if query.len() > MAX_UI_SEARCH_QUERY_BYTES {
+                return Task::none();
+            }
             state.library_search = query;
             state.library_generation = state.library_generation.wrapping_add(1);
             let generation = state.library_generation;
@@ -1835,7 +1843,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::EditNoteChanged(text) => {
-            state.editing_note_text = text;
+            if text.len() <= MAX_BOOKMARK_NOTE_BYTES {
+                state.editing_note_text = text;
+            }
         }
 
         Message::SaveNote => {
@@ -1971,6 +1981,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::SearchQueryChanged(query) => {
+            if query.len() > SearchLimits::default().max_query_bytes {
+                return Task::none();
+            }
             let previous_highlights = current_page_search_highlights(state);
             cancel_active_search(state);
             state.search_query = query;

@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
+use image::ImageDecoder;
 use zip::ZipArchive;
 
 use crate::document::{DocumentMetadata, RenderedPage};
@@ -52,6 +53,7 @@ pub struct CbzDoc {
     title: Option<String>,
     limits: CbzLimits,
     dimensions: Mutex<Vec<Option<(u32, u32)>>>,
+    native_bytes_per_pixel: Mutex<Vec<Option<usize>>>,
     _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
@@ -78,6 +80,11 @@ impl CbzDoc {
                 self.page_paths
                     .capacity()
                     .checked_mul(std::mem::size_of::<Option<(u32, u32)>>())?,
+            )?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<Option<usize>>())?,
             )?
             .checked_add(self.title.as_ref().map_or(0, String::capacity))
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
@@ -254,6 +261,7 @@ impl CbzDoc {
             anyhow::bail!("CBZ archive contains no image files");
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
+        let native_bytes_per_pixel = Mutex::new(vec![None; page_paths.len()]);
         let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
         let mut parsed = Self {
             page_paths,
@@ -262,6 +270,7 @@ impl CbzDoc {
             title,
             limits,
             dimensions,
+            native_bytes_per_pixel,
             _admission: None,
         };
         let retained_bytes = parsed
@@ -357,13 +366,17 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let reader = image::ImageReader::new(Cursor::new(bytes))
+        let decoder = image::ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
-            .with_context(|| format!("failed to identify image: {path}"))?;
-        let (width, height) = reader
-            .into_dimensions()
+            .with_context(|| format!("failed to identify image: {path}"))?
+            .into_decoder()
             .with_context(|| format!("failed to inspect image dimensions: {path}"))?;
+        let (width, height) = decoder.dimensions();
+        let native_bytes_per_pixel = usize::from(decoder.color_type().bytes_per_pixel());
         self.validate_dimensions(width, height)?;
+        self.native_bytes_per_pixel
+            .lock()
+            .expect("image byte-depth cache poisoned")[index] = Some(native_bytes_per_pixel);
         self.dimensions.lock().expect("dimension cache poisoned")[index] = Some((width, height));
         Ok((width, height))
     }
@@ -527,16 +540,35 @@ impl CbzDoc {
             return None;
         }
         let (width, height) = self.cached_dimensions(index)?;
+        let native_bytes_per_pixel = self
+            .native_bytes_per_pixel
+            .lock()
+            .expect("image byte-depth cache poisoned")
+            .get(index)
+            .copied()
+            .flatten()?;
         let (target_width, target_height) = scaled_dimensions(width, height, scale)?;
         let decoded = usize::try_from(width)
             .ok()?
             .checked_mul(usize::try_from(height).ok()?)?
-            .checked_mul(4)?;
+            .checked_mul(native_bytes_per_pixel)?;
         let resized = usize::try_from(target_width)
             .ok()?
             .checked_mul(usize::try_from(target_height).ok()?)?
-            .checked_mul(4)?;
-        decoded.checked_add(resized)
+            .checked_mul(native_bytes_per_pixel)?;
+        // image 0.25's Lanczos path resizes vertically first through an
+        // Rgba32F buffer spanning the source width and target height.
+        let resize_intermediate = if (scale - 1.0).abs() > f32::EPSILON {
+            usize::try_from(width)
+                .ok()?
+                .checked_mul(usize::try_from(target_height).ok()?)?
+                .checked_mul(std::mem::size_of::<image::Rgba<f32>>())?
+        } else {
+            0
+        };
+        decoded
+            .checked_add(resized)?
+            .checked_add(resize_intermediate)
     }
 
     /// Return dimensions already discovered by a prior size query or render.
@@ -658,6 +690,9 @@ fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn cbz_snapshot_rejects_growth_and_truncation() {
@@ -705,5 +740,25 @@ mod tests {
                 .to_string()
                 .contains("cancelled")
         );
+    }
+
+    #[test]
+    fn high_bit_depth_pages_charge_native_decode_and_resize_buffers() {
+        let image = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::new(2, 2);
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba16(image)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        archive
+            .start_file("page.png", SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(encoded.get_ref()).unwrap();
+        let bytes = archive.finish().unwrap().into_inner();
+        let document = CbzDoc::from_bytes(bytes).unwrap();
+
+        document.page_size(0).unwrap();
+
+        assert_eq!(document.render_transient_byte_len(0, 2.0), Some(288));
     }
 }
