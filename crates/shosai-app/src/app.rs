@@ -427,6 +427,7 @@ const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
 const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
 const LIBRARY_COVER_SOURCE_MAX_DIMENSION: u32 = 8_192;
 const LIBRARY_COVER_DECODE_MAX_BYTES: u64 = 64 * 1024 * 1024;
+const LIBRARY_COVER_DECODER_METADATA_BYTES: u64 = 1024 * 1024;
 const LIBRARY_COVER_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const LIBRARY_COVER_CACHE_ENTRIES: usize = 128;
 const LIBRARY_COVER_RELOAD_QUEUE_CAPACITY: usize = 128;
@@ -1524,46 +1525,62 @@ fn decode_library_cover(
     use std::io::Cursor;
 
     let data = data?;
-    let decode_limits = || {
+    let decode_limits = |max_alloc| {
         let mut limits = ::image::Limits::default();
         limits.max_image_width = Some(LIBRARY_COVER_SOURCE_MAX_DIMENSION);
         limits.max_image_height = Some(LIBRARY_COVER_SOURCE_MAX_DIMENSION);
-        limits.max_alloc = Some(LIBRARY_COVER_DECODE_MAX_BYTES);
+        limits.max_alloc = Some(max_alloc);
         limits
+    };
+    let budget = shosai_core::library::cover_decode_budget();
+    // Reserve the complete decode ceiling before probing. This covers the
+    // source, decoder-owned encoded copy, and bounded format metadata without
+    // retaining a partial permit while waiting to upgrade it.
+    let probe_permit = loop {
+        if cancellation.is_some_and(Cancellation::is_cancelled) {
+            return None;
+        }
+        if let Some(permit) =
+            budget.try_reserve(usize::try_from(LIBRARY_COVER_DECODE_MAX_BYTES).ok()?)
+        {
+            break permit;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     };
     let mut probe = ::image::ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .ok()?;
-    probe.limits(decode_limits());
+    probe.limits(decode_limits(LIBRARY_COVER_DECODER_METADATA_BYTES));
     let decoder = probe.into_decoder().ok()?;
     let (source_width, source_height) = decoder.dimensions();
     let decoded_bytes = decoder.total_bytes();
     let native_bytes_per_pixel = u64::from(decoder.color_type().bytes_per_pixel());
     let target_pixels =
         u64::from(LIBRARY_COVER_MAX_WIDTH).checked_mul(u64::from(LIBRARY_COVER_MAX_HEIGHT))?;
-    let transient_bytes = decoded_bytes
+    let transient_bytes = u64::try_from(data.len())
+        .ok()?
+        .checked_mul(2)?
+        .checked_add(decoded_bytes)?
+        .checked_add(LIBRARY_COVER_DECODER_METADATA_BYTES)?
         .checked_add(target_pixels.checked_mul(native_bytes_per_pixel)?)?
         .checked_add(target_pixels.checked_mul(4)?)?;
+    drop(decoder);
     if source_width > LIBRARY_COVER_SOURCE_MAX_DIMENSION
         || source_height > LIBRARY_COVER_SOURCE_MAX_DIMENSION
         || transient_bytes > LIBRARY_COVER_DECODE_MAX_BYTES
     {
         return None;
     }
-    let budget = shosai_core::library::cover_decode_budget();
-    let permit = loop {
-        if cancellation.is_some_and(Cancellation::is_cancelled) {
-            return None;
-        }
-        if let Some(permit) = budget.try_reserve(usize::try_from(transient_bytes).ok()?) {
-            break permit;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    };
+    let transient_bytes = usize::try_from(transient_bytes).ok()?;
+    let permit = budget
+        .try_reserve_replacing(transient_bytes, vec![probe_permit])
+        .ok()?;
     let mut reader = ::image::ImageReader::new(Cursor::new(data))
         .with_guessed_format()
         .ok()?;
-    reader.limits(decode_limits());
+    reader.limits(decode_limits(
+        decoded_bytes.checked_add(LIBRARY_COVER_DECODER_METADATA_BYTES)?,
+    ));
     let image = reader.decode().ok()?;
     let rgba = image
         .thumbnail(LIBRARY_COVER_MAX_WIDTH, LIBRARY_COVER_MAX_HEIGHT)
@@ -2407,6 +2424,10 @@ fn finish_open_document_with_permit(
             &retained_display_title,
         );
         save_active_tab(state);
+        let retained_identity = (
+            state.tabs[index].session.book_id,
+            state.tabs[index].session.locator.path().to_path_buf(),
+        );
         state.tabs[index].session.book_id = book_id;
         state.tabs[index].content_hash = content_hash.clone();
         state.tabs[index]
@@ -2420,10 +2441,6 @@ fn finish_open_document_with_permit(
         let retained_reading_state_failure = state.tabs[index].reading_state_restore_failed;
         let retained_state_generation = state.tabs[index].document_state_load_generation;
         let mut retained_pending_save = state.tabs[index].pending_reading_state_save.clone();
-        let retained_identity = (
-            state.tabs[index].session.book_id,
-            state.tabs[index].session.locator.path().to_path_buf(),
-        );
         let retained_bookmark_failure = state.tabs[index].bookmark_load_failed;
         let retained_bookmarks = state.tabs[index].bookmarks.clone();
         let new_identity = (book_id, path.clone());
@@ -2454,8 +2471,10 @@ fn finish_open_document_with_permit(
         update_bookmark_status(state);
         state.page_input = format!("{}", state.current_page + 1);
         state.display_title = display_title;
-        let state_task = if retained_reading_state_pending && retained_identity != new_identity {
-            load_document_state_task(state, false)
+        let state_task = if retained_identity != new_identity && retained_reading_state_pending {
+            load_document_state_task(state, retained_bookmark_failure)
+        } else if retained_identity != new_identity && retained_bookmark_failure {
+            refresh_bookmarks(state)
         } else {
             Task::none()
         };
@@ -9165,6 +9184,38 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_cbz_dimension_completion_reconciles_cached_current_page() {
+        let document = Arc::new(
+            CbzDoc::open(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../shosai-core/tests/fixtures/sample.cbz"
+            ))
+            .unwrap(),
+        );
+        let mut state = state_with_document(OpenDocument::Cbz(Arc::clone(&document)));
+        state.window_size.width = 500.0;
+        assert_eq!(refresh_content(&mut state).units(), 1);
+        let job = *state.cbz_dimension_jobs.keys().next().unwrap();
+        let cancellation = state.cbz_dimension_cancellations.get(&job).unwrap().clone();
+        document.page_size(job.page).unwrap();
+        cancellation.cancel();
+
+        let task = update(
+            &mut state,
+            Message::CbzDimensionsLoaded {
+                tab_id: job.tab_id,
+                generation: job.generation,
+                page: job.page,
+                result: Err("cancelled".to_owned()),
+            },
+        );
+
+        assert!(task.units() > 0);
+        assert!(!state.raster_jobs.is_empty());
+        assert!(!state.paginated_pending.is_empty());
+    }
+
+    #[test]
     fn inactive_cbz_dimension_completion_pumps_active_dimension_work() {
         let document = Arc::new(
             CbzDoc::open(concat!(
@@ -14002,6 +14053,38 @@ mod tests {
             panic!("expected EPUB document");
         };
         assert!(!Arc::ptr_eq(document, &old_document));
+    }
+
+    #[tokio::test]
+    async fn same_content_reopen_restarts_pending_state_for_changed_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.epub");
+        std::fs::write(
+            &path,
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub"),
+        )
+        .unwrap();
+        let (mut state, _) = boot();
+        state.library_loading = false;
+        state.storage_initializing = false;
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        state.bookmark_store = Some(BookmarkStore::new(store.pool().clone()));
+        state.reading_state = Some(store);
+        let _ = open_document_now(&mut state, path.clone(), Some(42));
+        state.reading_state_restore_pending = true;
+        state.bookmark_load_failed = true;
+        state.document_state_load_generation = 7;
+        save_active_tab(&mut state);
+
+        let task = open_document_now(&mut state, path, None);
+
+        assert!(task.units() > 0);
+        assert_eq!(state.book_id, None);
+        assert!(state.reading_state_restore_pending);
+        assert!(state.document_state_load_generation > 7);
+        assert!(state.bookmark_load_generation > 0);
     }
 
     #[test]

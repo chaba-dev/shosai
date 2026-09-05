@@ -2709,7 +2709,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             }
             if cancelled {
-                return pump_cbz_dimension_queue(state);
+                let content = if state.close_after_geometry_save.is_none()
+                    && matches!(state.document, Some(OpenDocument::Cbz(_)))
+                {
+                    refresh_content(state)
+                } else {
+                    Task::none()
+                };
+                return Task::batch([content, pump_background_work(state)]);
             }
             if state.active_tab_id == Some(tab_id) && generation == state.render_generation {
                 match result {
