@@ -55,6 +55,33 @@ async fn test_add_bookmark_with_note() {
 }
 
 #[tokio::test]
+async fn oversized_persisted_bookmark_fields_are_rejected_before_dto_decode() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+    let path = PathBuf::from("/books/oversized.pdf");
+    sqlx::query(
+        "INSERT INTO bookmarks (file_path, content_hash, page, note, color)
+         VALUES (?, ?, 0, ?, 'yellow')",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
+    .bind("x".repeat(MAX_BOOKMARK_NOTE_BYTES + 1))
+    .execute(state.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        store
+            .list_for_file_async(&path, CONTENT_HASH)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
 async fn test_list_for_file() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/test.pdf");

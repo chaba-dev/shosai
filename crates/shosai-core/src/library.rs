@@ -42,6 +42,32 @@ const MAX_IMPORT_FAILURE_DETAILS: usize = 32;
 const MAX_IMPORT_DETAIL_BYTES: usize = 512 * 1024;
 const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
+const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
+const BOOK_SELECT_COLUMNS: &str = "id,
+    CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096 THEN title END AS title,
+    CASE WHEN author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096) THEN author END AS author,
+    CASE WHEN typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16 THEN format END AS format,
+    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384 THEN file_path END AS file_path,
+    CASE WHEN typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16 THEN storage_kind END AS storage_kind,
+    CASE WHEN original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384) THEN original_path END AS original_path,
+    CASE WHEN content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64) THEN content_hash END AS content_hash,
+    file_size,
+    CASE WHEN cover_blob IS NULL OR (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288) THEN cover_blob END AS cover_blob,
+    progress,
+    CASE WHEN typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64 THEN date_added END AS date_added,
+    CASE WHEN last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64) THEN last_read END AS last_read,
+    CASE WHEN
+        typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096
+        AND (author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096))
+        AND typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16
+        AND typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+        AND typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16
+        AND (original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384))
+        AND (content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64))
+        AND (cover_blob IS NULL OR (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288))
+        AND typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64
+        AND (last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64))
+    THEN 1 ELSE 0 END AS fields_valid";
 
 fn scanner_admission() -> &'static Arc<tokio::sync::Semaphore> {
     static ADMISSION: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
@@ -376,6 +402,14 @@ impl ImportDiscoveryProgress {
 
     fn finish_enumerating(&self) {
         self.0.enumerating.store(false, Ordering::Release);
+    }
+}
+
+struct ImportEnumerationGuard(ImportDiscoveryProgress);
+
+impl Drop for ImportEnumerationGuard {
+    fn drop(&mut self) {
+        self.0.finish_enumerating();
     }
 }
 
@@ -887,10 +921,12 @@ impl Library {
         let format = BookFormat::from_extension(&ext)
             .with_context(|| format!("unsupported format: .{ext}"))?;
         let work_permit = acquire_import_work(cancellation).await?;
+        let storage_guard = acquire_managed_storage(cancellation).await?;
+        self.ensure_current_managed_dir().await?;
         let stage_source = path.clone();
         let stage_dir = self.managed_dir.clone();
         let stage_cancellation = cancellation.cloned();
-        let (staged, work_permit) = run_blocking_with(work_permit, move || {
+        let (staged, mut guards) = run_blocking_with((work_permit, storage_guard), move || {
             stage_managed_file(
                 &stage_source,
                 &stage_dir,
@@ -905,7 +941,7 @@ impl Library {
         let title_path = path.clone();
         let expected_hash = expected_hash.map(str::to_owned);
         let inspection_cancellation = cancellation.cloned();
-        let (inspection, work_permit) = run_blocking_with(work_permit, move || {
+        let (inspection, next_guards) = run_blocking_with(guards, move || {
             inspect_book_cancellable(
                 &inspection_path,
                 &title_path,
@@ -917,17 +953,17 @@ impl Library {
         })
         .await
         .context("metadata extraction task failed")?;
+        guards = next_guards;
         let inspection = inspection?;
         // Serialize final source verification and identity reconciliation with managed removal,
         // relinking, and relocation. The source may itself be a currently managed path.
         // Acquiring this lock is the commit point. From here the source verification and
         // database mutation run to a definitive result even if cancellation arrives.
-        let storage_guard = acquire_managed_storage(cancellation).await?;
         if let Some(commit_started) = commit_started {
             commit_started.store(true, Ordering::Release);
         }
         let source_path = path.clone();
-        let (source_file, _guards) = run_blocking_with((work_permit, storage_guard), move || {
+        let (source_file, _guards) = run_blocking_with(guards, move || {
             fingerprint_file_with_limit(&source_path, Some(format.max_input_bytes()), None)
         })
         .await
@@ -1226,6 +1262,7 @@ impl Library {
     pub async fn relink(&self, book_id: i64, replacement: &Path) -> Result<Book> {
         let work_permit = acquire_import_work(None).await?;
         let storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
         let mut guards = (work_permit, storage_guard);
         let book = self
             .get(book_id)
@@ -1459,6 +1496,7 @@ impl Library {
         cancellation: ImportCancellation,
         progress: ImportDiscoveryProgress,
     ) -> ImportDiscovery {
+        let _enumeration_guard = ImportEnumerationGuard(progress.clone());
         if roots.len() > MAX_IMPORT_ROOTS {
             return ImportDiscovery {
                 failures: vec![ImportFailure::new(
@@ -1748,11 +1786,7 @@ impl Library {
             bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
         }
         let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
-        let mut builder = QueryBuilder::new(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path, \
-             content_hash, file_size, cover_blob, progress, \
-             date_added, last_read FROM books",
-        );
+        let mut builder = QueryBuilder::new(format!("SELECT {BOOK_SELECT_COLUMNS} FROM books"));
 
         let query = query.filter(|query| !query.is_empty());
         if query.is_some() || format.is_some() {
@@ -1821,8 +1855,8 @@ impl Library {
 
     /// Load books from a previously captured ordered ID snapshot.
     pub async fn books_by_ids(&self, ids: &[i64]) -> Result<Vec<Book>> {
-        if ids.len() > MAX_LIBRARY_SNAPSHOT_SIZE {
-            bail!("library snapshot exceeds {MAX_LIBRARY_SNAPSHOT_SIZE} books");
+        if ids.len() > MAX_LIBRARY_PAGE_SIZE as usize {
+            bail!("library page exceeds {MAX_LIBRARY_PAGE_SIZE} books");
         }
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -1830,11 +1864,9 @@ impl Library {
 
         let mut books_by_id = HashMap::new();
         for chunk in ids.chunks(SQLITE_ID_CHUNK_SIZE) {
-            let mut builder = QueryBuilder::new(
-                "SELECT id, title, author, format, file_path, storage_kind, original_path, \
-                 content_hash, file_size, cover_blob, progress, \
-                 date_added, last_read FROM books WHERE id IN (",
-            );
+            let mut builder = QueryBuilder::new(format!(
+                "SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE id IN ("
+            ));
             let mut separated = builder.separated(", ");
             for id in chunk {
                 separated.push_bind(id);
@@ -1884,6 +1916,7 @@ impl Library {
     /// Remove a book from the library and delete its private managed copy, if any.
     pub async fn remove(&self, book_id: i64) -> Result<Option<PathBuf>> {
         let _storage_guard = acquire_managed_storage(None).await?;
+        self.ensure_current_managed_dir().await?;
         let book = self.get(book_id).await?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let detached_path = if let Some(book) = &book
@@ -1925,44 +1958,37 @@ impl Library {
 
     /// Get a book by stable ID.
     pub async fn get(&self, book_id: i64) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE id = ?",
-        )
-        .bind(book_id)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by id")?;
+        let query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE id = ?");
+        let row = sqlx::query(&query)
+            .bind(book_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by id")?;
         row.as_ref().map(row_to_book).transpose()
     }
 
     /// Get a book by file path.
     async fn get_by_path(&self, path: &str) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE file_path = ?",
-        )
-        .bind(path)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by path")?;
+        let query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE file_path = ?");
+        let row = sqlx::query(&query)
+            .bind(path)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by path")?;
 
         row.as_ref().map(row_to_book).transpose()
     }
 
     async fn get_by_hash(&self, content_hash: &str) -> Result<Option<Book>> {
-        let row = sqlx::query(
-            "SELECT id, title, author, format, file_path, storage_kind, original_path,
-                    content_hash, file_size, cover_blob, progress, date_added, last_read
-             FROM books WHERE content_hash = ?
-             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1",
-        )
-        .bind(content_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .context("failed to query book by fingerprint")?;
+        let query = format!(
+            "SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE content_hash = ?
+             ORDER BY storage_kind = 'managed' DESC, id ASC LIMIT 1"
+        );
+        let row = sqlx::query(&query)
+            .bind(content_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .context("failed to query book by fingerprint")?;
         row.as_ref().map(row_to_book).transpose()
     }
 
@@ -2472,30 +2498,90 @@ fn push_library_filters<'a>(
 }
 
 fn row_to_book(row: &sqlx::sqlite::SqliteRow) -> Result<Book> {
-    let format_str: String = row.try_get("format")?;
+    if row.try_get::<i64, _>("fields_valid")? != 1 {
+        bail!("stored book contains malformed or oversized fields");
+    }
+    let title = row
+        .try_get::<Option<String>, _>("title")?
+        .context("stored book title is invalid")?;
+    let author = row.try_get::<Option<String>, _>("author")?;
+    if title.len() > MAX_IMPORT_METADATA_BYTES
+        || author
+            .as_ref()
+            .is_some_and(|author| author.len() > MAX_IMPORT_METADATA_BYTES)
+    {
+        bail!("stored book metadata exceeds byte limits");
+    }
+    let format_str = row
+        .try_get::<Option<String>, _>("format")?
+        .context("stored book format is invalid")?;
     let format = BookFormat::from_db(&format_str).context("stored book format is invalid")?;
-    let storage_kind = StorageKind::from_db(&row.try_get::<String, _>("storage_kind")?)
+    let file_path = row
+        .try_get::<Option<String>, _>("file_path")?
+        .context("stored book path is invalid")?;
+    let decoded_path = crate::path_key::try_path_from_key(&file_path)
+        .map_err(|_| anyhow::anyhow!("stored book path is invalid"))?;
+    validate_import_path(&decoded_path)?;
+    let storage_kind_value = row
+        .try_get::<Option<String>, _>("storage_kind")?
         .context("stored book storage kind is invalid")?;
+    let storage_kind =
+        StorageKind::from_db(&storage_kind_value).context("stored book storage kind is invalid")?;
+    let original_path = row.try_get::<Option<String>, _>("original_path")?;
+    if let Some(original_path) = &original_path {
+        let decoded_path = crate::path_key::try_path_from_key(original_path)
+            .map_err(|_| anyhow::anyhow!("stored original book path is invalid"))?;
+        validate_import_path(&decoded_path)?;
+    }
+    let content_hash = row.try_get::<Option<String>, _>("content_hash")?;
+    if content_hash
+        .as_ref()
+        .is_some_and(|hash| hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        bail!("stored book content hash is invalid");
+    }
     let file_size = row
         .try_get::<Option<i64>, _>("file_size")?
         .map(u64::try_from)
         .transpose()
         .context("stored book file size is outside the supported range")?;
+    let cover = row.try_get::<Option<Vec<u8>>, _>("cover_blob")?;
+    if cover
+        .as_ref()
+        .is_some_and(|cover| cover.len() > MAX_IMPORT_COVER_BYTES)
+    {
+        bail!("stored book cover exceeds byte limit");
+    }
+    let progress = row.try_get::<f64, _>("progress")?;
+    if !progress.is_finite() || !(0.0..=1.0).contains(&progress) {
+        bail!("stored book progress is invalid");
+    }
+    let date_added = row
+        .try_get::<Option<String>, _>("date_added")?
+        .context("stored book date is invalid")?;
+    let last_read = row.try_get::<Option<String>, _>("last_read")?;
+    if date_added.len() > MAX_LIBRARY_TIMESTAMP_BYTES
+        || last_read
+            .as_ref()
+            .is_some_and(|timestamp| timestamp.len() > MAX_LIBRARY_TIMESTAMP_BYTES)
+    {
+        bail!("stored book timestamp exceeds byte limit");
+    }
 
     Ok(Book {
         id: row.try_get("id")?,
-        title: row.try_get("title")?,
-        author: row.try_get("author")?,
+        title,
+        author,
         format,
-        file_path: row.try_get("file_path")?,
+        file_path,
         storage_kind,
-        original_path: row.try_get("original_path")?,
-        content_hash: row.try_get("content_hash")?,
+        original_path,
+        content_hash,
         file_size,
-        cover: row.try_get("cover_blob")?,
-        progress: row.try_get("progress")?,
-        date_added: row.try_get("date_added")?,
-        last_read: row.try_get("last_read")?,
+        cover,
+        progress,
+        date_added,
+        last_read,
     })
 }
 

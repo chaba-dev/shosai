@@ -38,6 +38,23 @@ async fn malformed_library_rows_return_an_error_instead_of_being_omitted() {
 }
 
 #[tokio::test]
+async fn oversized_persisted_book_fields_are_rejected_before_dto_decode() {
+    let (library, store, _dir) = temp_library().await;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, storage_kind, cover_blob)
+         VALUES ('Oversized', 'pdf', '/books/oversized.pdf', 'referenced', ?)
+         RETURNING id",
+    )
+    .bind(vec![0_u8; 512 * 1024 + 1])
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    assert!(library.get(id).await.is_err());
+    assert!(library.page(None, None, 10, 0).await.is_err());
+}
+
+#[tokio::test]
 async fn discovery_failures_do_not_retain_oversized_root_paths() {
     let (library, _, _dir) = temp_library().await;
     let oversized = PathBuf::from("x".repeat(20 * 1024));
@@ -273,16 +290,16 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
             .contains("use page()")
     );
     let ids = lib.matching_ids(None, None).await.unwrap();
-    let books = lib.books_by_ids(&ids).await.unwrap();
-    assert_eq!(books.len(), 1_005);
+    let books = lib.books_by_ids(&ids[..500]).await.unwrap();
+    assert_eq!(books.len(), 500);
     assert_eq!(books.first().unwrap().id, ids[0]);
-    assert_eq!(books.last().unwrap().id, *ids.last().unwrap());
+    assert_eq!(books.last().unwrap().id, ids[499]);
     assert!(
-        lib.books_by_ids(&vec![0; 10_001])
+        lib.books_by_ids(&vec![0; 501])
             .await
             .unwrap_err()
             .to_string()
-            .contains("snapshot exceeds")
+            .contains("page exceeds")
     );
     assert!(
         lib.page(Some(&"q".repeat(4 * 1024 + 1)), None, 10, 0)
@@ -297,10 +314,14 @@ async fn library_caps_pages_and_chunks_large_id_snapshots() {
 async fn discovery_caps_selected_roots_before_starting_scanners() {
     let (lib, _, _dir) = temp_library().await;
     let roots = vec![fixture_path("sample.epub"); 10_001];
+    let progress = ImportDiscoveryProgress::default();
 
-    let discovery = lib.discover_files(&roots).await;
+    let discovery = lib
+        .discover_files_with_progress(roots, ImportCancellation::default(), progress.clone())
+        .await;
 
     assert!(discovery.candidates.is_empty());
+    assert!(!progress.snapshot().enumerating);
     assert_eq!(discovery.failures.len(), 1);
     assert!(
         discovery.failures[0]
@@ -765,13 +786,19 @@ async fn cancelled_discovery_stops_before_scanning_candidates() {
     let (lib, _, _dir) = temp_library().await;
     let cancellation = ImportCancellation::default();
     cancellation.cancel();
+    let progress = ImportDiscoveryProgress::default();
 
     let discovery = lib
-        .discover_files_cancellable(vec![fixture_path("sample.epub")], cancellation)
+        .discover_files_with_progress(
+            vec![fixture_path("sample.epub")],
+            cancellation,
+            progress.clone(),
+        )
         .await;
 
     assert!(discovery.candidates.is_empty());
     assert!(discovery.failures.is_empty());
+    assert!(!progress.snapshot().enumerating);
 }
 
 #[tokio::test]
@@ -965,7 +992,10 @@ async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
     let (lib, store, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
     std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
-    lib.import_managed_file(&source).await.unwrap();
+    let managed = lib.import_managed_file(&source).await.unwrap();
+    let referenced_source = dir.path().join("referenced.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &referenced_source).unwrap();
+    let referenced = lib.import_file(&referenced_source).await.unwrap();
     let old_dir = lib.managed_dir().to_path_buf();
     let destination = dir.path().join("external").join("Shosai");
     lib.relocate_managed_books(&destination).await.unwrap();
@@ -973,10 +1003,16 @@ async fn stale_library_facade_cannot_recreate_the_old_managed_directory() {
     let next = dir.path().join("next.cbz");
     std::fs::copy(fixture_path("sample.cbz"), &next).unwrap();
     let error = lib.import_managed_file(&next).await.unwrap_err();
-
     assert!(error.to_string().contains("location changed"));
+    assert!(lib.import_file(&next).await.is_err());
+    let replacement = dir.path().join("replacement.pdf");
+    std::fs::copy(&referenced_source, &replacement).unwrap();
+    assert!(lib.relink(referenced.id, &replacement).await.is_err());
+    assert!(lib.remove(managed.id).await.is_err());
     assert!(!old_dir.exists());
     let current = Library::new(store.pool().clone(), destination.canonicalize().unwrap());
+    let retained = current.get(managed.id).await.unwrap().unwrap();
+    assert!(path_from_key(&retained.file_path).exists());
     let imported = current.import_managed_file(&next).await.unwrap();
     assert!(path_from_key(&imported.file_path).starts_with(destination.canonicalize().unwrap()));
 }
