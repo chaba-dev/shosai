@@ -191,6 +191,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             &message,
             Message::Initialized(_)
                 | Message::FingerprintBackfillFinished(_)
+                | Message::DocumentOpenPrepared { .. }
                 | Message::DocumentOpened { .. }
                 | Message::LibraryLoaded { .. }
                 | Message::LibraryCoversLoaded { .. }
@@ -331,6 +332,59 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::FileSelected(None) => {}
+
+        Message::DocumentOpenPrepared {
+            generation,
+            path,
+            book_id,
+            result,
+        } => {
+            if generation != state.document_open_generation {
+                state.document_open_cancellations.remove(&generation);
+                state.pending_document_permits.remove(&generation);
+                return Task::none();
+            }
+            let prepared = match result {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    state.document_open_cancellations.remove(&generation);
+                    state.pending_document_permits.remove(&generation);
+                    state.document_opening = false;
+                    state.document_open_book_id = None;
+                    state.document_open_notice_visible = false;
+                    state.document_open_preview = None;
+                    state.open_error = Some(error);
+                    return Task::none();
+                }
+            };
+            let Some(mut permits) = state.pending_document_permits.remove(&generation) else {
+                return Task::none();
+            };
+            let replacement = state
+                .document_admission
+                .bytes
+                .try_reserve_replacing(prepared.retained_bytes, vec![permits._bytes]);
+            let Ok(bytes) = replacement else {
+                state.document_open_cancellations.remove(&generation);
+                state.document_opening = false;
+                state.document_open_book_id = None;
+                state.document_open_notice_visible = false;
+                state.document_open_preview = None;
+                state.open_error = Some(AppError::Open {
+                    format: "document",
+                    detail: "retained document byte limit exceeded".to_owned(),
+                });
+                return Task::none();
+            };
+            permits._bytes = bytes;
+            state.pending_document_permits.insert(generation, permits);
+            if state.close_after_geometry_save.is_some()
+                && let Some(cancellation) = state.document_open_cancellations.get(&generation)
+            {
+                cancellation.cancel();
+            }
+            return start_document_open_worker(state, generation, path, book_id, prepared);
+        }
 
         Message::DocumentOpened {
             generation,

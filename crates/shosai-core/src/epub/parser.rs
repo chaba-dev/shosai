@@ -407,6 +407,7 @@ fn epub_admission_ceiling(encoded_bytes: usize, limits: &EpubLimits) -> Result<u
             .context("EPUB uncompressed-byte admission cannot be represented")?,
         limits.max_total_decoded_font_bytes,
         limits.max_total_presentation_nodes,
+        encoded_bytes,
     )
     .context("EPUB retained-memory admission overflowed")
 }

@@ -2101,6 +2101,30 @@ impl Library {
         path: &Path,
         cancellation: crate::bridge::Cancellation,
     ) -> Result<(OpenDocument, String)> {
+        let requested_path = canonical_path(path);
+        let plan_path = requested_path.clone();
+        let plan_cancellation = cancellation.clone();
+        let plan = tokio::task::spawn_blocking(move || {
+            if plan_cancellation.is_cancelled() {
+                bail!("document open cancelled");
+            }
+            OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(plan_path))
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .context("book open preparation task failed")??;
+        self.open_book_document_plan_cancellable(book_id, &requested_path, plan, cancellation)
+            .await
+    }
+
+    #[doc(hidden)]
+    pub async fn open_book_document_plan_cancellable(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+        cancellation: crate::bridge::Cancellation,
+    ) -> Result<(OpenDocument, String)> {
         let book = self
             .get(book_id)
             .await?
@@ -2109,13 +2133,15 @@ impl Library {
         if canonical_path_key(&requested_path) != book.file_path {
             bail!("book location changed before it could be opened");
         }
+        if canonical_path(plan.source_path()) != requested_path {
+            bail!("prepared document location does not match the library identity");
+        }
         let expected_hash = book
             .content_hash
             .context("cannot verify this legacy book; remove it and import it again")?;
         let format = book.format;
         tokio::task::spawn_blocking(move || {
             let is_cancelled = || cancellation.is_cancelled();
-            let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(&requested_path))?;
             if plan.format() != format {
                 bail!("book format no longer matches the library identity");
             }
@@ -2359,6 +2385,10 @@ async fn commit_managed_publication(
             &destination_str,
         )
         .await?;
+        if source_str != existing.file_path {
+            reconcile_identity(&mut transaction, existing.id, &source_str, &destination_str)
+                .await?;
+        }
         commit_managed_transaction(transaction, &mut ownership).await?;
         return Ok(imported_book_from_commit(
             existing.id,
@@ -3644,9 +3674,13 @@ fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) ->
         .ok()?
         .into_decoder()
         .ok()?;
+    let native_bytes_per_pixel = u64::from(decoder.color_type().bytes_per_pixel());
+    let target_pixels = u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT);
     let transient_bytes = decoder
         .total_bytes()
-        .checked_add(u64::from(COVER_MAX_WIDTH) * u64::from(COVER_MAX_HEIGHT) * 4 * 2)?;
+        .checked_add(target_pixels.checked_mul(native_bytes_per_pixel)?)?
+        .checked_add(target_pixels.checked_mul(4)?)?
+        .checked_add(MAX_IMPORT_COVER_BYTES as u64)?;
     let transient_bytes = usize::try_from(transient_bytes).ok()?;
     if transient_bytes > COVER_DECODE_BYTE_CAPACITY {
         return None;
@@ -3654,11 +3688,7 @@ fn resize_cover_image(data: &[u8], cancellation: Option<&ImportCancellation>) ->
     let _permit = reserve_cover_decode(transient_bytes, cancellation)?;
     let img = image::load_from_memory(data).ok()?;
     check_import_cancelled(cancellation).ok()?;
-    let thumb = img.resize(
-        COVER_MAX_WIDTH,
-        COVER_MAX_HEIGHT,
-        image::imageops::FilterType::Triangle,
-    );
+    let thumb = img.thumbnail(COVER_MAX_WIDTH, COVER_MAX_HEIGHT);
     check_import_cancelled(cancellation).ok()?;
     let rgba = thumb.to_rgba8();
     check_import_cancelled(cancellation).ok()?;

@@ -358,7 +358,12 @@ impl CbzDoc {
     }
 
     fn cached_dimensions(&self, index: usize) -> Option<(u32, u32)> {
-        self.dimensions.lock().expect("dimension cache poisoned")[index]
+        self.dimensions
+            .lock()
+            .expect("dimension cache poisoned")
+            .get(index)
+            .copied()
+            .flatten()
     }
 
     fn inspect_dimensions(&self, index: usize, bytes: &[u8]) -> Result<(u32, u32)> {
@@ -740,6 +745,16 @@ mod tests {
                 .to_string()
                 .contains("cancelled")
         );
+    }
+
+    #[test]
+    fn invalid_page_indexes_return_errors_without_poisoning_dimension_cache() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+
+        assert!(document.page_size(usize::MAX).is_err());
+        assert!(document.rendered_byte_len(usize::MAX, 1.0).is_err());
+        assert!(document.page_size(0).is_ok());
     }
 
     #[test]

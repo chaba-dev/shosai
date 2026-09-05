@@ -954,6 +954,21 @@ struct DocumentOpenPreview {
     cover: Option<RasterImageHandle>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PreparedDocumentOpen {
+    retained_bytes: usize,
+    plan: Arc<std::sync::Mutex<Option<shosai_core::application::OpenDocumentPlan>>>,
+}
+
+impl PreparedDocumentOpen {
+    fn take_plan(&self) -> Option<shosai_core::application::OpenDocumentPlan> {
+        self.plan
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+}
+
 #[derive(Debug)]
 pub struct State {
     screen: Screen,
@@ -1504,9 +1519,12 @@ fn decode_library_cover(
     let decoder = probe.into_decoder().ok()?;
     let (source_width, source_height) = decoder.dimensions();
     let decoded_bytes = decoder.total_bytes();
-    let transient_bytes = decoded_bytes.checked_add(
-        u64::from(LIBRARY_COVER_MAX_WIDTH) * u64::from(LIBRARY_COVER_MAX_HEIGHT) * 4 * 2,
-    )?;
+    let native_bytes_per_pixel = u64::from(decoder.color_type().bytes_per_pixel());
+    let target_pixels =
+        u64::from(LIBRARY_COVER_MAX_WIDTH).checked_mul(u64::from(LIBRARY_COVER_MAX_HEIGHT))?;
+    let transient_bytes = decoded_bytes
+        .checked_add(target_pixels.checked_mul(native_bytes_per_pixel)?)?
+        .checked_add(target_pixels.checked_mul(4)?)?;
     if source_width > LIBRARY_COVER_SOURCE_MAX_DIMENSION
         || source_height > LIBRARY_COVER_SOURCE_MAX_DIMENSION
         || transient_bytes > LIBRARY_COVER_DECODE_MAX_BYTES
@@ -2021,13 +2039,6 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             return Task::none();
         }
     };
-    let Some(maximum_retained_bytes) = OpenDocument::maximum_retained_byte_len(format) else {
-        state.open_error = Some(AppError::Open {
-            format: format.display_name(),
-            detail: "retained document byte charge overflowed".to_owned(),
-        });
-        return Task::none();
-    };
     let Some(count) = state.document_admission.count.try_reserve(1) else {
         state.open_error = Some(AppError::Open {
             format: "document",
@@ -2035,11 +2046,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
         });
         return Task::none();
     };
-    let Some(bytes) = state
-        .document_admission
-        .bytes
-        .try_reserve(maximum_retained_bytes)
-    else {
+    let Some(bytes) = state.document_admission.bytes.try_reserve(0) else {
         state.open_error = Some(AppError::Open {
             format: "document",
             detail: "retained document byte limit exceeded".to_owned(),
@@ -2085,17 +2092,77 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
     state.open_error = None;
     state.missing_book_id = None;
     let task_path = path.clone();
-    let library = state.library.clone();
-    let open_cancellation = cancellation.clone();
-    let open = Task::perform(
+    let prepare = Task::perform(
         async move {
+            tokio::task::spawn_blocking(move || {
+                let plan = shosai_core::application::OpenDocumentPlan::prepare(
+                    &DeviceFileLocator::from_path(&task_path),
+                )
+                .map_err(app_document_open_error)?;
+                let retained_bytes =
+                    plan.retained_admission_byte_len()
+                        .ok_or_else(|| AppError::Open {
+                            format: format.display_name(),
+                            detail: "retained document byte charge overflowed".to_owned(),
+                        })?;
+                Ok(PreparedDocumentOpen {
+                    retained_bytes,
+                    plan: Arc::new(std::sync::Mutex::new(Some(plan))),
+                })
+            })
+            .await
+            .unwrap_or_else(|error| {
+                Err(AppError::Open {
+                    format: "document",
+                    detail: format!("document loader stopped unexpectedly: {error}"),
+                })
+            })
+        },
+        move |result| Message::DocumentOpenPrepared {
+            generation,
+            path,
+            book_id,
+            result,
+        },
+    );
+    let notice = Task::perform(
+        async move { tokio::time::sleep(DOCUMENT_OPEN_NOTICE_DELAY).await },
+        move |_| Message::ShowDocumentOpenNotice(generation),
+    );
+    Task::batch([prepare, notice])
+}
+
+fn start_document_open_worker(
+    state: &State,
+    generation: u64,
+    path: PathBuf,
+    book_id: Option<i64>,
+    prepared: PreparedDocumentOpen,
+) -> Task<Message> {
+    let task_path = path.clone();
+    let library = state.library.clone();
+    let Some(open_cancellation) = state.document_open_cancellations.get(&generation).cloned()
+    else {
+        return Task::none();
+    };
+    Task::perform(
+        async move {
+            let plan = prepared.take_plan().ok_or_else(|| AppError::Open {
+                format: "document",
+                detail: "prepared document open was already consumed".to_owned(),
+            })?;
             if let Some(book_id) = book_id {
                 let library = library.ok_or_else(|| AppError::Open {
                     format: "document",
                     detail: "library is unavailable".to_owned(),
                 })?;
                 return library
-                    .open_book_document_cancellable(book_id, &task_path, open_cancellation)
+                    .open_book_document_plan_cancellable(
+                        book_id,
+                        &task_path,
+                        plan,
+                        open_cancellation,
+                    )
                     .await
                     .map_err(|error| AppError::Open {
                         format: "document",
@@ -2103,10 +2170,6 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
                     });
             }
             tokio::task::spawn_blocking(move || {
-                let plan = shosai_core::application::OpenDocumentPlan::prepare(
-                    &DeviceFileLocator::from_path(&task_path),
-                )
-                .map_err(app_document_open_error)?;
                 plan.open_with_content_hash_cancellable(open_cancellation)
                     .map_err(app_document_open_error)
             })
@@ -2124,12 +2187,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             book_id,
             result,
         },
-    );
-    let notice = Task::perform(
-        async move { tokio::time::sleep(DOCUMENT_OPEN_NOTICE_DELAY).await },
-        move |_| Message::ShowDocumentOpenNotice(generation),
-    );
-    Task::batch([open, notice])
+    )
 }
 
 #[cfg(test)]

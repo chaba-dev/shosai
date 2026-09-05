@@ -23,6 +23,12 @@ pub enum Message {
     // File
     OpenFile,
     FileSelected(Option<PathBuf>),
+    DocumentOpenPrepared {
+        generation: u64,
+        path: PathBuf,
+        book_id: Option<i64>,
+        result: Result<super::PreparedDocumentOpen, super::AppError>,
+    },
     DocumentOpened {
         generation: u64,
         path: PathBuf,

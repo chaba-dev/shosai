@@ -922,6 +922,63 @@ async fn managed_import_survives_the_source_being_removed() {
 }
 
 #[tokio::test]
+async fn managed_promotion_reconciles_the_imported_source_alias() {
+    let (lib, store, dir) = temp_library().await;
+    let first = dir.path().join("first.epub");
+    let imported_source = dir.path().join("second.epub");
+    std::fs::copy(fixture_path("sample.epub"), &first).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &imported_source).unwrap();
+    let referenced = lib.import_file(&first).await.unwrap();
+    let content_hash = referenced.content_hash.as_deref().unwrap();
+    store
+        .set_for_book_async(
+            referenced.id,
+            &FileReadingState {
+                page: 1,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .set_async(
+            &imported_source,
+            content_hash,
+            &FileReadingState {
+                page: 9,
+                location_offset: Some(3),
+                zoom: 1.25,
+            },
+        )
+        .await
+        .unwrap();
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_at_async(&imported_source, content_hash, 4, Some(7), None)
+        .await
+        .unwrap();
+
+    let managed = lib.import_managed_file(&imported_source).await.unwrap();
+
+    assert_eq!(managed.id, referenced.id);
+    assert_eq!(managed.storage_kind, StorageKind::Managed);
+    let reading = store
+        .get_for_book_async(referenced.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reading.page, 9);
+    assert_eq!(reading.location_offset, Some(3));
+    let merged = bookmarks.list_for_book_async(referenced.id).await.unwrap();
+    assert!(
+        merged
+            .iter()
+            .any(|bookmark| bookmark.page == 4 && bookmark.location_offset == Some(7))
+    );
+}
+
+#[tokio::test]
 async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
     let (lib, store, dir) = temp_library().await;
     let source = dir.path().join("source.epub");

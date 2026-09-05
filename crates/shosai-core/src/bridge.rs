@@ -229,6 +229,7 @@ struct BridgeAdmission {
     request_slots: Arc<Semaphore>,
     render_slots: Arc<Semaphore>,
     buffer_bytes: Arc<Semaphore>,
+    planning_slots: Arc<Semaphore>,
     open_slots: Arc<Semaphore>,
     document_slots: Arc<Semaphore>,
     buffer_slots: Arc<Semaphore>,
@@ -242,6 +243,7 @@ impl BridgeAdmission {
             request_slots: Arc::new(Semaphore::new(MAX_BRIDGE_REQUESTS)),
             render_slots: Arc::new(Semaphore::new(render_workers)),
             buffer_bytes: Arc::new(Semaphore::new(buffer_bytes)),
+            planning_slots: Arc::new(Semaphore::new(MAX_BRIDGE_OPEN_WORKERS)),
             open_slots: Arc::new(Semaphore::new(MAX_BRIDGE_OPEN_WORKERS)),
             document_slots: Arc::new(Semaphore::new(MAX_BRIDGE_DOCUMENTS)),
             buffer_slots: Arc::new(Semaphore::new(MAX_BRIDGE_BUFFERS)),
@@ -324,12 +326,22 @@ impl Bridge {
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
         }
-        let format = locator.format().map_err(map_open_error)?;
         let document_slot =
             acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
-        // Reserve the parser's conservative retained ceiling before parsing so concurrently
-        // opening documents cannot allocate outside the process document budget.
-        let maximum_retained_bytes = OpenDocument::maximum_retained_byte_len(format)
+        let planning_slot =
+            acquire_permits(Arc::clone(&self.admission.planning_slots), 1, &cancellation).await?;
+        let (plan, guards) = tokio::task::spawn_blocking(move || {
+            let plan = guarded(|| OpenDocumentPlan::prepare(&locator).map_err(map_open_error));
+            (plan, (_request_slot, document_slot, planning_slot))
+        })
+        .await
+        .map_err(|_| BridgeError::Worker)?;
+        let (_request_slot, document_slot, planning_slot) = guards;
+        check_cancelled(&cancellation)?;
+        let plan = plan?;
+        drop(planning_slot);
+        let maximum_retained_bytes = plan
+            .retained_admission_byte_len()
             .filter(|bytes| *bytes <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES)
             .ok_or(BridgeError::DocumentLimit)?;
         let maximum_byte_permits =
@@ -345,7 +357,6 @@ impl Bridge {
         let worker_cancellation = cancellation.clone();
         let (document, guards) = tokio::task::spawn_blocking(move || {
             let document = guarded(|| {
-                let plan = OpenDocumentPlan::prepare(&locator).map_err(map_open_error)?;
                 plan.open_cancellable(worker_cancellation)
                     .map_err(map_open_error)
             });
