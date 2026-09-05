@@ -1013,9 +1013,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::LocateBook(book_id) => {
-            if state.library.is_none() || state.removing_book == Some(book_id) {
+            if state.library.is_none()
+                || state.removing_book == Some(book_id)
+                || state.relinking_book.is_some()
+            {
                 return Task::none();
             }
+            state.relink_generation = state.relink_generation.wrapping_add(1);
+            let generation = state.relink_generation;
             let ebooks = state.i18n.text("ebooks");
             let locate_book = state.i18n.text("locate-book-dialog");
             return Task::perform(
@@ -1027,37 +1032,58 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .await;
                     file.map(|file| file.path().to_path_buf())
                 },
-                move |path| Message::RelinkBookSelected(book_id, path),
+                move |path| Message::RelinkBookSelected {
+                    generation,
+                    book_id,
+                    path,
+                },
             );
         }
 
-        Message::RelinkBookSelected(book_id, Some(path)) => {
+        Message::RelinkBookSelected {
+            generation,
+            book_id,
+            path: Some(path),
+        } => {
+            if generation != state.relink_generation {
+                return Task::none();
+            }
             let Some(lib) = state.library.clone() else {
                 return Task::none();
             };
+            state.relinking_book = Some((generation, book_id));
             return Task::perform(
                 async move {
                     lib.relink(book_id, &path)
                         .await
                         .map_err(|error| format!("{error:#}"))
                 },
-                Message::BookRelinked,
+                move |result| Message::BookRelinked { generation, result },
             );
         }
 
-        Message::RelinkBookSelected(_, None) => {}
+        Message::RelinkBookSelected { .. } => {}
 
-        Message::BookRelinked(result) => match result {
-            Ok(book) => {
-                state.open_error = None;
-                state.missing_book_id = None;
-                return Task::batch([
-                    reset_library(state),
-                    Task::done(Message::OpenLibraryBook(book.id, book.file_path)),
-                ]);
+        Message::BookRelinked { generation, result }
+            if state
+                .relinking_book
+                .is_some_and(|(active, _)| active == generation) =>
+        {
+            state.relinking_book = None;
+            match result {
+                Ok(book) => {
+                    state.open_error = None;
+                    state.missing_book_id = None;
+                    return Task::batch([
+                        reset_library(state),
+                        Task::done(Message::OpenLibraryBook(book.id, book.file_path)),
+                    ]);
+                }
+                Err(error) => state.open_error = Some(AppError::Library(error)),
             }
-            Err(error) => state.open_error = Some(AppError::Library(error)),
-        },
+        }
+
+        Message::BookRelinked { .. } => {}
 
         Message::ToggleBookMenu(id) => {
             if state.removing_book.is_none() && state.pending_remove_book.is_none() {
@@ -1070,7 +1096,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::RequestRemoveBook(id) => {
-            if state.removing_book.is_none() && !state.moving_library {
+            if state.removing_book.is_none()
+                && state.relinking_book.is_none()
+                && !state.moving_library
+            {
                 state.book_menu = None;
                 state.pending_remove_book = Some(id);
                 state.library_error = None;
@@ -1083,6 +1112,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
 
         Message::RemoveBook(id) => {
             if state.moving_library
+                || state.relinking_book.is_some()
                 || state.removing_book.is_some()
                 || (state.pending_remove_book != Some(id) && state.missing_book_id != Some(id))
             {
@@ -1123,6 +1153,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                             detached_saves.push(ReadingStateSave {
                                 book_id: None,
                                 path: path.clone(),
+                                content_hash: state.document_content_hash.clone(),
                                 reading: FileReadingState {
                                     page: state.current_page,
                                     location_offset: current_epub_offset(state),
@@ -1142,6 +1173,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                                 detached_saves.push(ReadingStateSave {
                                     book_id: None,
                                     path,
+                                    content_hash: tab.content_hash.clone(),
                                     reading: FileReadingState {
                                         page: tab.session.location.page,
                                         location_offset: tab.session.location.offset,
@@ -1343,6 +1375,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             {
                 return Task::none();
             }
+            state.managed_library_move_generation =
+                state.managed_library_move_generation.wrapping_add(1);
+            let generation = state.managed_library_move_generation;
             let title = state.i18n.text("choose-managed-library-parent");
             return Task::perform(
                 async move {
@@ -1352,11 +1387,14 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .await
                         .map(|folder| folder.path().to_path_buf())
                 },
-                Message::ManagedLibraryParentSelected,
+                move |parent| Message::ManagedLibraryParentSelected { generation, parent },
             );
         }
 
-        Message::ManagedLibraryParentSelected(parent) => {
+        Message::ManagedLibraryParentSelected { generation, parent } => {
+            if generation != state.managed_library_move_generation {
+                return Task::none();
+            }
             let (Some(parent), Some(library)) = (parent, state.library.clone()) else {
                 return Task::none();
             };
@@ -1374,6 +1412,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .map_err(|error| format!("{error:#}"))
                 },
                 move |result| Message::ManagedLibraryMovePlanned {
+                    generation,
                     destination: destination.clone(),
                     result,
                 },
@@ -1381,9 +1420,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ManagedLibraryMovePlanned {
+            generation,
             destination,
             result,
-        } => match result {
+        } if generation == state.managed_library_move_generation => match result {
             Ok(summary) => {
                 state.pending_library_move = Some(LibraryMovePlan {
                     destination,
@@ -1393,9 +1433,13 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
             Err(error) => state.settings_error = Some(error),
         },
 
+        Message::ManagedLibraryMovePlanned { .. } => {}
+
         Message::CancelManagedLibraryMove => {
             if !state.moving_library {
                 state.pending_library_move = None;
+                state.managed_library_move_generation =
+                    state.managed_library_move_generation.wrapping_add(1);
             }
         }
 
@@ -1409,6 +1453,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 return Task::none();
             };
             let destination = plan.destination.clone();
+            let generation = state.managed_library_move_generation;
             let relocation_destination = destination.clone();
             let saves = state.reading_state_saves.clone();
             state.moving_library = true;
@@ -1434,6 +1479,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                         .map_err(|error| format!("{error:#}"))
                 },
                 move |result| Message::ManagedLibraryMoved {
+                    generation,
                     destination: destination.clone(),
                     result,
                 },
@@ -1441,9 +1487,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ManagedLibraryMoved {
+            generation,
             destination,
             result,
-        } => {
+        } if generation == state.managed_library_move_generation => {
             state.moving_library = false;
             match result {
                 Ok(changes) => {
@@ -1458,6 +1505,8 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Err(error) => state.settings_error = Some(error),
             }
         }
+
+        Message::ManagedLibraryMoved { .. } => {}
 
         // Bookmarks
         Message::ToggleBookmark => {
@@ -1477,6 +1526,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                     BookmarkMutation::Toggle {
                         generation,
                         file_path: path,
+                        content_hash: state.document_content_hash.clone(),
                         book_id,
                         page,
                         location_offset,
@@ -1620,8 +1670,12 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
         }
 
         Message::ExportBookmarks => {
-            if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
-                match store.export_markdown(path) {
+            if let (Some(path), Some(content_hash), Some(store)) = (
+                &state.file_path,
+                &state.document_content_hash,
+                &state.bookmark_store,
+            ) {
+                match store.export_markdown(path, content_hash) {
                     Ok(md) => {
                         // Save to file next to the document.
                         let export_path = path.with_extension("bookmarks.md");

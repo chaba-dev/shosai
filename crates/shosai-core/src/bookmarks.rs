@@ -51,19 +51,22 @@ impl BookmarkStore {
     pub async fn add_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         title: Option<&str>,
         note: Option<&str>,
         color: &str,
     ) -> Result<Bookmark> {
-        self.add_at_async(file_path, page, None, title, note, color)
+        self.add_at_async(file_path, content_hash, page, None, title, note, color)
             .await
     }
 
     /// Add a bookmark at a page/chapter and optional character offset.
+    #[allow(clippy::too_many_arguments)]
     pub async fn add_at_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         location_offset: Option<usize>,
         title: Option<&str>,
@@ -72,14 +75,18 @@ impl BookmarkStore {
     ) -> Result<Bookmark> {
         let key = canonical_key(file_path);
         validate_bookmark_fields(&key, title, note, color)?;
+        validate_content_hash(content_hash)?;
 
         let id = sqlx::query(
-            "INSERT INTO bookmarks (file_path, page, location_offset, title, note, color)
-             SELECT ?, ?, ?, ?, ?, ?
-             WHERE (SELECT COUNT(*) FROM bookmarks WHERE file_path = ?) < ?
+            "INSERT INTO bookmarks
+                (file_path, content_hash, page, location_offset, title, note, color)
+             SELECT ?, ?, ?, ?, ?, ?, ?
+             WHERE (SELECT COUNT(*) FROM bookmarks
+                    WHERE file_path = ? AND content_hash = ?) < ?
              RETURNING id",
         )
         .bind(&key)
+        .bind(content_hash)
         .bind(i64::try_from(page).context("bookmark page exceeds database range")?)
         .bind(
             location_offset
@@ -91,6 +98,7 @@ impl BookmarkStore {
         .bind(note)
         .bind(color)
         .bind(&key)
+        .bind(content_hash)
         .bind(MAX_BOOKMARKS_PER_BOOK as i64)
         .fetch_optional(&self.pool)
         .await
@@ -108,22 +116,26 @@ impl BookmarkStore {
     pub async fn toggle_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
-        self.toggle_at_async(file_path, page, None, title).await
+        self.toggle_at_async(file_path, content_hash, page, None, title)
+            .await
     }
 
     /// Toggle a bookmark at a page/chapter and optional character offset.
     pub async fn toggle_at_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         location_offset: Option<usize>,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
         let key = canonical_key(file_path);
         validate_bookmark_fields(&key, title, None, "yellow")?;
+        validate_content_hash(content_hash)?;
         let page_db = i64::try_from(page).context("bookmark page exceeds database range")?;
         let location_offset_db = location_offset
             .map(i64::try_from)
@@ -133,10 +145,11 @@ impl BookmarkStore {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
-             WHERE file_path = ? AND page = ?
+             WHERE file_path = ? AND content_hash = ? AND page = ?
                AND location_offset IS ? AND note IS NULL",
         )
         .bind(&key)
+        .bind(content_hash)
         .bind(page_db)
         .bind(location_offset_db)
         .fetch_optional(&mut *transaction)
@@ -153,22 +166,26 @@ impl BookmarkStore {
             transaction.commit().await?;
             Ok(None)
         } else {
-            let count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE file_path = ?")
-                    .bind(&key)
-                    .fetch_one(&mut *transaction)
-                    .await
-                    .context("failed to count bookmarks")?;
+            let count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM bookmarks WHERE file_path = ? AND content_hash = ?",
+            )
+            .bind(&key)
+            .bind(content_hash)
+            .fetch_one(&mut *transaction)
+            .await
+            .context("failed to count bookmarks")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
                 anyhow::bail!("bookmark count limit exceeded");
             }
             let row = sqlx::query(
-                "INSERT INTO bookmarks (file_path, page, location_offset, title, note, color)
-                 VALUES (?, ?, ?, ?, NULL, 'yellow')
+                "INSERT INTO bookmarks
+                    (file_path, content_hash, page, location_offset, title, note, color)
+                 VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
                            created_at",
             )
             .bind(&key)
+            .bind(content_hash)
             .bind(page_db)
             .bind(location_offset_db)
             .bind(title)
@@ -197,12 +214,14 @@ impl BookmarkStore {
             .transpose()
             .context("bookmark location exceeds database range")?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current_path: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
-            .bind(book_id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .context("failed to resolve bookmark book")?
-            .with_context(|| format!("book {book_id} not found"))?;
+        let (current_path, content_hash): (String, String) = sqlx::query_as(
+            "SELECT file_path, content_hash FROM books WHERE id = ? AND content_hash IS NOT NULL",
+        )
+        .bind(book_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve bookmark book")?
+        .with_context(|| format!("book {book_id} not found"))?;
         validate_bookmark_path(&current_path)?;
 
         // Claim path-only aliases while holding the write lock so lookup, counting, and the
@@ -210,20 +229,20 @@ impl BookmarkStore {
         // aliases even if that book currently happens to use the same path.
         sqlx::query(
             "UPDATE bookmarks SET book_id = ?
-             WHERE book_id IS NULL AND file_path = ?",
+             WHERE book_id IS NULL AND file_path = ? AND content_hash = ?",
         )
         .bind(book_id)
         .bind(&current_path)
+        .bind(&content_hash)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile bookmark aliases")?;
         let existing = sqlx::query(
             "SELECT id FROM bookmarks
-             WHERE (book_id = ? OR (book_id IS NULL AND file_path = ?)) AND page = ?
+             WHERE book_id = ? AND page = ?
                AND location_offset IS ? AND note IS NULL",
         )
         .bind(book_id)
-        .bind(&current_path)
         .bind(page)
         .bind(location_offset)
         .fetch_optional(&mut *transaction)
@@ -239,26 +258,23 @@ impl BookmarkStore {
             transaction.commit().await?;
             Ok(None)
         } else {
-            let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM bookmarks
-                 WHERE book_id = ? OR (book_id IS NULL AND file_path = ?)",
-            )
-            .bind(book_id)
-            .bind(&current_path)
-            .fetch_one(&mut *transaction)
-            .await
-            .context("failed to count bookmarks for book")?;
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE book_id = ?")
+                .bind(book_id)
+                .fetch_one(&mut *transaction)
+                .await
+                .context("failed to count bookmarks for book")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
                 anyhow::bail!("bookmark count limit exceeded");
             }
             let row = sqlx::query(
                 "INSERT INTO bookmarks
-                    (file_path, book_id, page, location_offset, title, note, color)
-                 VALUES (?, ?, ?, ?, ?, NULL, 'yellow')
+                    (file_path, content_hash, book_id, page, location_offset, title, note, color)
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
                            created_at",
             )
             .bind(current_path)
+            .bind(content_hash)
             .bind(book_id)
             .bind(page)
             .bind(location_offset)
@@ -273,18 +289,24 @@ impl BookmarkStore {
     }
 
     /// List all bookmarks for a file, ordered by page.
-    pub async fn list_for_file_async(&self, file_path: &Path) -> Result<Vec<Bookmark>> {
+    pub async fn list_for_file_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+    ) -> Result<Vec<Bookmark>> {
         let key = canonical_key(file_path);
         validate_bookmark_path(&key)?;
+        validate_content_hash(content_hash)?;
 
         let rows = sqlx::query(
             "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
              FROM bookmarks
-             WHERE file_path = ?
+             WHERE file_path = ? AND content_hash = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
              LIMIT ?",
         )
         .bind(&key)
+        .bind(content_hash)
         .bind(MAX_BOOKMARKS_PER_BOOK as i64 + 1)
         .fetch_all(&self.pool)
         .await
@@ -293,48 +315,54 @@ impl BookmarkStore {
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
             anyhow::bail!("bookmark count limit exceeded");
         }
-        Ok(rows.iter().filter_map(row_to_bookmark).collect())
+        rows.iter().map(row_to_bookmark).collect()
     }
 
     pub async fn list_for_file_page_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Bookmark>> {
         let key = canonical_key(file_path);
         validate_bookmark_path(&key)?;
+        validate_content_hash(content_hash)?;
         let rows = sqlx::query(
             "SELECT id, file_path, book_id, page, location_offset, title, note, color, created_at
-             FROM bookmarks WHERE file_path = ?
+             FROM bookmarks WHERE file_path = ? AND content_hash = ?
              ORDER BY page ASC, COALESCE(location_offset, 0) ASC, created_at ASC
              LIMIT ? OFFSET ?",
         )
         .bind(key)
+        .bind(content_hash)
         .bind(i64::from(limit.clamp(1, MAX_BOOKMARK_PAGE_SIZE)))
         .bind(i64::from(offset))
         .fetch_all(&self.pool)
         .await
         .context("failed to list bookmark page")?;
-        Ok(rows.iter().filter_map(row_to_bookmark).collect())
+        rows.iter().map(row_to_bookmark).collect()
     }
 
     /// List bookmarks using a stable library book identity.
     pub async fn list_for_book_async(&self, book_id: i64) -> Result<Vec<Bookmark>> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current_path: String = sqlx::query_scalar("SELECT file_path FROM books WHERE id = ?")
-            .bind(book_id)
-            .fetch_optional(&mut *transaction)
-            .await
-            .context("failed to resolve bookmark book")?
-            .with_context(|| format!("book {book_id} not found"))?;
+        let (current_path, content_hash): (String, String) = sqlx::query_as(
+            "SELECT file_path, content_hash FROM books WHERE id = ? AND content_hash IS NOT NULL",
+        )
+        .bind(book_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve bookmark book")?
+        .with_context(|| format!("book {book_id} not found"))?;
 
         sqlx::query(
             "UPDATE bookmarks SET book_id = ?
-             WHERE book_id IS NULL AND file_path = ?",
+             WHERE book_id IS NULL AND file_path = ? AND content_hash = ?",
         )
         .bind(book_id)
         .bind(&current_path)
+        .bind(&content_hash)
         .execute(&mut *transaction)
         .await
         .context("failed to reconcile bookmark aliases")?;
@@ -354,37 +382,51 @@ impl BookmarkStore {
             anyhow::bail!("bookmark count limit exceeded");
         }
         transaction.commit().await?;
-        Ok(rows.iter().filter_map(row_to_bookmark).collect())
+        rows.iter().map(row_to_bookmark).collect()
     }
 
     /// Check if a specific page is bookmarked (has a no-note bookmark).
-    pub async fn is_bookmarked_async(&self, file_path: &Path, page: usize) -> bool {
-        self.is_bookmarked_at_async(file_path, page, None).await
+    pub async fn is_bookmarked_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+        page: usize,
+    ) -> Result<bool> {
+        self.is_bookmarked_at_async(file_path, content_hash, page, None)
+            .await
     }
 
     /// Check whether a page/chapter and optional character offset is bookmarked.
     pub async fn is_bookmarked_at_async(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         location_offset: Option<usize>,
-    ) -> bool {
+    ) -> Result<bool> {
         let key = canonical_key(file_path);
+        validate_bookmark_path(&key)?;
+        validate_content_hash(content_hash)?;
+        let page = i64::try_from(page).context("bookmark page exceeds database range")?;
+        let location_offset = location_offset
+            .map(i64::try_from)
+            .transpose()
+            .context("bookmark location exceeds database range")?;
 
-        sqlx::query(
+        Ok(sqlx::query(
             "SELECT 1 FROM bookmarks
-             WHERE file_path = ? AND page = ?
+             WHERE file_path = ? AND content_hash = ? AND page = ?
                AND location_offset IS ? AND note IS NULL
              LIMIT 1",
         )
         .bind(&key)
-        .bind(page as i64)
-        .bind(location_offset.map(|offset| offset as i64))
+        .bind(content_hash)
+        .bind(page)
+        .bind(location_offset)
         .fetch_optional(&self.pool)
         .await
-        .ok()
-        .flatten()
-        .is_some()
+        .context("failed to check bookmark status")?
+        .is_some())
     }
 
     /// Update the note on a bookmark.
@@ -428,10 +470,17 @@ impl BookmarkStore {
     }
 
     /// Remove all bookmarks for a file.
-    pub async fn remove_all_for_file_async(&self, file_path: &Path) -> Result<()> {
+    pub async fn remove_all_for_file_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+    ) -> Result<()> {
         let key = canonical_key(file_path);
-        sqlx::query("DELETE FROM bookmarks WHERE file_path = ?")
+        validate_bookmark_path(&key)?;
+        validate_content_hash(content_hash)?;
+        sqlx::query("DELETE FROM bookmarks WHERE file_path = ? AND content_hash = ?")
             .bind(&key)
+            .bind(content_hash)
             .execute(&self.pool)
             .await
             .context("failed to remove bookmarks")?;
@@ -449,12 +498,16 @@ impl BookmarkStore {
         .await
         .context("failed to get bookmark")?;
 
-        Ok(row.as_ref().and_then(row_to_bookmark))
+        row.as_ref().map(row_to_bookmark).transpose()
     }
 
     /// Export all bookmarks for a file as Markdown text.
-    pub async fn export_markdown_async(&self, file_path: &Path) -> Result<String> {
-        let bookmarks = self.list_for_file_async(file_path).await?;
+    pub async fn export_markdown_async(
+        &self,
+        file_path: &Path,
+        content_hash: &str,
+    ) -> Result<String> {
+        let bookmarks = self.list_for_file_async(file_path, content_hash).await?;
 
         let filename = file_path
             .file_name()
@@ -487,34 +540,37 @@ impl BookmarkStore {
     pub fn add(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         title: Option<&str>,
         note: Option<&str>,
         color: &str,
     ) -> Result<Bookmark> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.add_async(file_path, page, title, note, color))
+        rt.block_on(self.add_async(file_path, content_hash, page, title, note, color))
     }
 
     pub fn toggle(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.toggle_async(file_path, page, title))
+        rt.block_on(self.toggle_async(file_path, content_hash, page, title))
     }
 
     pub fn toggle_at(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         location_offset: Option<usize>,
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.toggle_at_async(file_path, page, location_offset, title))
+        rt.block_on(self.toggle_at_async(file_path, content_hash, page, location_offset, title))
     }
 
     pub fn toggle_for_book_at(
@@ -529,9 +585,9 @@ impl BookmarkStore {
         rt.block_on(self.toggle_for_book_at_async(book_id, file_path, page, location_offset, title))
     }
 
-    pub fn list_for_file(&self, file_path: &Path) -> Result<Vec<Bookmark>> {
+    pub fn list_for_file(&self, file_path: &Path, content_hash: &str) -> Result<Vec<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.list_for_file_async(file_path))
+        rt.block_on(self.list_for_file_async(file_path, content_hash))
     }
 
     pub fn list_for_book(&self, book_id: i64) -> Result<Vec<Bookmark>> {
@@ -539,24 +595,25 @@ impl BookmarkStore {
         rt.block_on(self.list_for_book_async(book_id))
     }
 
-    pub fn is_bookmarked(&self, file_path: &Path, page: usize) -> bool {
+    pub fn is_bookmarked(&self, file_path: &Path, content_hash: &str, page: usize) -> Result<bool> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.is_bookmarked_async(file_path, page))
+        rt.block_on(self.is_bookmarked_async(file_path, content_hash, page))
     }
 
     pub fn is_bookmarked_at(
         &self,
         file_path: &Path,
+        content_hash: &str,
         page: usize,
         location_offset: Option<usize>,
-    ) -> bool {
+    ) -> Result<bool> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.is_bookmarked_at_async(file_path, page, location_offset))
+        rt.block_on(self.is_bookmarked_at_async(file_path, content_hash, page, location_offset))
     }
 
-    pub fn export_markdown(&self, file_path: &Path) -> Result<String> {
+    pub fn export_markdown(&self, file_path: &Path, content_hash: &str) -> Result<String> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.export_markdown_async(file_path))
+        rt.block_on(self.export_markdown_async(file_path, content_hash))
     }
 }
 
@@ -582,6 +639,13 @@ fn validate_bookmark_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_content_hash(content_hash: &str) -> Result<()> {
+    if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!("bookmark content hash must be a SHA-256 digest");
+    }
+    Ok(())
+}
+
 fn validate_optional_bytes(value: Option<&str>, limit: usize, field: &str) -> Result<()> {
     if value.is_some_and(|value| value.len() > limit) {
         anyhow::bail!("{field} exceeds byte limit");
@@ -593,19 +657,21 @@ fn canonical_key(path: &Path) -> String {
     canonical_path_key(path)
 }
 
-fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Option<Bookmark> {
-    Some(Bookmark {
-        id: row.try_get("id").ok()?,
-        file_path: row.try_get("file_path").ok()?,
-        book_id: row.try_get("book_id").ok()?,
-        page: row.try_get::<i64, _>("page").ok()? as usize,
+fn row_to_bookmark(row: &sqlx::sqlite::SqliteRow) -> Result<Bookmark> {
+    Ok(Bookmark {
+        id: row.try_get("id")?,
+        file_path: row.try_get("file_path")?,
+        book_id: row.try_get("book_id")?,
+        page: usize::try_from(row.try_get::<i64, _>("page")?)
+            .context("stored bookmark page is outside the supported range")?,
         location_offset: row
-            .try_get::<Option<i64>, _>("location_offset")
-            .ok()?
-            .map(|offset| offset as usize),
-        title: row.try_get("title").ok()?,
-        note: row.try_get("note").ok()?,
-        color: row.try_get("color").ok()?,
-        created_at: row.try_get("created_at").ok()?,
+            .try_get::<Option<i64>, _>("location_offset")?
+            .map(usize::try_from)
+            .transpose()
+            .context("stored bookmark location is outside the supported range")?,
+        title: row.try_get("title")?,
+        note: row.try_get("note")?,
+        color: row.try_get("color")?,
+        created_at: row.try_get("created_at")?,
     })
 }
