@@ -954,6 +954,7 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
                 .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
                 .await
                 .unwrap()
+                .unwrap()
         ),
         destination.canonicalize().unwrap()
     );
@@ -979,6 +980,7 @@ async fn non_unicode_managed_directory_survives_persistence() {
     let stored = store
         .get_pref_async(MANAGED_LIBRARY_DIR_PREFERENCE)
         .await
+        .unwrap()
         .unwrap();
     assert_eq!(path_from_key(&stored), destination.canonicalize().unwrap());
 }
@@ -1291,16 +1293,55 @@ async fn concurrent_identical_managed_imports_return_the_same_book() {
 
 #[tokio::test]
 async fn removing_a_managed_book_deletes_its_private_copy() {
-    let (lib, _, dir) = temp_library().await;
+    let (lib, store, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
     std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
     let book = lib.import_managed_file(&source).await.unwrap();
     let managed_path = PathBuf::from(&book.file_path);
+    let content_hash = book.content_hash.as_deref().unwrap();
+    store
+        .set_for_book_async(
+            book.id,
+            &FileReadingState {
+                page: 3,
+                location_offset: Some(42),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+    let bookmarks = BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .toggle_for_book_at_async(book.id, &managed_path, 2, Some(7), None)
+        .await
+        .unwrap();
 
-    lib.remove(book.id).await.unwrap();
+    let detached_path = lib.remove(book.id).await.unwrap();
 
+    assert_eq!(
+        detached_path.as_deref(),
+        Some(source.canonicalize().unwrap().as_path())
+    );
     assert!(!managed_path.exists());
     assert!(source.exists());
+    assert_eq!(
+        store
+            .get_async(&source, content_hash)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        3
+    );
+    let bookmark = bookmarks
+        .list_for_file_async(&source, content_hash)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(
+        path_from_key(&bookmark.file_path),
+        source.canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]

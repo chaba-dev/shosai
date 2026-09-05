@@ -381,6 +381,49 @@ struct LibraryMovePlan {
     summary: ManagedStorageSummary,
 }
 
+#[derive(Debug, Clone)]
+struct BookRemovalTarget {
+    id: i64,
+    file_path: String,
+    original_path: Option<String>,
+    content_hash: Option<String>,
+    tab_ids: BTreeSet<u64>,
+    suppressed_save: Option<ReadingStateSave>,
+}
+
+impl BookRemovalTarget {
+    fn from_book(book: &Book) -> Self {
+        Self {
+            id: book.id,
+            file_path: book.file_path.clone(),
+            original_path: book.original_path.clone(),
+            content_hash: book.content_hash.clone(),
+            tab_ids: BTreeSet::new(),
+            suppressed_save: None,
+        }
+    }
+
+    fn matches_path(&self, path: &Path) -> bool {
+        let key = shosai_core::canonical_path_key(path);
+        key == self.file_path || self.original_path.as_deref() == Some(&key)
+    }
+
+    fn matches_session(
+        &self,
+        tab_id: Option<u64>,
+        book_id: Option<i64>,
+        path: &Path,
+        content_hash: Option<&str>,
+    ) -> bool {
+        book_id == Some(self.id)
+            || tab_id.is_some_and(|tab_id| self.tab_ids.contains(&tab_id))
+            || (book_id.is_none()
+                && content_hash.is_some()
+                && content_hash == self.content_hash.as_deref()
+                && self.matches_path(path))
+    }
+}
+
 const LIBRARY_PAGE_SIZE: u32 = 40;
 const LIBRARY_LOAD_AHEAD_PX: u32 = 600;
 const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
@@ -734,6 +777,22 @@ impl BookmarkMutation {
             .saturating_add(file_path.to_string_lossy().len())
             .saturating_add(note.map_or(0, str::len))
     }
+
+    fn book_id(&self) -> Option<i64> {
+        match self {
+            Self::Toggle { book_id, .. }
+            | Self::UpdateNote { book_id, .. }
+            | Self::Delete { book_id, .. } => *book_id,
+        }
+    }
+
+    fn file_path(&self) -> &Path {
+        match self {
+            Self::Toggle { file_path, .. }
+            | Self::UpdateNote { file_path, .. }
+            | Self::Delete { file_path, .. } => file_path,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1013,6 +1072,8 @@ pub struct State {
     book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
     removing_book: Option<i64>,
+    deferred_remove_book: Option<i64>,
+    book_removal_target: Option<BookRemovalTarget>,
     relink_generation: u64,
     relinking_book: Option<(u64, i64)>,
     add_books_open: bool,
@@ -1194,6 +1255,8 @@ pub fn boot() -> (State, Task<Message>) {
         book_menu: None,
         pending_remove_book: None,
         removing_book: None,
+        deferred_remove_book: None,
+        book_removal_target: None,
         relink_generation: 0,
         relinking_book: None,
         add_books_open: false,
@@ -1253,7 +1316,10 @@ pub fn boot() -> (State, Task<Message>) {
             let store = ReadingStateStore::open_async_deferred_backfill()
                 .await
                 .map_err(|error| error.to_string())?;
-            let preferences = store.get_prefs_async().await;
+            let preferences = store
+                .get_prefs_async()
+                .await
+                .map_err(|error| error.to_string())?;
             let pref_int = |key: &str| {
                 preferences
                     .get(key)
@@ -1575,6 +1641,9 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
 }
 
 fn save_active_tab(state: &mut State) {
+    if active_session_matches_removal(state) {
+        save_reading_state(state);
+    }
     if let (Some(index), Some(tab)) = (state.active_tab, capture_reader_tab(state))
         && index < state.tabs.len()
     {
@@ -4289,6 +4358,19 @@ fn queue_bookmark_mutation(
     tab_id: u64,
     mutation: BookmarkMutation,
 ) -> Task<Message> {
+    let removal_blocks_mutation = [state.removing_book, state.pending_remove_book]
+        .into_iter()
+        .flatten()
+        .any(|book_id| bookmark_target_matches_book(state, Some(tab_id), &mutation, book_id));
+    if removal_blocks_mutation {
+        if let BookmarkMutation::UpdateNote { id, note, .. } = mutation {
+            restore_bookmark_edit(state, tab_id, id, note.unwrap_or_default());
+        }
+        state.error = Some(AppError::Library(
+            "bookmark changes are unavailable while removing this book".to_owned(),
+        ));
+        return Task::none();
+    }
     let (global_count, global_bytes) = bookmark_mutation_queue_usage(state);
     let (tab_count, queued_bytes) =
         state
@@ -4479,18 +4561,102 @@ fn finish_bookmark_mutation(
         has_more = !queue.is_empty();
     }
     if has_more {
-        return continue_bookmark_mutations(state, tab_id);
+        return Task::batch([
+            continue_bookmark_mutations(state, tab_id),
+            continue_deferred_book_removal(state),
+        ]);
     }
     state.bookmark_mutation_queues.remove(&tab_id);
+    let removal_targets_completion = state.removing_book.is_some_and(|target| {
+        bookmark_target_matches(state, Some(tab_id), book_id, file_path, target)
+    });
     let refresh = if state.active_tab_id == Some(tab_id)
         && state.file_path.as_deref() == Some(file_path)
         && state.book_id == book_id
+        && !removal_targets_completion
     {
         refresh_bookmarks(state)
     } else {
         Task::none()
     };
-    Task::batch([refresh, continue_close_after_durable_mutations(state)])
+    Task::batch([
+        refresh,
+        continue_deferred_book_removal(state),
+        continue_close_after_durable_mutations(state),
+    ])
+}
+
+fn bookmark_mutations_target_book(state: &State, book_id: i64) -> bool {
+    state
+        .bookmark_mutation_queues
+        .iter()
+        .any(|(tab_id, mutations)| {
+            mutations.iter().any(|mutation| {
+                bookmark_target_matches_book(state, Some(*tab_id), mutation, book_id)
+            })
+        })
+}
+
+fn bookmark_target_matches_book(
+    state: &State,
+    tab_id: Option<u64>,
+    mutation: &BookmarkMutation,
+    book_id: i64,
+) -> bool {
+    bookmark_target_matches(
+        state,
+        tab_id,
+        mutation.book_id(),
+        mutation.file_path(),
+        book_id,
+    )
+}
+
+fn bookmark_target_matches(
+    state: &State,
+    tab_id: Option<u64>,
+    mutation_book_id: Option<i64>,
+    mutation_path: &Path,
+    book_id: i64,
+) -> bool {
+    if let Some(mutation_book_id) = mutation_book_id {
+        return mutation_book_id == book_id;
+    }
+    state
+        .book_removal_target
+        .as_ref()
+        .filter(|target| target.id == book_id)
+        .is_some_and(|target| {
+            tab_id.is_some_and(|tab_id| target.tab_ids.contains(&tab_id))
+                || target.matches_path(mutation_path)
+        })
+}
+
+fn start_book_removal(state: &State, id: i64) -> Task<Message> {
+    let Some(lib) = state.library.clone() else {
+        return Task::none();
+    };
+    let saves = state.reading_state_saves.clone();
+    Task::perform(
+        async move {
+            if let Some(saves) = saves {
+                saves.flush().await.map_err(|error| error.to_string())?;
+            }
+            lib.remove(id).await.map_err(|error| format!("{error:#}"))
+        },
+        move |result| Message::BookRemoved { id, result },
+    )
+}
+
+fn continue_deferred_book_removal(state: &mut State) -> Task<Message> {
+    let Some(id) = state.deferred_remove_book else {
+        return Task::none();
+    };
+    if state.removing_book != Some(id) || bookmark_mutations_target_book(state, id) {
+        return Task::none();
+    }
+    state.deferred_remove_book = None;
+    start_book_removal(state, id)
 }
 
 fn cancel_close_after_bookmark_failure(
@@ -4609,25 +4775,27 @@ fn update_bookmark_status(state: &mut State) {
 }
 
 fn save_reading_state(state: &mut State) {
-    if state.reading_state_restore_failed
-        || state.book_id.is_some() && state.book_id == state.removing_book
-    {
+    if state.reading_state_restore_failed {
         return;
     }
-    if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
-        let save = ReadingStateSave {
-            book_id: state.book_id,
-            path: path.clone(),
-            content_hash: state.document_content_hash.clone(),
-            reading: FileReadingState {
-                page: state.current_page,
-                location_offset: current_epub_offset(state),
-                zoom: state.zoom.scale(),
-            },
-        };
-        if let Err(error) = saves.send(ReadingStateWriterMessage::Save(save)) {
-            state.open_error = Some(state_writer_send_error(error));
+    let save = state.file_path.as_ref().map(|path| ReadingStateSave {
+        book_id: state.book_id,
+        path: path.clone(),
+        content_hash: state.document_content_hash.clone(),
+        reading: FileReadingState {
+            page: state.current_page,
+            location_offset: current_epub_offset(state),
+            zoom: state.zoom.scale(),
+        },
+    });
+    if active_session_matches_removal(state) {
+        if let (Some(target), Some(save)) = (&mut state.book_removal_target, save) {
+            target.suppressed_save = Some(save);
         }
+        return;
+    }
+    if let Some(save) = save {
+        queue_reading_state_save(state, save);
     }
 
     // Also update library progress so the library sort/order stays current.
@@ -4640,6 +4808,26 @@ fn save_reading_state(state: &mut State) {
             state.open_error = Some(state_writer_send_error(error));
         }
     }
+}
+
+fn queue_reading_state_save(state: &mut State, save: ReadingStateSave) {
+    if let Some(saves) = &state.reading_state_saves
+        && let Err(error) = saves.send(ReadingStateWriterMessage::Save(save))
+    {
+        state.open_error = Some(state_writer_send_error(error));
+    }
+}
+
+fn active_session_matches_removal(state: &State) -> bool {
+    let (Some(target), Some(path)) = (&state.book_removal_target, &state.file_path) else {
+        return false;
+    };
+    target.matches_session(
+        state.active_tab_id,
+        state.book_id,
+        path,
+        state.document_content_hash.as_deref(),
+    )
 }
 
 fn save_preference(state: &mut State, key: &'static str, value: impl Into<String>) {
@@ -4728,11 +4916,12 @@ fn persist_window_geometry(state: &mut State) -> Task<Message> {
                     (WINDOW_Y_KEY, position.y.round() as i64),
                 ]);
             }
-            if let Err(error) = store.set_pref_ints_async(&values).await {
-                eprintln!("warning: failed to save window geometry: {error}");
-            }
+            store
+                .set_pref_ints_async(&values)
+                .await
+                .map_err(|error| error.to_string())
         },
-        |_| Message::WindowGeometryPersisted,
+        Message::WindowGeometryPersisted,
     )
 }
 
@@ -10622,16 +10811,37 @@ mod tests {
         assert_eq!(state.close_after_geometry_save, Some(id));
         assert!(state.window_geometry_dirty);
 
-        let latest_save = update(&mut state, Message::WindowGeometryPersisted);
+        let latest_save = update(&mut state, Message::WindowGeometryPersisted(Ok(())));
         assert!(latest_save.units() > 0);
         assert!(state.window_geometry_saving);
         assert_eq!(state.close_after_geometry_save, Some(id));
 
-        let close = update(&mut state, Message::WindowGeometryPersisted);
+        let close = update(&mut state, Message::WindowGeometryPersisted(Ok(())));
         assert!(close.units() > 0);
         assert!(!state.window_geometry_saving);
         assert_eq!(state.close_after_geometry_save, Some(id));
         assert!(state.close_flush_started);
+    }
+
+    #[test]
+    fn failed_geometry_persistence_cancels_close() {
+        let (mut state, _) = boot();
+        state.window_geometry_saving = true;
+        state.close_after_geometry_save = Some(window::Id::unique());
+
+        let task = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.window_geometry_saving);
+        assert_eq!(state.close_after_geometry_save, None);
+        assert!(!state.close_flush_started);
+        assert_eq!(
+            state.open_error,
+            Some(AppError::Storage("database unavailable".to_owned()))
+        );
     }
 
     #[test]
@@ -11575,13 +11785,18 @@ mod tests {
         assert_eq!(state.font_size, 18.0);
         assert_eq!(state.line_spacing, 1.8);
         assert_eq!(
-            store.get_pref_async(ADD_BOOK_BEHAVIOR_KEY).await.as_deref(),
+            store
+                .get_pref_async(ADD_BOOK_BEHAVIOR_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("copy")
         );
         assert_eq!(
             store
                 .get_pref_async(DEFAULT_READING_MODE_KEY)
                 .await
+                .unwrap()
                 .as_deref(),
             Some("continuous")
         );
@@ -11589,6 +11804,7 @@ mod tests {
             store
                 .get_pref_async(DEFAULT_READER_THEME_KEY)
                 .await
+                .unwrap()
                 .as_deref(),
             Some("sepia")
         );
@@ -11596,6 +11812,7 @@ mod tests {
             store
                 .get_pref_async(DEFAULT_EPUB_FONT_SIZE_KEY)
                 .await
+                .unwrap()
                 .as_deref(),
             Some("18")
         );
@@ -11603,11 +11820,16 @@ mod tests {
             store
                 .get_pref_async(DEFAULT_EPUB_LINE_SPACING_KEY)
                 .await
+                .unwrap()
                 .as_deref(),
             Some("1.8")
         );
         assert_eq!(
-            store.get_pref_async(DEFAULT_PDF_ZOOM_KEY).await.as_deref(),
+            store
+                .get_pref_async(DEFAULT_PDF_ZOOM_KEY)
+                .await
+                .unwrap()
+                .as_deref(),
             Some("fit-width")
         );
     }
@@ -11745,28 +11967,59 @@ mod tests {
         let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
         state.book_id = Some(42);
         state.file_path = Some(PathBuf::from("removed.epub"));
-        state.library_books = vec![test_book(42), test_book(7)];
+        let mut removed = test_book(42);
+        removed.file_path = shosai_core::canonical_path_key(Path::new("removed.epub"));
+        removed.original_path = Some(shosai_core::path_key(Path::new("original.epub")));
+        removed.content_hash = state.document_content_hash.clone();
+        state.library_books = vec![removed.clone(), test_book(7)];
         state.current_page = 3;
         state.epub_offset = 17;
         state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
-        let matching = capture_reader_tab(&state).unwrap();
+        let cached_bookmark = Bookmark {
+            id: 9,
+            file_path: "removed.epub".to_owned(),
+            book_id: Some(42),
+            page: 1,
+            location_offset: None,
+            title: None,
+            note: None,
+            color: "yellow".to_owned(),
+            created_at: "now".to_owned(),
+        };
+        state.bookmarks.push(cached_bookmark.clone());
+        state.editing_note_id = Some(9);
+        let mut matching = capture_reader_tab(&state).unwrap();
+        matching.session.book_id = None;
         let mut unrelated = matching.clone();
         unrelated.id = 2;
         unrelated.session.book_id = Some(7);
         unrelated.session.locator = DeviceFileLocator::from_path("other.epub");
         state.tabs = vec![matching, unrelated];
         state.removing_book = Some(42);
+        let mut removal_target = BookRemovalTarget::from_book(&removed);
+        removal_target.tab_ids.insert(1);
+        state.book_removal_target = Some(removal_target);
+        let bookmark_generation = state.bookmark_mutation_generation;
+        let original_path = PathBuf::from("original.epub");
+        save_active_tab(&mut state);
 
         let _ = update(
             &mut state,
             Message::BookRemoved {
                 id: 42,
-                result: Ok(()),
+                result: Ok(Some(original_path.clone())),
             },
         );
 
         assert_eq!(state.book_id, None);
+        assert_eq!(state.file_path.as_deref(), Some(original_path.as_path()));
         assert_eq!(state.tabs[0].session.book_id, None);
+        assert_eq!(state.tabs[0].session.locator.path(), original_path);
+        assert!(state.bookmarks.is_empty());
+        assert!(state.tabs[0].bookmarks.is_empty());
+        assert!(state.editing_note_id.is_none());
+        assert!(state.tabs[0].editing_note_id.is_none());
+        assert!(state.bookmark_mutation_generation > bookmark_generation);
         assert_eq!(state.tabs[1].session.book_id, Some(7));
         assert_eq!(state.removing_book, None);
         assert_eq!(
@@ -11786,12 +12039,77 @@ mod tests {
             .unwrap();
         wait.await.unwrap().unwrap();
         let save = store
-            .get_async(Path::new("removed.epub"), &"0".repeat(64))
+            .get_async(&original_path, &"0".repeat(64))
             .await
             .unwrap()
             .expect("removal should persist path-backed reading state");
         assert_eq!(save.page, 3);
         assert_eq!(save.location_offset, Some(17));
+    }
+
+    #[tokio::test]
+    async fn failed_removal_catches_up_suppressed_path_only_reading_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .unwrap();
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = directory.path().join("managed.epub");
+        state.file_path = Some(path.clone());
+        state.current_page = 4;
+        state.reading_state_saves = Some(start_reading_state_writer(store.clone()));
+        let mut book = test_book(42);
+        book.file_path = shosai_core::canonical_path_key(&path);
+        book.content_hash = state.document_content_hash.clone();
+        let mut target = BookRemovalTarget::from_book(&book);
+        target.tab_ids.insert(1);
+        state.book_removal_target = Some(target);
+        state.removing_book = Some(42);
+
+        save_active_tab(&mut state);
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        assert!(
+            store
+                .get_async(&path, &"0".repeat(64))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let _ = update(
+            &mut state,
+            Message::BookRemoved {
+                id: 42,
+                result: Err("database unavailable".to_owned()),
+            },
+        );
+        state
+            .reading_state_saves
+            .as_ref()
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .get_async(&path, &"0".repeat(64))
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            4
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -11827,6 +12145,7 @@ mod tests {
         state.library = Some(library);
         state.reading_state_saves = Some(writer.clone());
         state.pending_remove_book = Some(book.id);
+        state.library_books.push(book.clone());
 
         let task = update(&mut state, Message::RemoveBook(book.id));
         let mut messages = iced_runtime::task::into_stream(task).unwrap();
@@ -11955,12 +12274,22 @@ mod tests {
         ));
         state.pending_remove_book = Some(42);
         let book = test_book(42);
+        state.library_books.push(book.clone());
 
         let removal = update(&mut state, Message::RemoveBook(42));
 
         assert!(removal.units() > 0);
         assert_eq!(state.pending_remove_book, None);
         assert_eq!(state.removing_book, Some(42));
+        assert_eq!(update(&mut state, Message::OpenFile).units(), 0);
+        assert_eq!(
+            update(
+                &mut state,
+                Message::FileSelected(Some(PathBuf::from("other.epub")))
+            )
+            .units(),
+            0
+        );
         drop(render_book_card(&state, &book));
         drop(render_continue_card(&state, &book));
 
@@ -11976,6 +12305,121 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn book_removal_requires_an_authoritative_target_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.pending_remove_book = Some(42);
+
+        let removal = update(&mut state, Message::RemoveBook(42));
+
+        assert_eq!(removal.units(), 0);
+        assert_eq!(state.removing_book, None);
+        assert!(state.book_removal_target.is_none());
+        assert!(state.library_error.is_some());
+    }
+
+    #[tokio::test]
+    async fn book_removal_waits_for_targeted_bookmark_mutations_and_rejects_new_ones() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.pending_remove_book = Some(42);
+        let path = directory.path().join("managed.epub");
+        std::fs::write(&path, b"managed").unwrap();
+        let alias_dir = directory.path().join("alias");
+        std::fs::create_dir(&alias_dir).unwrap();
+        let alias = alias_dir.join("..").join("managed.epub");
+        let mut book = test_book(42);
+        book.file_path = shosai_core::canonical_path_key(&path);
+        book.original_path = Some(shosai_core::path_key(Path::new("original.epub")));
+        state.library_books.push(book);
+        state
+            .bookmark_mutation_queues
+            .entry(1)
+            .or_default()
+            .push_back(BookmarkMutation::Delete {
+                generation: 1,
+                file_path: path.clone(),
+                book_id: None,
+                id: 7,
+            });
+        state.bookmark_mutations_active.insert(1);
+        state
+            .bookmark_mutation_queues
+            .entry(3)
+            .or_default()
+            .push_back(BookmarkMutation::Delete {
+                generation: 3,
+                file_path: alias.clone(),
+                book_id: None,
+                id: 8,
+            });
+        state.bookmark_mutations_active.insert(3);
+
+        let deferred = update(&mut state, Message::RemoveBook(42));
+
+        assert_eq!(deferred.units(), 0);
+        assert_eq!(state.removing_book, Some(42));
+        assert_eq!(state.deferred_remove_book, Some(42));
+        state.library_books.clear();
+        let rejected = queue_bookmark_mutation(
+            &mut state,
+            2,
+            BookmarkMutation::Toggle {
+                generation: 2,
+                file_path: alias.clone(),
+                content_hash: Some("0".repeat(64)),
+                book_id: None,
+                page: 1,
+                location_offset: None,
+            },
+        );
+        assert_eq!(rejected.units(), 0);
+        assert!(!state.bookmark_mutation_queues.contains_key(&2));
+
+        let still_deferred = update(
+            &mut state,
+            Message::BookmarkMutationFinished {
+                tab_id: 1,
+                generation: 1,
+                file_path: path,
+                book_id: None,
+                result: Ok(()),
+            },
+        );
+
+        assert_eq!(still_deferred.units(), 0);
+        assert_eq!(state.deferred_remove_book, Some(42));
+        let removal = update(
+            &mut state,
+            Message::BookmarkMutationFinished {
+                tab_id: 3,
+                generation: 3,
+                file_path: alias,
+                book_id: None,
+                result: Ok(()),
+            },
+        );
+
+        assert!(removal.units() > 0);
+        assert_eq!(state.deferred_remove_book, None);
+        assert_eq!(state.removing_book, Some(42));
+    }
+
+    #[tokio::test]
     async fn library_mutations_cancel_pending_library_backed_opens() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
@@ -11985,6 +12429,7 @@ mod tests {
         let (mut removal_state, _) = boot();
         removal_state.library = Some(library.clone());
         removal_state.pending_remove_book = Some(42);
+        removal_state.library_books.push(test_book(42));
         removal_state.document_opening = true;
         removal_state.document_open_book_id = Some(42);
         let removal_cancellation = Cancellation::new();
@@ -14699,7 +15144,7 @@ mod tests {
         wait_for_flush.await.unwrap().unwrap();
 
         assert_eq!(
-            store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await,
+            store.get_pref_async(LANGUAGE_PREFERENCE_KEY).await.unwrap(),
             Some(LanguagePreference::English.stored().to_string())
         );
     }

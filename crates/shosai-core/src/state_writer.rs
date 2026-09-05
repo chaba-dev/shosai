@@ -1022,7 +1022,7 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if store.get_pref_async("language").await.as_deref() == Some("en") {
+                if store.get_pref_async("language").await.unwrap().as_deref() == Some("en") {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -1066,7 +1066,7 @@ mod tests {
             .unwrap();
         writer.shutdown().await.unwrap();
         assert_eq!(
-            store.get_pref_async("language").await.as_deref(),
+            store.get_pref_async("language").await.unwrap().as_deref(),
             Some("en")
         );
     }
@@ -1105,7 +1105,10 @@ mod tests {
             .await
             .unwrap();
         writer.quiesce_and_shutdown().await.unwrap();
-        assert_eq!(store.get_pref_async("theme").await.as_deref(), Some("dark"));
+        assert_eq!(
+            store.get_pref_async("theme").await.unwrap().as_deref(),
+            Some("dark")
+        );
     }
 
     #[tokio::test]
@@ -1154,8 +1157,8 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if store.get_pref_async("first").await.as_deref() == Some("one")
-                    && store.get_pref_async("second").await.as_deref() == Some("two")
+                if store.get_pref_async("first").await.unwrap().as_deref() == Some("one")
+                    && store.get_pref_async("second").await.unwrap().as_deref() == Some("two")
                 {
                     break;
                 }
@@ -1195,7 +1198,7 @@ mod tests {
         sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
         shutdown.await.unwrap().unwrap();
         assert_eq!(
-            store.get_pref_async("language").await.as_deref(),
+            store.get_pref_async("language").await.unwrap().as_deref(),
             Some("en")
         );
         assert_eq!(

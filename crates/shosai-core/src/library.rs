@@ -1855,10 +1855,23 @@ impl Library {
     }
 
     /// Remove a book from the library and delete its private managed copy, if any.
-    pub async fn remove(&self, book_id: i64) -> Result<()> {
+    pub async fn remove(&self, book_id: i64) -> Result<Option<PathBuf>> {
         let _storage_guard = acquire_managed_storage(None).await?;
         let book = self.get(book_id).await?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let detached_path = if let Some(book) = &book
+            && book.storage_kind == StorageKind::Managed
+        {
+            let original_path = book
+                .original_path
+                .as_deref()
+                .context("managed book has no original path")?;
+            validate_import_path(&path_from_key(original_path))?;
+            reconcile_identity(&mut transaction, book_id, &book.file_path, original_path).await?;
+            Some(original_path.to_owned())
+        } else {
+            None
+        };
         sqlx::query("UPDATE bookmarks SET book_id = NULL WHERE book_id = ?")
             .bind(book_id)
             .execute(&mut *transaction)
@@ -1880,7 +1893,7 @@ impl Library {
         {
             self.remove_unreferenced_managed_file(&book.file_path).await;
         }
-        Ok(())
+        Ok(detached_path.map(|path| path_from_key(&path)))
     }
 
     /// Get a book by stable ID.

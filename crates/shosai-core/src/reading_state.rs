@@ -516,28 +516,35 @@ impl ReadingStateStore {
     }
 
     /// Get a stored preference value.
-    pub async fn get_pref_async(&self, key: &str) -> Option<String> {
-        if validate_preference_key(key).is_err() {
-            return None;
-        }
-        sqlx::query("SELECT value FROM preferences WHERE key = ?")
+    pub async fn get_pref_async(&self, key: &str) -> Result<Option<String>> {
+        validate_preference_key(key)?;
+        let value = sqlx::query("SELECT value FROM preferences WHERE key = ?")
             .bind(key)
             .fetch_optional(&self.pool)
             .await
-            .ok()
-            .flatten()
-            .map(|row| row.get::<String, _>("value"))
+            .context("failed to load preference")?
+            .map(|row| row.try_get::<String, _>("value"))
+            .transpose()?;
+        if let Some(value) = &value {
+            validate_preference(key, value)?;
+        }
+        Ok(value)
     }
 
     /// Get all stored preferences in one query.
-    pub async fn get_prefs_async(&self) -> HashMap<String, String> {
-        sqlx::query("SELECT key, value FROM preferences")
+    pub async fn get_prefs_async(&self) -> Result<HashMap<String, String>> {
+        let rows = sqlx::query("SELECT key, value FROM preferences")
             .fetch_all(&self.pool)
             .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|row| (row.get::<String, _>("key"), row.get::<String, _>("value")))
-            .collect()
+            .context("failed to load preferences")?;
+        let mut preferences = HashMap::with_capacity(rows.len());
+        for row in rows {
+            let key = row.try_get::<String, _>("key")?;
+            let value = row.try_get::<String, _>("value")?;
+            validate_preference(&key, &value)?;
+            preferences.insert(key, value);
+        }
+        Ok(preferences)
     }
 
     /// Set a stored preference value.
@@ -560,7 +567,7 @@ impl ReadingStateStore {
     }
 
     /// Get a stored preference value as an integer.
-    pub fn get_pref_int(&self, key: &str) -> Option<i64> {
+    pub fn get_pref_int(&self, key: &str) -> Result<Option<i64>> {
         // Preferences are stored as strings to keep the table flexible.
         let rt = tokio::runtime::Handle::current();
         rt.block_on(self.get_pref_int_async(key))
@@ -573,10 +580,10 @@ impl ReadingStateStore {
     }
 
     /// Async: get a preference value as an integer.
-    pub async fn get_pref_int_async(&self, key: &str) -> Option<i64> {
+    pub async fn get_pref_int_async(&self, key: &str) -> Result<Option<i64>> {
         self.get_pref_async(key)
             .await
-            .and_then(|value| value.parse::<i64>().ok())
+            .map(|value| value.and_then(|value| value.parse::<i64>().ok()))
     }
 
     /// Async: set a preference value as an integer.

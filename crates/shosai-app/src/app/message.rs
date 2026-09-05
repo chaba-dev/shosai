@@ -156,7 +156,7 @@ pub enum Message {
     RemoveBook(i64),
     BookRemoved {
         id: i64,
-        result: Result<(), String>,
+        result: Result<Option<PathBuf>, String>,
     },
     LibrarySearchChanged(String),
     LibrarySearchDebounced(u64),
@@ -289,7 +289,7 @@ pub enum Message {
         scale_factor: f32,
     },
     PersistWindowGeometry(u64),
-    WindowGeometryPersisted,
+    WindowGeometryPersisted(Result<(), String>),
     ReadingStateFlushed {
         id: window::Id,
         result: Result<(), String>,
