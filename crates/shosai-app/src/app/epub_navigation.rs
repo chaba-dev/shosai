@@ -110,13 +110,19 @@ pub(super) fn navigate_to_current_search_result(
         .get(state.search_current)
         .map(|result| (result.page, result.offset));
     if let Some((target_page, offset)) = target {
-        if matches!(state.document, Some(OpenDocument::Epub(_))) {
+        let is_epub = matches!(state.document, Some(OpenDocument::Epub(_)));
+        if is_epub {
             state.epub_offset = offset;
         }
         if target_page != state.current_page && target_page < state.total_pages {
             state.current_page = target_page;
             state.epub_page = 0;
             state.page_input = format!("{}", state.current_page + 1);
+            if !is_epub {
+                save_reading_state(state);
+            }
+        }
+        if is_epub {
             save_reading_state(state);
         }
     }

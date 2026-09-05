@@ -231,20 +231,10 @@ pub(super) fn epub_image_byte_len(document: &EpubDoc, path: &str) -> Option<usiz
     if resource.media_type() == "image/svg+xml" {
         return Some(resource.bytes().len());
     }
-    let (width, height) = ::image::ImageReader::new(Cursor::new(resource.bytes()))
-        .with_guessed_format()
-        .ok()?
-        .into_dimensions()
-        .ok()?;
-    if width > EPUB_IMAGE_MAX_DIMENSION || height > EPUB_IMAGE_MAX_DIMENSION {
-        return None;
-    }
-    usize::try_from(
-        u64::from(width)
-            .checked_mul(u64::from(height))?
-            .checked_mul(4)?,
-    )
-    .ok()
+    // Dimension probing may decode format metadata. Reserve the full bounded
+    // raster size before any decoder is constructed instead of probing before
+    // transient decode admission.
+    usize::try_from(EPUB_IMAGE_MAX_BYTES).ok()
 }
 
 pub(super) fn epub_image_transient_byte_len(document: &EpubDoc, path: &str) -> Option<usize> {

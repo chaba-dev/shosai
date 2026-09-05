@@ -2,17 +2,19 @@
 //!
 //! Pages are indexed cheaply and decoded only when requested.
 
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result};
+use image::ImageDecoder;
 use zip::ZipArchive;
 
 use crate::document::{DocumentMetadata, RenderedPage};
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "webp", "bmp"];
 const MIB: u64 = 1024 * 1024;
+pub(crate) const IMAGE_PROBE_METADATA_BYTES: usize = 1024 * 1024;
 
 /// Resource limits applied while opening and reading a CBZ.
 #[derive(Clone, Copy, Debug)]
@@ -45,13 +47,25 @@ impl Default for CbzLimits {
 }
 
 #[derive(Debug)]
+struct SharedBytes(std::sync::Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for SharedBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
+#[derive(Debug)]
 pub struct CbzDoc {
     page_paths: Vec<String>,
     page_byte_lengths: Vec<usize>,
-    data: Vec<u8>,
+    archive: Mutex<ZipArchive<Cursor<SharedBytes>>>,
+    encoded_bytes: usize,
     title: Option<String>,
     limits: CbzLimits,
     dimensions: Mutex<Vec<Option<(u32, u32)>>>,
+    native_bytes_per_pixel: Mutex<Vec<Option<usize>>>,
+    archive_metadata_bytes: usize,
     _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
@@ -61,9 +75,9 @@ impl CbzDoc {
             .page_paths
             .iter()
             .try_fold(0_usize, |total, path| total.checked_add(path.capacity()))?;
-        self.data
-            .capacity()
+        self.encoded_bytes
             .checked_add(names)?
+            .checked_add(self.archive_metadata_bytes)?
             .checked_add(
                 self.page_paths
                     .capacity()
@@ -78,6 +92,11 @@ impl CbzDoc {
                 self.page_paths
                     .capacity()
                     .checked_mul(std::mem::size_of::<Option<(u32, u32)>>())?,
+            )?
+            .checked_add(
+                self.page_paths
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<Option<usize>>())?,
             )?
             .checked_add(self.title.as_ref().map_or(0, String::capacity))
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>()))
@@ -112,9 +131,17 @@ impl CbzDoc {
         if metadata.len() > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
+        let preflight =
+            crate::zip_preflight::preflight(&mut file, limits.max_entries, is_cancelled)
+                .context("failed to preflight CBZ ZIP archive")?;
+        file.rewind()?;
+        let archive_metadata_bytes = crate::zip_preflight::metadata_allocation_ceiling(preflight)
+            .context("CBZ metadata admission overflowed")?;
         let retained_ceiling = crate::document_admission::cbz_retained_ceiling(
-            usize::try_from(limits.max_archive_bytes).unwrap_or(usize::MAX),
+            usize::try_from(metadata.len()).unwrap_or(usize::MAX),
             limits.max_entries,
+            archive_metadata_bytes,
+            preflight.copied_filename_ceiling,
         )
         .context("CBZ retained-memory admission overflowed")?;
         let admission =
@@ -126,6 +153,25 @@ impl CbzDoc {
             is_cancelled,
         )
         .with_context(|| format!("failed to read {}", path.display()))?;
+        let snapshot_preflight = crate::zip_preflight::preflight(
+            Cursor::new(data.as_slice()),
+            limits.max_entries,
+            is_cancelled,
+        )
+        .context("failed to preflight CBZ snapshot")?;
+        let snapshot_metadata =
+            crate::zip_preflight::metadata_allocation_ceiling(snapshot_preflight)
+                .context("CBZ snapshot metadata admission overflowed")?;
+        let required = crate::document_admission::cbz_retained_ceiling(
+            data.capacity(),
+            limits.max_entries,
+            snapshot_metadata,
+            snapshot_preflight.copied_filename_ceiling,
+        )
+        .context("CBZ snapshot admission overflowed")?;
+        if required > retained_ceiling {
+            crate::resource_limit!("CBZ changed after retained-memory admission");
+        }
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
         Self::from_bytes_with_title_cancellable_admitted(
             data,
@@ -178,9 +224,21 @@ impl CbzDoc {
         limits: CbzLimits,
         is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
-        let retained_ceiling =
-            crate::document_admission::cbz_retained_ceiling(data.capacity(), limits.max_entries)
-                .context("CBZ retained-memory admission overflowed")?;
+        let preflight = crate::zip_preflight::preflight(
+            Cursor::new(data.as_slice()),
+            limits.max_entries,
+            is_cancelled,
+        )
+        .context("failed to preflight CBZ ZIP archive")?;
+        let archive_metadata_bytes = crate::zip_preflight::metadata_allocation_ceiling(preflight)
+            .context("CBZ metadata admission overflowed")?;
+        let retained_ceiling = crate::document_admission::cbz_retained_ceiling(
+            data.capacity(),
+            limits.max_entries,
+            archive_metadata_bytes,
+            preflight.copied_filename_ceiling,
+        )
+        .context("CBZ retained-memory admission overflowed")?;
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         Self::from_bytes_with_title_cancellable_admitted(
@@ -203,11 +261,15 @@ impl CbzDoc {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
-        let mut archive =
-            ZipArchive::new(Cursor::new(&data)).context("failed to open CBZ as ZIP archive")?;
-        if archive.len() > limits.max_entries {
-            crate::resource_limit!("CBZ archive exceeds entry count limit");
-        }
+        let preflight = crate::zip_preflight::preflight(
+            Cursor::new(data.as_slice()),
+            limits.max_entries,
+            is_cancelled,
+        )
+        .context("failed to preflight CBZ ZIP archive")?;
+        let encoded_bytes = data.capacity();
+        let mut archive = ZipArchive::new(Cursor::new(SharedBytes(std::sync::Arc::new(data))))
+            .context("failed to open CBZ as ZIP archive")?;
 
         let mut total = 0_u64;
         let mut page_paths = Vec::new();
@@ -254,14 +316,19 @@ impl CbzDoc {
             anyhow::bail!("CBZ archive contains no image files");
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
+        let native_bytes_per_pixel = Mutex::new(vec![None; page_paths.len()]);
         let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
         let mut parsed = Self {
             page_paths,
             page_byte_lengths,
-            data,
+            archive: Mutex::new(archive),
+            encoded_bytes,
             title,
             limits,
             dimensions,
+            native_bytes_per_pixel,
+            archive_metadata_bytes: crate::zip_preflight::metadata_allocation_ceiling(preflight)
+                .context("CBZ archive metadata charge overflowed")?,
             _admission: None,
         };
         let retained_bytes = parsed
@@ -277,6 +344,11 @@ impl CbzDoc {
 
     pub fn page_source_byte_len(&self, index: usize) -> Option<usize> {
         self.page_byte_lengths.get(index).copied()
+    }
+
+    pub fn page_probe_admission_byte_len(&self, index: usize) -> Option<usize> {
+        self.page_source_byte_len(index)?
+            .checked_add(IMAGE_PROBE_METADATA_BYTES)
     }
 
     /// Worst-case source and decode admission used by non-rendering callers.
@@ -305,8 +377,7 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let mut archive =
-            ZipArchive::new(Cursor::new(&self.data)).context("failed to reopen CBZ archive")?;
+        let mut archive = self.archive.lock().expect("CBZ archive mutex poisoned");
         let mut file = archive
             .by_name(path)
             .with_context(|| format!("image not found in archive: {path}"))?;
@@ -316,27 +387,31 @@ impl CbzDoc {
         {
             crate::resource_limit!("CBZ entry exceeds streamed byte limit: {path}");
         }
-        let capacity = usize::try_from(declared.min(self.limits.max_entry_bytes)).unwrap_or(0);
+        let capacity = usize::try_from(declared).context("CBZ entry size cannot be represented")?;
         let mut bytes = Vec::with_capacity(capacity);
         let mut buffer = [0_u8; 64 * 1024];
-        loop {
+        while bytes.len() < capacity {
             check_cancelled(is_cancelled)?;
-            let remaining = self
-                .limits
-                .max_entry_bytes
-                .saturating_add(1)
-                .saturating_sub(bytes.len() as u64);
+            let remaining = capacity - bytes.len();
+            let chunk = remaining.min(buffer.len());
             let read = file
                 .by_ref()
-                .take(remaining)
-                .read(&mut buffer)
+                .read(&mut buffer[..chunk])
                 .with_context(|| format!("failed to read image: {path}"))?;
             if read == 0 {
                 break;
             }
             bytes.extend_from_slice(&buffer[..read]);
         }
+        check_cancelled(is_cancelled)?;
+        let mut extra = [0_u8; 1];
+        let extra = file
+            .read(&mut extra)
+            .with_context(|| format!("failed to finish reading image: {path}"))?;
         let streamed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        if extra != 0 {
+            crate::resource_limit!("CBZ entry exceeds declared streamed byte limit: {path}");
+        }
         if streamed > self.limits.max_entry_bytes
             || streamed > self.limits.max_total_uncompressed_bytes
         {
@@ -349,7 +424,12 @@ impl CbzDoc {
     }
 
     fn cached_dimensions(&self, index: usize) -> Option<(u32, u32)> {
-        self.dimensions.lock().expect("dimension cache poisoned")[index]
+        self.dimensions
+            .lock()
+            .expect("dimension cache poisoned")
+            .get(index)
+            .copied()
+            .flatten()
     }
 
     fn inspect_dimensions(&self, index: usize, bytes: &[u8]) -> Result<(u32, u32)> {
@@ -357,13 +437,23 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let reader = image::ImageReader::new(Cursor::new(bytes))
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
             .with_guessed_format()
             .with_context(|| format!("failed to identify image: {path}"))?;
-        let (width, height) = reader
-            .into_dimensions()
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(self.limits.max_image_width);
+        limits.max_image_height = Some(self.limits.max_image_height);
+        limits.max_alloc = Some(IMAGE_PROBE_METADATA_BYTES as u64);
+        reader.limits(limits);
+        let decoder = reader
+            .into_decoder()
             .with_context(|| format!("failed to inspect image dimensions: {path}"))?;
+        let (width, height) = decoder.dimensions();
+        let native_bytes_per_pixel = usize::from(decoder.color_type().bytes_per_pixel());
         self.validate_dimensions(width, height)?;
+        self.native_bytes_per_pixel
+            .lock()
+            .expect("image byte-depth cache poisoned")[index] = Some(native_bytes_per_pixel);
         self.dimensions.lock().expect("dimension cache poisoned")[index] = Some((width, height));
         Ok((width, height))
     }
@@ -527,16 +617,36 @@ impl CbzDoc {
             return None;
         }
         let (width, height) = self.cached_dimensions(index)?;
+        let native_bytes_per_pixel = self
+            .native_bytes_per_pixel
+            .lock()
+            .expect("image byte-depth cache poisoned")
+            .get(index)
+            .copied()
+            .flatten()?;
         let (target_width, target_height) = scaled_dimensions(width, height, scale)?;
         let decoded = usize::try_from(width)
             .ok()?
             .checked_mul(usize::try_from(height).ok()?)?
-            .checked_mul(4)?;
+            .checked_mul(native_bytes_per_pixel)?;
+        let decoder = decoded.max(usize::try_from(self.limits.max_decoded_rgba_bytes).ok()?);
         let resized = usize::try_from(target_width)
             .ok()?
             .checked_mul(usize::try_from(target_height).ok()?)?
-            .checked_mul(4)?;
-        decoded.checked_add(resized)
+            .checked_mul(native_bytes_per_pixel)?;
+        // image 0.25's Lanczos path resizes vertically first through an
+        // Rgba32F buffer spanning the source width and target height.
+        let resize_intermediate = if (scale - 1.0).abs() > f32::EPSILON {
+            usize::try_from(width)
+                .ok()?
+                .checked_mul(usize::try_from(target_height).ok()?)?
+                .checked_mul(std::mem::size_of::<image::Rgba<f32>>())?
+        } else {
+            0
+        };
+        decoder
+            .checked_add(resized)?
+            .checked_add(resize_intermediate)
     }
 
     /// Return dimensions already discovered by a prior size query or render.
@@ -621,28 +731,31 @@ fn read_cbz_snapshot_cancellable(
     max_archive_bytes: u64,
     is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<u8>> {
-    let mut data = Vec::with_capacity(
-        usize::try_from(expected_bytes.min(max_archive_bytes)).unwrap_or_default(),
-    );
+    if expected_bytes > max_archive_bytes {
+        crate::resource_limit!("CBZ archive exceeds encoded byte limit");
+    }
+    let mut data = Vec::with_capacity(usize::try_from(expected_bytes).unwrap_or_default());
     let mut buffer = [0_u8; 64 * 1024];
-    loop {
+    while (data.len() as u64) < expected_bytes {
         check_cancelled(is_cancelled)?;
-        let remaining = max_archive_bytes
-            .saturating_add(1)
-            .saturating_sub(data.len() as u64);
-        let read = reader.by_ref().take(remaining).read(&mut buffer)?;
+        let remaining = usize::try_from(expected_bytes - data.len() as u64)
+            .unwrap_or(usize::MAX)
+            .min(buffer.len());
+        let read = reader.read(&mut buffer[..remaining])?;
         if read == 0 {
             break;
         }
         data.extend_from_slice(&buffer[..read]);
     }
+    let mut extra = [0_u8; 1];
+    let grew = reader.read(&mut extra)? != 0;
     let actual_bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    if actual_bytes > max_archive_bytes {
+    if grew && expected_bytes == max_archive_bytes {
         crate::resource_limit!("CBZ archive exceeds encoded byte limit");
     }
-    if actual_bytes != expected_bytes {
+    if actual_bytes != expected_bytes || grew {
         anyhow::bail!(
-            "CBZ changed while reading (expected {expected_bytes} bytes, read {actual_bytes})"
+            "CBZ changed while reading (expected {expected_bytes} bytes, read {actual_bytes}, grew={grew})"
         );
     }
     Ok(data)
@@ -658,6 +771,9 @@ fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     #[test]
     fn cbz_snapshot_rejects_growth_and_truncation() {
@@ -677,6 +793,75 @@ mod tests {
         assert!(IMAGE_EXTENSIONS.contains(&"jpg"));
         assert!(IMAGE_EXTENSIONS.contains(&"png"));
         assert!(!IMAGE_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn raw_duplicate_names_count_toward_the_entry_limit() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        for name in ["page1.png", "page2.png"] {
+            writer
+                .start_file(name, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"not decoded").unwrap();
+        }
+        let mut bytes = writer.finish().unwrap().into_inner();
+        for offset in bytes
+            .windows(b"page2.png".len())
+            .enumerate()
+            .filter_map(|(offset, value)| (value == b"page2.png").then_some(offset))
+            .collect::<Vec<_>>()
+        {
+            bytes[offset..offset + b"page1.png".len()].copy_from_slice(b"page1.png");
+        }
+        let error = CbzDoc::from_bytes_with_limits(
+            bytes,
+            CbzLimits {
+                max_entries: 1,
+                ..CbzLimits::default()
+            },
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("too many entries"));
+    }
+
+    #[test]
+    fn retained_ceiling_includes_long_copied_page_names() {
+        let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+        let name = format!("{}.png", "a".repeat(6_000));
+        writer
+            .start_file(&name, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"not decoded").unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+
+        let document = CbzDoc::from_bytes_with_limits(
+            bytes,
+            CbzLimits {
+                max_entries: 1,
+                ..CbzLimits::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(document.page_count(), 1);
+        assert!(document.page_paths[0].capacity() >= name.len());
+    }
+
+    #[test]
+    fn retained_document_charges_zip_metadata_without_recharging_page_work() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+        let without_metadata = document.page_source_byte_len(0).unwrap()
+            + usize::try_from(document.limits.max_decoded_rgba_bytes).unwrap() * 2;
+        assert_eq!(
+            document.render_admission_byte_len(0).unwrap(),
+            without_metadata
+        );
+        assert!(document.archive_metadata_bytes > 0);
+        assert!(
+            document.retained_byte_len().unwrap()
+                >= document.encoded_bytes + document.archive_metadata_bytes
+        );
     }
 
     #[test]
@@ -704,6 +889,39 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("cancelled")
+        );
+    }
+
+    #[test]
+    fn invalid_page_indexes_return_errors_without_poisoning_dimension_cache() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+
+        assert!(document.page_size(usize::MAX).is_err());
+        assert!(document.rendered_byte_len(usize::MAX, 1.0).is_err());
+        assert!(document.page_size(0).is_ok());
+    }
+
+    #[test]
+    fn high_bit_depth_pages_charge_native_decode_and_resize_buffers() {
+        let image = image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::new(2, 2);
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba16(image)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+        archive
+            .start_file("page.png", SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(encoded.get_ref()).unwrap();
+        let bytes = archive.finish().unwrap().into_inner();
+        let document = CbzDoc::from_bytes(bytes).unwrap();
+
+        document.page_size(0).unwrap();
+
+        assert_eq!(
+            document.render_transient_byte_len(0, 2.0),
+            Some(usize::try_from(document.limits.max_decoded_rgba_bytes).unwrap() + 256)
         );
     }
 }

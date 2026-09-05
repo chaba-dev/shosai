@@ -60,7 +60,7 @@ pub enum StateWriterSendError {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum SaveKey {
     Book(i64),
-    Path(String),
+    Path(String, String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -83,6 +83,7 @@ struct PendingSave {
     save: StateSave,
     normalized_path: String,
     enqueue_sequence: u64,
+    persistence_revision: Option<i64>,
 }
 
 #[derive(Debug, Default)]
@@ -109,6 +110,7 @@ impl Pending {
                             .expect("prepared save must have a normalized path"),
                         enqueue_sequence: enqueue_sequence
                             .expect("prepared save must have an enqueue sequence"),
+                        persistence_revision: None,
                     },
                 );
             }
@@ -145,6 +147,13 @@ impl Pending {
             .chain(self.progress.keys().copied().map(WriteKey::Progress))
             .chain(self.preferences.keys().cloned().map(WriteKey::Preference))
             .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.saves.is_empty()
+            && self.progress.is_empty()
+            && self.preferences.is_empty()
+            && self.flushes.is_empty()
     }
 
     fn contains(&self, key: &WriteKey) -> bool {
@@ -259,7 +268,13 @@ impl Clone for StateWriter {
 impl Drop for StateWriter {
     fn drop(&mut self) {
         if self.inner.handles.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let state = self
+                .inner
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             self.inner.stopped.store(true, Ordering::Release);
+            drop(state);
             self.inner.notify.notify_one();
         }
     }
@@ -365,7 +380,13 @@ impl StateWriter {
     /// Stop accepting writes and wait until every accepted write has either
     /// persisted or produced a persistence error.
     pub async fn shutdown(&self) -> Result<(), PersistError> {
+        let state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         self.inner.stopped.store(true, Ordering::Release);
+        drop(state);
         self.inner.notify.notify_one();
         loop {
             let completed = self.inner.completed.notified();
@@ -428,17 +449,31 @@ pub fn start_state_writer(store: ReadingStateStore) -> StateWriter {
                 let _ = flush.send(error.clone().map_or(Ok(()), Err));
                 worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
             }
-            let pending_is_empty = worker
-                .state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .pending
-                .write_keys()
-                .is_empty();
-            if worker.stopped.load(Ordering::Acquire) {
+            let (pending_is_empty, stopped) = {
+                let state = worker
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                (
+                    state.pending.is_empty(),
+                    worker.stopped.load(Ordering::Acquire),
+                )
+            };
+            if stopped {
                 if let Some(error) = error
                     && worker.handles.load(Ordering::Acquire) != 0
                 {
+                    let flushes = {
+                        let mut state = worker
+                            .state
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        std::mem::take(&mut state.pending.flushes)
+                    };
+                    for flush in flushes {
+                        let _ = flush.send(Err(error.clone()));
+                        worker.outstanding_flushes.fetch_sub(1, Ordering::AcqRel);
+                    }
                     *worker
                         .completion
                         .lock()
@@ -484,6 +519,10 @@ fn prepare_message_with(
             Err(StateWriterSendError::Full)
         }
         StateWriterMessage::Preference(key, value) => {
+            // Admission is based on retained bytes, so discard caller-provided
+            // spare capacity before these strings enter the pending maps.
+            let key = key.into_boxed_str().into_string();
+            let value = value.into_boxed_str().into_string();
             let byte_len = key
                 .len()
                 .checked_mul(2)
@@ -496,8 +535,9 @@ fn prepare_message_with(
                 byte_len,
             })
         }
-        StateWriterMessage::Save(save) => {
-            let path = normalize_path(&save.path);
+        StateWriterMessage::Save(mut save) => {
+            let normalized = normalize_path(&save.path);
+            let path = normalized.as_str().to_owned();
             if path.len() > MAX_STATE_PATH_KEY_BYTES {
                 return Err(StateWriterSendError::Full);
             }
@@ -516,15 +556,28 @@ fn prepare_message_with(
             {
                 return Err(StateWriterSendError::Full);
             }
+            let hash = save.content_hash.as_deref().map(str::to_owned);
+            save.path = PathBuf::new();
+            save.content_hash = hash;
+            let copies = if save.book_id.is_some() { 1 } else { 4 };
             let byte_len = path
                 .len()
-                .checked_mul(if save.book_id.is_some() { 1 } else { 3 })
+                .checked_mul(copies)
                 .and_then(|bytes| {
-                    bytes.checked_add(save.content_hash.as_ref().map_or(0, String::len))
+                    save.content_hash.as_ref().map_or(Some(bytes), |hash| {
+                        hash.len().checked_mul(copies)?.checked_add(bytes)
+                    })
                 })
                 .ok_or(StateWriterSendError::Full)?;
             let key = save.book_id.map_or_else(
-                || WriteKey::Save(SaveKey::Path(path.clone())),
+                || {
+                    WriteKey::Save(SaveKey::Path(
+                        path.clone(),
+                        save.content_hash
+                            .clone()
+                            .expect("untracked saves require a content hash"),
+                    ))
+                },
                 |book_id| WriteKey::Save(SaveKey::Book(book_id)),
             );
             Ok(PreparedMessage {
@@ -577,23 +630,50 @@ async fn persist_batch(
     saves.sort_by_key(|(_, pending)| pending.enqueue_sequence);
     let mut failed_saves = Vec::new();
     let mut successful_saves = Vec::new();
+    let mut reservation_error = None;
+    for (_, pending) in &mut saves {
+        if pending.persistence_revision.is_none() {
+            match crate::reading_state::reserve_reading_state_revision(store.pool()).await {
+                Ok(revision) => pending.persistence_revision = Some(revision),
+                Err(error) => {
+                    reservation_error = Some(format!("reading state revision: {error:#}"));
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(error) = reservation_error {
+        failed_saves.extend(
+            saves
+                .drain(..)
+                .map(|(key, pending)| (key, pending, error.clone())),
+        );
+    }
     for (key, pending) in saves {
+        let revision = pending
+            .persistence_revision
+            .expect("every save is revisioned before persistence");
         let result = if let Some(book_id) = pending.save.book_id {
             match store
-                .set_for_book_current_path_async(book_id, &pending.save.reading)
+                .set_for_book_current_path_at_revision_async(
+                    book_id,
+                    &pending.save.reading,
+                    Some(revision),
+                )
                 .await
             {
-                Ok(current_path) => Ok(current_path),
+                Ok(current_path) => Ok((Some(book_id), current_path)),
                 Err(CurrentBookPathSaveError::MissingBook(_)) => {
                     match pending.save.content_hash.as_deref() {
                         Some(content_hash) => store
-                            .set_key_async(
+                            .set_key_at_revision_async(
                                 &pending.normalized_path,
                                 content_hash,
                                 &pending.save.reading,
+                                Some(revision),
                             )
                             .await
-                            .map(|()| pending.normalized_path.clone()),
+                            .map(|owner| (owner, pending.normalized_path.clone())),
                         None => Err(anyhow::anyhow!(
                             "removed book save has no admitted content hash"
                         )),
@@ -604,32 +684,61 @@ async fn persist_batch(
         } else {
             match pending.save.content_hash.as_deref() {
                 Some(content_hash) => store
-                    .set_key_async(
+                    .set_key_at_revision_async(
                         &pending.normalized_path,
                         content_hash,
                         &pending.save.reading,
+                        Some(revision),
                     )
                     .await
-                    .map(|()| pending.normalized_path.clone()),
+                    .map(|owner| (owner, pending.normalized_path.clone())),
                 None => Err(anyhow::anyhow!(
                     "untracked save has no admitted content hash"
                 )),
             }
         };
         match result {
-            Ok(saved_path) => successful_saves.push((saved_path, pending.enqueue_sequence)),
+            Ok((book_id, saved_path)) => {
+                successful_saves.push((
+                    book_id,
+                    saved_path,
+                    pending.save.content_hash.clone(),
+                    pending.enqueue_sequence,
+                ));
+            }
             Err(error) => {
                 failed_saves.push((key, pending, format!("reading state: {error:#}")));
             }
         }
     }
-    for (key, pending, error) in failed_saves {
-        // A newer stable-identity save for the same path supersedes this
-        // failed path-key save; retaining it would let a retry restore stale
-        // state after promotion.
-        let superseded = successful_saves.iter().any(|(path, sequence)| {
-            path == &pending.normalized_path && *sequence > pending.enqueue_sequence
-        });
+    for (key, pending, mut error) in failed_saves {
+        let failed_book_id = if let Some(book_id) = pending.save.book_id {
+            Ok(Some(book_id))
+        } else if let Some(content_hash) = pending.save.content_hash.as_deref() {
+            store
+                .resolve_path_owner_async(&pending.normalized_path, content_hash)
+                .await
+                .map(|owner| owner.map(|(book_id, _)| book_id))
+        } else {
+            Ok(None)
+        };
+        // A newer save for the same stable book supersedes an older failed
+        // path-key save even when an import changed the document's path.
+        let superseded = match failed_book_id {
+            Ok(failed_book_id) => successful_saves
+                .iter()
+                .any(|(book_id, path, hash, sequence)| {
+                    *sequence > pending.enqueue_sequence
+                        && (failed_book_id.is_some() && failed_book_id == *book_id
+                            || failed_book_id.is_none()
+                                && path == &pending.normalized_path
+                                && hash == &pending.save.content_hash)
+                }),
+            Err(owner_error) => {
+                error.push_str(&format!("; owner resolution: {owner_error:#}"));
+                false
+            }
+        };
         if !superseded {
             errors.push(error);
             failed.saves.insert(key, pending);
@@ -716,9 +825,17 @@ mod tests {
         }
 
         assert_eq!(state.pending.saves.len(), 1);
-        assert_eq!(
-            state.pending.saves[&SaveKey::Book(7)].save.path,
-            PathBuf::from("new.epub")
+        assert!(
+            state.pending.saves[&SaveKey::Book(7)]
+                .normalized_path
+                .ends_with("new.epub")
+        );
+        assert!(
+            state.pending.saves[&SaveKey::Book(7)]
+                .save
+                .path
+                .as_os_str()
+                .is_empty()
         );
         assert_eq!(state.pending.saves[&SaveKey::Book(7)].save.reading.page, 2);
     }
@@ -792,6 +909,24 @@ mod tests {
     }
 
     #[test]
+    fn preference_admission_discards_oversized_spare_capacity() {
+        let mut key = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES * 2);
+        key.push('k');
+        let mut value = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES * 2);
+        value.push('v');
+        let mut state = WriterState::default();
+
+        state
+            .insert(StateWriterMessage::Preference(key, value))
+            .unwrap();
+
+        let (key, value) = state.pending.preferences.iter().next().unwrap();
+        assert_eq!(key.capacity(), key.len());
+        assert_eq!(value.capacity(), value.len());
+        assert_eq!(state.total_admitted_bytes, 3);
+    }
+
+    #[test]
     fn save_paths_are_bounded_and_charged() {
         let mut state = WriterState::default();
         state
@@ -821,6 +956,28 @@ mod tests {
             })),
             Err(StateWriterSendError::Full)
         );
+
+        let mut overallocated_path = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES);
+        overallocated_path.push_str("compact.epub");
+        let mut overallocated_hash = String::with_capacity(MAX_PENDING_STATE_WRITE_BYTES);
+        overallocated_hash.push_str(CONTENT_HASH);
+        let mut compacted = WriterState::default();
+        compacted
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: Some(7),
+                path: PathBuf::from(overallocated_path),
+                content_hash: Some(overallocated_hash),
+                reading: FileReadingState {
+                    page: 0,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let pending = &compacted.pending.saves[&SaveKey::Book(7)];
+        assert!(pending.save.path.as_os_str().is_empty());
+        assert_eq!(pending.save.content_hash.as_ref().unwrap().capacity(), 64);
+        assert!(compacted.total_admitted_bytes >= pending.normalized_path.capacity());
     }
 
     #[test]
@@ -885,6 +1042,67 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn same_path_with_distinct_content_owners_keeps_both_saves() {
+        const OTHER_HASH: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = canonical_path_key(&directory.path().join("source.epub"));
+        let first_path = canonical_path_key(&directory.path().join("first.epub"));
+        let second_path = canonical_path_key(&directory.path().join("second.epub"));
+        for (path, hash) in [(&first_path, CONTENT_HASH), (&second_path, OTHER_HASH)] {
+            let book_id: i64 = sqlx::query_scalar(
+                "INSERT INTO books (title, format, file_path, content_hash)
+                 VALUES ('Book', 'epub', ?, ?) RETURNING id",
+            )
+            .bind(path)
+            .bind(hash)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO book_path_aliases (file_path, content_hash, book_id)
+                 VALUES (?, ?, ?)",
+            )
+            .bind(&source)
+            .bind(hash)
+            .bind(book_id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        }
+        let mut writer_state = WriterState::default();
+        for (hash, page) in [(CONTENT_HASH, 3), (OTHER_HASH, 17)] {
+            writer_state
+                .insert(StateWriterMessage::Save(StateSave {
+                    book_id: None,
+                    path: PathBuf::from(&source),
+                    content_hash: Some(hash.to_owned()),
+                    reading: FileReadingState {
+                        page,
+                        location_offset: None,
+                        zoom: 1.0,
+                    },
+                }))
+                .unwrap();
+        }
+        assert_eq!(writer_state.pending.saves.len(), 2);
+        let (batch, _) = writer_state.take_batch();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        let pages: Vec<i64> = sqlx::query_scalar("SELECT page FROM reading_state ORDER BY page")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(pages, vec![3, 17]);
+    }
+
     #[test]
     fn save_normalization_runs_once_and_supplies_the_pending_identity() {
         let calls = Cell::new(0);
@@ -909,21 +1127,18 @@ mod tests {
         state.insert_prepared(prepared).unwrap();
 
         assert_eq!(calls.get(), 1);
-        assert!(
-            state
-                .pending
-                .saves
-                .contains_key(&SaveKey::Path("normalized-1".to_owned()))
-        );
+        assert!(state.pending.saves.contains_key(&SaveKey::Path(
+            "normalized-1".to_owned(),
+            CONTENT_HASH.to_owned()
+        )));
         assert_eq!(
             state.pending.saves.values().next().unwrap().normalized_path,
             "normalized-1"
         );
-        assert!(
-            state
-                .admitted
-                .contains(&WriteKey::Save(SaveKey::Path("normalized-1".to_owned())))
-        );
+        assert!(state.admitted.contains(&WriteKey::Save(SaveKey::Path(
+            "normalized-1".to_owned(),
+            CONTENT_HASH.to_owned()
+        ))));
     }
 
     #[test]
@@ -1255,6 +1470,50 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn shutdown_answers_flush_queued_behind_a_failing_in_flight_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_preference
+             BEFORE INSERT ON preferences
+             BEGIN SELECT RAISE(FAIL, 'terminal failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let mut blocker = store.pool().acquire().await.unwrap();
+        sqlx::query("BEGIN EXCLUSIVE")
+            .execute(&mut *blocker)
+            .await
+            .unwrap();
+        let writer = start_state_writer(store);
+        writer
+            .send(StateWriterMessage::Preference("key".into(), "value".into()))
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let (flushed, wait) = oneshot::channel();
+        writer.send(StateWriterMessage::Flush(flushed)).unwrap();
+        let shutdown = {
+            let writer = writer.clone();
+            tokio::spawn(async move { writer.shutdown().await })
+        };
+        sqlx::query("COMMIT").execute(&mut *blocker).await.unwrap();
+
+        tokio::time::timeout(std::time::Duration::from_secs(2), wait)
+            .await
+            .expect("accepted flush must be answered")
+            .unwrap()
+            .unwrap_err();
+        tokio::time::timeout(std::time::Duration::from_secs(2), shutdown)
+            .await
+            .expect("shutdown must finish")
+            .unwrap()
+            .unwrap_err();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn untracked_save_persists_the_path_identity_prepared_at_admission() {
@@ -1357,7 +1616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stable_save_does_not_suppress_a_failed_save_for_its_stale_caller_path() {
+    async fn path_save_owned_by_another_book_is_promoted_without_retry() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
             .await
@@ -1416,8 +1675,17 @@ mod tests {
 
         let (failed, error) = persist_batch(&store, &library, batch).await;
 
-        assert!(error.is_some());
-        assert_eq!(failed.saves.len(), 1);
+        assert!(error.is_none());
+        assert!(failed.saves.is_empty());
+        assert_eq!(
+            store
+                .get_for_book_async(foreign_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            2
+        );
         assert_eq!(
             store
                 .get_for_book_async(book.id)
@@ -1463,6 +1731,272 @@ mod tests {
         assert_eq!(
             store
                 .get_for_book_async(book.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            17
+        );
+    }
+
+    #[tokio::test]
+    async fn stable_save_supersedes_failed_historical_source_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let first_source = directory.path().join("first.epub");
+        let historical_source = directory.path().join("second.epub");
+        std::fs::copy(&fixture, &first_source).unwrap();
+        std::fs::copy(&fixture, &historical_source).unwrap();
+        let book = library.import_managed_file(&first_source).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_older_reading_state
+             BEFORE INSERT ON reading_state WHEN NEW.page = 3
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: historical_source.clone(),
+                content_hash: book.content_hash.clone(),
+                reading: FileReadingState {
+                    page: 3,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (older_batch, _) = writer_state.take_batch();
+        let (failed_older, error) = persist_batch(&store, &library, older_batch).await;
+        assert!(error.is_some());
+        assert_eq!(failed_older.saves.len(), 1);
+
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: Some(book.id),
+                path: PathBuf::from(&book.file_path),
+                content_hash: book.content_hash.clone(),
+                reading: FileReadingState {
+                    page: 17,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (newer_batch, _) = writer_state.take_batch();
+        let (failed_newer, error) = persist_batch(&store, &library, newer_batch).await;
+        assert!(failed_newer.saves.is_empty());
+        assert!(error.is_none());
+
+        let duplicate = library
+            .import_managed_file(&historical_source)
+            .await
+            .unwrap();
+        assert_eq!(duplicate.id, book.id);
+        sqlx::query("DROP TRIGGER reject_older_reading_state")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let (failed, error) = persist_batch(&store, &library, failed_older).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        assert_eq!(
+            store
+                .get_for_book_async(book.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            17
+        );
+    }
+
+    #[tokio::test]
+    async fn retried_tracked_save_ignores_newer_untracked_different_content_at_same_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let path = directory.path().join("shared.epub");
+        let key = canonical_path_key(&path);
+        let other_hash = "1111111111111111111111111111111111111111111111111111111111111111";
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, content_hash)
+             VALUES ('tracked', 'epub', ?, ?) RETURNING id",
+        )
+        .bind(&key)
+        .bind(CONTENT_HASH)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        store
+            .set_key_at_revision_async(
+                &key,
+                other_hash,
+                &FileReadingState {
+                    page: 22,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+                Some(2),
+            )
+            .await
+            .unwrap();
+
+        store
+            .set_for_book_current_path_at_revision_async(
+                book_id,
+                &FileReadingState {
+                    page: 11,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+                Some(1),
+            )
+            .await
+            .unwrap();
+
+        let rows: Vec<(Option<i64>, String, i64)> = sqlx::query_as(
+            "SELECT book_id, content_hash, page FROM reading_state
+             WHERE file_path = ? ORDER BY book_id IS NULL",
+        )
+        .bind(&key)
+        .fetch_all(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (Some(book_id), CONTENT_HASH.to_owned(), 11),
+                (None, other_hash.to_owned(), 22),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn revision_failure_blocks_later_saves_in_the_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_revision
+             BEFORE UPDATE ON reading_state_revision
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let mut writer_state = WriterState::default();
+        for (book_id, page) in [(None, 3), (Some(book.id), 17)] {
+            writer_state
+                .insert(StateWriterMessage::Save(StateSave {
+                    book_id,
+                    path: source.clone(),
+                    content_hash: book.content_hash.clone(),
+                    reading: FileReadingState {
+                        page,
+                        location_offset: None,
+                        zoom: 1.0,
+                    },
+                }))
+                .unwrap();
+        }
+        let (batch, _) = writer_state.take_batch();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(error.is_some());
+        assert_eq!(failed.saves.len(), 2);
+        assert!(store.get_for_book_async(book.id).await.unwrap().is_none());
+        sqlx::query("DROP TRIGGER reject_test_revision")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let (failed, error) = persist_batch(&store, &library, failed).await;
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        assert_eq!(
+            store
+                .get_for_book_async(book.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            17
+        );
+    }
+
+    #[tokio::test]
+    async fn removed_book_does_not_expose_newer_unowned_state_to_an_old_retry() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        let content_hash = book.content_hash.clone().unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_old_unowned_save
+             BEFORE INSERT ON reading_state WHEN NEW.page = 3
+             BEGIN SELECT RAISE(FAIL, 'temporary failure'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: source.clone(),
+                content_hash: Some(content_hash.clone()),
+                reading: FileReadingState {
+                    page: 3,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (batch, _) = writer_state.take_batch();
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+        assert!(error.is_some());
+        store
+            .set_for_book_async(
+                book.id,
+                &FileReadingState {
+                    page: 17,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            )
+            .await
+            .unwrap();
+        library.remove(book.id).await.unwrap();
+        sqlx::query("DROP TRIGGER reject_old_unowned_save")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let (failed, error) = persist_batch(&store, &library, failed).await;
+
+        assert!(failed.saves.is_empty());
+        assert!(error.is_none());
+        assert_eq!(
+            store
+                .get_async(&source, &content_hash)
                 .await
                 .unwrap()
                 .unwrap()

@@ -115,8 +115,7 @@ impl EpubDoc {
         path: impl AsRef<Path>,
         limits: EpubLimits,
     ) -> Result<EpubInspection> {
-        let data = read_epub_file(path.as_ref(), &limits)?;
-        inspect_bytes(data, limits)
+        inspect_path_with_limits_cancellable(path.as_ref(), limits, None)
     }
 
     pub(crate) fn inspect_with_limits_cancellable(
@@ -124,8 +123,7 @@ impl EpubDoc {
         limits: EpubLimits,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<EpubInspection> {
-        let data = read_epub_file_cancellable(path, &limits, Some(is_cancelled))?;
-        inspect_bytes_cancellable(data, limits, Some(is_cancelled))
+        inspect_path_with_limits_cancellable(path, limits, Some(is_cancelled))
     }
 
     /// Open an EPUB file from disk.
@@ -135,13 +133,32 @@ impl EpubDoc {
 
     /// Open an EPUB file with explicit resource admission limits.
     pub fn open_with_limits(path: impl AsRef<Path>, limits: EpubLimits) -> Result<Self> {
-        let retained_ceiling = epub_admission_ceiling(
-            usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX),
-            &limits,
+        let path = path.as_ref();
+        let mut file =
+            File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let encoded_bytes = usize::try_from(file.metadata()?.len())
+            .context("EPUB input size cannot be represented")?;
+        validate_input_size(encoded_bytes as u64, &limits)?;
+        let preflight = crate::zip_preflight::preflight(
+            &mut file,
+            limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+            None,
         )?;
+        let retained_ceiling = epub_admission_ceiling(encoded_bytes, &limits, preflight)?;
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
-        let data = read_epub_file(path.as_ref(), &limits)?;
+        file.rewind()?;
+        let data =
+            read_epub_snapshot_cancellable(&mut file, path, encoded_bytes as u64, &limits, None)?;
+        let snapshot_preflight = crate::zip_preflight::preflight(
+            Cursor::new(data.as_slice()),
+            limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+            None,
+        )?;
+        if epub_admission_ceiling(data.capacity(), &limits, snapshot_preflight)? > retained_ceiling
+        {
+            crate::resource_limit!("EPUB changed after retained-memory admission");
+        }
         Self::from_bytes_inner_admitted(data, false, limits, admission, None)
     }
 
@@ -174,7 +191,12 @@ impl EpubDoc {
         include_non_spine_content: bool,
         limits: EpubLimits,
     ) -> Result<Self> {
-        let retained_ceiling = epub_admission_ceiling(data.capacity(), &limits)?;
+        let preflight = crate::zip_preflight::preflight(
+            Cursor::new(data.as_slice()),
+            limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+            None,
+        )?;
+        let retained_ceiling = epub_admission_ceiling(data.capacity(), &limits, preflight)?;
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
         Self::from_bytes_inner_admitted(data, include_non_spine_content, limits, admission, None)
@@ -400,55 +422,59 @@ impl EpubDoc {
 // Internal parsing functions
 // ---------------------------------------------------------------------------
 
-fn epub_admission_ceiling(encoded_bytes: usize, limits: &EpubLimits) -> Result<usize> {
+fn epub_admission_ceiling(
+    encoded_bytes: usize,
+    limits: &EpubLimits,
+    preflight: crate::zip_preflight::ZipPreflight,
+) -> Result<usize> {
+    if preflight.declared_uncompressed_bytes > limits.max_total_uncompressed_bytes {
+        crate::resource_limit!("EPUB archive exceeds aggregate uncompressed byte limit");
+    }
     crate::document_admission::epub_retained_ceiling(
         encoded_bytes,
-        usize::try_from(limits.max_total_uncompressed_bytes)
+        usize::try_from(preflight.declared_uncompressed_bytes)
             .context("EPUB uncompressed-byte admission cannot be represented")?,
         limits.max_total_decoded_font_bytes,
         limits.max_total_presentation_nodes,
+        preflight.central_directory_bytes,
     )
     .context("EPUB retained-memory admission overflowed")
 }
 
-fn read_epub_file(path: &Path, limits: &EpubLimits) -> Result<Vec<u8>> {
-    read_epub_file_cancellable(path, limits, None)
-}
-
-fn read_epub_file_cancellable(
+fn read_epub_snapshot_cancellable(
+    file: &mut File,
     path: &Path,
+    declared_bytes: u64,
     limits: &EpubLimits,
     is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<u8>> {
-    let mut file =
-        File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let declared_bytes = file
-        .metadata()
-        .with_context(|| format!("failed to inspect {}", path.display()))?
-        .len();
     validate_input_size(declared_bytes, limits)?;
     let capacity = usize::try_from(declared_bytes)
         .unwrap_or(usize::MAX)
         .min(usize::try_from(limits.max_input_bytes).unwrap_or(usize::MAX));
     let mut data = Vec::with_capacity(capacity);
     let mut buffer = [0_u8; 64 * 1024];
-    while data.len() as u64 <= limits.max_input_bytes {
+    while (data.len() as u64) < declared_bytes {
         check_cancelled(is_cancelled)?;
-        let remaining = limits
-            .max_input_bytes
-            .saturating_add(1)
-            .saturating_sub(data.len() as u64);
+        let remaining = usize::try_from(declared_bytes - data.len() as u64)
+            .unwrap_or(usize::MAX)
+            .min(buffer.len());
         let read = file
-            .by_ref()
-            .take(remaining)
-            .read(&mut buffer)
+            .read(&mut buffer[..remaining])
             .with_context(|| format!("failed to read {}", path.display()))?;
         if read == 0 {
             break;
         }
         data.extend_from_slice(&buffer[..read]);
     }
-    validate_input_size(data.len() as u64, limits)?;
+    let mut extra = [0_u8; 1];
+    let grew = file
+        .read(&mut extra)
+        .with_context(|| format!("failed to read {}", path.display()))?
+        != 0;
+    if data.len() as u64 != declared_bytes || grew {
+        anyhow::bail!("EPUB changed while reading");
+    }
     Ok(data)
 }
 
@@ -459,12 +485,16 @@ fn validated_archive_cancellable(
 ) -> Result<ZipArchive<Cursor<Vec<u8>>>> {
     check_cancelled(is_cancelled)?;
     validate_input_size(data.len() as u64, limits)?;
-    let declared_entries = declared_archive_entry_count(&data, limits.max_archive_entries)?;
+    let preflight = crate::zip_preflight::preflight(
+        Cursor::new(data.as_slice()),
+        limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+        is_cancelled,
+    )?;
     let mut validation_archive = ZipArchive::new(Cursor::new(data.as_slice()))
         .context("EPUB archive is corrupt: failed to open ZIP archive")?;
     validate_archive_entries(
         &mut validation_archive,
-        declared_entries,
+        preflight.entries,
         limits,
         &data,
         is_cancelled,
@@ -488,14 +518,24 @@ fn parse_package(
     parse_opf(&opf_xml, &opf_dir)
 }
 
+#[cfg(test)]
 fn inspect_bytes(data: Vec<u8>, limits: EpubLimits) -> Result<EpubInspection> {
-    inspect_bytes_cancellable(data, limits, None)
+    let preflight = crate::zip_preflight::preflight(
+        Cursor::new(data.as_slice()),
+        limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+        None,
+    )?;
+    let retained_ceiling = epub_admission_ceiling(data.capacity(), &limits, preflight)?;
+    let admission =
+        crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+    inspect_bytes_cancellable_admitted(data, limits, None, admission)
 }
 
-fn inspect_bytes_cancellable(
+fn inspect_bytes_cancellable_admitted(
     data: Vec<u8>,
     limits: EpubLimits,
     is_cancelled: Option<&dyn Fn() -> bool>,
+    _inspection_admission: crate::document_admission::ProvisionalDocumentAdmission,
 ) -> Result<EpubInspection> {
     let mut archive = validated_archive_cancellable(data, &limits, is_cancelled)?;
     check_cancelled(is_cancelled)?;
@@ -529,6 +569,42 @@ fn inspect_bytes_cancellable(
         None
     };
     Ok(EpubInspection { metadata, cover })
+}
+
+fn inspect_path_with_limits_cancellable(
+    path: &Path,
+    limits: EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<EpubInspection> {
+    let mut file =
+        File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let encoded_bytes = file
+        .metadata()
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .len();
+    validate_input_size(encoded_bytes, &limits)?;
+    let encoded_capacity =
+        usize::try_from(encoded_bytes).context("EPUB input size cannot be represented")?;
+    let preflight = crate::zip_preflight::preflight(
+        &mut file,
+        limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+        is_cancelled,
+    )?;
+    let retained_ceiling = epub_admission_ceiling(encoded_capacity, &limits, preflight)?;
+    let admission =
+        crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+    file.rewind()?;
+    let data =
+        read_epub_snapshot_cancellable(&mut file, path, encoded_bytes, &limits, is_cancelled)?;
+    let snapshot_preflight = crate::zip_preflight::preflight(
+        Cursor::new(data.as_slice()),
+        limits.max_archive_entries.min(MAX_ARCHIVE_ENTRIES),
+        is_cancelled,
+    )?;
+    if epub_admission_ceiling(data.capacity(), &limits, snapshot_preflight)? > retained_ceiling {
+        crate::resource_limit!("EPUB changed after retained-memory admission");
+    }
+    inspect_bytes_cancellable_admitted(data, limits, is_cancelled, admission)
 }
 
 fn read_archive_entry_cancellable(
@@ -778,6 +854,7 @@ fn validate_archive_entries<R: Read + Seek>(
     Ok(())
 }
 
+#[cfg(test)]
 fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<usize> {
     const EOCD_SIGNATURE: &[u8] = b"PK\x05\x06";
     const ZIP64_LOCATOR_SIGNATURE: &[u8] = b"PK\x06\x07";
@@ -826,6 +903,7 @@ fn declared_archive_entry_count(data: &[u8], configured_max: usize) -> Result<us
     )
 }
 
+#[cfg(test)]
 fn bounded_archive_entry_count(entries: u64, configured_max: usize) -> Result<usize> {
     let max_entries = configured_max.min(MAX_ARCHIVE_ENTRIES);
     if entries > max_entries as u64 {
@@ -844,18 +922,21 @@ fn is_xml_archive_path(path: &str) -> bool {
     })
 }
 
+#[cfg(test)]
 fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
     get_bytes(data, offset, 2)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u16::from_le_bytes)
 }
 
+#[cfg(test)]
 fn read_u64(data: &[u8], offset: usize) -> Option<u64> {
     get_bytes(data, offset, 8)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u64::from_le_bytes)
 }
 
+#[cfg(test)]
 fn get_bytes(data: &[u8], offset: usize, length: usize) -> Option<&[u8]> {
     data.get(offset..offset.checked_add(length)?)
 }
@@ -1412,8 +1493,15 @@ mod tests {
             .map(|chapter| chapter.content.capacity())
             .sum::<usize>();
         let retained_bytes = document.retained_byte_len().unwrap();
-        let ceiling = super::epub_admission_ceiling(bytes.capacity(), &EpubLimits::default())
-            .expect("default ceiling should be representable");
+        let preflight = crate::zip_preflight::preflight(
+            Cursor::new(bytes.as_slice()),
+            super::MAX_ARCHIVE_ENTRIES,
+            None,
+        )
+        .unwrap();
+        let ceiling =
+            super::epub_admission_ceiling(bytes.capacity(), &EpubLimits::default(), preflight)
+                .expect("default ceiling should be representable");
 
         assert!(retained_bytes >= source_bytes * 4);
         assert!(retained_bytes <= ceiling);
@@ -1447,7 +1535,13 @@ mod tests {
 
         let document = EpubDoc::from_bytes_with_limits(bytes.clone(), limits).unwrap();
         let retained_bytes = document.retained_byte_len().unwrap();
-        let ceiling = super::epub_admission_ceiling(bytes.capacity(), &limits)
+        let preflight = crate::zip_preflight::preflight(
+            Cursor::new(bytes.as_slice()),
+            super::MAX_ARCHIVE_ENTRIES,
+            None,
+        )
+        .unwrap();
+        let ceiling = super::epub_admission_ceiling(bytes.capacity(), &limits, preflight)
             .expect("custom ceiling should be representable");
 
         assert!(retained_bytes <= ceiling);

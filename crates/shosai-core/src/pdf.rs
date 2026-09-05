@@ -235,6 +235,16 @@ mod tests {
     }
 
     #[test]
+    fn fixed_snapshot_rejects_growth_and_truncation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("document.pdf");
+        std::fs::write(&path, b"12345").unwrap();
+
+        assert!(super::read_pdf_snapshot(File::open(&path).unwrap(), &path, 4, None).is_err());
+        assert!(super::read_pdf_snapshot(File::open(&path).unwrap(), &path, 6, None).is_err());
+    }
+
+    #[test]
     fn bundled_pdfium_is_resolved_relative_to_executable() {
         #[cfg(target_os = "macos")]
         let expected =
@@ -401,13 +411,17 @@ impl PdfDoc {
     ) -> Result<Self> {
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
+        let expected = file.metadata()?.len();
+        if expected > max_input_bytes {
+            crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
+        }
         let retained_ceiling = crate::document_admission::pdf_retained_ceiling(
-            usize::try_from(max_input_bytes).unwrap_or(usize::MAX),
+            usize::try_from(expected).unwrap_or(usize::MAX),
         )
         .context("PDF retained-memory admission overflowed")?;
         let admission =
             crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
-        let data = read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, is_cancelled)?;
+        let data = read_pdf_snapshot(file, path, expected, is_cancelled)?;
         check_cancelled(is_cancelled)?;
         let document =
             Self::from_bytes_with_limit_admitted(data, max_input_bytes, is_cancelled, admission)?;
@@ -533,38 +547,38 @@ fn read_pdf_file_with_limit(
     path: &Path,
     max_input_bytes: u64,
 ) -> Result<Vec<u8>> {
-    read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, None)
-}
-
-fn read_pdf_file_with_limit_cancellable(
-    mut file: std::fs::File,
-    path: &Path,
-    max_input_bytes: u64,
-    is_cancelled: Option<&dyn Fn() -> bool>,
-) -> Result<Vec<u8>> {
     let metadata = file
         .metadata()
         .with_context(|| format!("failed to inspect {}", path.display()))?;
     if metadata.len() > max_input_bytes {
         crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
     }
-    let capacity = usize::try_from(metadata.len().min(max_input_bytes)).unwrap_or(usize::MAX);
+    read_pdf_snapshot(file, path, metadata.len(), None)
+}
+fn read_pdf_snapshot(
+    mut file: std::fs::File,
+    path: &Path,
+    expected: u64,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<u8>> {
+    let capacity = usize::try_from(expected).context("PDF size cannot be represented")?;
     let mut data = Vec::with_capacity(capacity);
     let mut buffer = [0_u8; 64 * 1024];
-    loop {
+    while data.len() < capacity {
         check_cancelled(is_cancelled)?;
-        let remaining = max_input_bytes
-            .saturating_add(1)
-            .saturating_sub(data.len() as u64);
+        let chunk = (capacity - data.len()).min(buffer.len());
         let read = file
-            .by_ref()
-            .take(remaining)
-            .read(&mut buffer)
+            .read(&mut buffer[..chunk])
             .with_context(|| format!("failed to read {}", path.display()))?;
         if read == 0 {
             break;
         }
         data.extend_from_slice(&buffer[..read]);
+    }
+    let mut extra = [0; 1];
+    let grew = file.read(&mut extra)? != 0;
+    if data.len() != capacity || grew {
+        anyhow::bail!("PDF changed while reading");
     }
     Ok(data)
 }

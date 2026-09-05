@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
+const IMAGE_PROBE_METADATA_BYTES: u64 = 1024 * 1024;
+
 /// Configurable limits applied before EPUB resources reach renderer backends.
 #[derive(Debug, Clone, Copy)]
 pub struct EpubLimits {
@@ -303,11 +305,13 @@ pub(crate) fn validate_resource(
             let format = format.with_context(|| {
                 format!("EPUB image resource could not inspect dimensions: {path}")
             })?;
-            let (width, height) = image::ImageReader::with_format(Cursor::new(bytes), format)
-                .into_dimensions()
-                .with_context(|| {
-                    format!("EPUB image resource could not inspect dimensions: {path}")
-                })?;
+            let mut reader = image::ImageReader::with_format(Cursor::new(bytes), format);
+            let mut image_limits = image::Limits::default();
+            image_limits.max_alloc = Some(IMAGE_PROBE_METADATA_BYTES);
+            reader.limits(image_limits);
+            let (width, height) = reader.into_dimensions().with_context(|| {
+                format!("EPUB image resource could not inspect dimensions: {path}")
+            })?;
             validate_image_dimensions(path, width, height, limits)?;
         }
     }
