@@ -208,6 +208,17 @@ mod tests {
     }
 
     #[test]
+    fn render_honors_preexisting_cancellation() {
+        let document = PdfDoc::from_bytes(selectable_pdf("cancel")).unwrap();
+
+        let error = document
+            .render_page_with_highlights_cancellable(0, 1.0, &[], &|| true)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
     fn bounded_file_read_uses_open_descriptor_after_path_replacement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("document.pdf");
@@ -341,6 +352,7 @@ pub struct PdfDoc {
     metadata: DocumentMetadata,
     /// Raw PDF bytes, kept for re-opening during render calls.
     data: Vec<u8>,
+    _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
 impl PdfDoc {
@@ -371,11 +383,36 @@ impl PdfDoc {
     }
 
     pub fn open_with_limit(path: impl AsRef<Path>, max_input_bytes: u64) -> Result<Self> {
-        let path = path.as_ref();
+        Self::open_with_limit_inner(path.as_ref(), max_input_bytes, None)
+    }
+
+    pub(crate) fn open_with_limit_cancellable(
+        path: &Path,
+        max_input_bytes: u64,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self> {
+        Self::open_with_limit_inner(path, max_input_bytes, Some(is_cancelled))
+    }
+
+    fn open_with_limit_inner(
+        path: &Path,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
         let file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let data = read_pdf_file_with_limit(file, path, max_input_bytes)?;
-        Self::from_bytes_with_limit(data, max_input_bytes)
+        let retained_ceiling = crate::document_admission::pdf_retained_ceiling(
+            usize::try_from(max_input_bytes).unwrap_or(usize::MAX),
+        )
+        .context("PDF retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        let data = read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, is_cancelled)?;
+        check_cancelled(is_cancelled)?;
+        let document =
+            Self::from_bytes_with_limit_admitted(data, max_input_bytes, is_cancelled, admission)?;
+        check_cancelled(is_cancelled)?;
+        Ok(document)
     }
 
     /// Open a PDF from raw bytes.
@@ -383,20 +420,54 @@ impl PdfDoc {
         Self::from_bytes_with_limit(data, MAX_PDF_INPUT_BYTES)
     }
 
+    pub(crate) fn from_bytes_admitted_cancellable(
+        data: Vec<u8>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        Self::from_bytes_with_limit_admitted(data, MAX_PDF_INPUT_BYTES, is_cancelled, admission)
+    }
+
     pub fn from_bytes_with_limit(data: Vec<u8>, max_input_bytes: u64) -> Result<Self> {
+        Self::from_bytes_with_limit_inner(data, max_input_bytes, None)
+    }
+
+    fn from_bytes_with_limit_inner(
+        data: Vec<u8>,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        let retained_ceiling = crate::document_admission::pdf_retained_ceiling(data.capacity())
+            .context("PDF retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        Self::from_bytes_with_limit_admitted(data, max_input_bytes, is_cancelled, admission)
+    }
+
+    fn from_bytes_with_limit_admitted(
+        data: Vec<u8>,
+        max_input_bytes: u64,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+    ) -> Result<Self> {
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > max_input_bytes {
             crate::resource_limit!("PDF exceeds the {max_input_bytes}-byte input limit");
         }
+        check_cancelled(is_cancelled)?;
         let pdfium = create_pdfium()?;
+        check_cancelled(is_cancelled)?;
         preflight_pdf(pdfium.bindings(), &data)?;
+        check_cancelled(is_cancelled)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF: {e}"))?;
+        check_cancelled(is_cancelled)?;
 
         let page_count = document.pages().len() as usize;
 
         let mut page_sizes = Vec::with_capacity(page_count);
         for i in 0..page_count {
+            check_cancelled(is_cancelled)?;
             let page = document
                 .pages()
                 .get(i as u16)
@@ -406,6 +477,7 @@ impl PdfDoc {
             page_sizes.push((w, h));
         }
 
+        check_cancelled(is_cancelled)?;
         let meta = document.metadata();
         let metadata = DocumentMetadata {
             title: meta
@@ -440,19 +512,35 @@ impl PdfDoc {
         drop(document);
         drop(pdfium);
 
-        Ok(Self {
+        let mut parsed = Self {
             page_count,
             page_sizes,
             metadata,
             data,
-        })
+            _admission: None,
+        };
+        let retained_bytes = parsed
+            .retained_byte_len()
+            .context("PDF retained-memory charge overflowed")?;
+        parsed._admission = Some(admission.finish(retained_bytes)?);
+        Ok(parsed)
     }
 }
 
+#[cfg(test)]
 fn read_pdf_file_with_limit(
     file: std::fs::File,
     path: &Path,
     max_input_bytes: u64,
+) -> Result<Vec<u8>> {
+    read_pdf_file_with_limit_cancellable(file, path, max_input_bytes, None)
+}
+
+fn read_pdf_file_with_limit_cancellable(
+    mut file: std::fs::File,
+    path: &Path,
+    max_input_bytes: u64,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<Vec<u8>> {
     let metadata = file
         .metadata()
@@ -462,10 +550,30 @@ fn read_pdf_file_with_limit(
     }
     let capacity = usize::try_from(metadata.len().min(max_input_bytes)).unwrap_or(usize::MAX);
     let mut data = Vec::with_capacity(capacity);
-    file.take(max_input_bytes.saturating_add(1))
-        .read_to_end(&mut data)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check_cancelled(is_cancelled)?;
+        let remaining = max_input_bytes
+            .saturating_add(1)
+            .saturating_sub(data.len() as u64);
+        let read = file
+            .by_ref()
+            .take(remaining)
+            .read(&mut buffer)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
     Ok(data)
+}
+
+fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
+    if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+        anyhow::bail!("import cancelled");
+    }
+    Ok(())
 }
 
 fn preflight_pdf(bindings: &dyn PdfiumLibraryBindings, data: &[u8]) -> Result<()> {
@@ -660,7 +768,18 @@ impl PdfDoc {
         scale: f32,
         highlights: &[(usize, usize, bool)],
     ) -> Result<RenderedPage> {
-        self.render_page_impl(index, scale, highlights)
+        self.render_page_impl(index, scale, highlights, None)
+    }
+
+    #[doc(hidden)]
+    pub fn render_page_with_highlights_cancellable(
+        &self,
+        index: usize,
+        scale: f32,
+        highlights: &[(usize, usize, bool)],
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<RenderedPage> {
+        self.render_page_impl(index, scale, highlights, Some(is_cancelled))
     }
 
     pub fn rendered_byte_len(&self, index: usize, scale: f32) -> Result<usize> {
@@ -691,10 +810,13 @@ impl PdfDoc {
         index: usize,
         scale: f32,
         highlights: &[(usize, usize, bool)],
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<RenderedPage> {
+        check_cancelled(is_cancelled)?;
         let (pixel_w, pixel_h) = self.render_dimensions(index, scale)?;
 
         let pdfium = create_pdfium()?;
+        check_cancelled(is_cancelled)?;
         let document = pdfium
             .load_pdf_from_byte_slice(&self.data, None)
             .map_err(|e| anyhow::anyhow!("failed to load PDF for rendering: {e}"))?;
@@ -707,9 +829,11 @@ impl PdfDoc {
             .set_target_width(pixel_w)
             .set_maximum_height(pixel_h)
             .use_lcd_text_rendering(true);
+        check_cancelled(is_cancelled)?;
         let bitmap = page
             .render_with_config(&config)
             .map_err(|e| anyhow::anyhow!("failed to render page {index}: {e}"))?;
+        check_cancelled(is_cancelled)?;
 
         let width = bitmap.width() as u32;
         let height = bitmap.height() as u32;
@@ -721,8 +845,10 @@ impl PdfDoc {
             let chars = text.chars();
 
             for &(offset, length, current) in highlights {
+                check_cancelled(is_cancelled)?;
                 let end = offset.saturating_add(length).min(chars.len());
                 for char_index in offset..end {
+                    check_cancelled(is_cancelled)?;
                     let Ok(character) = chars.get(char_index) else {
                         continue;
                     };
@@ -736,6 +862,7 @@ impl PdfDoc {
             }
         }
 
+        check_cancelled(is_cancelled)?;
         Ok(RenderedPage {
             width,
             height,
@@ -914,7 +1041,7 @@ impl Document for PdfDoc {
     }
 
     fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
-        self.render_page_impl(index, scale, &[])
+        self.render_page_impl(index, scale, &[], None)
     }
 
     fn metadata(&self) -> DocumentMetadata {

@@ -651,14 +651,14 @@ fn reading_state_db_values(state: &FileReadingState) -> Result<(i64, Option<i64>
 }
 
 fn row_to_reading_state(row: &sqlx::sqlite::SqliteRow) -> Result<FileReadingState> {
-    let page = usize::try_from(row.get::<i64, _>("page"))
+    let page = usize::try_from(row.try_get::<i64, _>("page")?)
         .context("stored reading state page is outside the supported range")?;
     let location_offset = row
-        .get::<Option<i64>, _>("location_offset")
+        .try_get::<Option<i64>, _>("location_offset")?
         .map(usize::try_from)
         .transpose()
         .context("stored reading state location is outside the supported range")?;
-    let zoom = row.get::<f64, _>("zoom");
+    let zoom = row.try_get::<f64, _>("zoom")?;
     if !zoom.is_finite() || zoom <= 0.0 || zoom > f64::from(f32::MAX) {
         bail!("stored reading state zoom is outside the supported range");
     }

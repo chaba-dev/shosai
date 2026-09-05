@@ -171,11 +171,22 @@ impl EpubFontBook {
             .is_some_and(|families| families.contains(&family))
     }
 
+    #[cfg(test)]
     pub(crate) fn new(
         chapters: &[Chapter],
         styles: &EpubStyles,
         resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
         limits: &EpubLimits,
+    ) -> Result<Self> {
+        Self::new_cancellable(chapters, styles, resources, limits, None)
+    }
+
+    pub(crate) fn new_cancellable(
+        chapters: &[Chapter],
+        styles: &EpubStyles,
+        resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
+        limits: &EpubLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
     ) -> Result<Self> {
         let mut book = Self {
             database: Database::new(),
@@ -190,6 +201,7 @@ impl EpubFontBook {
         let mut inspected = HashMap::<Descriptor, bool>::new();
         let mut descriptor_limit_reported = false;
         for chapter in chapters {
+            check_cancelled(is_cancelled)?;
             let Ok(normalized) =
                 super::render::bounded_chapter_xhtml(&chapter.content, &chapter.path, limits)
             else {
@@ -204,6 +216,7 @@ impl EpubFontBook {
                 styles.document_css_with_owner(&document, base, Some(&chapter.path), limits)?;
             let descriptors = parse_faces(&css, limits, &inspected)?;
             for descriptor in descriptors {
+                check_cancelled(is_cancelled)?;
                 if let Some(admitted) = inspected.get(&descriptor) {
                     if *admitted {
                         book.chapter_families
@@ -261,7 +274,8 @@ impl EpubFontBook {
                     continue;
                 }
                 let family = descriptor.family.clone();
-                let admitted = book.load_descriptor(descriptor.clone(), resources, limits);
+                let admitted =
+                    book.load_descriptor(descriptor.clone(), resources, limits, is_cancelled)?;
                 inspected.insert(descriptor, admitted);
                 if admitted {
                     book.chapter_families
@@ -271,11 +285,15 @@ impl EpubFontBook {
                 }
             }
         }
-        book.native = Mutex::new(super::native_text::NativeTextState::new(
+        check_cancelled(is_cancelled)?;
+        let native = super::native_text::NativeTextState::new_cancellable(
             &book.database,
             &book.registered_ids,
             &book.faces,
-        ));
+            is_cancelled,
+        )?;
+        check_cancelled(is_cancelled)?;
+        book.native = Mutex::new(native);
         Ok(book)
     }
 
@@ -284,9 +302,11 @@ impl EpubFontBook {
         descriptor: Descriptor,
         resources: &HashMap<CanonicalEpubPath, StoredEpubResource>,
         limits: &EpubLimits,
-    ) -> bool {
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<bool> {
         let mut attempts = Vec::new();
         for source in &descriptor.sources {
+            check_cancelled(is_cancelled)?;
             let (reference, format, technology) = match source {
                 SourceDescriptor::Local(_) => {
                     reject(&mut attempts, source.label(), "local fonts are disabled");
@@ -345,13 +365,16 @@ impl EpubFontBook {
                 );
                 continue;
             };
-            let (format, decoded) = match decode_font(&resource.bytes, declared, limits) {
-                Ok(value) => value,
-                Err(error) => {
-                    reject(&mut attempts, reference_path.as_str(), error);
-                    continue;
-                }
-            };
+            let (format, decoded) =
+                match decode_font(&resource.bytes, declared, limits, is_cancelled) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        check_cancelled(is_cancelled)?;
+                        reject(&mut attempts, reference_path.as_str(), error);
+                        continue;
+                    }
+                };
+            check_cancelled(is_cancelled)?;
             if self
                 .decoded_bytes
                 .checked_add(decoded.len())
@@ -368,6 +391,7 @@ impl EpubFontBook {
             let ids = self
                 .database
                 .load_font_source(Source::Binary(Arc::new(decoded)));
+            check_cancelled(is_cancelled)?;
             if ids.is_empty() {
                 reject(
                     &mut attempts,
@@ -402,14 +426,21 @@ impl EpubFontBook {
                 decoded_bytes,
                 attempts,
             });
-            return true;
+            return Ok(true);
         }
         self.rejected_faces.push(EpubRejectedFontFace {
             family: descriptor.family,
             attempts,
         });
-        false
+        Ok(false)
     }
+}
+
+fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
+    if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+        anyhow::bail!("import cancelled");
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -679,7 +710,11 @@ fn base_size(n: usize) -> std::result::Result<usize, String> {
         .and_then(|v| 12usize.checked_add(v))
         .ok_or_else(|| "font size arithmetic overflowed".into())
 }
-fn preflight_woff(bytes: &[u8], limits: &EpubLimits) -> std::result::Result<(), String> {
+fn preflight_woff(
+    bytes: &[u8],
+    limits: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> std::result::Result<(), String> {
     let n = header(bytes, limits)?;
     if 20usize
         .checked_mul(n)
@@ -690,6 +725,7 @@ fn preflight_woff(bytes: &[u8], limits: &EpubLimits) -> std::result::Result<(), 
     }
     let mut total = base_size(n)?;
     for i in 0..n {
+        check_cancelled(is_cancelled).map_err(|error| error.to_string())?;
         let e = 44 + i * 20;
         let o = read_u32(bytes, e + 4)?;
         let c = read_u32(bytes, e + 8)?;
@@ -726,10 +762,15 @@ fn base128(b: &[u8], c: &mut usize) -> std::result::Result<usize, String> {
     }
     Err("WOFF2 length is too large".into())
 }
-fn preflight_woff2(b: &[u8], l: &EpubLimits) -> std::result::Result<(), String> {
+fn preflight_woff2(
+    b: &[u8],
+    l: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> std::result::Result<(), String> {
     let n = header(b, l)?;
     let (mut c, mut out, mut encoded) = (48, base_size(n)?, 0usize);
     for _ in 0..n {
+        check_cancelled(is_cancelled).map_err(|error| error.to_string())?;
         let flags = *b
             .get(c)
             .ok_or_else(|| "WOFF2 table directory is truncated".to_owned())?;
@@ -768,15 +809,25 @@ fn preflight_woff2(b: &[u8], l: &EpubLimits) -> std::result::Result<(), String> 
     Ok(())
 }
 fn bounded(
-    reader: impl Read,
+    mut reader: impl Read,
     expected: usize,
     limit: usize,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> std::result::Result<Vec<u8>, Box<dyn std::error::Error>> {
     if expected > limit {
         return Err("decoder output exceeds the limit".into());
     }
     let mut out = Vec::with_capacity(expected);
-    reader.take(expected as u64 + 1).read_to_end(&mut out)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    while out.len() <= expected {
+        check_cancelled(is_cancelled)?;
+        let remaining = expected.saturating_add(1).saturating_sub(out.len());
+        let read = reader.by_ref().take(remaining as u64).read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        out.extend_from_slice(&buffer[..read]);
+    }
     if out.len() != expected {
         return Err("decoder output length does not match the table directory".into());
     }
@@ -795,7 +846,9 @@ fn decode_font(
     b: &[u8],
     declared: Option<EpubFontFormat>,
     l: &EpubLimits,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> std::result::Result<(EpubFontFormat, Vec<u8>), String> {
+    check_cancelled(is_cancelled).map_err(|error| error.to_string())?;
     if b.len() as u64 > l.max_font_bytes {
         return Err("encoded font exceeds the input limit".into());
     }
@@ -804,30 +857,40 @@ fn decode_font(
         return Err("font signature does not match its format descriptor".into());
     }
     let out = match f {
-        EpubFontFormat::TrueType | EpubFontFormat::OpenType => b.to_vec(),
+        EpubFontFormat::TrueType | EpubFontFormat::OpenType => {
+            let mut out = Vec::with_capacity(b.len());
+            for chunk in b.chunks(64 * 1024) {
+                check_cancelled(is_cancelled).map_err(|error| error.to_string())?;
+                out.extend_from_slice(chunk);
+            }
+            out
+        }
         EpubFontFormat::Woff => {
-            preflight_woff(b, l)?;
+            preflight_woff(b, l, is_cancelled)?;
             wuff::decompress_woff1_with_custom_z(b, &mut |c, n| {
                 bounded(
                     flate2::read::ZlibDecoder::new(c),
                     n,
                     l.max_decoded_font_bytes,
+                    is_cancelled,
                 )
             })
             .map_err(|_| "WOFF decoding failed".to_owned())?
         }
         EpubFontFormat::Woff2 => {
-            preflight_woff2(b, l)?;
+            preflight_woff2(b, l, is_cancelled)?;
             wuff::decompress_woff2_with_custom_brotli(b, &mut |c, n| {
                 bounded(
                     brotli_decompressor::Decompressor::new(c, 4096),
                     n,
                     l.max_decoded_font_bytes,
+                    is_cancelled,
                 )
             })
             .map_err(|_| "WOFF2 decoding failed".to_owned())?
         }
     };
+    check_cancelled(is_cancelled).map_err(|error| error.to_string())?;
     if out.len() > l.max_decoded_font_bytes {
         return Err("decoded font exceeds the output limit".into());
     }

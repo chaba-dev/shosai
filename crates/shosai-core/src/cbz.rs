@@ -52,6 +52,7 @@ pub struct CbzDoc {
     title: Option<String>,
     limits: CbzLimits,
     dimensions: Mutex<Vec<Option<(u32, u32)>>>,
+    _admission: Option<crate::document_admission::DocumentAdmission>,
 }
 
 impl CbzDoc {
@@ -87,7 +88,22 @@ impl CbzDoc {
     }
 
     pub fn open_with_limits(path: impl AsRef<Path>, limits: CbzLimits) -> Result<Self> {
-        let path = path.as_ref();
+        Self::open_with_limits_inner(path.as_ref(), limits, None)
+    }
+
+    pub(crate) fn open_with_limits_cancellable(
+        path: &Path,
+        limits: CbzLimits,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self> {
+        Self::open_with_limits_inner(path, limits, Some(is_cancelled))
+    }
+
+    fn open_with_limits_inner(
+        path: &Path,
+        limits: CbzLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
         let mut file = std::fs::File::open(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         let metadata = file
@@ -96,10 +112,28 @@ impl CbzDoc {
         if metadata.len() > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
-        let data = read_cbz_snapshot(&mut file, metadata.len(), limits.max_archive_bytes)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let retained_ceiling = crate::document_admission::cbz_retained_ceiling(
+            usize::try_from(limits.max_archive_bytes).unwrap_or(usize::MAX),
+            limits.max_entries,
+        )
+        .context("CBZ retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        let data = read_cbz_snapshot_cancellable(
+            &mut file,
+            metadata.len(),
+            limits.max_archive_bytes,
+            is_cancelled,
+        )
+        .with_context(|| format!("failed to read {}", path.display()))?;
         let title = path.file_stem().map(|s| s.to_string_lossy().to_string());
-        Self::from_bytes_with_title(data, title, limits)
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            limits,
+            is_cancelled,
+            admission,
+        )
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
@@ -110,8 +144,24 @@ impl CbzDoc {
         Self::from_bytes_with_title(data, None, limits)
     }
 
+    #[cfg(test)]
     pub(crate) fn from_bytes_with_title_hint(data: Vec<u8>, title: Option<String>) -> Result<Self> {
         Self::from_bytes_with_title(data, title, CbzLimits::default())
+    }
+
+    pub(crate) fn from_bytes_with_title_hint_admitted_cancellable(
+        data: Vec<u8>,
+        title: Option<String>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            CbzLimits::default(),
+            is_cancelled,
+            admission,
+        )
     }
 
     fn from_bytes_with_title(
@@ -119,6 +169,37 @@ impl CbzDoc {
         title: Option<String>,
         limits: CbzLimits,
     ) -> Result<Self> {
+        Self::from_bytes_with_title_cancellable(data, title, limits, None)
+    }
+
+    fn from_bytes_with_title_cancellable(
+        data: Vec<u8>,
+        title: Option<String>,
+        limits: CbzLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self> {
+        let retained_ceiling =
+            crate::document_admission::cbz_retained_ceiling(data.capacity(), limits.max_entries)
+                .context("CBZ retained-memory admission overflowed")?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_ceiling)?;
+        Self::from_bytes_with_title_cancellable_admitted(
+            data,
+            title,
+            limits,
+            is_cancelled,
+            admission,
+        )
+    }
+
+    fn from_bytes_with_title_cancellable_admitted(
+        data: Vec<u8>,
+        title: Option<String>,
+        limits: CbzLimits,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+        admission: crate::document_admission::ProvisionalDocumentAdmission,
+    ) -> Result<Self> {
+        check_cancelled(is_cancelled)?;
         if u64::try_from(data.len()).unwrap_or(u64::MAX) > limits.max_archive_bytes {
             crate::resource_limit!("CBZ archive exceeds encoded byte limit");
         }
@@ -131,6 +212,7 @@ impl CbzDoc {
         let mut total = 0_u64;
         let mut page_paths = Vec::new();
         for i in 0..archive.len() {
+            check_cancelled(is_cancelled)?;
             let file = archive.by_index(i).context("failed to inspect CBZ entry")?;
             let size = file.size();
             if size > limits.max_entry_bytes {
@@ -173,14 +255,20 @@ impl CbzDoc {
         }
         let dimensions = Mutex::new(vec![None; page_paths.len()]);
         let (page_paths, page_byte_lengths) = page_paths.into_iter().unzip();
-        Ok(Self {
+        let mut parsed = Self {
             page_paths,
             page_byte_lengths,
             data,
             title,
             limits,
             dimensions,
-        })
+            _admission: None,
+        };
+        let retained_bytes = parsed
+            .retained_byte_len()
+            .context("CBZ retained-memory charge overflowed")?;
+        parsed._admission = Some(admission.finish(retained_bytes)?);
+        Ok(parsed)
     }
 
     pub fn page_count(&self) -> usize {
@@ -205,6 +293,14 @@ impl CbzDoc {
     }
 
     fn image_bytes(&self, index: usize) -> Result<Vec<u8>> {
+        self.image_bytes_cancellable(index, None)
+    }
+
+    fn image_bytes_cancellable(
+        &self,
+        index: usize,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Vec<u8>> {
         let path = self
             .page_paths
             .get(index)
@@ -222,10 +318,24 @@ impl CbzDoc {
         }
         let capacity = usize::try_from(declared.min(self.limits.max_entry_bytes)).unwrap_or(0);
         let mut bytes = Vec::with_capacity(capacity);
-        file.by_ref()
-            .take(self.limits.max_entry_bytes.saturating_add(1))
-            .read_to_end(&mut bytes)
-            .with_context(|| format!("failed to read image: {path}"))?;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            check_cancelled(is_cancelled)?;
+            let remaining = self
+                .limits
+                .max_entry_bytes
+                .saturating_add(1)
+                .saturating_sub(bytes.len() as u64);
+            let read = file
+                .by_ref()
+                .take(remaining)
+                .read(&mut buffer)
+                .with_context(|| format!("failed to read image: {path}"))?;
+            if read == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&buffer[..read]);
+        }
         let streamed = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if streamed > self.limits.max_entry_bytes
             || streamed > self.limits.max_total_uncompressed_bytes
@@ -287,6 +397,26 @@ impl CbzDoc {
     }
 
     pub fn render_page(&self, index: usize, scale: f32) -> Result<RenderedPage> {
+        self.render_page_cancellable_inner(index, scale, None)
+    }
+
+    #[doc(hidden)]
+    pub fn render_page_cancellable(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<RenderedPage> {
+        self.render_page_cancellable_inner(index, scale, Some(is_cancelled))
+    }
+
+    fn render_page_cancellable_inner(
+        &self,
+        index: usize,
+        scale: f32,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<RenderedPage> {
+        check_cancelled(is_cancelled)?;
         if !scale.is_finite() || scale <= 0.0 {
             anyhow::bail!("page scale must be finite and positive");
         }
@@ -294,7 +424,7 @@ impl CbzDoc {
             .page_paths
             .get(index)
             .context("page index out of range")?;
-        let bytes = self.image_bytes(index)?;
+        let bytes = self.image_bytes_cancellable(index, is_cancelled)?;
         let (width, height) = self
             .cached_dimensions(index)
             .map(Ok)
@@ -313,11 +443,13 @@ impl CbzDoc {
         let img = reader
             .decode()
             .with_context(|| format!("failed to decode image: {path}"))?;
+        check_cancelled(is_cancelled)?;
         let img = if (scale - 1.0).abs() > f32::EPSILON {
             img.resize_exact(new_width, new_height, image::imageops::FilterType::Lanczos3)
         } else {
             img
         };
+        check_cancelled(is_cancelled)?;
         let rgba = img.to_rgba8();
         let (width, height) = rgba.dimensions();
         Ok(RenderedPage {
@@ -328,7 +460,33 @@ impl CbzDoc {
     }
 
     pub fn page_size(&self, index: usize) -> Result<(f32, f32)> {
-        let (width, height) = self.dimensions(index)?;
+        self.page_size_cancellable_inner(index, None)
+    }
+
+    #[doc(hidden)]
+    pub fn page_size_cancellable(
+        &self,
+        index: usize,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<(f32, f32)> {
+        self.page_size_cancellable_inner(index, Some(is_cancelled))
+    }
+
+    fn page_size_cancellable_inner(
+        &self,
+        index: usize,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<(f32, f32)> {
+        check_cancelled(is_cancelled)?;
+        let dimensions = if let Some(dimensions) = self.cached_dimensions(index) {
+            dimensions
+        } else {
+            let bytes = self.image_bytes_cancellable(index, is_cancelled)?;
+            check_cancelled(is_cancelled)?;
+            self.inspect_dimensions(index, &bytes)?
+        };
+        check_cancelled(is_cancelled)?;
+        let (width, height) = dimensions;
         Ok((width as f32, height as f32))
     }
 
@@ -394,6 +552,20 @@ impl CbzDoc {
         }
         Ok(bytes)
     }
+
+    pub(crate) fn page_image_bytes_cancellable(
+        &self,
+        index: usize,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Vec<u8>> {
+        let bytes = self.image_bytes_cancellable(index, Some(is_cancelled))?;
+        check_cancelled(Some(is_cancelled))?;
+        if self.cached_dimensions(index).is_none() {
+            self.inspect_dimensions(index, &bytes)?;
+        }
+        check_cancelled(Some(is_cancelled))?;
+        Ok(bytes)
+    }
 }
 
 fn scaled_dimensions(width: u32, height: u32, scale: f32) -> Option<(u32, u32)> {
@@ -417,17 +589,36 @@ fn scaled_dimensions(width: u32, height: u32, scale: f32) -> Option<(u32, u32)> 
     Some((width as u32, height as u32))
 }
 
+#[cfg(test)]
 fn read_cbz_snapshot(
     reader: impl Read,
     expected_bytes: u64,
     max_archive_bytes: u64,
 ) -> Result<Vec<u8>> {
+    read_cbz_snapshot_cancellable(reader, expected_bytes, max_archive_bytes, None)
+}
+
+fn read_cbz_snapshot_cancellable(
+    mut reader: impl Read,
+    expected_bytes: u64,
+    max_archive_bytes: u64,
+    is_cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<Vec<u8>> {
     let mut data = Vec::with_capacity(
         usize::try_from(expected_bytes.min(max_archive_bytes)).unwrap_or_default(),
     );
-    reader
-        .take(max_archive_bytes.saturating_add(1))
-        .read_to_end(&mut data)?;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check_cancelled(is_cancelled)?;
+        let remaining = max_archive_bytes
+            .saturating_add(1)
+            .saturating_sub(data.len() as u64);
+        let read = reader.by_ref().take(remaining).read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+    }
     let actual_bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
     if actual_bytes > max_archive_bytes {
         crate::resource_limit!("CBZ archive exceeds encoded byte limit");
@@ -438,6 +629,13 @@ fn read_cbz_snapshot(
         );
     }
     Ok(data)
+}
+
+fn check_cancelled(is_cancelled: Option<&dyn Fn() -> bool>) -> Result<()> {
+    if is_cancelled.is_some_and(|is_cancelled| is_cancelled()) {
+        anyhow::bail!("import cancelled");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -462,5 +660,26 @@ mod tests {
         assert!(IMAGE_EXTENSIONS.contains(&"jpg"));
         assert!(IMAGE_EXTENSIONS.contains(&"png"));
         assert!(!IMAGE_EXTENSIONS.contains(&"txt"));
+    }
+
+    #[test]
+    fn page_work_honors_preexisting_cancellation() {
+        let document =
+            CbzDoc::from_bytes(include_bytes!("../tests/fixtures/sample.cbz").to_vec()).unwrap();
+
+        assert!(
+            document
+                .page_size_cancellable(0, &|| true)
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
+        assert!(
+            document
+                .render_page_cancellable(0, 1.0, &|| true)
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled")
+        );
     }
 }

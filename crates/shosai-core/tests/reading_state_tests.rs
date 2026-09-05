@@ -45,6 +45,37 @@ async fn test_get_nonexistent_returns_none() {
     );
 }
 
+#[tokio::test]
+async fn malformed_reading_state_rows_return_an_error() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/malformed.epub");
+    sqlx::query(
+        "INSERT INTO reading_state (file_path, content_hash, page, zoom)
+         VALUES (?, ?, -1, 1.0)",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    assert!(store.get_async(&path, CONTENT_HASH).await.is_err());
+}
+
+#[tokio::test]
+async fn fingerprint_backfill_returns_an_error_for_malformed_legacy_rows() {
+    let (store, _dir) = temp_store().await;
+    sqlx::query(
+        "INSERT INTO books (title, format, file_path)
+         VALUES ('Malformed', 'unknown', '/books/malformed')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    assert!(store.backfill_missing_fingerprints().await.is_err());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn non_unicode_paths_have_distinct_reading_state_keys() {

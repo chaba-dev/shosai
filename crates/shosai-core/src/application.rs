@@ -144,6 +144,13 @@ pub struct OpenDocumentPlan {
     title_hint: Option<String>,
 }
 
+pub(crate) struct AdmittedDocumentBytes {
+    pub(crate) format: BookFormat,
+    pub(crate) data: Vec<u8>,
+    pub(crate) title_hint: Option<String>,
+    admission: crate::document_admission::ProvisionalDocumentAdmission,
+}
+
 impl OpenDocumentPlan {
     pub fn prepare(locator: &DeviceFileLocator) -> Result<Self, OpenDocumentError> {
         let format = locator.format()?;
@@ -186,9 +193,24 @@ impl OpenDocumentPlan {
         OpenDocument::retained_admission_byte_len(self.format, self.encoded_byte_len)
     }
 
-    pub(crate) fn read_bytes(
+    pub(crate) fn read_bytes(self) -> Result<AdmittedDocumentBytes, OpenDocumentError> {
+        self.read_bytes_cancellable(None)
+    }
+
+    pub(crate) fn read_bytes_cancellable(
         mut self,
-    ) -> Result<(BookFormat, Vec<u8>, Option<String>), OpenDocumentError> {
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<AdmittedDocumentBytes, OpenDocumentError> {
+        let retained_bytes =
+            OpenDocument::maximum_retained_byte_len(self.format).ok_or_else(|| {
+                OpenDocumentError::LimitExceeded {
+                    format: self.format,
+                    detail: "retained-memory admission cannot be represented".to_owned(),
+                }
+            })?;
+        let admission =
+            crate::document_admission::ProvisionalDocumentAdmission::acquire(retained_bytes)
+                .map_err(|error| classify_open_error(self.format, error))?;
         let max_input_bytes = OpenDocument::max_input_bytes(self.format);
         let read_limit =
             max_input_bytes
@@ -198,30 +220,77 @@ impl OpenDocumentPlan {
                     detail: "input byte limit cannot be represented".to_owned(),
                 })?;
         let mut data = Vec::with_capacity(self.encoded_byte_len);
-        self.file
-            .by_ref()
-            .take(read_limit)
-            .read_to_end(&mut data)
-            .map_err(|error| classify_open_error(self.format, error.into()))?;
+        let mut buffer = [0_u8; 64 * 1024];
+        while data.len() as u64 <= max_input_bytes {
+            if is_cancelled.is_some_and(|cancelled| cancelled()) {
+                return Err(classify_open_error(
+                    self.format,
+                    anyhow::anyhow!("document open cancelled"),
+                ));
+            }
+            let remaining = read_limit.saturating_sub(data.len() as u64);
+            let read = self
+                .file
+                .by_ref()
+                .take(remaining)
+                .read(&mut buffer)
+                .map_err(|error| classify_open_error(self.format, error.into()))?;
+            if read == 0 {
+                break;
+            }
+            data.extend_from_slice(&buffer[..read]);
+        }
         if data.len() as u64 > max_input_bytes {
             return Err(OpenDocumentError::LimitExceeded {
                 format: self.format,
                 detail: format!("input is larger than {max_input_bytes} bytes"),
             });
         }
-        Ok((self.format, data, self.title_hint))
+        Ok(AdmittedDocumentBytes {
+            format: self.format,
+            data,
+            title_hint: self.title_hint,
+            admission,
+        })
     }
 
     pub fn open(self) -> Result<OpenDocument, OpenDocumentError> {
-        let (format, data, title_hint) = self.read_bytes()?;
-        OpenDocument::from_bytes(format, data, title_hint)
+        OpenDocument::from_admitted_bytes(self.read_bytes()?)
     }
 
     #[doc(hidden)]
     pub fn open_with_content_hash(self) -> Result<(OpenDocument, String), OpenDocumentError> {
-        let (format, data, title_hint) = self.read_bytes()?;
-        let content_hash = format!("{:x}", Sha256::digest(&data));
-        let document = OpenDocument::from_bytes(format, data, title_hint)?;
+        let admitted = self.read_bytes()?;
+        let content_hash = format!("{:x}", Sha256::digest(&admitted.data));
+        let document = OpenDocument::from_admitted_bytes(admitted)?;
+        Ok((document, content_hash))
+    }
+
+    #[doc(hidden)]
+    pub fn open_with_content_hash_cancellable(
+        self,
+        cancellation: crate::bridge::Cancellation,
+    ) -> Result<(OpenDocument, String), OpenDocumentError> {
+        let is_cancelled = || cancellation.is_cancelled();
+        let admitted = self.read_bytes_cancellable(Some(&is_cancelled))?;
+        if cancellation.is_cancelled() {
+            return Err(classify_open_error(
+                admitted.format,
+                anyhow::anyhow!("document open cancelled"),
+            ));
+        }
+        let mut hasher = Sha256::new();
+        for chunk in admitted.data.chunks(64 * 1024) {
+            if cancellation.is_cancelled() {
+                return Err(classify_open_error(
+                    admitted.format,
+                    anyhow::anyhow!("document open cancelled"),
+                ));
+            }
+            hasher.update(chunk);
+        }
+        let content_hash = format!("{:x}", hasher.finalize());
+        let document = OpenDocument::from_admitted_bytes_cancellable(admitted, &is_cancelled)?;
         Ok((document, content_hash))
     }
 }
@@ -287,6 +356,7 @@ impl OpenDocument {
         format.max_input_bytes()
     }
 
+    #[cfg(test)]
     pub(crate) fn from_bytes(
         format: BookFormat,
         data: Vec<u8>,
@@ -302,6 +372,51 @@ impl OpenDocument {
             BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint(data, title_hint)
                 .map(|document| Self::Cbz(Arc::new(document)))
                 .map_err(|error| classify_open_error(format, error)),
+        }
+    }
+
+    pub(crate) fn from_admitted_bytes(
+        admitted: AdmittedDocumentBytes,
+    ) -> Result<Self, OpenDocumentError> {
+        Self::from_admitted_bytes_inner(admitted, None)
+    }
+
+    pub(crate) fn from_admitted_bytes_cancellable(
+        admitted: AdmittedDocumentBytes,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Self, OpenDocumentError> {
+        Self::from_admitted_bytes_inner(admitted, Some(is_cancelled))
+    }
+
+    fn from_admitted_bytes_inner(
+        admitted: AdmittedDocumentBytes,
+        is_cancelled: Option<&dyn Fn() -> bool>,
+    ) -> Result<Self, OpenDocumentError> {
+        let AdmittedDocumentBytes {
+            format,
+            data,
+            title_hint,
+            admission,
+        } = admitted;
+        match format {
+            BookFormat::Pdf => {
+                PdfDoc::from_bytes_admitted_cancellable(data, admission, is_cancelled)
+                    .map(|document| Self::Pdf(Arc::new(document)))
+                    .map_err(|error| classify_open_error(format, error))
+            }
+            BookFormat::Epub => {
+                EpubDoc::from_bytes_admitted_cancellable(data, admission, is_cancelled)
+                    .map(|document| Self::Epub(Arc::new(document)))
+                    .map_err(|error| classify_open_error(format, error))
+            }
+            BookFormat::Cbz => CbzDoc::from_bytes_with_title_hint_admitted_cancellable(
+                data,
+                title_hint,
+                admission,
+                is_cancelled,
+            )
+            .map(|document| Self::Cbz(Arc::new(document)))
+            .map_err(|error| classify_open_error(format, error)),
         }
     }
 
@@ -400,6 +515,22 @@ mod tests {
             error,
             OpenDocumentError::UnsupportedFormat("txt".to_owned())
         );
+    }
+
+    #[test]
+    fn prepared_document_open_honors_preexisting_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.cbz");
+        std::fs::write(&path, include_bytes!("../tests/fixtures/sample.cbz")).unwrap();
+        let plan = OpenDocumentPlan::prepare(&DeviceFileLocator::from_path(path)).unwrap();
+        let cancellation = crate::bridge::Cancellation::new();
+        cancellation.cancel();
+
+        let error = plan
+            .open_with_content_hash_cancellable(cancellation)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 
     #[test]
