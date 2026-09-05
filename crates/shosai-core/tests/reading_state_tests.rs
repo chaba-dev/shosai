@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Each test gets its own temporary directory (and therefore its own database).
 /// The directory is cleaned up automatically when `TempDir` is dropped.
@@ -37,8 +38,9 @@ async fn test_get_nonexistent_returns_none() {
     let (store, _dir) = temp_store().await;
     assert!(
         store
-            .get_async(&PathBuf::from("/no/such/file.pdf"))
+            .get_async(&PathBuf::from("/no/such/file.pdf"), CONTENT_HASH)
             .await
+            .unwrap()
             .is_none()
     );
 }
@@ -59,6 +61,7 @@ async fn non_unicode_paths_have_distinct_reading_state_keys() {
     store
         .set_async(
             &first,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 1,
                 location_offset: Some(10),
@@ -70,6 +73,7 @@ async fn non_unicode_paths_have_distinct_reading_state_keys() {
     store
         .set_async(
             &second,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 2,
                 location_offset: Some(20),
@@ -79,8 +83,24 @@ async fn non_unicode_paths_have_distinct_reading_state_keys() {
         .await
         .unwrap();
 
-    assert_eq!(store.get_async(&first).await.unwrap().page, 1);
-    assert_eq!(store.get_async(&second).await.unwrap().page, 2);
+    assert_eq!(
+        store
+            .get_async(&first, CONTENT_HASH)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        1
+    );
+    assert_eq!(
+        store
+            .get_async(&second, CONTENT_HASH)
+            .await
+            .unwrap()
+            .unwrap()
+            .page,
+        2
+    );
 }
 
 #[tokio::test]
@@ -91,6 +111,7 @@ async fn test_set_then_get() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 5,
                 location_offset: None,
@@ -101,11 +122,94 @@ async fn test_set_then_get() {
         .unwrap();
 
     let state = store
-        .get_async(&path)
+        .get_async(&path, CONTENT_HASH)
         .await
+        .unwrap()
         .expect("should exist after set");
     assert_eq!(state.page, 5);
     assert!((state.zoom - 1.5).abs() < f32::EPSILON);
+}
+
+#[tokio::test]
+async fn path_state_is_restored_only_for_matching_content() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/replaced.epub");
+    store
+        .set_async(
+            &path,
+            CONTENT_HASH,
+            &FileReadingState {
+                page: 5,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .get_async(
+                &path,
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            )
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn reading_state_queries_report_database_failures() {
+    let (store, _dir) = temp_store().await;
+    store.pool().close().await;
+
+    assert!(
+        store
+            .get_async(PathBuf::from("book.epub").as_path(), CONTENT_HASH)
+            .await
+            .is_err()
+    );
+    assert!(store.get_for_book_async(1).await.is_err());
+}
+
+#[tokio::test]
+async fn reading_state_writes_reject_unrepresentable_values() {
+    let (store, _dir) = temp_store().await;
+    let invalid_zoom = FileReadingState {
+        page: 0,
+        location_offset: None,
+        zoom: f32::NAN,
+    };
+
+    assert!(
+        store
+            .set_async(
+                PathBuf::from("book.epub").as_path(),
+                CONTENT_HASH,
+                &invalid_zoom,
+            )
+            .await
+            .is_err()
+    );
+
+    if usize::BITS > 63 {
+        let invalid_page = FileReadingState {
+            page: usize::MAX,
+            location_offset: None,
+            zoom: 1.0,
+        };
+        assert!(
+            store
+                .set_async(
+                    PathBuf::from("book.epub").as_path(),
+                    CONTENT_HASH,
+                    &invalid_page,
+                )
+                .await
+                .is_err()
+        );
+    }
 }
 
 #[tokio::test]
@@ -116,6 +220,7 @@ async fn test_epub_character_offset_persists() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 4,
                 location_offset: Some(1_234),
@@ -125,7 +230,7 @@ async fn test_epub_character_offset_persists() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(state.page, 4);
     assert_eq!(state.location_offset, Some(1_234));
 }
@@ -138,6 +243,7 @@ async fn test_upsert_overwrites() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 1,
                 location_offset: None,
@@ -149,6 +255,7 @@ async fn test_upsert_overwrites() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 42,
                 location_offset: None,
@@ -158,7 +265,7 @@ async fn test_upsert_overwrites() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(state.page, 42);
     assert!((state.zoom - 3.0).abs() < f32::EPSILON);
 }
@@ -172,6 +279,7 @@ async fn test_multiple_files_independent() {
     store
         .set_async(
             &a,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 1,
                 location_offset: None,
@@ -183,6 +291,7 @@ async fn test_multiple_files_independent() {
     store
         .set_async(
             &b,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 99,
                 location_offset: None,
@@ -192,11 +301,11 @@ async fn test_multiple_files_independent() {
         .await
         .unwrap();
 
-    let sa = store.get_async(&a).await.unwrap();
+    let sa = store.get_async(&a, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(sa.page, 1);
     assert!((sa.zoom - 1.0).abs() < f32::EPSILON);
 
-    let sb = store.get_async(&b).await.unwrap();
+    let sb = store.get_async(&b, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(sb.page, 99);
     assert!((sb.zoom - 2.5).abs() < f32::EPSILON);
 }
@@ -210,6 +319,7 @@ async fn test_updating_one_file_does_not_affect_another() {
     store
         .set_async(
             &a,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 10,
                 location_offset: None,
@@ -221,6 +331,7 @@ async fn test_updating_one_file_does_not_affect_another() {
     store
         .set_async(
             &b,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 20,
                 location_offset: None,
@@ -234,6 +345,7 @@ async fn test_updating_one_file_does_not_affect_another() {
     store
         .set_async(
             &b,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 50,
                 location_offset: None,
@@ -244,10 +356,10 @@ async fn test_updating_one_file_does_not_affect_another() {
         .unwrap();
 
     // a should be untouched
-    let sa = store.get_async(&a).await.unwrap();
+    let sa = store.get_async(&a, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(sa.page, 10);
 
-    let sb = store.get_async(&b).await.unwrap();
+    let sb = store.get_async(&b, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(sb.page, 50);
     assert!((sb.zoom - 4.0).abs() < f32::EPSILON);
 }
@@ -268,6 +380,7 @@ async fn test_data_persists_across_opens() {
         store
             .set_async(
                 &path,
+                CONTENT_HASH,
                 &FileReadingState {
                     page: 42,
                     location_offset: None,
@@ -281,7 +394,11 @@ async fn test_data_persists_across_opens() {
     // Read with a fresh instance
     {
         let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
-        let state = store.get_async(&path).await.expect("should persist");
+        let state = store
+            .get_async(&path, CONTENT_HASH)
+            .await
+            .expect("query should succeed")
+            .expect("should persist");
         assert_eq!(state.page, 42);
         assert!((state.zoom - 2.0).abs() < f32::EPSILON);
     }
@@ -350,6 +467,7 @@ async fn test_migrations_are_idempotent() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 7,
                 location_offset: None,
@@ -363,8 +481,9 @@ async fn test_migrations_are_idempotent() {
     // Open again — migrations run a second time but should not destroy data
     let store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
     let state = store
-        .get_async(&path)
+        .get_async(&path, CONTENT_HASH)
         .await
+        .unwrap()
         .expect("data should survive re-migration");
     assert_eq!(state.page, 7);
     assert!((state.zoom - 1.25).abs() < f32::EPSILON);
@@ -518,15 +637,18 @@ async fn stable_save_replaces_a_path_only_alias() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/relinked.epub");
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', '/old.epub')
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', '/books/relinked.epub', ?)
          RETURNING id",
     )
+    .bind(CONTENT_HASH)
     .fetch_one(store.pool())
     .await
     .unwrap();
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 1,
                 location_offset: None,
@@ -539,7 +661,6 @@ async fn stable_save_replaces_a_path_only_alias() {
     store
         .set_for_book_async(
             book_id,
-            &path,
             &FileReadingState {
                 page: 9,
                 location_offset: Some(3),
@@ -549,7 +670,7 @@ async fn stable_save_replaces_a_path_only_alias() {
         .await
         .unwrap();
 
-    let state = store.get_for_book_async(book_id).await.unwrap();
+    let state = store.get_for_book_async(book_id).await.unwrap().unwrap();
     assert_eq!(state.page, 9);
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reading_state WHERE file_path = ?")
         .bind(path.to_string_lossy().as_ref())
@@ -557,6 +678,56 @@ async fn stable_save_replaces_a_path_only_alias() {
         .await
         .unwrap();
     assert_eq!(count, 1);
+}
+
+#[tokio::test]
+async fn stable_save_does_not_overwrite_a_row_owned_by_another_book() {
+    let (store, _dir) = temp_store().await;
+    let target_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Target', 'epub', '/books/target.epub', ?) RETURNING id",
+    )
+    .bind(CONTENT_HASH)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let other_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Other', 'epub', '/books/other.epub', ?) RETURNING id",
+    )
+    .bind("1111111111111111111111111111111111111111111111111111111111111111")
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO reading_state (file_path, content_hash, book_id, page, zoom)
+         VALUES ('/books/target.epub', ?, ?, 4, 1.0)",
+    )
+    .bind("1111111111111111111111111111111111111111111111111111111111111111")
+    .bind(other_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let result = store
+        .set_for_book_async(
+            target_id,
+            &FileReadingState {
+                page: 9,
+                location_offset: None,
+                zoom: 1.0,
+            },
+        )
+        .await;
+
+    assert!(result.is_err());
+    let owner: i64 = sqlx::query_scalar(
+        "SELECT book_id FROM reading_state WHERE file_path = '/books/target.epub'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(owner, other_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +742,7 @@ async fn test_page_zero_and_default_zoom() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 0,
                 location_offset: None,
@@ -580,7 +752,7 @@ async fn test_page_zero_and_default_zoom() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(state.page, 0);
     assert!((state.zoom - 1.0).abs() < f32::EPSILON);
 }
@@ -593,6 +765,7 @@ async fn test_large_page_number() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 999_999,
                 location_offset: None,
@@ -602,7 +775,7 @@ async fn test_large_page_number() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(state.page, 999_999);
     assert!((state.zoom - 5.0).abs() < f32::EPSILON);
 }
@@ -615,6 +788,7 @@ async fn test_small_zoom_value() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 0,
                 location_offset: None,
@@ -624,7 +798,7 @@ async fn test_small_zoom_value() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert!((state.zoom - 0.25).abs() < f32::EPSILON);
 }
 
@@ -636,6 +810,7 @@ async fn test_path_with_spaces_and_unicode() {
     store
         .set_async(
             &path,
+            CONTENT_HASH,
             &FileReadingState {
                 page: 3,
                 location_offset: None,
@@ -645,7 +820,7 @@ async fn test_path_with_spaces_and_unicode() {
         .await
         .unwrap();
 
-    let state = store.get_async(&path).await.unwrap();
+    let state = store.get_async(&path, CONTENT_HASH).await.unwrap().unwrap();
     assert_eq!(state.page, 3);
 }
 
@@ -659,6 +834,7 @@ async fn test_open_creates_parent_directories() {
     store
         .set_async(
             &PathBuf::from("/test.pdf"),
+            CONTENT_HASH,
             &FileReadingState {
                 page: 1,
                 location_offset: None,

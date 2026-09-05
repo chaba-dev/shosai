@@ -136,8 +136,15 @@ pub enum Message {
     BookAddedToBatch(ImportReport),
     OpenLibraryBook(i64, String),
     LocateBook(i64),
-    RelinkBookSelected(i64, Option<PathBuf>),
-    BookRelinked(Result<Book, String>),
+    RelinkBookSelected {
+        generation: u64,
+        book_id: i64,
+        path: Option<PathBuf>,
+    },
+    BookRelinked {
+        generation: u64,
+        result: Result<Book, String>,
+    },
     ToggleBookMenu(i64),
     CloseBookMenu,
     RequestRemoveBook(i64),
@@ -163,14 +170,19 @@ pub enum Message {
     SelectDefaultPdfFitWidth(bool),
     OpenManagedLibraryFolder,
     ChooseManagedLibraryParent,
-    ManagedLibraryParentSelected(Option<PathBuf>),
+    ManagedLibraryParentSelected {
+        generation: u64,
+        parent: Option<PathBuf>,
+    },
     ManagedLibraryMovePlanned {
+        generation: u64,
         destination: PathBuf,
         result: Result<shosai_core::library::ManagedStorageSummary, String>,
     },
     CancelManagedLibraryMove,
     ConfirmManagedLibraryMove,
     ManagedLibraryMoved {
+        generation: u64,
         destination: PathBuf,
         result: Result<Vec<shosai_core::library::ManagedPathChange>, String>,
     },

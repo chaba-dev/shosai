@@ -6,6 +6,8 @@ use shosai_core::reading_state::ReadingStateStore;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
 async fn temp_store() -> (BookmarkStore, TempDir) {
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("shosai.db");
@@ -20,7 +22,7 @@ async fn test_add_bookmark() {
     let path = PathBuf::from("/books/test.pdf");
 
     let bm = store
-        .add_async(&path, 5, Some("Chapter 3"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, Some("Chapter 3"), None, "yellow")
         .await
         .unwrap();
 
@@ -36,7 +38,14 @@ async fn test_add_bookmark_with_note() {
     let path = PathBuf::from("/books/test.pdf");
 
     let bm = store
-        .add_async(&path, 10, None, Some("Important concept"), "blue")
+        .add_async(
+            &path,
+            CONTENT_HASH,
+            10,
+            None,
+            Some("Important concept"),
+            "blue",
+        )
         .await
         .unwrap();
 
@@ -51,19 +60,22 @@ async fn test_list_for_file() {
     let path = PathBuf::from("/books/test.pdf");
 
     store
-        .add_async(&path, 1, Some("Page 1"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 1, Some("Page 1"), None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path, 10, Some("Page 10"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 10, Some("Page 10"), None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path, 5, Some("Page 5"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, Some("Page 5"), None, "yellow")
         .await
         .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bookmarks.len(), 3);
     // Should be sorted by page
     assert_eq!(bookmarks[0].page, 1);
@@ -78,17 +90,41 @@ async fn test_list_only_returns_for_specified_file() {
     let path_b = PathBuf::from("/books/b.pdf");
 
     store
-        .add_async(&path_a, 1, None, None, "yellow")
+        .add_async(&path_a, CONTENT_HASH, 1, None, None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path_b, 2, None, None, "yellow")
+        .add_async(&path_b, CONTENT_HASH, 2, None, None, "yellow")
         .await
         .unwrap();
 
-    let bms_a = store.list_for_file_async(&path_a).await.unwrap();
+    let bms_a = store
+        .list_for_file_async(&path_a, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bms_a.len(), 1);
     assert_eq!(bms_a[0].page, 1);
+}
+
+#[tokio::test]
+async fn path_bookmarks_are_listed_only_for_matching_content() {
+    let (store, _dir) = temp_store().await;
+    let path = PathBuf::from("/books/replaced.epub");
+    store
+        .add_async(&path, CONTENT_HASH, 1, None, None, "yellow")
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .list_for_file_async(
+                &path,
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -97,16 +133,32 @@ async fn test_toggle_creates_and_removes() {
     let path = PathBuf::from("/books/test.pdf");
 
     // First toggle: creates bookmark
-    let result = store.toggle_async(&path, 5, Some("Page 5")).await.unwrap();
+    let result = store
+        .toggle_async(&path, CONTENT_HASH, 5, Some("Page 5"))
+        .await
+        .unwrap();
     assert!(result.is_some(), "should create bookmark");
 
-    assert!(store.is_bookmarked_async(&path, 5).await);
+    assert!(
+        store
+            .is_bookmarked_async(&path, CONTENT_HASH, 5)
+            .await
+            .unwrap()
+    );
 
     // Second toggle: removes bookmark
-    let result = store.toggle_async(&path, 5, Some("Page 5")).await.unwrap();
+    let result = store
+        .toggle_async(&path, CONTENT_HASH, 5, Some("Page 5"))
+        .await
+        .unwrap();
     assert!(result.is_none(), "should remove bookmark");
 
-    assert!(!store.is_bookmarked_async(&path, 5).await);
+    assert!(
+        !store
+            .is_bookmarked_async(&path, CONTENT_HASH, 5)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -114,15 +166,30 @@ async fn test_is_bookmarked() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/test.pdf");
 
-    assert!(!store.is_bookmarked_async(&path, 5).await);
+    assert!(
+        !store
+            .is_bookmarked_async(&path, CONTENT_HASH, 5)
+            .await
+            .unwrap()
+    );
 
     store
-        .add_async(&path, 5, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, None, None, "yellow")
         .await
         .unwrap();
 
-    assert!(store.is_bookmarked_async(&path, 5).await);
-    assert!(!store.is_bookmarked_async(&path, 6).await);
+    assert!(
+        store
+            .is_bookmarked_async(&path, CONTENT_HASH, 5)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .is_bookmarked_async(&path, CONTENT_HASH, 6)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -131,7 +198,7 @@ async fn test_update_note() {
     let path = PathBuf::from("/books/test.pdf");
 
     let bm = store
-        .add_async(&path, 5, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, None, None, "yellow")
         .await
         .unwrap();
 
@@ -140,7 +207,10 @@ async fn test_update_note() {
         .await
         .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bookmarks[0].note.as_deref(), Some("Added a note later"));
 }
 
@@ -162,7 +232,7 @@ async fn test_update_title() {
     let path = PathBuf::from("/books/test.pdf");
 
     let bm = store
-        .add_async(&path, 5, Some("Old title"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, Some("Old title"), None, "yellow")
         .await
         .unwrap();
 
@@ -171,7 +241,10 @@ async fn test_update_title() {
         .await
         .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bookmarks[0].title.as_deref(), Some("New title"));
 }
 
@@ -181,13 +254,16 @@ async fn test_remove_bookmark() {
     let path = PathBuf::from("/books/test.pdf");
 
     let bm = store
-        .add_async(&path, 5, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, None, None, "yellow")
         .await
         .unwrap();
 
     store.remove_async(bm.id).await.unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert!(bookmarks.is_empty());
 }
 
@@ -197,21 +273,27 @@ async fn test_remove_all_for_file() {
     let path = PathBuf::from("/books/test.pdf");
 
     store
-        .add_async(&path, 1, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 1, None, None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path, 5, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, None, None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path, 10, None, None, "yellow")
+        .add_async(&path, CONTENT_HASH, 10, None, None, "yellow")
         .await
         .unwrap();
 
-    store.remove_all_for_file_async(&path).await.unwrap();
+    store
+        .remove_all_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert!(bookmarks.is_empty());
 }
 
@@ -222,15 +304,18 @@ async fn test_multiple_bookmarks_on_same_page() {
 
     // A page bookmark (no note) + a note on the same page
     store
-        .add_async(&path, 5, Some("Page 5"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 5, Some("Page 5"), None, "yellow")
         .await
         .unwrap();
     store
-        .add_async(&path, 5, None, Some("A note"), "blue")
+        .add_async(&path, CONTENT_HASH, 5, None, Some("A note"), "blue")
         .await
         .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bookmarks.len(), 2);
 }
 
@@ -240,15 +325,18 @@ async fn test_epub_bookmarks_can_share_a_chapter_at_distinct_offsets() {
     let path = PathBuf::from("/books/test.epub");
 
     store
-        .toggle_at_async(&path, 5, Some(100), Some("First location"))
+        .toggle_at_async(&path, CONTENT_HASH, 5, Some(100), Some("First location"))
         .await
         .unwrap();
     store
-        .toggle_at_async(&path, 5, Some(500), Some("Second location"))
+        .toggle_at_async(&path, CONTENT_HASH, 5, Some(500), Some("Second location"))
         .await
         .unwrap();
 
-    let bookmarks = store.list_for_file_async(&path).await.unwrap();
+    let bookmarks = store
+        .list_for_file_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert_eq!(bookmarks.len(), 2);
     assert_eq!(bookmarks[0].location_offset, Some(100));
     assert_eq!(bookmarks[1].location_offset, Some(500));
@@ -260,12 +348,13 @@ async fn test_export_markdown() {
     let path = PathBuf::from("/books/test.pdf");
 
     store
-        .add_async(&path, 0, Some("Introduction"), None, "yellow")
+        .add_async(&path, CONTENT_HASH, 0, Some("Introduction"), None, "yellow")
         .await
         .unwrap();
     store
         .add_async(
             &path,
+            CONTENT_HASH,
             4,
             Some("Key Concept"),
             Some("This is very important."),
@@ -274,7 +363,10 @@ async fn test_export_markdown() {
         .await
         .unwrap();
 
-    let md = store.export_markdown_async(&path).await.unwrap();
+    let md = store
+        .export_markdown_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
 
     assert!(md.contains("# Bookmarks: test.pdf"));
     assert!(md.contains("## Page 1: Introduction"));
@@ -287,7 +379,10 @@ async fn test_export_empty() {
     let (store, _dir) = temp_store().await;
     let path = PathBuf::from("/books/empty.pdf");
 
-    let md = store.export_markdown_async(&path).await.unwrap();
+    let md = store
+        .export_markdown_async(&path, CONTENT_HASH)
+        .await
+        .unwrap();
     assert!(md.contains("# Bookmarks: empty.pdf"));
     // No bookmark sections
     assert!(!md.contains("## Page"));
@@ -299,7 +394,7 @@ async fn bookmark_fields_are_bounded_at_public_write_boundaries() {
     let path = PathBuf::from("/books/bounded.pdf");
     let note = "n".repeat(MAX_BOOKMARK_NOTE_BYTES);
     let bookmark = store
-        .add_async(&path, 0, Some("title"), Some(&note), "yellow")
+        .add_async(&path, CONTENT_HASH, 0, Some("title"), Some(&note), "yellow")
         .await
         .unwrap();
 
@@ -315,6 +410,7 @@ async fn bookmark_fields_are_bounded_at_public_write_boundaries() {
         store
             .add_async(
                 &path,
+                CONTENT_HASH,
                 1,
                 Some(&"t".repeat(MAX_BOOKMARK_TITLE_BYTES + 1)),
                 None,
@@ -329,6 +425,7 @@ async fn bookmark_fields_are_bounded_at_public_write_boundaries() {
         store
             .add_async(
                 &path,
+                CONTENT_HASH,
                 1,
                 None,
                 None,
@@ -347,14 +444,21 @@ async fn bookmark_count_and_page_results_are_bounded() {
     let path = PathBuf::from("/books/many.pdf");
     for page in 0..MAX_BOOKMARKS_PER_BOOK {
         store
-            .add_async(&path, page, None, None, "yellow")
+            .add_async(&path, CONTENT_HASH, page, None, None, "yellow")
             .await
             .unwrap();
     }
 
     assert!(
         store
-            .add_async(&path, MAX_BOOKMARKS_PER_BOOK, None, None, "yellow")
+            .add_async(
+                &path,
+                CONTENT_HASH,
+                MAX_BOOKMARKS_PER_BOOK,
+                None,
+                None,
+                "yellow",
+            )
             .await
             .unwrap_err()
             .to_string()
@@ -362,7 +466,7 @@ async fn bookmark_count_and_page_results_are_bounded() {
     );
     assert_eq!(
         store
-            .list_for_file_page_async(&path, u32::MAX, 0)
+            .list_for_file_page_async(&path, CONTENT_HASH, u32::MAX, 0)
             .await
             .unwrap()
             .len(),
@@ -377,14 +481,14 @@ async fn bookmark_markdown_export_has_an_aggregate_byte_limit() {
     let note = "n".repeat(MAX_BOOKMARK_NOTE_BYTES);
     for page in 0..(MAX_BOOKMARK_EXPORT_BYTES / MAX_BOOKMARK_NOTE_BYTES + 1) {
         store
-            .add_async(&path, page, None, Some(&note), "yellow")
+            .add_async(&path, CONTENT_HASH, page, None, Some(&note), "yellow")
             .await
             .unwrap();
     }
 
     assert!(
         store
-            .export_markdown_async(&path)
+            .export_markdown_async(&path, CONTENT_HASH)
             .await
             .unwrap_err()
             .to_string()
@@ -412,9 +516,11 @@ async fn stable_book_toggle_reconciles_path_only_bookmarks_before_counting() {
         .unwrap();
     let current_path = PathBuf::from("/book.epub");
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', ?, ?) RETURNING id",
     )
     .bind(current_path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
     .fetch_one(state.pool())
     .await
     .unwrap();
@@ -424,19 +530,21 @@ async fn stable_book_toggle_reconciles_path_only_bookmarks_before_counting() {
         "WITH RECURSIVE pages(page) AS (
            SELECT 0 UNION ALL SELECT page + 1 FROM pages WHERE page < ?
          )
-         INSERT INTO bookmarks (file_path, book_id, page, note, color)
-         SELECT '/old-book.epub', ?, page, 'stable', 'yellow' FROM pages",
+         INSERT INTO bookmarks (file_path, content_hash, book_id, page, note, color)
+         SELECT '/old-book.epub', ?, ?, page, 'stable', 'yellow' FROM pages",
     )
     .bind(MAX_BOOKMARKS_PER_BOOK as i64 - 2)
+    .bind(CONTENT_HASH)
     .bind(book_id)
     .execute(state.pool())
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO bookmarks (file_path, page, note, color)
-         VALUES (?, ?, 'path alias', 'yellow')",
+        "INSERT INTO bookmarks (file_path, content_hash, page, note, color)
+         VALUES (?, ?, ?, 'path alias', 'yellow')",
     )
     .bind(current_path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
     .bind(MAX_BOOKMARKS_PER_BOOK as i64 - 1)
     .execute(state.pool())
     .await
@@ -474,15 +582,17 @@ async fn stable_book_toggle_claims_path_only_aliases() {
         .unwrap();
     let path = PathBuf::from("/book.epub");
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', ?, ?) RETURNING id",
     )
     .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
     .fetch_one(state.pool())
     .await
     .unwrap();
     let store = BookmarkStore::new(state.pool().clone());
     let alias = store
-        .add_async(&path, 1, None, Some("note"), "yellow")
+        .add_async(&path, CONTENT_HASH, 1, None, Some("note"), "yellow")
         .await
         .unwrap();
 
@@ -502,6 +612,43 @@ async fn stable_book_toggle_claims_path_only_aliases() {
 }
 
 #[tokio::test]
+async fn stable_book_toggle_ignores_path_aliases_for_other_content() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let path = PathBuf::from("/book.epub");
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', ?, ?) RETURNING id",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
+    .fetch_one(state.pool())
+    .await
+    .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+    let other_hash = "1111111111111111111111111111111111111111111111111111111111111111";
+    let unrelated = store
+        .add_async(&path, other_hash, 2, None, None, "yellow")
+        .await
+        .unwrap();
+
+    assert!(
+        store
+            .toggle_for_book_at_async(book_id, &path, 2, None, None)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(store.list_for_book_async(book_id).await.unwrap().len(), 1);
+    assert_eq!(
+        store.list_for_file_async(&path, other_hash).await.unwrap()[0].id,
+        unrelated.id
+    );
+}
+
+#[tokio::test]
 async fn stable_book_listing_claims_late_path_only_aliases() {
     let dir = TempDir::new().unwrap();
     let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
@@ -509,16 +656,18 @@ async fn stable_book_listing_claims_late_path_only_aliases() {
         .unwrap();
     let path = PathBuf::from("/book.epub");
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', ?) RETURNING id",
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', ?, ?) RETURNING id",
     )
     .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
     .fetch_one(state.pool())
     .await
     .unwrap();
     let store = BookmarkStore::new(state.pool().clone());
 
     let alias = store
-        .add_async(&path, 4, None, Some("late alias"), "yellow")
+        .add_async(&path, CONTENT_HASH, 4, None, Some("late alias"), "yellow")
         .await
         .unwrap();
 
@@ -535,9 +684,10 @@ async fn concurrent_stable_book_toggles_are_linearizable() {
         .await
         .unwrap();
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path) VALUES ('Book', 'epub', '/book.epub')
-         RETURNING id",
+        "INSERT INTO books (title, format, file_path, content_hash)
+         VALUES ('Book', 'epub', '/book.epub', ?) RETURNING id",
     )
+    .bind(CONTENT_HASH)
     .fetch_one(state.pool())
     .await
     .unwrap();
@@ -573,17 +723,53 @@ async fn concurrent_untracked_book_toggles_are_linearizable() {
     let path = PathBuf::from("/book.epub");
     let first_toggle = tokio::spawn({
         let path = path.clone();
-        async move { first.toggle_at_async(&path, 1, None, Some("Page 2")).await }
+        async move {
+            first
+                .toggle_at_async(&path, CONTENT_HASH, 1, None, Some("Page 2"))
+                .await
+        }
     });
     let second_path = path.clone();
     let second_toggle = tokio::spawn(async move {
         second
-            .toggle_at_async(&second_path, 1, None, Some("Page 2"))
+            .toggle_at_async(&second_path, CONTENT_HASH, 1, None, Some("Page 2"))
             .await
     });
 
     first_toggle.await.unwrap().unwrap();
     second_toggle.await.unwrap().unwrap();
 
-    assert!(store.list_for_file_async(&path).await.unwrap().is_empty());
+    assert!(
+        store
+            .list_for_file_async(&path, CONTENT_HASH)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn invalid_stored_bookmark_coordinates_are_reported() {
+    let dir = TempDir::new().unwrap();
+    let state = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let store = BookmarkStore::new(state.pool().clone());
+    let path = PathBuf::from("/book.epub");
+    sqlx::query(
+        "INSERT INTO bookmarks (file_path, content_hash, page, color)
+         VALUES (?, ?, -1, 'yellow')",
+    )
+    .bind(path.to_string_lossy().as_ref())
+    .bind(CONTENT_HASH)
+    .execute(state.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        store
+            .list_for_file_async(&path, CONTENT_HASH)
+            .await
+            .is_err()
+    );
 }

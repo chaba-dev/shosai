@@ -628,6 +628,7 @@ struct ReaderTab {
     id: u64,
     session: ReaderSession,
     content_hash: Option<String>,
+    reading_state_restore_failed: bool,
     display_title: String,
     total_pages: usize,
     rendered_page: Option<RenderedPage>,
@@ -678,6 +679,7 @@ enum BookmarkMutation {
     Toggle {
         generation: u64,
         file_path: PathBuf,
+        content_hash: Option<String>,
         book_id: Option<i64>,
         page: usize,
         location_offset: Option<usize>,
@@ -881,6 +883,7 @@ pub struct State {
     // -- Reader state --
     book_id: Option<i64>,
     document_content_hash: Option<String>,
+    reading_state_restore_failed: bool,
     display_title: Option<String>,
     file_path: Option<PathBuf>,
     document: Option<OpenDocument>,
@@ -990,6 +993,8 @@ pub struct State {
     book_menu: Option<i64>,
     pending_remove_book: Option<i64>,
     removing_book: Option<i64>,
+    relink_generation: u64,
+    relinking_book: Option<(u64, i64)>,
     add_books_open: bool,
     add_books_source: Option<AddBooksSource>,
     add_books_discovering: bool,
@@ -1023,6 +1028,7 @@ pub struct State {
     reader_defaults: ReaderDefaults,
     pending_library_move: Option<LibraryMovePlan>,
     moving_library: bool,
+    managed_library_move_generation: u64,
     settings_error: Option<String>,
     storage_initializing: bool,
     storage_error: Option<AppError>,
@@ -1052,6 +1058,7 @@ pub fn boot() -> (State, Task<Message>) {
 
         book_id: None,
         document_content_hash: None,
+        reading_state_restore_failed: false,
         display_title: None,
         file_path: None,
         document: None,
@@ -1158,6 +1165,8 @@ pub fn boot() -> (State, Task<Message>) {
         book_menu: None,
         pending_remove_book: None,
         removing_book: None,
+        relink_generation: 0,
+        relinking_book: None,
         add_books_open: false,
         add_books_source: None,
         add_books_discovering: false,
@@ -1188,6 +1197,7 @@ pub fn boot() -> (State, Task<Message>) {
         reader_defaults: ReaderDefaults::default(),
         pending_library_move: None,
         moving_library: false,
+        managed_library_move_generation: 0,
         settings_error: None,
         storage_initializing: true,
         storage_error: None,
@@ -1424,6 +1434,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
             },
         },
         content_hash: state.document_content_hash.clone(),
+        reading_state_restore_failed: state.reading_state_restore_failed,
         display_title: state
             .display_title
             .clone()
@@ -1478,6 +1489,7 @@ fn restore_reader_tab(state: &mut State, tab: ReaderTab) {
     state.active_tab_id = Some(tab.id);
     state.book_id = tab.session.book_id;
     state.document_content_hash = tab.content_hash;
+    state.reading_state_restore_failed = tab.reading_state_restore_failed;
     state.display_title = Some(tab.display_title);
     state.file_path = Some(tab.session.locator.path().to_path_buf());
     state.document = Some(tab.session.document);
@@ -1969,8 +1981,7 @@ fn finish_open_document_with_permit(
         state.continuous_activation = state.continuous_activation.wrapping_add(1);
         state.open_error = None;
         state.missing_book_id = None;
-        install_document(state, path, book_id, document);
-        state.document_content_hash = content_hash;
+        install_document(state, path, book_id, content_hash, document);
         state.document_permit = Some(document_permit);
         state.zoom = retained_preferences.pdf_zoom;
         state.font_size = retained_preferences.epub_font_size;
@@ -1997,8 +2008,7 @@ fn finish_open_document_with_permit(
     state.continuous_activation = state.continuous_activation.wrapping_add(1);
     state.open_error = None;
     state.missing_book_id = None;
-    install_document(state, path, book_id, document);
-    state.document_content_hash = content_hash;
+    install_document(state, path, book_id, content_hash, document);
     state.document_permit = Some(document_permit);
     apply_reader_defaults(state);
     let task = refresh_content(state);
@@ -2155,13 +2165,15 @@ fn install_document(
     state: &mut State,
     path: PathBuf,
     book_id: Option<i64>,
+    content_hash: Option<String>,
     document: OpenDocument,
 ) {
     if let Some(tab_id) = state.active_tab_id {
         cancel_epub_jobs_for_tab(state, tab_id);
     }
     cancel_active_search(state);
-    state.document_content_hash = None;
+    state.document_content_hash = content_hash;
+    state.reading_state_restore_failed = false;
     state.display_title = book_title(book_id, &document, Some(&path), &state.library_books);
     state.search_document_generation = state.search_document_generation.wrapping_add(1);
     state.search_query_generation = state.search_query_generation.wrapping_add(1);
@@ -2212,9 +2224,23 @@ fn install_document(
     state.search_current = 0;
 
     let saved = state.reading_state.as_ref().and_then(|store| {
-        book_id
-            .and_then(|id| store.get_for_book(id))
-            .or_else(|| store.get(&path))
+        let result = match book_id {
+            Some(id) => store.get_for_book(id),
+            None => state
+                .document_content_hash
+                .as_deref()
+                .map_or_else(|| Ok(None), |content_hash| store.get(&path, content_hash)),
+        };
+        match result {
+            Ok(saved) => saved,
+            Err(error) => {
+                state.reading_state_restore_failed = true;
+                state.open_error = Some(AppError::Storage(format!(
+                    "failed to restore reading state: {error:#}"
+                )));
+                None
+            }
+        }
     });
     let session = ReaderSession::new(
         book_id,
@@ -2240,7 +2266,12 @@ fn install_document(
     if let (Some(path), Some(store)) = (&state.file_path, &state.bookmark_store) {
         state.bookmarks = book_id
             .map(|id| store.list_for_book(id))
-            .unwrap_or_else(|| store.list_for_file(path))
+            .unwrap_or_else(|| {
+                state.document_content_hash.as_deref().map_or_else(
+                    || Ok(Vec::new()),
+                    |content_hash| store.list_for_file(path, content_hash),
+                )
+            })
             .unwrap_or_default();
     }
     update_bookmark_status(state);
@@ -4099,6 +4130,7 @@ fn continue_bookmark_mutations(state: &mut State, tab_id: u64) -> Task<Message> 
         BookmarkMutation::Toggle {
             generation,
             file_path,
+            content_hash,
             book_id,
             page,
             location_offset,
@@ -4117,9 +4149,22 @@ fn continue_bookmark_mutations(state: &mut State, tab_id: u64) -> Task<Message> 
                             )
                             .await
                     } else {
-                        store
-                            .toggle_at_async(&task_path, page, location_offset, None)
-                            .await
+                        match content_hash.as_deref() {
+                            Some(content_hash) => {
+                                store
+                                    .toggle_at_async(
+                                        &task_path,
+                                        content_hash,
+                                        page,
+                                        location_offset,
+                                        None,
+                                    )
+                                    .await
+                            }
+                            None => {
+                                Err(anyhow::anyhow!("document has no admitted content identity"))
+                            }
+                        }
                     };
                     result.map_err(|error| format!("{error:#}"))
                 },
@@ -4273,6 +4318,7 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
         let store = store.clone();
         let path = path.clone();
         let book_id = state.book_id;
+        let content_hash = state.document_content_hash.clone();
         let generation = state.bookmark_mutation_generation;
         let result_path = path.clone();
         Task::perform(
@@ -4280,7 +4326,13 @@ fn refresh_bookmarks(state: &State) -> Task<Message> {
                 if let Some(book_id) = book_id {
                     store.list_for_book_async(book_id).await.unwrap_or_default()
                 } else {
-                    store.list_for_file_async(&path).await.unwrap_or_default()
+                    match content_hash.as_deref() {
+                        Some(content_hash) => store
+                            .list_for_file_async(&path, content_hash)
+                            .await
+                            .unwrap_or_default(),
+                        None => Vec::new(),
+                    }
                 }
             },
             move |bookmarks| Message::BookmarksLoaded {
@@ -4306,13 +4358,16 @@ fn update_bookmark_status(state: &mut State) {
 }
 
 fn save_reading_state(state: &mut State) {
-    if state.book_id.is_some() && state.book_id == state.removing_book {
+    if state.reading_state_restore_failed
+        || state.book_id.is_some() && state.book_id == state.removing_book
+    {
         return;
     }
     if let (Some(path), Some(saves)) = (&state.file_path, &state.reading_state_saves) {
         let save = ReadingStateSave {
             book_id: state.book_id,
             path: path.clone(),
+            content_hash: state.document_content_hash.clone(),
             reading: FileReadingState {
                 page: state.current_page,
                 location_offset: current_epub_offset(state),
@@ -4573,19 +4628,20 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         .spacing(8)
         .align_y(iced::Alignment::Center);
         if let Some(book_id) = state.missing_book_id {
-            let removing = state.removing_book == Some(book_id);
+            let busy = state.removing_book == Some(book_id)
+                || state.relinking_book.is_some_and(|(_, id)| id == book_id);
             alert = alert.push(widgets::primary_button(
                 state.i18n.text("locate-file"),
-                (!removing).then_some(Message::LocateBook(book_id)),
+                (!busy).then_some(Message::LocateBook(book_id)),
                 state.i18n.ui_font(),
             ));
             alert = alert.push(widgets::secondary_button(
-                state.i18n.text(if removing {
+                state.i18n.text(if busy {
                     "removing"
                 } else {
                     "remove-from-library"
                 }),
-                (!removing).then_some(Message::RemoveBook(book_id)),
+                (!busy).then_some(Message::RemoveBook(book_id)),
                 state.i18n.ui_font(),
             ));
         }
@@ -7433,6 +7489,7 @@ mod tests {
             &mut state,
             PathBuf::from("/managed/books/content-hash.epub"),
             Some(42),
+            None,
             OpenDocument::Epub(epub),
         );
 
@@ -7454,6 +7511,7 @@ mod tests {
             &mut state,
             PathBuf::from("/managed/books/content-hash.epub"),
             Some(42),
+            None,
             OpenDocument::Epub(epub),
         );
         let tab = capture_reader_tab(&state).expect("reader state should create a tab");
@@ -7693,6 +7751,7 @@ mod tests {
         state.screen = Screen::Reader;
         state.active_tab_id = Some(1);
         state.next_tab_id = 2;
+        state.document_content_hash = Some("0".repeat(64));
         state.document = Some(document);
         state.total_pages = 1;
         state.page_input = "1".to_string();
@@ -8730,6 +8789,7 @@ mod tests {
         runtime
             .block_on(store.set_async(
                 &path,
+                "0000000000000000000000000000000000000000000000000000000000000000",
                 &FileReadingState {
                     page: 1,
                     location_offset: None,
@@ -8745,7 +8805,13 @@ mod tests {
         state.reading_state = Some(store);
 
         let _runtime = runtime.enter();
-        install_document(&mut state, path, None, OpenDocument::Cbz(Arc::new(cbz)));
+        install_document(
+            &mut state,
+            path,
+            None,
+            Some("0".repeat(64)),
+            OpenDocument::Cbz(Arc::new(cbz)),
+        );
 
         assert_eq!(state.current_page, 1);
         assert_eq!(state.zoom, ZoomMode::FitPage);
@@ -8767,9 +8833,10 @@ mod tests {
         runtime
             .block_on(store.set_async(
                 &path,
+                "0000000000000000000000000000000000000000000000000000000000000000",
                 &FileReadingState {
                     page: 0,
-                    location_offset: Some(usize::MAX),
+                    location_offset: Some(i64::MAX as usize),
                     zoom: 1.0,
                 },
             ))
@@ -8785,9 +8852,59 @@ mod tests {
         state.reading_state = Some(store);
 
         let _runtime = runtime.enter();
-        install_document(&mut state, path, None, document);
+        install_document(&mut state, path, None, Some("0".repeat(64)), document);
 
         assert_eq!(state.epub_offset, expected);
+    }
+
+    #[test]
+    fn failed_reading_state_restore_blocks_default_state_and_progress_writes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let failed_store = runtime
+            .block_on(ReadingStateStore::open_at_async(
+                &directory.path().join("failed.db"),
+            ))
+            .unwrap();
+        runtime.block_on(failed_store.pool().close());
+        let saved_store = runtime
+            .block_on(ReadingStateStore::open_at_async(
+                &directory.path().join("saved.db"),
+            ))
+            .unwrap();
+        let _runtime = runtime.enter();
+        let writer = start_reading_state_writer(saved_store.clone());
+        let path = directory.path().join("book.cbz");
+        let document = OpenDocument::Cbz(Arc::new(
+            CbzDoc::from_bytes(
+                include_bytes!("../../shosai-core/tests/fixtures/sample.cbz").to_vec(),
+            )
+            .unwrap(),
+        ));
+        let (mut state, _) = boot();
+        state.reading_state = Some(failed_store);
+        state.reading_state_saves = Some(writer.clone());
+
+        install_document(
+            &mut state,
+            path.clone(),
+            None,
+            Some("0".repeat(64)),
+            document,
+        );
+        assert!(state.reading_state_restore_failed);
+        save_reading_state(&mut state);
+        runtime.block_on(writer.flush()).unwrap();
+
+        assert!(
+            runtime
+                .block_on(saved_store.get_async(&path, &"0".repeat(64)))
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn test_book(id: i64) -> Book {
@@ -10732,6 +10849,58 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn active_relink_cannot_be_superseded_or_completed_by_a_stale_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.relink_generation = 2;
+        state.relinking_book = Some((2, 7));
+        state.missing_book_id = Some(7);
+
+        let locate = update(&mut state, Message::LocateBook(7));
+        assert_eq!(locate.units(), 0);
+        assert_eq!(state.relink_generation, 2);
+
+        let task = update(
+            &mut state,
+            Message::BookRelinked {
+                generation: 1,
+                result: Ok(test_book(7)),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert_eq!(state.missing_book_id, Some(7));
+    }
+
+    #[test]
+    fn stale_managed_library_plan_cannot_replace_the_current_request() {
+        let (mut state, _) = boot();
+        state.managed_library_move_generation = 2;
+
+        let task = update(
+            &mut state,
+            Message::ManagedLibraryMovePlanned {
+                generation: 1,
+                destination: PathBuf::from("stale"),
+                result: Ok(ManagedStorageSummary {
+                    book_count: 1,
+                    total_bytes: 10,
+                }),
+            },
+        );
+
+        assert_eq!(task.units(), 0);
+        assert!(state.pending_library_move.is_none());
+    }
+
     #[test]
     fn import_candidate_labels_distinguish_nested_and_individual_files() {
         let directory = tempfile::tempdir().unwrap();
@@ -11008,8 +11177,9 @@ mod tests {
             .unwrap();
         wait.await.unwrap().unwrap();
         let save = store
-            .get_async(Path::new("removed.epub"))
+            .get_async(Path::new("removed.epub"), &"0".repeat(64))
             .await
+            .unwrap()
             .expect("removal should persist path-backed reading state");
         assert_eq!(save.page, 3);
         assert_eq!(save.location_offset, Some(17));
@@ -11036,6 +11206,7 @@ mod tests {
             .send(ReadingStateWriterMessage::Save(ReadingStateSave {
                 book_id: Some(book.id),
                 path: path.clone(),
+                content_hash: book.content_hash.clone(),
                 reading: FileReadingState {
                     page: 4,
                     location_offset: Some(8),
@@ -11056,7 +11227,13 @@ mod tests {
         let _ = update(&mut state, message);
 
         writer.flush().await.unwrap();
-        assert!(store.get_async(&path).await.is_some());
+        assert!(
+            store
+                .get_async(&path, book.content_hash.as_deref().unwrap())
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -12182,6 +12359,7 @@ mod tests {
         install_document(
             &mut state,
             PathBuf::from("second.epub"),
+            None,
             None,
             OpenDocument::Epub(Arc::new(second)),
         );
@@ -13589,7 +13767,11 @@ mod tests {
             .send(ReadingStateWriterMessage::Flush(flushed))
             .unwrap();
         wait.await.unwrap().unwrap();
-        let save = store.get_async(Path::new("book.epub")).await.unwrap();
+        let save = store
+            .get_async(Path::new("book.epub"), &"0".repeat(64))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(save.page, 2);
         assert_eq!(save.location_offset, Some(0));
     }
@@ -13651,7 +13833,12 @@ mod tests {
             .unwrap();
         wait.await.unwrap().unwrap();
         assert_eq!(
-            store.get_async(Path::new("book.epub")).await.unwrap().page,
+            store
+                .get_async(Path::new("book.epub"), &"0".repeat(64))
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
             state.current_page
         );
         assert!(Arc::ptr_eq(&state.epub_pages, &pages));
@@ -13754,6 +13941,7 @@ mod tests {
                 .send(ReadingStateWriterMessage::Save(ReadingStateSave {
                     book_id: None,
                     path: path.clone(),
+                    content_hash: Some("0".repeat(64)),
                     reading: FileReadingState {
                         page,
                         location_offset: Some(page * 10),
@@ -13778,8 +13966,9 @@ mod tests {
         wait_for_flush.await.unwrap().unwrap();
 
         let saved = store
-            .get_async(&path)
+            .get_async(&path, &"0".repeat(64))
             .await
+            .unwrap()
             .expect("flush should persist the latest queued position");
         assert_eq!(saved.page, 3);
         assert_eq!(saved.location_offset, Some(30));

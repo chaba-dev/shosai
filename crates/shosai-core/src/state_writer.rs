@@ -10,13 +10,14 @@ use tokio::sync::{Notify, oneshot};
 
 use crate::library::Library;
 use crate::path_key::canonical_path_key;
-use crate::reading_state::{CurrentBookPathSaveError, FileReadingState, ReadingStateStore};
+use crate::reading_state::{
+    CurrentBookPathSaveError, FileReadingState, MAX_PREFERENCE_KEY_BYTES,
+    MAX_PREFERENCE_VALUE_BYTES, MAX_READING_STATE_PATH_BYTES, ReadingStateStore,
+};
 
 pub const MAX_PENDING_STATE_WRITES: usize = 4_096;
 pub const MAX_PENDING_STATE_FLUSHES: usize = 256;
-pub const MAX_PREFERENCE_KEY_BYTES: usize = 1024;
-pub const MAX_PREFERENCE_VALUE_BYTES: usize = 64 * 1024;
-pub const MAX_STATE_PATH_KEY_BYTES: usize = 16 * 1024;
+pub const MAX_STATE_PATH_KEY_BYTES: usize = MAX_READING_STATE_PATH_BYTES;
 pub const MAX_PENDING_STATE_WRITE_BYTES: usize = 4 * 1024 * 1024;
 const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 
@@ -24,6 +25,7 @@ const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
 pub struct StateSave {
     pub book_id: Option<i64>,
     pub path: PathBuf,
+    pub content_hash: Option<String>,
     pub reading: FileReadingState,
 }
 
@@ -497,9 +499,17 @@ fn prepare_message_with(
             if path.len() > MAX_STATE_PATH_KEY_BYTES {
                 return Err(StateWriterSendError::Full);
             }
+            if save.book_id.is_none()
+                && !save.content_hash.as_deref().is_some_and(valid_content_hash)
+            {
+                return Err(StateWriterSendError::Full);
+            }
             let byte_len = path
                 .len()
                 .checked_mul(if save.book_id.is_some() { 1 } else { 3 })
+                .and_then(|bytes| {
+                    bytes.checked_add(save.content_hash.as_ref().map_or(0, String::len))
+                })
                 .ok_or(StateWriterSendError::Full)?;
             let key = save.book_id.map_or_else(
                 || WriteKey::Save(SaveKey::Path(path.clone())),
@@ -535,6 +545,10 @@ fn increment_bounded(counter: &AtomicUsize, limit: usize) -> bool {
         .is_ok()
 }
 
+fn valid_content_hash(hash: &str) -> bool {
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 async fn persist_batch(
     store: &ReadingStateStore,
     library: &Library,
@@ -552,23 +566,44 @@ async fn persist_batch(
                 .set_for_book_current_path_async(book_id, &pending.save.reading)
                 .await
             {
-                Ok(()) => Ok(()),
+                Ok(current_path) => Ok(current_path),
                 Err(CurrentBookPathSaveError::MissingBook(_)) => {
-                    store
-                        .set_key_async(&pending.normalized_path, &pending.save.reading)
-                        .await
+                    match pending.save.content_hash.as_deref() {
+                        Some(content_hash) => store
+                            .set_key_async(
+                                &pending.normalized_path,
+                                content_hash,
+                                &pending.save.reading,
+                            )
+                            .await
+                            .map(|()| pending.normalized_path.clone()),
+                        None => Err(anyhow::anyhow!(
+                            "removed book save has no admitted content hash"
+                        )),
+                    }
                 }
                 Err(CurrentBookPathSaveError::Persistence(error)) => Err(error),
             }
         } else {
-            store
-                .set_key_async(&pending.normalized_path, &pending.save.reading)
-                .await
+            match pending.save.content_hash.as_deref() {
+                Some(content_hash) => store
+                    .set_key_async(
+                        &pending.normalized_path,
+                        content_hash,
+                        &pending.save.reading,
+                    )
+                    .await
+                    .map(|()| pending.normalized_path.clone()),
+                None => Err(anyhow::anyhow!(
+                    "untracked save has no admitted content hash"
+                )),
+            }
         };
-        if let Err(error) = result {
-            failed_saves.push((key, pending, format!("reading state: {error:#}")));
-        } else {
-            successful_saves.push((pending.normalized_path.clone(), pending.enqueue_sequence));
+        match result {
+            Ok(saved_path) => successful_saves.push((saved_path, pending.enqueue_sequence)),
+            Err(error) => {
+                failed_saves.push((key, pending, format!("reading state: {error:#}")));
+            }
         }
     }
     for (key, pending, error) in failed_saves {
@@ -606,6 +641,8 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
+    const CONTENT_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
     #[test]
     fn book_saves_coalesce_across_relocated_paths() {
         let mut state = WriterState::default();
@@ -614,6 +651,7 @@ mod tests {
                 .insert(StateWriterMessage::Save(StateSave {
                     book_id: Some(7),
                     path: path.into(),
+                    content_hash: Some(CONTENT_HASH.to_owned()),
                     reading: FileReadingState {
                         page,
                         location_offset: None,
@@ -706,6 +744,7 @@ mod tests {
             .insert(StateWriterMessage::Save(StateSave {
                 book_id: None,
                 path: PathBuf::from("book.epub"),
+                content_hash: Some(CONTENT_HASH.to_owned()),
                 reading: FileReadingState {
                     page: 0,
                     location_offset: None,
@@ -719,6 +758,7 @@ mod tests {
             state.insert(StateWriterMessage::Save(StateSave {
                 book_id: None,
                 path: PathBuf::from("x".repeat(MAX_STATE_PATH_KEY_BYTES + 1)),
+                content_hash: Some(CONTENT_HASH.to_owned()),
                 reading: FileReadingState {
                     page: 0,
                     location_offset: None,
@@ -766,6 +806,7 @@ mod tests {
                 .insert(StateWriterMessage::Save(StateSave {
                     book_id: None,
                     path,
+                    content_hash: Some(CONTENT_HASH.to_owned()),
                     reading: FileReadingState {
                         page,
                         location_offset: None,
@@ -797,6 +838,7 @@ mod tests {
             StateWriterMessage::Save(StateSave {
                 book_id: None,
                 path: PathBuf::from("book.epub"),
+                content_hash: Some(CONTENT_HASH.to_owned()),
                 reading: FileReadingState {
                     page: 0,
                     location_offset: None,
@@ -1134,6 +1176,7 @@ mod tests {
             .insert(StateWriterMessage::Save(StateSave {
                 book_id: None,
                 path: alias.clone(),
+                content_hash: Some(CONTENT_HASH.to_owned()),
                 reading: FileReadingState {
                     page: 7,
                     location_offset: None,
@@ -1149,8 +1192,22 @@ mod tests {
 
         assert!(failed.saves.is_empty());
         assert!(error.is_none());
-        assert_eq!(store.get_async(&first).await.unwrap().page, 7);
-        assert!(store.get_async(&second).await.is_none());
+        assert_eq!(
+            store
+                .get_async(&first, CONTENT_HASH)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            7
+        );
+        assert!(
+            store
+                .get_async(&second, CONTENT_HASH)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -1169,6 +1226,7 @@ mod tests {
             .insert(StateWriterMessage::Save(StateSave {
                 book_id: Some(book.id),
                 path: source,
+                content_hash: book.content_hash.clone(),
                 reading: FileReadingState {
                     page: 9,
                     location_offset: Some(3),
@@ -1199,6 +1257,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stable_save_does_not_suppress_a_failed_save_for_its_stale_caller_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
+        let book = library.import_file(&source).await.unwrap();
+        let foreign_path = directory.path().join("foreign.epub");
+        let foreign_key = canonical_path_key(&foreign_path);
+        let foreign_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, content_hash)
+             VALUES ('Foreign', 'epub', ?, ?) RETURNING id",
+        )
+        .bind(&foreign_key)
+        .bind(CONTENT_HASH)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        store
+            .set_for_book_async(
+                foreign_id,
+                &FileReadingState {
+                    page: 1,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            )
+            .await
+            .unwrap();
+        let mut writer_state = WriterState::default();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: None,
+                path: foreign_path.clone(),
+                content_hash: Some(CONTENT_HASH.to_owned()),
+                reading: FileReadingState {
+                    page: 2,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        writer_state
+            .insert(StateWriterMessage::Save(StateSave {
+                book_id: Some(book.id),
+                path: foreign_path,
+                content_hash: book.content_hash.clone(),
+                reading: FileReadingState {
+                    page: 3,
+                    location_offset: None,
+                    zoom: 1.0,
+                },
+            }))
+            .unwrap();
+        let (batch, _) = writer_state.take_batch();
+
+        let (failed, error) = persist_batch(&store, &library, batch).await;
+
+        assert!(error.is_some());
+        assert_eq!(failed.saves.len(), 1);
+        assert_eq!(
+            store
+                .get_for_book_async(book.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            3
+        );
+    }
+
+    #[tokio::test]
     async fn promoted_book_save_wins_over_older_path_save_in_the_same_batch() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
@@ -1207,12 +1338,14 @@ mod tests {
         let library = Library::new(store.pool().clone(), store.managed_books_dir());
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub");
         let book = library.import_file(&source).await.unwrap();
+        let content_hash = book.content_hash.clone();
         let mut writer_state = WriterState::default();
         for (book_id, page) in [(None, 3), (Some(book.id), 17)] {
             writer_state
                 .insert(StateWriterMessage::Save(StateSave {
                     book_id,
                     path: source.clone(),
+                    content_hash: content_hash.clone(),
                     reading: FileReadingState {
                         page,
                         location_offset: None,
@@ -1227,7 +1360,15 @@ mod tests {
 
         assert!(failed.saves.is_empty());
         assert!(error.is_none());
-        assert_eq!(store.get_for_book_async(book.id).await.unwrap().page, 17);
+        assert_eq!(
+            store
+                .get_for_book_async(book.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .page,
+            17
+        );
     }
 
     #[tokio::test]
@@ -1244,6 +1385,7 @@ mod tests {
             .insert(StateWriterMessage::Save(StateSave {
                 book_id: Some(book.id),
                 path: source.clone(),
+                content_hash: Some(CONTENT_HASH.to_owned()),
                 reading: FileReadingState {
                     page: 11,
                     location_offset: Some(4),
@@ -1263,7 +1405,11 @@ mod tests {
 
         assert!(writer_state.admitted.is_empty());
         assert!(writer_state.pending.saves.is_empty());
-        let saved = store.get_async(&source).await.unwrap();
+        let saved = store
+            .get_async(&source, CONTENT_HASH)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(saved.page, 11);
         assert_eq!(saved.location_offset, Some(4));
         let book_id: Option<i64> =

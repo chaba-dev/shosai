@@ -110,9 +110,10 @@ of both frontends.
 
 * Core has no production UI-framework or bridge-runtime dependency.  The
   code-generation smoke test supplies the bridge runtime only in its temporary
-  workspace and creates its own generated host. Public bridge DTOs own their
-  strings, locators, summaries, and byte buffers; handles are numeric opaque
-  identities.
+  source workspace and emits Rust and Dart binding files into a disposable Dart
+  package skeleton; it does not compile a Dart or Flutter host. Public bridge
+  DTOs own their strings, locators, summaries, and byte buffers; handles are
+  numeric opaque identities.
 * Durable locations are a page/resource plus optional logical scalar offset.
   Viewport size, zoomed pixels, scroll position, widget IDs, and GPU handles are
   not persisted or exposed as document identity.
@@ -150,7 +151,9 @@ cancellation/error/release barriers, and aggregate buffer limits without an
 Iced event loop. Iced-reference tests cover tab/session transfer, global worker
 admission, stale-request coalescing, continuous raster bytes, and incremental
 EPUB image decoding. The generator smoke test proves that the public bridge
-module is accepted as a generated Dart API.
+module is accepted by the generator and emits the expected Rust and Dart API
+symbols; it does not prove that those bindings compile in a Dart or Flutter
+host.
 
 The extraction does not prove generated-binding compilation in a checked-in
 host, Flutter scene fidelity, native host packaging, physical-device lifecycle,
