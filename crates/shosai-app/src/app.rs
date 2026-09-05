@@ -5250,6 +5250,8 @@ fn submit_pending_reading_state_saves(state: &mut State) {
     let mut failed = false;
     if let Some(save) = state.pending_reading_state_save.clone() {
         if try_queue_reading_state_save(state, save) {
+            state.document_state_load_generation =
+                state.document_state_load_generation.wrapping_add(1);
             state.pending_reading_state_save = None;
             state.reading_state_restore_pending = false;
         } else {
@@ -5269,6 +5271,9 @@ fn submit_pending_reading_state_saves(state: &mut State) {
         .collect::<Vec<_>>();
     for (index, save) in pending_tabs {
         if try_queue_reading_state_save(state, save) {
+            state.tabs[index].document_state_load_generation = state.tabs[index]
+                .document_state_load_generation
+                .wrapping_add(1);
             state.tabs[index].pending_reading_state_save = None;
             state.tabs[index].reading_state_restore_pending = false;
         } else {
@@ -11574,6 +11579,126 @@ mod tests {
         let saved = store.get_async(&path, &hash).await.unwrap().unwrap();
         assert_eq!(saved.page, 5);
         assert_eq!(saved.location_offset, Some(23));
+    }
+
+    #[tokio::test]
+    async fn failed_close_does_not_let_a_superseded_restore_rewind_navigation() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let writer = start_reading_state_writer(store.clone());
+        let epub = EpubDoc::from_bytes(
+            include_bytes!("../../shosai-core/tests/fixtures/sample.epub").to_vec(),
+        )
+        .expect("fixture should be a valid EPUB");
+        let mut state = state_with_document(OpenDocument::Epub(Arc::new(epub)));
+        let path = directory.path().join("pending.epub");
+        let hash = state.document_content_hash.clone().unwrap();
+        state.file_path = Some(path.clone());
+        state.reading_state = Some(store.clone());
+        state.reading_state_saves = Some(writer.clone());
+        state.reading_state_restore_pending = true;
+        state.document_state_load_generation = 7;
+        state.current_page = 5;
+        state.pending_reading_state_save = Some(ReadingStateSave {
+            book_id: None,
+            path: path.clone(),
+            content_hash: Some(hash.clone()),
+            reading: FileReadingState {
+                page: 5,
+                location_offset: Some(23),
+                zoom: 1.0,
+            },
+        });
+        let id = window::Id::unique();
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(id, window::Event::CloseRequested),
+        );
+        assert_eq!(state.document_state_load_generation, 8);
+        assert!(!state.reading_state_restore_pending);
+        let bookmark_generation = state.bookmark_load_generation;
+
+        let completion = update(
+            &mut state,
+            Message::DocumentStateLoaded {
+                tab_id: 1,
+                generation: 7,
+                bookmark_generation,
+                path: path.clone(),
+                book_id: None,
+                content_hash: Some(hash.clone()),
+                reading_state: Ok(Some(FileReadingState {
+                    page: 0,
+                    location_offset: None,
+                    zoom: 1.0,
+                })),
+                bookmarks: None,
+            },
+        );
+        assert_eq!(completion.units(), 0);
+        assert_eq!(state.current_page, 5);
+
+        let _ = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+        state.current_page = 7;
+        save_reading_state(&mut state);
+        writer.flush().await.unwrap();
+
+        assert_eq!(state.close_after_geometry_save, None);
+        assert_eq!(
+            store.get_async(&path, &hash).await.unwrap().unwrap().page,
+            7
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_close_retires_a_library_cover_completion_and_reopens_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let (mut state, _) = boot();
+        state.library = Some(Library::new(
+            store.pool().clone(),
+            store.managed_books_dir(),
+        ));
+        state.library_generation = 3;
+        state.library_covers_pending.insert((3, 1));
+        state.library_cover_reload_active = Some((3, 1, Cancellation::default()));
+
+        let _ = update(
+            &mut state,
+            Message::WindowEvent(window::Id::unique(), window::Event::CloseRequested),
+        );
+        let completion = update(
+            &mut state,
+            Message::LibraryCoverLoaded {
+                generation: 3,
+                book_id: 1,
+                cover: None,
+            },
+        );
+
+        assert_eq!(
+            completion.units(),
+            0,
+            "closing must not start another reload"
+        );
+        assert!(state.library_cover_reload_active.is_none());
+        assert!(!state.library_covers_pending.contains(&(3, 1)));
+
+        let _ = update(
+            &mut state,
+            Message::WindowGeometryPersisted(Err("database unavailable".to_owned())),
+        );
+        let reload = update(&mut state, Message::LoadLibraryCover(2));
+        assert_eq!(reload.units(), 1);
+        assert!(state.library_cover_reload_active.is_some());
     }
 
     #[test]

@@ -210,8 +210,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 | Message::FingerprintBackfillFinished(_)
                 | Message::DocumentOpenPrepared { .. }
                 | Message::DocumentOpened { .. }
+                | Message::DocumentStateLoaded { .. }
                 | Message::LibraryLoaded { .. }
                 | Message::LibraryCoversLoaded { .. }
+                | Message::LibraryCoverLoaded { .. }
                 | Message::ManagedBookPrepared { .. }
                 | Message::BookAddedToBatch { .. }
                 | Message::BookRelinked { .. }
@@ -527,7 +529,10 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 {
                     state.tabs[index] = tab;
                 }
-                if location_changed && state.document_permit.is_some() {
+                if location_changed
+                    && state.document_permit.is_some()
+                    && state.close_after_geometry_save.is_none()
+                {
                     return refresh_content(state);
                 }
                 return Task::none();
@@ -1061,6 +1066,9 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 state
                     .library_cover_handles
                     .insert_weighted(book_id, handle, retained_bytes);
+            }
+            if state.close_after_geometry_save.is_some() {
+                return Task::none();
             }
             return start_library_cover_reload(state);
         }

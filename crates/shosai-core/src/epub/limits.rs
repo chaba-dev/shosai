@@ -587,6 +587,7 @@ fn svg_definition_container(name: &str) -> bool {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_svg_rendering_reference<'a, 'input>(
     property: &str,
     value: &str,

@@ -1,4 +1,4 @@
-use shosai_core::bookmarks::BookmarkStore;
+use shosai_core::bookmarks::{BookmarkStore, MAX_BOOKMARKS_PER_BOOK};
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::borrow::Cow;
@@ -697,10 +697,8 @@ async fn schema_010_upgrade_reconciles_newer_path_state_with_stable_owner() {
         .unwrap();
     assert_eq!((state.page, state.zoom), (9, 1.5));
 
-    let bookmarks = BookmarkStore::new(state_store.pool().clone())
-        .list_for_book_async(book_id)
-        .await
-        .unwrap();
+    let bookmark_store = BookmarkStore::new(state_store.pool().clone());
+    let bookmarks = bookmark_store.list_for_book_async(book_id).await.unwrap();
     assert_eq!(bookmarks.len(), 2);
     assert_eq!(
         (bookmarks[0].page, bookmarks[0].title.as_deref()),
@@ -710,6 +708,46 @@ async fn schema_010_upgrade_reconciles_newer_path_state_with_stable_owner() {
         (bookmarks[1].page, bookmarks[1].title.as_deref()),
         (7, Some("unique"))
     );
+
+    let removed = bookmark_store
+        .toggle_async(&PathBuf::from("/books/owned.epub"), CONTENT_HASH, 3, None)
+        .await
+        .unwrap();
+    assert!(removed.is_none());
+    assert_eq!(
+        bookmark_store
+            .list_for_book_async(book_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    sqlx::query(
+        "WITH RECURSIVE pages(page) AS (
+             SELECT 100 UNION ALL SELECT page + 1 FROM pages WHERE page < ?
+         )
+         INSERT INTO bookmarks (file_path, content_hash, book_id, page, note, color)
+         SELECT '/another/owned-alias.epub', ?, ?, page, 'alias note', 'yellow' FROM pages",
+    )
+    .bind(100 + MAX_BOOKMARKS_PER_BOOK as i64 - 2)
+    .bind(CONTENT_HASH)
+    .bind(book_id)
+    .execute(state_store.pool())
+    .await
+    .unwrap();
+    let admission_error = bookmark_store
+        .add_async(
+            &PathBuf::from("/managed/owned.epub"),
+            CONTENT_HASH,
+            2_000,
+            None,
+            None,
+            "yellow",
+        )
+        .await
+        .unwrap_err();
+    assert!(admission_error.to_string().contains("count limit"));
 
     let unattached_state: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM reading_state WHERE book_id IS NULL")
