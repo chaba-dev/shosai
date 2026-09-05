@@ -48,6 +48,7 @@ All notable changes to this project will be documented in this file.
 - *(core)* Bind phase one state and library identities (#81)
 - *(core)* Enforce phase one admission lifecycle (#82)
 - Bound phase one retention and persistence (#83)
+- *(core)* Enforce exact document admission (#84)
 
 ### 🚜 Refactor
 
