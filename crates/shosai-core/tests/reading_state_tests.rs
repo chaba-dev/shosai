@@ -1,3 +1,4 @@
+use shosai_core::bookmarks::BookmarkStore;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::borrow::Cow;
@@ -630,6 +631,98 @@ async fn revision_migration_orders_legacy_rows_by_last_update() {
         revisions,
         vec![("newer-rowid".to_owned(), 1), ("older-rowid".to_owned(), 2),]
     );
+}
+
+#[tokio::test]
+async fn schema_010_upgrade_reconciles_newer_path_state_with_stable_owner() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shosai.db");
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true);
+    let pool = SqlitePool::connect_with(options).await.unwrap();
+    let v10_migrator = sqlx::migrate::Migrator {
+        migrations: Cow::Owned(MIGRATOR.migrations[..10].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    v10_migrator.run(&pool).await.unwrap();
+
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, original_path, content_hash)
+         VALUES ('Owned', 'epub', '/managed/owned.epub', '/books/owned.epub', ?) RETURNING id",
+    )
+    .bind(CONTENT_HASH)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO reading_state
+             (file_path, content_hash, book_id, page, zoom, revision, updated_at)
+         VALUES ('/managed/owned.epub', ?, ?, 2, 1.0, 4, '2026-01-01'),
+                ('/books/owned.epub', ?, NULL, 9, 1.5, 8, '2026-02-01'),
+                ('/books/null.epub', NULL, NULL, 11, 1.0, 9, '2026-03-01'),
+                ('/books/mismatch.epub', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+                 NULL, 12, 1.0, 10, '2026-04-01')",
+    )
+    .bind(CONTENT_HASH)
+    .bind(book_id)
+    .bind(CONTENT_HASH)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO bookmarks
+             (file_path, content_hash, book_id, page, title, note, color, created_at)
+         VALUES ('/managed/owned.epub', ?, ?, 3, 'old', NULL, 'yellow', '2026-01-01'),
+                ('/books/owned.epub', ?, NULL, 3, 'new', NULL, 'blue', '2026-02-01'),
+                ('/books/owned.epub', ?, NULL, 7, 'unique', 'note', 'green', '2026-03-01'),
+                ('/books/owned.epub', NULL, NULL, 8, 'null hash', NULL, 'yellow', '2026-04-01'),
+                ('/books/owned.epub', 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+                 NULL, 9, 'wrong hash', NULL, 'yellow', '2026-05-01')",
+    )
+    .bind(CONTENT_HASH)
+    .bind(book_id)
+    .bind(CONTENT_HASH)
+    .bind(CONTENT_HASH)
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool.close().await;
+
+    let state_store = ReadingStateStore::open_at_async(&db_path).await.unwrap();
+    let state = state_store
+        .get_for_book_async(book_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((state.page, state.zoom), (9, 1.5));
+
+    let bookmarks = BookmarkStore::new(state_store.pool().clone())
+        .list_for_book_async(book_id)
+        .await
+        .unwrap();
+    assert_eq!(bookmarks.len(), 2);
+    assert_eq!(
+        (bookmarks[0].page, bookmarks[0].title.as_deref()),
+        (3, Some("new"))
+    );
+    assert_eq!(
+        (bookmarks[1].page, bookmarks[1].title.as_deref()),
+        (7, Some("unique"))
+    );
+
+    let unattached_state: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM reading_state WHERE book_id IS NULL")
+            .fetch_one(state_store.pool())
+            .await
+            .unwrap();
+    let unattached_bookmarks: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM bookmarks WHERE book_id IS NULL AND file_path = '/books/owned.epub'",
+    )
+    .fetch_one(state_store.pool())
+    .await
+    .unwrap();
+    assert_eq!((unattached_state, unattached_bookmarks), (2, 2));
 }
 
 #[tokio::test]

@@ -971,6 +971,7 @@ pub fn update(state: &mut State, message: Message) -> Task<Message> {
                 Ok(page) => page,
                 Err(error) => {
                     state.library_loading = false;
+                    state.library_offset = state.library_page_start + state.library_books.len();
                     state.library_error = Some(AppError::Library(error));
                     return Task::none();
                 }

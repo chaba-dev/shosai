@@ -2147,6 +2147,7 @@ fn open_document(state: &mut State, path: PathBuf, book_id: Option<i64>) -> Task
             }
         }
         if identity_changed && state.active_tab == Some(index) {
+            state.screen = Screen::Reader;
             return if reading_state_pending {
                 load_document_state_task(state, bookmark_load_pending)
             } else if bookmark_load_pending {
@@ -5230,6 +5231,12 @@ fn queue_reading_state_save(state: &mut State, save: ReadingStateSave) {
 }
 
 fn try_queue_reading_state_save(state: &mut State, save: ReadingStateSave) -> bool {
+    if let Some(target) = &mut state.book_removal_target
+        && target.matches_session(None, save.book_id, &save.path, save.content_hash.as_deref())
+    {
+        target.suppressed_save = Some(save);
+        return true;
+    }
     if let Some(saves) = &state.reading_state_saves
         && let Err(error) = saves.send(ReadingStateWriterMessage::Save(save))
     {
@@ -13018,6 +13025,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removal_fence_retargets_deferred_state_before_persistence() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
+            .await
+            .unwrap();
+        let writer = start_reading_state_writer(store.clone());
+        let managed_path = PathBuf::from("managed.epub");
+        let original_path = PathBuf::from("original.epub");
+        let hash = "0".repeat(64);
+        let mut book = test_book(42);
+        book.file_path = shosai_core::canonical_path_key(&managed_path);
+        book.original_path = Some(shosai_core::canonical_path_key(&original_path));
+        book.content_hash = Some(hash.clone());
+        let (mut state, _) = boot();
+        state.reading_state_saves = Some(writer.clone());
+        state.book_removal_target = Some(BookRemovalTarget::from_book(&book));
+        state.removing_book = Some(42);
+
+        assert!(try_queue_reading_state_save(
+            &mut state,
+            ReadingStateSave {
+                book_id: Some(42),
+                path: managed_path.clone(),
+                content_hash: Some(hash.clone()),
+                reading: FileReadingState {
+                    page: 6,
+                    location_offset: Some(31),
+                    zoom: 1.0,
+                },
+            }
+        ));
+        writer.flush().await.unwrap();
+        assert!(store.get_for_book_async(42).await.unwrap().is_none());
+
+        let _ = update(
+            &mut state,
+            Message::BookRemoved {
+                id: 42,
+                result: Ok(Some(original_path.clone())),
+            },
+        );
+        writer.flush().await.unwrap();
+
+        let saved = store
+            .get_async(&original_path, &hash)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.page, 6);
+        assert_eq!(saved.location_offset, Some(31));
+        assert!(
+            store
+                .get_async(&managed_path, &hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn failed_removal_catches_up_suppressed_path_only_reading_state() {
         let directory = tempfile::tempdir().unwrap();
         let store = ReadingStateStore::open_at_async(&directory.path().join("state.db"))
@@ -13190,10 +13257,12 @@ mod tests {
         state.library_books.push(book);
         state.tabs = vec![capture_reader_tab(&state).unwrap()];
         state.active_tab = Some(0);
+        state.screen = Screen::Library;
 
         let task = open_document(&mut state, path, Some(42));
 
         assert!(task.units() > 0);
+        assert_eq!(state.screen, Screen::Reader);
         assert_eq!(state.book_id, Some(42));
         assert_eq!(state.tabs[0].session.book_id, Some(42));
         assert!(state.document_state_load_generation > 7);
@@ -14013,6 +14082,17 @@ mod tests {
         assert_eq!(previous.units(), 1);
         assert_eq!(state.library_offset, 0);
         assert!(state.library_loading);
+
+        let _ = update(
+            &mut state,
+            Message::LibraryLoaded {
+                generation: 1,
+                offset: 0,
+                result: Err("database unavailable".to_owned()),
+            },
+        );
+        assert_eq!(state.library_offset, LIBRARY_PAGE_SIZE as usize * 2);
+        assert_eq!(update(&mut state, Message::LoadMoreLibrary).units(), 1);
     }
 
     #[tokio::test]
