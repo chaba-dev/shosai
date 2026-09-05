@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-04
+## [0.1.0] - 2026-09-05
 
 ### 🚀 Features
 
@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Restore publisher rendering and book titles (#70)
 - *(app)* Fade completed library activity (#73)
 - *(core)* Harden document identity, persistence, and lifecycle (#80)
+- *(core)* Bind phase one state and library identities (#81)
 
 ### 🚜 Refactor
 
