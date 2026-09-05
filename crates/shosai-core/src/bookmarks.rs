@@ -125,12 +125,29 @@ impl BookmarkStore {
             .unwrap_or((None, key));
         validate_bookmark_path(&current_key)?;
 
+        let count: i64 = if let Some(book_id) = book_id {
+            sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE book_id = ?")
+                .bind(book_id)
+                .fetch_one(&mut *transaction)
+                .await
+        } else {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM bookmarks
+                 WHERE book_id IS NULL AND file_path = ? AND content_hash = ?",
+            )
+            .bind(&current_key)
+            .bind(content_hash)
+            .fetch_one(&mut *transaction)
+            .await
+        }
+        .context("failed to count bookmarks")?;
+        if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
+            anyhow::bail!("bookmark count limit exceeded");
+        }
         let id = sqlx::query(
             "INSERT INTO bookmarks
                 (file_path, content_hash, book_id, page, location_offset, title, note, color)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?
-             WHERE (SELECT COUNT(*) FROM bookmarks
-                    WHERE file_path = ? AND content_hash = ? AND book_id IS ?) < ?
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
              RETURNING id",
         )
         .bind(&current_key)
@@ -141,14 +158,9 @@ impl BookmarkStore {
         .bind(title)
         .bind(note)
         .bind(color)
-        .bind(&current_key)
-        .bind(content_hash)
-        .bind(book_id)
-        .bind(MAX_BOOKMARKS_PER_BOOK as i64)
-        .fetch_optional(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await
         .context("failed to add bookmark")?
-        .context("bookmark count limit exceeded")?
         .get::<i64, _>("id");
         transaction.commit().await?;
 
@@ -232,18 +244,29 @@ impl BookmarkStore {
             .await
             .context("failed to reconcile promoted bookmark aliases")?;
         }
-        let existing = sqlx::query(
-            "SELECT id FROM bookmarks
-             WHERE file_path = ? AND content_hash = ? AND book_id IS ? AND page = ?
-               AND location_offset IS ? AND note IS NULL",
-        )
-        .bind(&current_key)
-        .bind(content_hash)
-        .bind(book_id)
-        .bind(page_db)
-        .bind(location_offset_db)
-        .fetch_optional(&mut *transaction)
-        .await
+        let existing = if let Some(book_id) = book_id {
+            sqlx::query(
+                "SELECT id FROM bookmarks
+                 WHERE book_id = ? AND page = ? AND location_offset IS ? AND note IS NULL",
+            )
+            .bind(book_id)
+            .bind(page_db)
+            .bind(location_offset_db)
+            .fetch_optional(&mut *transaction)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT id FROM bookmarks
+                 WHERE book_id IS NULL AND file_path = ? AND content_hash = ? AND page = ?
+                   AND location_offset IS ? AND note IS NULL",
+            )
+            .bind(&current_key)
+            .bind(content_hash)
+            .bind(page_db)
+            .bind(location_offset_db)
+            .fetch_optional(&mut *transaction)
+            .await
+        }
         .context("failed to check existing bookmark")?;
 
         if let Some(row) = existing {
@@ -256,15 +279,21 @@ impl BookmarkStore {
             transaction.commit().await?;
             Ok(None)
         } else {
-            let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM bookmarks
-                 WHERE file_path = ? AND content_hash = ? AND book_id IS ?",
-            )
-            .bind(&current_key)
-            .bind(content_hash)
-            .bind(book_id)
-            .fetch_one(&mut *transaction)
-            .await
+            let count: i64 = if let Some(book_id) = book_id {
+                sqlx::query_scalar("SELECT COUNT(*) FROM bookmarks WHERE book_id = ?")
+                    .bind(book_id)
+                    .fetch_one(&mut *transaction)
+                    .await
+            } else {
+                sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM bookmarks
+                     WHERE book_id IS NULL AND file_path = ? AND content_hash = ?",
+                )
+                .bind(&current_key)
+                .bind(content_hash)
+                .fetch_one(&mut *transaction)
+                .await
+            }
             .context("failed to count bookmarks")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
                 anyhow::bail!("bookmark count limit exceeded");

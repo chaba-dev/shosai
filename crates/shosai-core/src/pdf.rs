@@ -719,7 +719,11 @@ impl PdfDoc {
         let text = page
             .text()
             .map_err(|e| anyhow::anyhow!("failed to load text for page {index}: {e}"))?;
-        validate_pdf_selection_endpoint_count(text.chars().len())?;
+        // PdfPageTextChars eagerly allocates an index for every character, so
+        // reject from PDFium's cheap count before constructing it.
+        let character_count = usize::try_from(text.len()).unwrap_or(usize::MAX);
+        validate_pdf_selection_endpoint_count(character_count)?;
+        let chars = text.chars();
 
         let (pt_w, pt_h) = self.page_sizes[index];
         let (pixel_w, pixel_h) = validate_pdf_bitmap_size(pt_w, pt_h, scale)?;
@@ -732,8 +736,8 @@ impl PdfDoc {
             .map_err(|e| anyhow::anyhow!("failed to render PDF selection page {index}: {e}"))?;
         let bitmap_width = bitmap.width() as u32;
         let bitmap_height = bitmap.height() as u32;
-        let mut zones = Vec::with_capacity(text.chars().len());
-        for character in text.chars().iter() {
+        let mut zones = Vec::with_capacity(chars.len());
+        for character in chars.iter() {
             let Ok(page_bounds) = character.loose_bounds() else {
                 continue;
             };
