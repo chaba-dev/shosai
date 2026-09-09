@@ -796,6 +796,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       apiObj.sources,
     );
     wireObj.next_cursor = cst_encode_opt_String(apiObj.nextCursor);
+    wireObj.previous_cursor = cst_encode_opt_String(apiObj.previousCursor);
   }
 
   @protected
@@ -1521,6 +1522,7 @@ class RustLibWire implements BaseWire {
   void wire__crate__api__FlutterBridge_list_annotation_association_sources(
     int port_,
     int that,
+    ffi.Pointer<wire_cst_flutter_document_handle> target,
     ffi.Pointer<wire_cst_list_prim_u_8_strict> cursor,
     int limit,
     int cancellation_id,
@@ -1528,6 +1530,7 @@ class RustLibWire implements BaseWire {
     return _wire__crate__api__FlutterBridge_list_annotation_association_sources(
       port_,
       that,
+      target,
       cursor,
       limit,
       cancellation_id,
@@ -1540,6 +1543,7 @@ class RustLibWire implements BaseWire {
           ffi.Void Function(
             ffi.Int64,
             ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_document_handle>,
             ffi.Pointer<wire_cst_list_prim_u_8_strict>,
             ffi.UintPtr,
             ffi.Uint64,
@@ -1554,6 +1558,7 @@ class RustLibWire implements BaseWire {
             void Function(
               int,
               int,
+              ffi.Pointer<wire_cst_flutter_document_handle>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               int,
               int,
@@ -2469,6 +2474,8 @@ final class wire_cst_flutter_annotation_association_source_page
   sources;
 
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> next_cursor;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> previous_cursor;
 }
 
 final class wire_cst_flutter_bridge_error extends ffi.Struct {

@@ -320,6 +320,7 @@ fn wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
     that: impl CstDecode<
         RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
     >,
+    target: impl CstDecode<crate::api::FlutterDocumentHandle>,
     cursor: impl CstDecode<Option<String>>,
     limit: impl CstDecode<usize>,
     cancellation_id: impl CstDecode<u64>,
@@ -332,6 +333,7 @@ fn wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
         },
         move || {
             let api_that = that.cst_decode();
+            let api_target = target.cst_decode();
             let api_cursor = cursor.cst_decode();
             let api_limit = limit.cst_decode();
             let api_cancellation_id = cancellation_id.cst_decode();
@@ -358,6 +360,7 @@ fn wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
                         let output_ok =
                             crate::api::FlutterBridge::list_annotation_association_sources(
                                 &*api_that_guard,
+                                api_target,
                                 api_cursor,
                                 api_limit,
                                 api_cancellation_id,
@@ -1128,9 +1131,11 @@ impl SseDecode for crate::api::FlutterAnnotationAssociationSourcePage {
         let mut var_sources =
             <Vec<crate::api::FlutterAnnotationAssociationSource>>::sse_decode(deserializer);
         let mut var_nextCursor = <Option<String>>::sse_decode(deserializer);
+        let mut var_previousCursor = <Option<String>>::sse_decode(deserializer);
         return crate::api::FlutterAnnotationAssociationSourcePage {
             sources: var_sources,
             next_cursor: var_nextCursor,
+            previous_cursor: var_previousCursor,
         };
     }
 }
@@ -1716,6 +1721,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterAnnotationAssociationS
         [
             self.sources.into_into_dart().into_dart(),
             self.next_cursor.into_into_dart().into_dart(),
+            self.previous_cursor.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2204,6 +2210,7 @@ impl SseEncode for crate::api::FlutterAnnotationAssociationSourcePage {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::api::FlutterAnnotationAssociationSource>>::sse_encode(self.sources, serializer);
         <Option<String>>::sse_encode(self.next_cursor, serializer);
+        <Option<String>>::sse_encode(self.previous_cursor, serializer);
     }
 }
 
@@ -2725,6 +2732,7 @@ mod io {
             crate::api::FlutterAnnotationAssociationSourcePage {
                 sources: self.sources.cst_decode(),
                 next_cursor: self.next_cursor.cst_decode(),
+                previous_cursor: self.previous_cursor.cst_decode(),
             }
         }
     }
@@ -2996,6 +3004,7 @@ mod io {
             Self {
                 sources: core::ptr::null_mut(),
                 next_cursor: core::ptr::null_mut(),
+                previous_cursor: core::ptr::null_mut(),
             }
         }
     }
@@ -3273,6 +3282,7 @@ mod io {
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_annotation_association_sources(
         port_: i64,
         that: usize,
+        target: *mut wire_cst_flutter_document_handle,
         cursor: *mut wire_cst_list_prim_u_8_strict,
         limit: usize,
         cancellation_id: u64,
@@ -3280,6 +3290,7 @@ mod io {
         wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
             port_,
             that,
+            target,
             cursor,
             limit,
             cancellation_id,
@@ -3634,6 +3645,7 @@ mod io {
     pub struct wire_cst_flutter_annotation_association_source_page {
         sources: *mut wire_cst_list_flutter_annotation_association_source,
         next_cursor: *mut wire_cst_list_prim_u_8_strict,
+        previous_cursor: *mut wire_cst_list_prim_u_8_strict,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]

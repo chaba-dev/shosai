@@ -115,6 +115,7 @@ abstract class RustLibApi extends BaseApi {
   Future<FlutterAnnotationAssociationSourcePage>
   crateApiFlutterBridgeListAnnotationAssociationSources({
     required FlutterBridge that,
+    required FlutterDocumentHandle target,
     String? cursor,
     required BigInt limit,
     required BigInt cancellationId,
@@ -458,6 +459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<FlutterAnnotationAssociationSourcePage>
   crateApiFlutterBridgeListAnnotationAssociationSources({
     required FlutterBridge that,
+    required FlutterDocumentHandle target,
     String? cursor,
     required BigInt limit,
     required BigInt cancellationId,
@@ -469,9 +471,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
               cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
                 that,
               );
-          var arg1 = cst_encode_opt_String(cursor);
-          var arg2 = cst_encode_usize(limit);
-          var arg3 = cst_encode_u_64(cancellationId);
+          var arg1 = cst_encode_box_autoadd_flutter_document_handle(target);
+          var arg2 = cst_encode_opt_String(cursor);
+          var arg3 = cst_encode_usize(limit);
+          var arg4 = cst_encode_u_64(cancellationId);
           return wire
               .wire__crate__api__FlutterBridge_list_annotation_association_sources(
                 port_,
@@ -479,6 +482,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
                 arg1,
                 arg2,
                 arg3,
+                arg4,
               );
         },
         codec: DcoCodec(
@@ -488,7 +492,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         ),
         constMeta:
             kCrateApiFlutterBridgeListAnnotationAssociationSourcesConstMeta,
-        argValues: [that, cursor, limit, cancellationId],
+        argValues: [that, target, cursor, limit, cancellationId],
         apiImpl: this,
       ),
     );
@@ -498,7 +502,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get kCrateApiFlutterBridgeListAnnotationAssociationSourcesConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_list_annotation_association_sources",
-        argNames: ["that", "cursor", "limit", "cancellationId"],
+        argNames: ["that", "target", "cursor", "limit", "cancellationId"],
       );
 
   @override
@@ -1136,11 +1140,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_flutter_annotation_association_source_page(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return FlutterAnnotationAssociationSourcePage(
       sources: dco_decode_list_flutter_annotation_association_source(arr[0]),
       nextCursor: dco_decode_opt_String(arr[1]),
+      previousCursor: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -1678,9 +1683,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_nextCursor = sse_decode_opt_String(deserializer);
+    var var_previousCursor = sse_decode_opt_String(deserializer);
     return FlutterAnnotationAssociationSourcePage(
       sources: var_sources,
       nextCursor: var_nextCursor,
+      previousCursor: var_previousCursor,
     );
   }
 
@@ -2395,6 +2402,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_opt_String(self.nextCursor, serializer);
+    sse_encode_opt_String(self.previousCursor, serializer);
   }
 
   @protected
@@ -2842,12 +2850,14 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
 
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
+    required FlutterDocumentHandle target,
     String? cursor,
     required BigInt limit,
     required BigInt cancellationId,
   }) => RustLib.instance.api
       .crateApiFlutterBridgeListAnnotationAssociationSources(
         that: this,
+        target: target,
         cursor: cursor,
         limit: limit,
         cancellationId: cancellationId,

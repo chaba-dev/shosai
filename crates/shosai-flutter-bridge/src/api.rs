@@ -119,6 +119,7 @@ impl From<AnnotationAssociationSourceDto> for FlutterAnnotationAssociationSource
 pub struct FlutterAnnotationAssociationSourcePage {
     pub sources: Vec<FlutterAnnotationAssociationSource>,
     pub next_cursor: Option<String>,
+    pub previous_cursor: Option<String>,
 }
 
 impl From<AnnotationAssociationSourcePageDto> for FlutterAnnotationAssociationSourcePage {
@@ -126,6 +127,7 @@ impl From<AnnotationAssociationSourcePageDto> for FlutterAnnotationAssociationSo
         Self {
             sources: value.sources.into_iter().map(Into::into).collect(),
             next_cursor: value.next_cursor,
+            previous_cursor: value.previous_cursor,
         }
     }
 }
@@ -645,13 +647,19 @@ impl FlutterBridge {
 
     pub async fn list_annotation_association_sources(
         &self,
+        target: FlutterDocumentHandle,
         cursor: Option<String>,
         limit: usize,
         cancellation_id: u64,
     ) -> Result<FlutterAnnotationAssociationSourcePage, FlutterBridgeError> {
         let cancellation = self.cancellation(cancellation_id)?;
         self.bridge
-            .list_annotation_association_sources(cursor.as_deref(), limit, cancellation)
+            .list_annotation_association_sources(
+                target.into(),
+                cursor.as_deref(),
+                limit,
+                cancellation,
+            )
             .await
             .map(Into::into)
             .map_err(Into::into)

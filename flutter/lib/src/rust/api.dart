@@ -42,6 +42,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
 
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
+    required FlutterDocumentHandle target,
     String? cursor,
     required BigInt limit,
     required BigInt cancellationId,
@@ -195,14 +196,17 @@ class FlutterAnnotationAssociationSource {
 class FlutterAnnotationAssociationSourcePage {
   final List<FlutterAnnotationAssociationSource> sources;
   final String? nextCursor;
+  final String? previousCursor;
 
   const FlutterAnnotationAssociationSourcePage({
     required this.sources,
     this.nextCursor,
+    this.previousCursor,
   });
 
   @override
-  int get hashCode => sources.hashCode ^ nextCursor.hashCode;
+  int get hashCode =>
+      sources.hashCode ^ nextCursor.hashCode ^ previousCursor.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -210,7 +214,8 @@ class FlutterAnnotationAssociationSourcePage {
       other is FlutterAnnotationAssociationSourcePage &&
           runtimeType == other.runtimeType &&
           sources == other.sources &&
-          nextCursor == other.nextCursor;
+          nextCursor == other.nextCursor &&
+          previousCursor == other.previousCursor;
 }
 
 enum FlutterAnnotationResolution { exact, recovered, ambiguous, orphaned }
