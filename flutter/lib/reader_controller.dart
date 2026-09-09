@@ -2271,6 +2271,7 @@ final class ReaderController implements Listenable {
   void _annotationReloadRequested() {
     final document = _model.document;
     if (document == null ||
+        document.format == FlutterBookFormat.cbz ||
         _model.busy ||
         _model.annotationsReady ||
         _model.annotationOperations.isNotEmpty ||

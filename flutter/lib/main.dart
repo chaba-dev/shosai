@@ -289,7 +289,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
-        actions: model.document != null
+        actions:
+            model.document != null &&
+                model.document!.format != FlutterBookFormat.cbz
             ? [
                 IconButton(
                   tooltip: model.annotationsReady

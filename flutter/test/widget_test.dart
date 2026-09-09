@@ -420,6 +420,7 @@ void main() {
     await tester.pump();
     expect(find.byType(RawImage), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byTooltip('Retry loading highlights'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
