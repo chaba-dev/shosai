@@ -34,6 +34,8 @@ pub const MAX_LOCAL_PATH_BYTES: usize = 32_768;
 pub const MAX_EPUB_RESOURCE_PATH_BYTES: usize = 4_096;
 pub const MAX_PROVENANCE_SYSTEM_BYTES: usize = 256;
 pub const MAX_PROVENANCE_ID_BYTES: usize = 4_096;
+pub const MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE: usize = 100;
+pub const MAX_ANNOTATION_DOCUMENT_VERSIONS: usize = 128;
 pub(crate) const MAX_TEXT_ANCHOR_RESOLUTION_WORK: usize = 64 * 1024 * 1024;
 const MAX_TEXT_ANCHOR_GRAPHEME_SCALARS: usize = 1_024;
 
@@ -69,6 +71,71 @@ impl FromStr for AnnotationId {
         Uuid::parse_str(value).map(Self)
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AnnotationDocumentVersionId(Uuid);
+
+impl std::fmt::Display for AnnotationDocumentVersionId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl FromStr for AnnotationDocumentVersionId {
+    type Err = uuid::Error;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        Uuid::parse_str(value).map(Self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnotationDocumentFormat {
+    Epub,
+    Pdf,
+}
+
+impl AnnotationDocumentFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Epub => "epub",
+            Self::Pdf => "pdf",
+        }
+    }
+
+    fn from_db(value: &str) -> Result<Self> {
+        match value {
+            "epub" => Ok(Self::Epub),
+            "pdf" => Ok(Self::Pdf),
+            _ => bail!("unknown annotation document format {value:?}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationAssociationSource {
+    pub version_id: AnnotationDocumentVersionId,
+    pub format: AnnotationDocumentFormat,
+    pub local_path: String,
+    pub fingerprint: DocumentFingerprint,
+    pub live_annotations: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationAssociationSourcePage {
+    pub sources: Vec<AnnotationAssociationSource>,
+    pub next_cursor: Option<AnnotationDocumentVersionId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnotationAssociationOutcome {
+    Associated,
+    AlreadyAssociated,
+}
+
+#[derive(Debug, Error)]
+#[error("document version already belongs to another annotation collection")]
+pub struct AnnotationAssociationConflict;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HighlightColor {
@@ -1299,6 +1366,162 @@ impl AnnotationStore {
             .await
             .context("failed to finish annotation list snapshot")?;
         Ok(annotations)
+    }
+
+    pub async fn list_association_sources_async(
+        &self,
+        cursor: Option<&AnnotationDocumentVersionId>,
+        limit: usize,
+    ) -> Result<AnnotationAssociationSourcePage> {
+        if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
+            bail!(
+                "annotation association source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
+            );
+        }
+        let rows = sqlx::query(
+            "SELECT v.id, d.format, v.local_path, v.fingerprint_algorithm,
+                    v.fingerprint_version, v.fingerprint,
+                    SUM(CASE WHEN a.deleted_at IS NULL THEN 1 ELSE 0 END) AS live_annotations
+             FROM annotation_document_versions v
+             JOIN annotation_documents d ON d.id = v.document_id
+             JOIN annotations a ON a.annotation_document_id = v.document_id
+             WHERE (? IS NULL OR v.id > ?)
+             GROUP BY v.id, d.format, v.local_path, v.fingerprint_algorithm,
+                      v.fingerprint_version, v.fingerprint
+             ORDER BY v.id
+             LIMIT ?",
+        )
+        .bind(cursor.map(ToString::to_string))
+        .bind(cursor.map(ToString::to_string))
+        .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to list annotation association sources")?;
+        let has_more = rows.len() > limit;
+        let mut sources = Vec::with_capacity(rows.len().min(limit));
+        for row in rows.into_iter().take(limit) {
+            let version_id =
+                AnnotationDocumentVersionId::from_str(&row.try_get::<String, _>("id")?)
+                    .context("invalid annotation document version ID in database")?;
+            sources.push(AnnotationAssociationSource {
+                version_id,
+                format: AnnotationDocumentFormat::from_db(&row.try_get::<String, _>("format")?)?,
+                local_path: row.try_get("local_path")?,
+                fingerprint: DocumentFingerprint::new(
+                    row.try_get::<String, _>("fingerprint_algorithm")?,
+                    positive_u32(row.try_get("fingerprint_version")?, "fingerprint version")?,
+                    row.try_get("fingerprint")?,
+                )?,
+                live_annotations: usize::try_from(row.try_get::<i64, _>("live_annotations")?)
+                    .context("invalid live annotation count in database")?,
+            });
+        }
+        let next_cursor = has_more
+            .then(|| sources.last().map(|source| source.version_id.clone()))
+            .flatten();
+        Ok(AnnotationAssociationSourcePage {
+            sources,
+            next_cursor,
+        })
+    }
+
+    pub async fn associate_document_version_async(
+        &self,
+        source: &AnnotationDocumentVersionId,
+        target_format: AnnotationDocumentFormat,
+        target_local_path: &str,
+        target_fingerprint: &DocumentFingerprint,
+    ) -> Result<AnnotationAssociationOutcome> {
+        if target_local_path.is_empty() || target_local_path.len() > MAX_LOCAL_PATH_BYTES {
+            bail!("annotation local path is empty or exceeds {MAX_LOCAL_PATH_BYTES} bytes");
+        }
+        target_fingerprint.validate()?;
+        let mut transaction = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin annotation document association")?;
+        let source_id = source.to_string();
+        let locked = sqlx::query(
+            "UPDATE annotation_documents SET format = format
+             WHERE id = (SELECT document_id FROM annotation_document_versions WHERE id = ?)",
+        )
+        .bind(&source_id)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to lock annotation document association")?;
+        if locked.rows_affected() != 1 {
+            bail!("annotation association source was not found");
+        }
+        let (document_id, source_format): (String, String) = sqlx::query_as(
+            "SELECT v.document_id, d.format
+             FROM annotation_document_versions v
+             JOIN annotation_documents d ON d.id = v.document_id
+             WHERE v.id = ?",
+        )
+        .bind(&source_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .context("failed to load annotation association source")?;
+        if source_format != target_format.as_str() {
+            bail!("selected annotation source has a different document format");
+        }
+        let existing = sqlx::query_scalar::<_, String>(
+            "SELECT document_id FROM annotation_document_versions
+             WHERE local_path = ? AND fingerprint_algorithm = ?
+               AND fingerprint_version = ? AND fingerprint = ?",
+        )
+        .bind(target_local_path)
+        .bind(&target_fingerprint.algorithm)
+        .bind(i64::from(target_fingerprint.version))
+        .bind(&target_fingerprint.bytes)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("failed to resolve target annotation document version")?;
+        if let Some(existing) = existing {
+            if existing != document_id {
+                return Err(AnnotationAssociationConflict.into());
+            }
+            transaction
+                .commit()
+                .await
+                .context("failed to finish existing annotation association")?;
+            return Ok(AnnotationAssociationOutcome::AlreadyAssociated);
+        }
+        let version_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM annotation_document_versions WHERE document_id = ?",
+        )
+        .bind(&document_id)
+        .fetch_one(&mut *transaction)
+        .await
+        .context("failed to count annotation document versions")?;
+        if usize::try_from(version_count).unwrap_or(usize::MAX) >= MAX_ANNOTATION_DOCUMENT_VERSIONS
+        {
+            bail!(
+                "annotation document exceeds its {MAX_ANNOTATION_DOCUMENT_VERSIONS}-version limit"
+            );
+        }
+        sqlx::query(
+            "INSERT INTO annotation_document_versions (
+                id, document_id, local_path, fingerprint_algorithm,
+                fingerprint_version, fingerprint, associated_from_version_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(document_id)
+        .bind(target_local_path)
+        .bind(&target_fingerprint.algorithm)
+        .bind(i64::from(target_fingerprint.version))
+        .bind(&target_fingerprint.bytes)
+        .bind(source_id)
+        .execute(&mut *transaction)
+        .await
+        .context("failed to associate annotation document version")?;
+        transaction
+            .commit()
+            .await
+            .context("failed to commit annotation document association")?;
+        Ok(AnnotationAssociationOutcome::Associated)
     }
 
     pub async fn update_async(

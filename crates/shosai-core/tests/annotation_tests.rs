@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use shosai_core::annotations::{
+    AnnotationAssociationConflict, AnnotationAssociationOutcome, AnnotationDocumentFormat,
     AnnotationId, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint,
     EpubAnchor, HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS,
     MAX_EPUB_RESOURCE_PATH_BYTES, MAX_FINGERPRINT_ALGORITHM_BYTES, MAX_FINGERPRINT_BYTES,
@@ -319,6 +320,99 @@ async fn concurrent_first_annotations_create_one_exact_document_version() {
             .len(),
         2
     );
+}
+
+#[tokio::test]
+async fn explicit_document_association_preserves_anchor_evidence_and_rejects_conflicts() {
+    let (store, pool, _dir) = temp_store().await;
+    let source = epub_annotation(None);
+    store.create_async(&source).await.unwrap();
+    let source_page = store
+        .list_association_sources_async(None, 10)
+        .await
+        .unwrap();
+    assert_eq!(source_page.sources.len(), 1);
+    assert_eq!(source_page.sources[0].live_annotations, 1);
+    assert!(source_page.next_cursor.is_none());
+    let source_version = &source_page.sources[0].version_id;
+    let changed_fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
+
+    assert_eq!(
+        store
+            .associate_document_version_async(
+                source_version,
+                AnnotationDocumentFormat::Epub,
+                "/replacements/changed.epub",
+                &changed_fingerprint,
+            )
+            .await
+            .unwrap(),
+        AnnotationAssociationOutcome::Associated
+    );
+    assert_eq!(
+        store
+            .associate_document_version_async(
+                source_version,
+                AnnotationDocumentFormat::Epub,
+                "/replacements/changed.epub",
+                &changed_fingerprint,
+            )
+            .await
+            .unwrap(),
+        AnnotationAssociationOutcome::AlreadyAssociated
+    );
+    let stored_source = store.get_async(&source.id, false).await.unwrap().unwrap();
+    assert_eq!(stored_source.local_path, source.local_path);
+    assert_eq!(stored_source.fingerprint, source.fingerprint);
+    let associated_from: String = sqlx::query_scalar(
+        "SELECT associated_from_version_id FROM annotation_document_versions
+         WHERE local_path = '/replacements/changed.epub'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(associated_from, source_version.to_string());
+
+    let mut target_annotation = epub_annotation(None);
+    target_annotation.local_path = Some("/replacements/changed.epub".into());
+    target_annotation.fingerprint = changed_fingerprint.clone();
+    store.create_async(&target_annotation).await.unwrap();
+    let distinct_documents: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT annotation_document_id) FROM annotations
+         WHERE id IN (?, ?)",
+    )
+    .bind(source.id.to_string())
+    .bind(target_annotation.id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(distinct_documents, 1);
+
+    let mut unrelated = epub_annotation(None);
+    unrelated.local_path = Some("/replacements/unrelated.epub".into());
+    unrelated.fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xef; 32]).unwrap();
+    store.create_async(&unrelated).await.unwrap();
+    let conflict = store
+        .associate_document_version_async(
+            source_version,
+            AnnotationDocumentFormat::Epub,
+            unrelated.local_path.as_deref().unwrap(),
+            &unrelated.fingerprint,
+        )
+        .await
+        .unwrap_err();
+    assert!(conflict.is::<AnnotationAssociationConflict>());
+}
+
+#[tokio::test]
+async fn tombstone_only_collections_remain_discoverable_for_association() {
+    let (store, _pool, _dir) = temp_store().await;
+    let source = store.create_async(&epub_annotation(None)).await.unwrap();
+    store.delete_async(&source.id).await.unwrap();
+
+    let page = store.list_association_sources_async(None, 1).await.unwrap();
+    assert_eq!(page.sources.len(), 1);
+    assert_eq!(page.sources[0].live_annotations, 0);
 }
 
 #[tokio::test]
