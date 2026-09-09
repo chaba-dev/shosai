@@ -1863,6 +1863,28 @@ impl AnnotationStore {
             .await
             .context("failed to bind detached book annotations")?;
         }
+        let representatives = sqlx::query_scalar::<_, String>(
+            "SELECT MIN(id) FROM annotations
+             WHERE book_id = ? AND annotation_document_id IS NOT NULL
+             GROUP BY annotation_document_id",
+        )
+        .bind(book_id)
+        .fetch_all(&mut **transaction)
+        .await
+        .context("failed to identify detached annotation collections")?;
+        sqlx::query(
+            "UPDATE annotations SET book_id = NULL
+             WHERE book_id = ? AND annotation_document_id IS NOT NULL",
+        )
+        .bind(book_id)
+        .execute(&mut **transaction)
+        .await
+        .context("failed to detach bound book annotations")?;
+        for representative in representatives {
+            let annotation_id = AnnotationId::from_str(&representative)
+                .context("invalid detached annotation ID in database")?;
+            ensure_annotation_snapshot_within_limits(transaction, &annotation_id).await?;
+        }
         Ok(())
     }
 

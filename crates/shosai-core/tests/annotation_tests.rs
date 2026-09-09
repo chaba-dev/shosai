@@ -309,6 +309,71 @@ async fn removing_a_book_preserves_its_annotation_document_identity() {
 }
 
 #[tokio::test]
+async fn removing_a_book_rolls_back_an_over_limit_collection_merge() {
+    let (store, pool, dir) = temp_store().await;
+    let full_body = "x".repeat(MAX_ANNOTATION_BODY_SCALARS);
+    loop {
+        let mut source = epub_annotation(None);
+        source.local_path = Some("/books/source.epub".into());
+        source.body = Some(full_body.clone());
+        match store.create_async(&source).await {
+            Ok(_) => {}
+            Err(error) => {
+                assert!(error.is::<AnnotationSnapshotLimit>());
+                break;
+            }
+        }
+    }
+    let source = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/books/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+        )
+        .await
+        .unwrap()
+        .sources
+        .into_iter()
+        .next()
+        .unwrap();
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path)
+         VALUES ('Target', 'epub', '/books/target.epub') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut target = epub_annotation(Some(book_id));
+    target.local_path = Some("/books/target.epub".into());
+    target.fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
+    target.body = Some(full_body);
+    let target = store.create_async(&target).await.unwrap();
+    store
+        .associate_document_version_async(
+            &source.version_id,
+            AnnotationDocumentFormat::Epub,
+            "/books/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let library = Library::new(pool.clone(), dir.path().join("managed"));
+    let error = library.remove(book_id).await.unwrap_err();
+    assert!(error.is::<AnnotationSnapshotLimit>());
+    assert!(library.get(book_id).await.unwrap().is_some());
+    let binding: (Option<i64>, Option<String>) =
+        sqlx::query_as("SELECT book_id, annotation_document_id FROM annotations WHERE id = ?")
+            .bind(target.id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(binding, (Some(book_id), None));
+}
+
+#[tokio::test]
 async fn untracked_annotations_reopen_by_device_local_path() {
     let (store, _pool, _dir) = temp_store().await;
     let mut first = epub_annotation(None);
