@@ -213,6 +213,7 @@ pub struct AnnotationAssociationSourceDto {
 pub struct AnnotationAssociationSourcePageDto {
     pub sources: Vec<AnnotationAssociationSourceDto>,
     pub next_cursor: Option<String>,
+    pub previous_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -928,6 +929,7 @@ impl Bridge {
             BridgeError::RequestLimit,
         )?;
         let retained = self.document(document)?;
+        let format = annotation_document_format(&retained.document)?;
         let store = tokio::select! {
             store = self.annotation_store() => store?,
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
@@ -936,6 +938,7 @@ impl Bridge {
         let listed = tokio::select! {
             result = store.list_for_local_document_async(
                 &retained.local_path,
+                format,
                 Some(&retained.fingerprint),
             ) => {
                 check_cancelled(&cancellation)?;
@@ -960,6 +963,7 @@ impl Bridge {
 
     pub async fn list_annotation_association_sources(
         &self,
+        target: DocumentHandle,
         cursor: Option<&str>,
         limit: usize,
         cancellation: Cancellation,
@@ -968,6 +972,8 @@ impl Bridge {
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
         )?;
+        let target = self.document(target)?;
+        let format = annotation_document_format(&target.document)?;
         let cursor = cursor
             .map(AnnotationDocumentVersionId::from_str)
             .transpose()
@@ -977,7 +983,13 @@ impl Bridge {
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
         };
         let page = tokio::select! {
-            page = store.list_association_sources_async(cursor.as_ref(), limit) => {
+            page = store.list_association_sources_async(
+                format,
+                &target.local_path,
+                &target.fingerprint,
+                cursor.as_ref(),
+                limit,
+            ) => {
                 page.map_err(annotation_storage_error)?
             }
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
@@ -1001,6 +1013,7 @@ impl Bridge {
                 })
                 .collect(),
             next_cursor: page.next_cursor.map(|cursor| cursor.to_string()),
+            previous_cursor: page.previous_cursor.map(|cursor| cursor.to_string()),
         })
     }
 
@@ -1028,17 +1041,34 @@ impl Bridge {
             store = self.annotation_store() => store?,
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
         };
-        let outcome = tokio::select! {
-            outcome = store.associate_document_version_async(
+        #[cfg(test)]
+        if let Some(gate) = self
+            .annotation_test_hooks
+            .as_ref()
+            .and_then(|hooks| hooks.before_acceptance.as_ref())
+        {
+            gate.pause().await;
+        }
+        // Association is durable after this acceptance boundary. Cancellation
+        // takes the same lock, so it either wins before persistence starts or
+        // receives the definitive association result.
+        {
+            let _publication = cancellation
+                .0
+                .publication
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            check_cancelled(&cancellation)?;
+        }
+        store
+            .associate_document_version_async(
                 &source,
                 format,
                 &target.local_path,
                 &target.fingerprint,
-            ) => outcome.map_err(annotation_storage_error)?,
-            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
-        };
-        check_cancelled(&cancellation)?;
-        Ok(outcome)
+            )
+            .await
+            .map_err(annotation_storage_error)
     }
 
     async fn resolve_annotation_dtos(
@@ -1119,6 +1149,7 @@ impl Bridge {
             BridgeError::RequestLimit,
         )?;
         let retained = self.document(document)?;
+        let format = annotation_document_format(&retained.document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
         self.annotation_store()
@@ -1126,6 +1157,7 @@ impl Bridge {
             .update_for_local_document_async(
                 &id,
                 &retained.local_path,
+                format,
                 &retained.fingerprint,
                 color,
                 body.as_deref(),
@@ -1144,11 +1176,17 @@ impl Bridge {
             BridgeError::RequestLimit,
         )?;
         let retained = self.document(document)?;
+        let format = annotation_document_format(&retained.document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
         self.annotation_store()
             .await?
-            .delete_for_local_document_async(&id, &retained.local_path, &retained.fingerprint)
+            .delete_for_local_document_async(
+                &id,
+                &retained.local_path,
+                format,
+                &retained.fingerprint,
+            )
             .await
             .map_err(storage_error)
     }
@@ -2192,6 +2230,16 @@ fn annotation_storage_error(error: anyhow::Error) -> BridgeError {
     }
 }
 
+fn annotation_document_format(
+    document: &OpenDocument,
+) -> Result<AnnotationDocumentFormat, BridgeError> {
+    match document {
+        OpenDocument::Epub(_) => Ok(AnnotationDocumentFormat::Epub),
+        OpenDocument::Pdf(_) => Ok(AnnotationDocumentFormat::Pdf),
+        OpenDocument::Cbz(_) => Err(BridgeError::UnsupportedOperation(BookFormat::Cbz)),
+    }
+}
+
 fn bounded_annotation_snapshot(
     annotations: Vec<Annotation>,
 ) -> Result<Vec<Annotation>, BridgeError> {
@@ -2611,6 +2659,50 @@ mod tests {
             color: HighlightColor::Yellow,
             body: None,
         }
+    }
+
+    async fn association_fixture(
+        persistence: Arc<AnnotationPersistenceTestGate>,
+    ) -> (tempfile::TempDir, Bridge, DocumentHandle, String) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        bridge.annotation_test_hooks = Some(Arc::new(AnnotationTestHooks {
+            persistence: Some(Arc::clone(&persistence)),
+            ..AnnotationTestHooks::default()
+        }));
+        bridge.annotation_store().await.unwrap();
+        let source = bridge
+            .open_document(epub_request(), Cancellation::new())
+            .await
+            .unwrap();
+        persistence.release();
+        bridge
+            .create_annotation(annotation_request(source.handle), Cancellation::new())
+            .await
+            .unwrap();
+        persistence.wait_until_entered().await;
+        let target_path = directory.path().join("changed.epub");
+        std::fs::write(&target_path, epub_with_body("changed fixture text")).unwrap();
+        let target = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "association-target".into(),
+                    path_key: crate::path_key::path_key(&target_path),
+                    format_hint: Some(BookFormat::Epub),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let source_id = bridge
+            .list_annotation_association_sources(target.handle, None, 1, Cancellation::new())
+            .await
+            .unwrap()
+            .sources[0]
+            .version_id
+            .clone();
+        (directory, bridge, target.handle, source_id)
     }
 
     fn empty_epub() -> Vec<u8> {
@@ -4075,16 +4167,16 @@ mod tests {
             )
             .await
             .unwrap();
-        let sources = bridge
-            .list_annotation_association_sources(None, 10, Cancellation::new())
-            .await
-            .unwrap();
-        assert_eq!(sources.sources.len(), 1);
-
         let target = bridge
             .open_document(open(&target_path, "target"), Cancellation::new())
             .await
             .unwrap();
+        let sources = bridge
+            .list_annotation_association_sources(target.handle, None, 10, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(sources.sources.len(), 1);
+
         assert!(
             bridge
                 .list_annotations(target.handle, 1.0, Cancellation::new())
@@ -4136,6 +4228,72 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a shared tombstone must prevent resurrection on every version"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_before_association_acceptance_prevents_persistence() {
+        let persistence = Arc::new(AnnotationPersistenceTestGate::new());
+        let (_directory, mut bridge, target, source_id) =
+            association_fixture(Arc::clone(&persistence)).await;
+        let before_acceptance = Arc::new(TestPhaseGate::default());
+        bridge.annotation_test_hooks = Some(Arc::new(AnnotationTestHooks {
+            before_acceptance: Some(Arc::clone(&before_acceptance)),
+            persistence: Some(persistence),
+            ..AnnotationTestHooks::default()
+        }));
+        let bridge = Arc::new(bridge);
+        let cancellation = Cancellation::new();
+        let operation_bridge = Arc::clone(&bridge);
+        let operation_cancellation = cancellation.clone();
+        let operation = tokio::spawn(async move {
+            operation_bridge
+                .associate_annotation_version(&source_id, target, operation_cancellation)
+                .await
+        });
+
+        before_acceptance.wait_until_entered().await;
+        cancellation.cancel();
+        before_acceptance.release();
+        assert_eq!(operation.await.unwrap(), Err(BridgeError::Cancelled));
+        assert!(
+            bridge
+                .list_annotations(target, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn accepted_association_finishes_after_cancellation() {
+        let persistence = Arc::new(AnnotationPersistenceTestGate::new());
+        let (_directory, bridge, target, source_id) =
+            association_fixture(Arc::clone(&persistence)).await;
+        let bridge = Arc::new(bridge);
+        let cancellation = Cancellation::new();
+        let operation_bridge = Arc::clone(&bridge);
+        let operation_cancellation = cancellation.clone();
+        let operation = tokio::spawn(async move {
+            operation_bridge
+                .associate_annotation_version(&source_id, target, operation_cancellation)
+                .await
+        });
+
+        persistence.wait_until_entered().await;
+        cancellation.cancel();
+        persistence.release();
+        assert_eq!(
+            operation.await.unwrap().unwrap(),
+            AnnotationAssociationOutcome::Associated
+        );
+        assert_eq!(
+            bridge
+                .list_annotations(target, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .len(),
+            1
         );
     }
 

@@ -1,19 +1,22 @@
 CREATE TABLE annotation_documents (
     id      TEXT PRIMARY KEY NOT NULL,
     format  TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
+    UNIQUE (id, format),
     CHECK (length(id) = 36)
 );
 
 CREATE TABLE annotation_document_versions (
     id                          TEXT PRIMARY KEY NOT NULL,
-    document_id                 TEXT NOT NULL REFERENCES annotation_documents(id) ON DELETE CASCADE,
+    document_id                 TEXT NOT NULL,
+    format                      TEXT NOT NULL CHECK (format IN ('epub', 'pdf')),
     local_path                  TEXT NOT NULL,
     fingerprint_algorithm       TEXT NOT NULL,
     fingerprint_version         INTEGER NOT NULL CHECK (fingerprint_version > 0),
     fingerprint                 BLOB NOT NULL,
     associated_from_version_id  TEXT REFERENCES annotation_document_versions(id),
     associated_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE (local_path, fingerprint_algorithm, fingerprint_version, fingerprint),
+    UNIQUE (local_path, format, fingerprint_algorithm, fingerprint_version, fingerprint),
+    FOREIGN KEY (document_id, format) REFERENCES annotation_documents(id, format) ON DELETE CASCADE,
     CHECK (length(id) = 36),
     CHECK (length(CAST(local_path AS BLOB)) BETWEEN 1 AND 32768),
     CHECK (length(CAST(fingerprint_algorithm AS BLOB)) BETWEEN 1 AND 64),
@@ -40,6 +43,7 @@ SELECT id, format FROM initial_annotation_documents;
 INSERT INTO annotation_document_versions (
     id,
     document_id,
+    format,
     local_path,
     fingerprint_algorithm,
     fingerprint_version,
@@ -47,6 +51,7 @@ INSERT INTO annotation_document_versions (
 )
 SELECT id,
        id,
+       format,
        local_path,
        fingerprint_algorithm,
        fingerprint_version,

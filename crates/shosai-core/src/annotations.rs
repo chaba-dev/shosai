@@ -125,6 +125,7 @@ pub struct AnnotationAssociationSource {
 pub struct AnnotationAssociationSourcePage {
     pub sources: Vec<AnnotationAssociationSource>,
     pub next_cursor: Option<AnnotationDocumentVersionId>,
+    pub previous_cursor: Option<AnnotationDocumentVersionId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1287,12 +1288,14 @@ impl AnnotationStore {
 
     /// List live annotations associated with an untracked device-local path.
     pub async fn list_for_local_path_async(&self, local_path: &str) -> Result<Vec<Annotation>> {
-        self.list_for_local_document_async(local_path, None).await
+        self.list_for_local_document_async(local_path, AnnotationDocumentFormat::Epub, None)
+            .await
     }
 
     pub(crate) async fn list_for_local_document_async(
         &self,
         local_path: &str,
+        format: AnnotationDocumentFormat,
         fingerprint: Option<&DocumentFingerprint>,
     ) -> Result<Vec<Annotation>> {
         let mut transaction = self
@@ -1313,6 +1316,7 @@ impl AnnotationStore {
                  JOIN annotation_document_versions v
                    ON v.document_id = a.annotation_document_id
                  WHERE v.local_path = ?
+                   AND v.format = ?
                    AND v.fingerprint_algorithm = ?
                    AND v.fingerprint_version = ?
                    AND v.fingerprint = ?
@@ -1320,6 +1324,7 @@ impl AnnotationStore {
                  ORDER BY a.created_at, a.id LIMIT ?",
             )
             .bind(local_path)
+            .bind(format.as_str())
             .bind(&fingerprint.algorithm)
             .bind(i64::from(fingerprint.version))
             .bind(&fingerprint.bytes)
@@ -1370,6 +1375,9 @@ impl AnnotationStore {
 
     pub async fn list_association_sources_async(
         &self,
+        format: AnnotationDocumentFormat,
+        target_local_path: &str,
+        target_fingerprint: &DocumentFingerprint,
         cursor: Option<&AnnotationDocumentVersionId>,
         limit: usize,
     ) -> Result<AnnotationAssociationSourcePage> {
@@ -1379,18 +1387,39 @@ impl AnnotationStore {
             );
         }
         let rows = sqlx::query(
-            "SELECT v.id, d.format, v.local_path, v.fingerprint_algorithm,
-                    v.fingerprint_version, v.fingerprint,
-                    SUM(CASE WHEN a.deleted_at IS NULL THEN 1 ELSE 0 END) AS live_annotations
-             FROM annotation_document_versions v
-             JOIN annotation_documents d ON d.id = v.document_id
-             JOIN annotations a ON a.annotation_document_id = v.document_id
-             WHERE (? IS NULL OR v.id > ?)
-             GROUP BY v.id, d.format, v.local_path, v.fingerprint_algorithm,
-                      v.fingerprint_version, v.fingerprint
-             ORDER BY v.id
-             LIMIT ?",
+            "WITH candidates AS MATERIALIZED (
+               SELECT v.id, v.document_id, v.format, v.local_path,
+                      v.fingerprint_algorithm, v.fingerprint_version, v.fingerprint
+               FROM annotation_document_versions v
+               WHERE v.format = ?
+                 AND v.document_id != COALESCE((
+                   SELECT target.document_id FROM annotation_document_versions target
+                   WHERE target.local_path = ? AND target.format = ?
+                     AND target.fingerprint_algorithm = ?
+                     AND target.fingerprint_version = ? AND target.fingerprint = ?
+                 ), '')
+                 AND (? IS NULL OR v.id > ?)
+                 AND EXISTS (
+                   SELECT 1 FROM annotations a
+                   WHERE a.annotation_document_id = v.document_id
+                     AND a.deleted_at IS NULL
+                 )
+               ORDER BY v.id
+               LIMIT ?
+             )
+             SELECT c.id, c.format, c.local_path, c.fingerprint_algorithm,
+                    c.fingerprint_version, c.fingerprint,
+                    (SELECT COUNT(*) FROM annotations a
+                     WHERE a.annotation_document_id = c.document_id
+                       AND a.deleted_at IS NULL) AS live_annotations
+             FROM candidates c ORDER BY c.id",
         )
+        .bind(format.as_str())
+        .bind(target_local_path)
+        .bind(format.as_str())
+        .bind(&target_fingerprint.algorithm)
+        .bind(i64::from(target_fingerprint.version))
+        .bind(&target_fingerprint.bytes)
         .bind(cursor.map(ToString::to_string))
         .bind(cursor.map(ToString::to_string))
         .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
@@ -1419,9 +1448,50 @@ impl AnnotationStore {
         let next_cursor = has_more
             .then(|| sources.last().map(|source| source.version_id.clone()))
             .flatten();
+        let previous_cursor = if let Some(cursor) = cursor {
+            let previous = sqlx::query_scalar::<_, String>(
+                "SELECT v.id FROM annotation_document_versions v
+                 WHERE v.format = ?
+                   AND v.document_id != COALESCE((
+                     SELECT target.document_id FROM annotation_document_versions target
+                     WHERE target.local_path = ? AND target.format = ?
+                       AND target.fingerprint_algorithm = ?
+                       AND target.fingerprint_version = ? AND target.fingerprint = ?
+                   ), '')
+                   AND v.id <= ?
+                   AND EXISTS (
+                     SELECT 1 FROM annotations a
+                     WHERE a.annotation_document_id = v.document_id
+                       AND a.deleted_at IS NULL
+                   )
+                 ORDER BY v.id DESC LIMIT ?",
+            )
+            .bind(format.as_str())
+            .bind(target_local_path)
+            .bind(format.as_str())
+            .bind(&target_fingerprint.algorithm)
+            .bind(i64::from(target_fingerprint.version))
+            .bind(&target_fingerprint.bytes)
+            .bind(cursor.to_string())
+            .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to locate previous annotation association source page")?;
+            if previous.len() > limit {
+                Some(
+                    AnnotationDocumentVersionId::from_str(&previous[limit])
+                        .context("invalid previous annotation version cursor in database")?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         Ok(AnnotationAssociationSourcePage {
             sources,
             next_cursor,
+            previous_cursor,
         })
     }
 
@@ -1441,6 +1511,11 @@ impl AnnotationStore {
             .begin()
             .await
             .context("failed to begin annotation document association")?;
+        #[cfg(test)]
+        if let Some(gate) = &self.persistence_gate {
+            gate.entered.add_permits(1);
+            gate.release.acquire().await.unwrap().forget();
+        }
         let source_id = source.to_string();
         let locked = sqlx::query(
             "UPDATE annotation_documents SET format = format
@@ -1468,10 +1543,11 @@ impl AnnotationStore {
         }
         let existing = sqlx::query_scalar::<_, String>(
             "SELECT document_id FROM annotation_document_versions
-             WHERE local_path = ? AND fingerprint_algorithm = ?
+             WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
                AND fingerprint_version = ? AND fingerprint = ?",
         )
         .bind(target_local_path)
+        .bind(target_format.as_str())
         .bind(&target_fingerprint.algorithm)
         .bind(i64::from(target_fingerprint.version))
         .bind(&target_fingerprint.bytes)
@@ -1503,12 +1579,13 @@ impl AnnotationStore {
         }
         sqlx::query(
             "INSERT INTO annotation_document_versions (
-                id, document_id, local_path, fingerprint_algorithm,
+                id, document_id, format, local_path, fingerprint_algorithm,
                 fingerprint_version, fingerprint, associated_from_version_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(document_id)
+        .bind(target_format.as_str())
         .bind(target_local_path)
         .bind(&target_fingerprint.algorithm)
         .bind(i64::from(target_fingerprint.version))
@@ -1568,6 +1645,7 @@ impl AnnotationStore {
         &self,
         id: &AnnotationId,
         local_path: &str,
+        format: AnnotationDocumentFormat,
         fingerprint: &DocumentFingerprint,
         color: HighlightColor,
         body: Option<&str>,
@@ -1587,7 +1665,7 @@ impl AnnotationStore {
              WHERE id = ? AND deleted_at IS NULL
                AND annotation_document_id = (
                  SELECT document_id FROM annotation_document_versions
-                 WHERE local_path = ? AND fingerprint_algorithm = ?
+                 WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
                    AND fingerprint_version = ? AND fingerprint = ?
                )",
         )
@@ -1595,6 +1673,7 @@ impl AnnotationStore {
         .bind(body)
         .bind(id.to_string())
         .bind(local_path)
+        .bind(format.as_str())
         .bind(&fingerprint.algorithm)
         .bind(i64::from(fingerprint.version))
         .bind(&fingerprint.bytes)
@@ -1630,6 +1709,7 @@ impl AnnotationStore {
         &self,
         id: &AnnotationId,
         local_path: &str,
+        format: AnnotationDocumentFormat,
         fingerprint: &DocumentFingerprint,
     ) -> Result<bool> {
         let result = sqlx::query(
@@ -1644,12 +1724,13 @@ impl AnnotationStore {
              WHERE id = ? AND deleted_at IS NULL
                AND annotation_document_id = (
                  SELECT document_id FROM annotation_document_versions
-                 WHERE local_path = ? AND fingerprint_algorithm = ?
+                 WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
                    AND fingerprint_version = ? AND fingerprint = ?
                )",
         )
         .bind(id.to_string())
         .bind(local_path)
+        .bind(format.as_str())
         .bind(&fingerprint.algorithm)
         .bind(i64::from(fingerprint.version))
         .bind(&fingerprint.bytes)
@@ -1690,10 +1771,11 @@ async fn ensure_annotation_document_version(
         .context("failed to reserve annotation document")?;
     if let Some(retained_document_id) = sqlx::query_scalar::<_, String>(
         "SELECT document_id FROM annotation_document_versions
-         WHERE local_path = ? AND fingerprint_algorithm = ?
+         WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
            AND fingerprint_version = ? AND fingerprint = ?",
     )
     .bind(local_path)
+    .bind(format)
     .bind(&fingerprint.algorithm)
     .bind(i64::from(fingerprint.version))
     .bind(&fingerprint.bytes)
@@ -1712,14 +1794,15 @@ async fn ensure_annotation_document_version(
     let version_id = Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO annotation_document_versions (
-            id, document_id, local_path, fingerprint_algorithm,
+            id, document_id, format, local_path, fingerprint_algorithm,
             fingerprint_version, fingerprint)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(local_path, fingerprint_algorithm, fingerprint_version, fingerprint)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(local_path, format, fingerprint_algorithm, fingerprint_version, fingerprint)
          DO NOTHING",
     )
     .bind(version_id)
     .bind(&document_id)
+    .bind(format)
     .bind(local_path)
     .bind(&fingerprint.algorithm)
     .bind(i64::from(fingerprint.version))

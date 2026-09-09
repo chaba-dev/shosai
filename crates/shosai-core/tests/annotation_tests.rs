@@ -289,6 +289,40 @@ async fn untracked_annotations_share_only_their_exact_document_version() {
 }
 
 #[tokio::test]
+async fn identical_path_and_fingerprint_remain_distinct_across_formats() {
+    let (store, pool, _dir) = temp_store().await;
+    let epub = epub_annotation(None);
+    let mut pdf = epub_annotation(None);
+    pdf.target = AnnotationTarget::Pdf(
+        PdfAnchor::new(
+            0,
+            Some((0, 8)),
+            vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()],
+        )
+        .unwrap(),
+    );
+
+    store.create_async(&epub).await.unwrap();
+    store.create_async(&pdf).await.unwrap();
+
+    let formats: Vec<(String, String)> = sqlx::query_as(
+        "SELECT d.format, a.annotation_document_id
+         FROM annotations a
+         JOIN annotation_documents d ON d.id = a.annotation_document_id
+         WHERE a.id IN (?, ?) ORDER BY d.format",
+    )
+    .bind(epub.id.to_string())
+    .bind(pdf.id.to_string())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(formats.len(), 2);
+    assert_eq!(formats[0].0, "epub");
+    assert_eq!(formats[1].0, "pdf");
+    assert_ne!(formats[0].1, formats[1].1);
+}
+
+#[tokio::test]
 async fn concurrent_first_annotations_create_one_exact_document_version() {
     let (store, pool, _dir) = temp_store().await;
     let first = epub_annotation(None);
@@ -327,15 +361,21 @@ async fn explicit_document_association_preserves_anchor_evidence_and_rejects_con
     let (store, pool, _dir) = temp_store().await;
     let source = epub_annotation(None);
     store.create_async(&source).await.unwrap();
+    let changed_fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
     let source_page = store
-        .list_association_sources_async(None, 10)
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/replacements/changed.epub",
+            &changed_fingerprint,
+            None,
+            10,
+        )
         .await
         .unwrap();
     assert_eq!(source_page.sources.len(), 1);
     assert_eq!(source_page.sources[0].live_annotations, 1);
     assert!(source_page.next_cursor.is_none());
     let source_version = &source_page.sources[0].version_id;
-    let changed_fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
 
     assert_eq!(
         store
@@ -360,6 +400,21 @@ async fn explicit_document_association_preserves_anchor_evidence_and_rejects_con
             .await
             .unwrap(),
         AnnotationAssociationOutcome::AlreadyAssociated
+    );
+    assert!(
+        store
+            .list_association_sources_async(
+                AnnotationDocumentFormat::Epub,
+                "/replacements/changed.epub",
+                &changed_fingerprint,
+                None,
+                10,
+            )
+            .await
+            .unwrap()
+            .sources
+            .is_empty(),
+        "the target's existing collection is not an earlier-version choice"
     );
     let stored_source = store.get_async(&source.id, false).await.unwrap().unwrap();
     assert_eq!(stored_source.local_path, source.local_path);
@@ -405,14 +460,137 @@ async fn explicit_document_association_preserves_anchor_evidence_and_rejects_con
 }
 
 #[tokio::test]
-async fn tombstone_only_collections_remain_discoverable_for_association() {
+async fn tombstone_only_collections_are_not_association_choices() {
     let (store, _pool, _dir) = temp_store().await;
     let source = store.create_async(&epub_annotation(None)).await.unwrap();
     store.delete_async(&source.id).await.unwrap();
 
-    let page = store.list_association_sources_async(None, 1).await.unwrap();
+    let page = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    assert!(page.sources.is_empty());
+}
+
+#[tokio::test]
+async fn association_source_pages_filter_format_and_tombstones_before_limit() {
+    let (store, pool, _dir) = temp_store().await;
+    for _ in 0..100 {
+        let deleted = store.create_async(&epub_annotation(None)).await.unwrap();
+        store.delete_async(&deleted.id).await.unwrap();
+    }
+    let live = store.create_async(&epub_annotation(None)).await.unwrap();
+    let mut pdf = epub_annotation(None);
+    pdf.target = AnnotationTarget::Pdf(
+        PdfAnchor::new(
+            0,
+            Some((0, 8)),
+            vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()],
+        )
+        .unwrap(),
+    );
+    store.create_async(&pdf).await.unwrap();
+
+    let page = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
     assert_eq!(page.sources.len(), 1);
-    assert_eq!(page.sources[0].live_annotations, 0);
+    assert_eq!(page.sources[0].format, AnnotationDocumentFormat::Epub);
+    assert_eq!(page.sources[0].live_annotations, 1);
+
+    let document_id: String =
+        sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+            .bind(live.id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT 1 FROM annotations
+         WHERE annotation_document_id = ? AND deleted_at IS NULL LIMIT 1",
+    )
+    .bind(document_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        plan.iter()
+            .any(|(_, _, _, detail)| detail.contains("annotations_document_active_idx")),
+        "live-source lookup must use the collection/deletion index: {plan:?}"
+    );
+}
+
+#[tokio::test]
+async fn association_source_pages_navigate_without_retaining_prior_pages() {
+    let (store, _pool, _dir) = temp_store().await;
+    for index in 0..65 {
+        let mut annotation = epub_annotation(None);
+        annotation.local_path = Some(format!("/books/source-{index}.epub"));
+        annotation.fingerprint =
+            DocumentFingerprint::new("sha256", 1, vec![u8::try_from(index).unwrap(); 32]).unwrap();
+        store.create_async(&annotation).await.unwrap();
+    }
+    let target_fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xff; 32]).unwrap();
+    let first = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &target_fingerprint,
+            None,
+            32,
+        )
+        .await
+        .unwrap();
+    let second = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &target_fingerprint,
+            first.next_cursor.as_ref(),
+            32,
+        )
+        .await
+        .unwrap();
+    let third = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &target_fingerprint,
+            second.next_cursor.as_ref(),
+            32,
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.sources.len(), 32);
+    assert_eq!(second.sources.len(), 32);
+    assert_eq!(third.sources.len(), 1);
+    assert!(second.previous_cursor.is_none());
+    assert_eq!(third.previous_cursor, first.next_cursor);
+
+    let previous = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &target_fingerprint,
+            third.previous_cursor.as_ref(),
+            32,
+        )
+        .await
+        .unwrap();
+    assert_eq!(previous.sources, second.sources);
 }
 
 #[tokio::test]
@@ -460,6 +638,23 @@ async fn annotation_document_migration_backfills_exact_versions_including_tombst
         .await
         .unwrap();
     }
+    let pdf_id = AnnotationId::new().to_string();
+    sqlx::query(
+        "INSERT INTO annotations (
+            id, local_path, format, anchor_version,
+            fingerprint_algorithm, fingerprint_version, fingerprint,
+            original_quote, normalization_profile, normalized_exact,
+            normalized_prefix, normalized_suffix, color,
+            pdf_page, pdf_char_start, pdf_char_end)
+         VALUES (?, '/books/example.epub', 'pdf', 1,
+                 'sha256', 1, ?, 'selected', 'shosai-quote-v1',
+                 'selected', '', '', 'yellow', 0, 0, 8)",
+    )
+    .bind(&pdf_id)
+    .bind(vec![0xab; 32])
+    .execute(&pool)
+    .await
+    .unwrap();
 
     MIGRATOR.run(&pool).await.unwrap();
 
@@ -484,12 +679,22 @@ async fn annotation_document_migration_backfills_exact_versions_including_tombst
         first_document,
         "path equality must not associate changed bytes"
     );
+    let pdf_document: String =
+        sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+            .bind(pdf_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_ne!(
+        pdf_document, first_document,
+        "format is part of exact document-version identity"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM annotation_document_versions")
             .fetch_one(&pool)
             .await
             .unwrap(),
-        2
+        3
     );
 }
 
