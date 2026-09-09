@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use shosai_core::annotations::{
     AnnotationAssociationConflict, AnnotationAssociationOutcome,
@@ -13,7 +14,7 @@ use shosai_core::annotations::{
     QuoteSelector, normalize_quote_v1, scalar_range_to_utf16,
 };
 use shosai_core::reading_state::ReadingStateStore;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use tempfile::TempDir;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -24,6 +25,21 @@ async fn temp_store() -> (AnnotationStore, sqlx::SqlitePool, TempDir) {
         .await
         .unwrap();
     let pool = state.pool().clone();
+    (AnnotationStore::new(pool.clone()), pool, dir)
+}
+
+async fn single_connection_store() -> (AnnotationStore, SqlitePool, TempDir) {
+    let dir = TempDir::new().unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(dir.path().join("shosai.db"))
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
+    MIGRATOR.run(&pool).await.unwrap();
     (AnnotationStore::new(pool.clone()), pool, dir)
 }
 
@@ -500,10 +516,13 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
             &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
             None,
             1,
-            {
-                let cancellation_checks = Arc::clone(&cancellation_checks);
-                move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 0
-            },
+            (
+                {
+                    let cancellation_checks = Arc::clone(&cancellation_checks);
+                    move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 0
+                },
+                std::future::pending(),
+            ),
         )
         .await
         .unwrap_err();
@@ -589,6 +608,102 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
             .any(|(_, _, _, detail)| detail.contains("annotations_document_active_idx")),
         "source-page filtering must use the live annotation index: {page_plan:?}"
     );
+}
+
+#[tokio::test]
+async fn aborted_source_discovery_cannot_contaminate_a_pooled_connection() {
+    let (store, pool, _dir) = single_connection_store().await;
+    for index in 0..100 {
+        let mut annotation = epub_annotation(None);
+        annotation.local_path = Some(format!("/books/aborted-{index}.epub"));
+        annotation.fingerprint =
+            DocumentFingerprint::new("sha256", 1, vec![u8::try_from(index).unwrap(); 32]).unwrap();
+        let deleted = store.create_async(&annotation).await.unwrap();
+        store.delete_async(&deleted.id).await.unwrap();
+    }
+
+    let checks = Arc::new(AtomicUsize::new(0));
+    let handler_started = Arc::new(AtomicBool::new(false));
+    let release_handler = Arc::new(AtomicBool::new(false));
+    let cancel_query = Arc::new(AtomicBool::new(false));
+    let task = {
+        let store = store.clone();
+        let checks = Arc::clone(&checks);
+        let handler_started = Arc::clone(&handler_started);
+        let release_handler = Arc::clone(&release_handler);
+        let cancel_query = Arc::clone(&cancel_query);
+        tokio::spawn(async move {
+            store
+                .list_association_sources_cancellable_async(
+                    AnnotationDocumentFormat::Epub,
+                    "/target.epub",
+                    &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+                    None,
+                    1,
+                    (
+                        move || {
+                            let check = checks.fetch_add(1, Ordering::Relaxed);
+                            if check >= 2 {
+                                handler_started.store(true, Ordering::Release);
+                                while !release_handler.load(Ordering::Acquire) {
+                                    std::thread::yield_now();
+                                }
+                            }
+                            cancel_query.load(Ordering::Acquire)
+                        },
+                        std::future::pending(),
+                    ),
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !handler_started.load(Ordering::Acquire) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("source discovery must enter its SQLite progress handler");
+    task.abort();
+    cancel_query.store(true, Ordering::Release);
+    release_handler.store(true, Ordering::Release);
+    assert!(task.await.unwrap_err().is_cancelled());
+
+    let sum = tokio::time::timeout(
+        Duration::from_secs(2),
+        sqlx::query_scalar::<_, i64>(
+            "WITH RECURSIVE numbers(value) AS (
+               VALUES(1) UNION ALL SELECT value + 1 FROM numbers WHERE value < 10000
+             ) SELECT SUM(value) FROM numbers",
+        )
+        .fetch_one(&pool),
+    )
+    .await
+    .expect("the replacement connection must be available")
+    .expect("an abandoned progress handler must not interrupt later SQL");
+    assert_eq!(sum, 50_005_000);
+}
+
+#[tokio::test]
+async fn source_discovery_cancels_while_waiting_for_a_connection() {
+    let (store, pool, _dir) = single_connection_store().await;
+    let _held_connection = pool.acquire().await.unwrap();
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(1),
+        store.list_association_sources_cancellable_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+            (|| false, async { tokio::task::yield_now().await }),
+        ),
+    )
+    .await
+    .expect("cancellation must not wait for the held connection")
+    .unwrap_err();
+    assert!(error.is::<AnnotationAssociationSourceCancelled>());
 }
 
 #[tokio::test]

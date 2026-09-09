@@ -1,5 +1,6 @@
 //! Renderer-independent text annotations and their SQLite persistence.
 
+use std::future::Future;
 use std::ops::Range;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1397,23 +1398,25 @@ impl AnnotationStore {
             target_fingerprint,
             cursor,
             limit,
-            || false,
+            (|| false, std::future::pending()),
         )
         .await
     }
 
-    pub async fn list_association_sources_cancellable_async<F>(
+    pub async fn list_association_sources_cancellable_async<F, C>(
         &self,
         format: AnnotationDocumentFormat,
         target_local_path: &str,
         target_fingerprint: &DocumentFingerprint,
         cursor: Option<&AnnotationDocumentVersionId>,
         limit: usize,
-        is_cancelled: F,
+        cancellation: (F, C),
     ) -> Result<AnnotationAssociationSourcePage>
     where
         F: Fn() -> bool + Send + 'static,
+        C: Future<Output = ()> + Send,
     {
+        let (is_cancelled, cancelled) = cancellation;
         if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
             bail!(
                 "annotation association source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
@@ -1422,11 +1425,15 @@ impl AnnotationStore {
         if is_cancelled() {
             return Err(AnnotationAssociationSourceCancelled.into());
         }
-        let mut connection = self
-            .pool
-            .acquire()
-            .await
-            .context("failed to acquire annotation association source connection")?;
+        let mut connection = tokio::select! {
+            connection = self.pool.acquire() => connection
+                .context("failed to acquire annotation association source connection")?,
+            () = cancelled => return Err(AnnotationAssociationSourceCancelled.into()),
+        };
+        connection.close_on_drop();
+        if is_cancelled() {
+            return Err(AnnotationAssociationSourceCancelled.into());
+        }
         let cancelled = Arc::new(AtomicBool::new(false));
         let work_exhausted = Arc::new(AtomicBool::new(false));
         let completed_work = Arc::new(AtomicUsize::new(0));

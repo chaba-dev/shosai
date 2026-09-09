@@ -990,10 +990,13 @@ impl Bridge {
                 &target.fingerprint,
                 cursor.as_ref(),
                 limit,
-                {
-                    let cancellation = cancellation.clone();
-                    move || cancellation.is_cancelled()
-                },
+                (
+                    {
+                        let cancellation = cancellation.clone();
+                        move || cancellation.is_cancelled()
+                    },
+                    cancellation.cancelled(),
+                ),
             )
             .await
             .map_err(annotation_storage_error)?;
