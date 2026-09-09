@@ -1413,10 +1413,11 @@ impl AnnotationStore {
         cancellation: (F, C),
     ) -> Result<AnnotationAssociationSourcePage>
     where
-        F: Fn() -> bool + Send + 'static,
+        F: Fn() -> bool + Send + Sync + 'static,
         C: Future<Output = ()> + Send,
     {
         let (is_cancelled, cancelled) = cancellation;
+        let is_cancelled = Arc::new(is_cancelled);
         tokio::pin!(cancelled);
         if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
             bail!(
@@ -1442,6 +1443,7 @@ impl AnnotationStore {
             let query_cancelled = Arc::clone(&query_cancelled);
             let work_exhausted = Arc::clone(&work_exhausted);
             let completed_work = Arc::clone(&completed_work);
+            let query_is_cancelled = Arc::clone(&is_cancelled);
             let mut handle = tokio::select! {
                 handle = connection.lock_handle() => handle
                     .context("failed to configure annotation association source query")?,
@@ -1453,7 +1455,7 @@ impl AnnotationStore {
                 i32::try_from(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL)
                     .expect("SQLite progress interval fits in i32"),
                 move || {
-                    if is_cancelled() {
+                    if query_is_cancelled() {
                         query_cancelled.store(true, Ordering::Release);
                         return false;
                     }
@@ -1467,6 +1469,9 @@ impl AnnotationStore {
                     true
                 },
             );
+        }
+        if is_cancelled() {
+            return Err(AnnotationAssociationSourceCancelled.into());
         }
         let result: Result<AnnotationAssociationSourcePage> = tokio::select! {
             result = async {
@@ -1808,6 +1813,57 @@ impl AnnotationStore {
         .await
         .context("failed to delete annotation")?;
         Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn bind_book_annotations_before_detach(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        book_id: i64,
+    ) -> Result<()> {
+        let versions = sqlx::query(
+            "SELECT DISTINCT format, local_path, fingerprint_algorithm,
+                    fingerprint_version, fingerprint
+             FROM annotations
+             WHERE book_id = ? AND local_path IS NOT NULL
+               AND annotation_document_id IS NULL",
+        )
+        .bind(book_id)
+        .fetch_all(&mut **transaction)
+        .await
+        .context("failed to list book annotation document versions")?;
+        for version in versions {
+            let format: String = version.try_get("format")?;
+            AnnotationDocumentFormat::from_db(&format)?;
+            let local_path: String = version.try_get("local_path")?;
+            let fingerprint = DocumentFingerprint::new(
+                version.try_get::<String, _>("fingerprint_algorithm")?,
+                positive_u32(
+                    version.try_get("fingerprint_version")?,
+                    "fingerprint version",
+                )?,
+                version.try_get("fingerprint")?,
+            )?;
+            let document_id =
+                ensure_annotation_document_version(transaction, &format, &local_path, &fingerprint)
+                    .await?;
+            sqlx::query(
+                "UPDATE annotations SET annotation_document_id = ?
+                 WHERE book_id = ? AND annotation_document_id IS NULL
+                   AND local_path = ? AND format = ?
+                   AND fingerprint_algorithm = ? AND fingerprint_version = ?
+                   AND fingerprint = ?",
+            )
+            .bind(document_id)
+            .bind(book_id)
+            .bind(local_path)
+            .bind(format)
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .execute(&mut **transaction)
+            .await
+            .context("failed to bind detached book annotations")?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn delete_for_local_document_async(

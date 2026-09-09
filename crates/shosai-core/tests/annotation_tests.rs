@@ -13,6 +13,7 @@ use shosai_core::annotations::{
     MAX_QUOTE_CONTEXT_INPUT_SCALARS, MAX_QUOTE_SCALARS, NewAnnotation, PageRect, PdfAnchor,
     QuoteSelector, normalize_quote_v1, scalar_range_to_utf16,
 };
+use shosai_core::library::Library;
 use shosai_core::reading_state::ReadingStateStore;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use tempfile::TempDir;
@@ -236,6 +237,75 @@ async fn epub_annotation_round_trips_and_updates() {
     assert_ne!(updated.modified_at, created.modified_at);
     assert_eq!(updated.created_at, created.created_at);
     assert_eq!(store.list_for_book_async(book_id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn removing_a_book_preserves_its_annotation_document_identity() {
+    let (store, pool, dir) = temp_store().await;
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path)
+         VALUES ('Example', 'epub', '/books/example.epub') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let retained = store
+        .create_async(&epub_annotation(Some(book_id)))
+        .await
+        .unwrap();
+    let tombstone = store
+        .create_async(&epub_annotation(Some(book_id)))
+        .await
+        .unwrap();
+    store.delete_async(&tombstone.id).await.unwrap();
+
+    let library = Library::new(pool.clone(), dir.path().join("managed"));
+    library.remove(book_id).await.unwrap();
+
+    let rows: Vec<(Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT book_id, annotation_document_id FROM annotations
+         WHERE id IN (?, ?) ORDER BY id",
+    )
+    .bind(retained.id.to_string())
+    .bind(tombstone.id.to_string())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter()
+            .all(|(book_id, document_id)| book_id.is_none() && document_id.is_some()),
+        "live annotations and tombstones must retain document identity: {rows:?}"
+    );
+
+    let page = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.sources.len(), 1);
+    assert_eq!(page.sources[0].live_annotations, 1);
+    assert!(
+        store
+            .update_async(&retained.id, HighlightColor::Blue, Some("detached"))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .get_async(&retained.id, false)
+            .await
+            .unwrap()
+            .unwrap()
+            .body
+            .as_deref(),
+        Some("detached")
+    );
 }
 
 #[tokio::test]
@@ -519,7 +589,7 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
             (
                 {
                     let cancellation_checks = Arc::clone(&cancellation_checks);
-                    move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 1
+                    move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 2
                 },
                 std::future::pending(),
             ),
@@ -528,7 +598,7 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
         .unwrap_err();
     assert!(error.is::<AnnotationAssociationSourceCancelled>());
     assert!(
-        cancellation_checks.load(Ordering::Relaxed) > 2,
+        cancellation_checks.load(Ordering::Relaxed) > 3,
         "cancellation must be observed by SQLite's progress handler"
     );
 
@@ -643,7 +713,7 @@ async fn aborted_source_discovery_cannot_contaminate_a_pooled_connection() {
                     (
                         move || {
                             let check = checks.fetch_add(1, Ordering::Relaxed);
-                            if check >= 2 {
+                            if check >= 3 {
                                 handler_started.store(true, Ordering::Release);
                                 while !release_handler.load(Ordering::Acquire) {
                                     std::thread::yield_now();
@@ -731,9 +801,13 @@ async fn source_discovery_cancels_while_sqlite_waits_on_a_lock() {
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancellation = Arc::new(tokio::sync::Notify::new());
+    let query_started = Arc::new(tokio::sync::Notify::new());
+    let checks = Arc::new(AtomicUsize::new(0));
     let task = {
         let cancelled = Arc::clone(&cancelled);
         let cancellation = Arc::clone(&cancellation);
+        let query_started = Arc::clone(&query_started);
+        let checks = Arc::clone(&checks);
         tokio::spawn(async move {
             store
                 .list_association_sources_cancellable_async(
@@ -742,14 +816,22 @@ async fn source_discovery_cancels_while_sqlite_waits_on_a_lock() {
                     &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
                     None,
                     1,
-                    (move || cancelled.load(Ordering::Acquire), async move {
-                        cancellation.notified().await
-                    }),
+                    (
+                        move || {
+                            if checks.fetch_add(1, Ordering::Relaxed) == 2 {
+                                query_started.notify_one();
+                            }
+                            cancelled.load(Ordering::Acquire)
+                        },
+                        async move { cancellation.notified().await },
+                    ),
                 )
                 .await
         })
     };
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(1), query_started.notified())
+        .await
+        .expect("discovery must finish setup and enter its query phase");
     cancelled.store(true, Ordering::Release);
     cancellation.notify_one();
 
