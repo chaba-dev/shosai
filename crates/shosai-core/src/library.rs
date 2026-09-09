@@ -17,6 +17,7 @@ use sqlx::sqlite::{Sqlite, SqlitePool};
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::annotations::AnnotationStore;
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentPlan};
 use crate::bookmarks::MAX_BOOKMARKS_PER_BOOK;
 use crate::cbz::{CbzDoc, CbzLimits};
@@ -2106,6 +2107,7 @@ impl Library {
             .execute(&mut *transaction)
             .await
             .context("failed to detach book reading state")?;
+        AnnotationStore::bind_book_annotations_before_detach(&mut transaction, book_id).await?;
         sqlx::query("DELETE FROM books WHERE id = ?")
             .bind(book_id)
             .execute(&mut *transaction)

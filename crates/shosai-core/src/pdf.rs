@@ -1700,6 +1700,16 @@ impl PdfDoc {
         max_bytes: usize,
         is_cancelled: impl Fn() -> bool,
     ) -> std::result::Result<String, BoundedPageTextError> {
+        self.page_text_with_mapping_bounded(index, max_bytes, is_cancelled)
+            .map(|(text, _complete)| text)
+    }
+
+    pub(crate) fn page_text_with_mapping_bounded(
+        &self,
+        index: usize,
+        max_bytes: usize,
+        is_cancelled: impl Fn() -> bool,
+    ) -> std::result::Result<(String, bool), BoundedPageTextError> {
         if index >= self.page_count {
             return Err(BoundedPageTextError::Document(anyhow::anyhow!(
                 "page index {index} out of range (total: {})",
@@ -1738,7 +1748,6 @@ impl PdfDoc {
         }
 
         searchable_page_text_bounded(&page, &text, max_bytes, is_cancelled)
-            .map(|(text, _complete)| text)
     }
 
     /// Extracts a bounded owned hit-test snapshot for a page rendered at `scale`.

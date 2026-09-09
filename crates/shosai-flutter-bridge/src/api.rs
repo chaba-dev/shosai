@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use shosai_core::annotations::AnnotationAssociationOutcome;
 use shosai_core::annotations::{AnnotationResolution, HighlightColor};
 use shosai_core::bridge::{
-    AnnotationTextRange, Bridge, BridgeAnnotation, BridgeError, BufferHandle, Cancellation,
-    CreateAnnotationRequest, DocumentHandle, OpenRequest, RenderRequest, SelectionHandle,
-    SelectionSurface,
+    AnnotationAssociationSourceDto, AnnotationAssociationSourcePageDto, AnnotationTextRange,
+    Bridge, BridgeAnnotation, BridgeError, BufferHandle, Cancellation, CreateAnnotationRequest,
+    DocumentHandle, OpenRequest, RenderRequest, SelectionHandle, SelectionSurface,
 };
 use shosai_core::library::BookFormat;
 use thiserror::Error;
@@ -87,6 +88,63 @@ impl From<AnnotationResolution> for FlutterAnnotationResolution {
 pub struct FlutterAnnotationTextRange {
     pub start: usize,
     pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlutterAnnotationAssociationSource {
+    pub version_id: String,
+    pub format: FlutterBookFormat,
+    pub local_path: String,
+    pub fingerprint_algorithm: String,
+    pub fingerprint_version: u32,
+    pub fingerprint: Vec<u8>,
+    pub live_annotations: usize,
+}
+
+impl From<AnnotationAssociationSourceDto> for FlutterAnnotationAssociationSource {
+    fn from(value: AnnotationAssociationSourceDto) -> Self {
+        Self {
+            version_id: value.version_id,
+            format: value.format.into(),
+            local_path: value.local_path,
+            fingerprint_algorithm: value.fingerprint_algorithm,
+            fingerprint_version: value.fingerprint_version,
+            fingerprint: value.fingerprint,
+            live_annotations: value.live_annotations,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlutterAnnotationAssociationSourcePage {
+    pub sources: Vec<FlutterAnnotationAssociationSource>,
+    pub next_cursor: Option<String>,
+    pub previous_cursor: Option<String>,
+}
+
+impl From<AnnotationAssociationSourcePageDto> for FlutterAnnotationAssociationSourcePage {
+    fn from(value: AnnotationAssociationSourcePageDto) -> Self {
+        Self {
+            sources: value.sources.into_iter().map(Into::into).collect(),
+            next_cursor: value.next_cursor,
+            previous_cursor: value.previous_cursor,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlutterAnnotationAssociationOutcome {
+    Associated,
+    AlreadyAssociated,
+}
+
+impl From<AnnotationAssociationOutcome> for FlutterAnnotationAssociationOutcome {
+    fn from(value: AnnotationAssociationOutcome) -> Self {
+        match value {
+            AnnotationAssociationOutcome::Associated => Self::Associated,
+            AnnotationAssociationOutcome::AlreadyAssociated => Self::AlreadyAssociated,
+        }
+    }
 }
 
 impl From<AnnotationTextRange> for FlutterAnnotationTextRange {
@@ -584,6 +642,40 @@ impl FlutterBridge {
             .list_annotations(document.into(), scale, cancellation)
             .await
             .map(|items| items.into_iter().map(Into::into).collect())
+            .map_err(Into::into)
+    }
+
+    pub async fn list_annotation_association_sources(
+        &self,
+        target: FlutterDocumentHandle,
+        cursor: Option<String>,
+        limit: usize,
+        cancellation_id: u64,
+    ) -> Result<FlutterAnnotationAssociationSourcePage, FlutterBridgeError> {
+        let cancellation = self.cancellation(cancellation_id)?;
+        self.bridge
+            .list_annotation_association_sources(
+                target.into(),
+                cursor.as_deref(),
+                limit,
+                cancellation,
+            )
+            .await
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+
+    pub async fn associate_annotation_version(
+        &self,
+        source_version_id: String,
+        target: FlutterDocumentHandle,
+        cancellation_id: u64,
+    ) -> Result<FlutterAnnotationAssociationOutcome, FlutterBridgeError> {
+        let cancellation = self.cancellation(cancellation_id)?;
+        self.bridge
+            .associate_annotation_version(&source_version_id, target.into(), cancellation)
+            .await
+            .map(Into::into)
             .map_err(Into::into)
     }
 

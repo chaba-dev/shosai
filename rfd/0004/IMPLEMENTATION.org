@@ -115,11 +115,11 @@ coordinates.
   or changing EPUB pagination geometry.
 - [X] Persist, reopen, navigate to, recolor, annotate, and delete one highlight
   in each format through the Rust annotation store.
-- [-] Verify PDF zoom/DPI and EPUB viewport/font/theme relayout preserve anchors;
+- [X] Verify PDF zoom/DPI and EPUB viewport/font/theme relayout preserve anchors;
   surface exact, recovered, ambiguous, and orphaned states.
   - [X] Preserve and resolve anchors across relayout when document bytes retain
     the same fingerprint.
-  - [ ] Define stable document association, then recover anchors after document
+  - [X] Define stable document association, then recover anchors after document
     bytes and fingerprints change without treating path equality as identity.
 - [-] Implement responsive reader compositions for desktop, phone, and tablet,
   including rotation, safe areas, text scaling, visible focus, screen-reader
@@ -158,9 +158,12 @@ completion races, annotation reopen/update/delete, geometry bounds, compact
 large-text action layout, responsive composition, visible focus, non-color
 selection state, cross-platform announcement policy, lifecycle draining,
 resource recovery, process restoration, and unavailable-locator retry.
-Changed-fingerprint relayout, manual screen-reader and physical lifecycle
-validation, multi-platform measurement, and physical-mobile exit gates remain
-explicitly unclaimed.
+Changed-fingerprint recovery uses explicit version association rather than path
+equality: quote-backed text anchors recover against the associated version,
+while geometry-only PDF anchors become orphaned instead of being silently
+misplaced. Manual screen-reader and physical lifecycle validation,
+multi-platform measurement, and physical-mobile exit gates remain explicitly
+unclaimed.
 
 The first relayout increment now recomputes PDF geometry at the active display
 scale and EPUB geometry at the active viewport, font size, and display scale,
@@ -169,10 +172,11 @@ snapshot.  Completer-controlled regressions cover superseded work at selection,
 render, decode, and annotation-list boundaries, deterministic handle release,
 queued layout changes during open, bounded/cancellable quote resolution, and
 exact/recovered/ambiguous/orphaned presentation.  This proves relayout for the
-same fingerprint (unchanged document bytes).  Recovery after changed document
-bytes remains deferred until the core has a stable document-association contract;
-path equality alone is intentionally not treated as identity, so the full
-relayout/recovery checklist item remains unchecked.
+same fingerprint (unchanged document bytes).  Durable collection and version
+identities now extend recovery across changed bytes after explicit user
+association. Bounded, cancellable source discovery never infers identity from a
+path; association persistence has a defined acceptance boundary, and reopening
+the target resolves text anchors against its current content.
 
 *Exit*: highlighting works end to end in both formats on desktop and at least one
 physical mobile platform, and failures on any unvalidated target are recorded

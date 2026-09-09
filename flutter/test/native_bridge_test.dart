@@ -300,6 +300,115 @@ void main() {
   }
 
   test(
+    'explicitly associates annotations through generated native bindings',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'shosai-native-association-',
+      );
+      final databasePath = '${directory.path}/annotations.sqlite';
+      final target = File('${directory.path}/replacement.epub');
+      await File(
+        '../crates/shosai-core/tests/fixtures/sample.epub',
+      ).copy(target.path);
+      final bridge = FlutterBridge.withDatabasePath(databasePath: databasePath);
+      final cancellation = bridge.createCancellation();
+      FlutterDocumentHandle? sourceDocument;
+      FlutterDocumentHandle? targetDocument;
+      try {
+        final source = await bridge.openDocument(
+          request: const FlutterOpenRequest(
+            localId: 'association-source',
+            pathKey: '../crates/shosai-core/tests/fixtures/sample.epub',
+          ),
+          cancellationId: cancellation,
+        );
+        sourceDocument = source.handle;
+        final surface = await bridge.selectionSurface(
+          document: source.handle,
+          unit: BigInt.zero,
+          scale: 1,
+          width: 680,
+          fontSize: 18,
+          cancellationId: cancellation,
+        );
+        final endpoint = surface.endpoints.firstWhere(
+          (value) => value.rangeStart < value.rangeEnd,
+        );
+        if (surface.raster case final raster?) {
+          bridge.releaseBuffer(handle: raster.handle);
+        }
+        bridge.releaseSelection(handle: surface.handle);
+        final created = await bridge.createAnnotation(
+          document: source.handle,
+          unit: BigInt.zero,
+          start: endpoint.rangeStart,
+          end: endpoint.rangeEnd,
+          displayScale: 1,
+          color: FlutterHighlightColor.yellow,
+          cancellationId: cancellation,
+        );
+        bridge.releaseDocument(handle: source.handle);
+        sourceDocument = null;
+
+        final replacement = await bridge.openDocument(
+          request: FlutterOpenRequest(
+            localId: 'association-target',
+            pathKey: target.path,
+          ),
+          cancellationId: cancellation,
+        );
+        targetDocument = replacement.handle;
+        expect(
+          await bridge.listAnnotations(
+            document: replacement.handle,
+            scale: 1,
+            cancellationId: cancellation,
+          ),
+          isEmpty,
+        );
+
+        final sources = await bridge.listAnnotationAssociationSources(
+          target: replacement.handle,
+          limit: BigInt.from(10),
+          cancellationId: cancellation,
+        );
+        expect(sources.sources, hasLength(1));
+        expect(sources.sources.single.localPath, contains('sample.epub'));
+        expect(sources.sources.single.liveAnnotations, BigInt.one);
+        expect(
+          await bridge.associateAnnotationVersion(
+            sourceVersionId: sources.sources.single.versionId,
+            target: replacement.handle,
+            cancellationId: cancellation,
+          ),
+          FlutterAnnotationAssociationOutcome.associated,
+        );
+        final associated = await bridge.listAnnotations(
+          document: replacement.handle,
+          scale: 1,
+          cancellationId: cancellation,
+        );
+        expect(associated, hasLength(1));
+        expect(associated.single.id, created.id);
+        expect(associated.single.quote, created.quote);
+      } finally {
+        if (sourceDocument != null) {
+          bridge.releaseDocument(handle: sourceDocument);
+        }
+        if (targetDocument != null) {
+          bridge.releaseDocument(handle: targetDocument);
+        }
+        bridge.releaseCancellation(id: cancellation);
+        bridge.dispose();
+        await directory.delete(recursive: true);
+      }
+    },
+    skip: supported
+        ? false
+        : 'native bridge association test supports desktop hosts',
+  );
+
+  test(
     'preserves straight alpha when rendering a translucent CBZ page',
     () async {
       const archive =

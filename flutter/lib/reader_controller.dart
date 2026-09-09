@@ -15,6 +15,11 @@ typedef PageDecoder =
 
 typedef NoteEditor = Future<String?> Function(String? initialValue);
 typedef NoteEditorCanceller = void Function();
+typedef AnnotationAssociationPicker =
+    Future<AnnotationAssociationChoice> Function(
+      AnnotationAssociationPage page,
+    );
+typedef AnnotationAssociationPickerCanceller = void Function();
 typedef ReaderFocusAdapter = void Function(ReaderFocusTarget target);
 typedef SelectionCopier = Future<void> Function(String text);
 typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
@@ -22,6 +27,40 @@ typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
 const _unchanged = Object();
 final _frozenSurfaces = Expando<bool>();
 final _frozenAnnotations = Expando<bool>();
+
+final class AnnotationAssociationPage {
+  AnnotationAssociationPage({
+    required List<FlutterAnnotationAssociationSource> sources,
+    required this.canGoBack,
+    required this.canGoForward,
+  }) : sources = List.unmodifiable(sources);
+
+  final List<FlutterAnnotationAssociationSource> sources;
+  final bool canGoBack;
+  final bool canGoForward;
+}
+
+sealed class AnnotationAssociationChoice {
+  const AnnotationAssociationChoice();
+}
+
+final class AnnotationAssociationSelected extends AnnotationAssociationChoice {
+  const AnnotationAssociationSelected(this.source);
+  final FlutterAnnotationAssociationSource source;
+}
+
+final class AnnotationAssociationNextPage extends AnnotationAssociationChoice {
+  const AnnotationAssociationNextPage();
+}
+
+final class AnnotationAssociationPreviousPage
+    extends AnnotationAssociationChoice {
+  const AnnotationAssociationPreviousPage();
+}
+
+final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
+  const AnnotationAssociationCancelled();
+}
 
 final class ReaderLayout {
   const ReaderLayout({this.scale = 1, this.width = 680, this.fontSize = 18});
@@ -450,6 +489,68 @@ final class ReaderAnnotationNavigated extends ReaderMessage {
   final String id;
 }
 
+final class ReaderAnnotationAssociationRequested extends ReaderMessage {
+  const ReaderAnnotationAssociationRequested();
+}
+
+final class ReaderAnnotationReloadRequested extends ReaderMessage {
+  const ReaderAnnotationReloadRequested();
+}
+
+final class _ReaderAssociationSourcesLoaded extends ReaderMessage {
+  const _ReaderAssociationSourcesLoaded({
+    required this.generation,
+    required this.revision,
+    required this.operationId,
+    required this.cancellation,
+    required this.document,
+    required this.cursor,
+    required this.page,
+  });
+
+  final int generation;
+  final int revision;
+  final String operationId;
+  final BigInt cancellation;
+  final FlutterDocumentSummary document;
+  final String? cursor;
+  final FlutterAnnotationAssociationSourcePage page;
+}
+
+final class _ReaderAssociationChoiceCompleted extends ReaderMessage {
+  const _ReaderAssociationChoiceCompleted({
+    required this.sources,
+    required this.choice,
+    this.error,
+  });
+
+  final _ReaderAssociationSourcesLoaded sources;
+  final AnnotationAssociationChoice? choice;
+  final String? error;
+}
+
+final class _ReaderAssociationPersisted extends ReaderMessage {
+  const _ReaderAssociationPersisted({
+    required this.sources,
+    required this.outcome,
+  });
+
+  final _ReaderAssociationSourcesLoaded sources;
+  final FlutterAnnotationAssociationOutcome outcome;
+}
+
+final class _ReaderAssociationFinished extends ReaderMessage {
+  const _ReaderAssociationFinished({
+    required this.sources,
+    this.items,
+    this.error,
+  });
+
+  final _ReaderAssociationSourcesLoaded sources;
+  final List<FlutterAnnotation>? items;
+  final String? error;
+}
+
 final class ReaderSelectionCancelled extends ReaderMessage {
   const ReaderSelectionCancelled();
 }
@@ -611,6 +712,8 @@ final class ReaderController implements Listenable {
     required PageDecoder decoder,
     NoteEditor? noteEditor,
     NoteEditorCanceller? noteEditorCanceller,
+    AnnotationAssociationPicker? annotationAssociationPicker,
+    AnnotationAssociationPickerCanceller? annotationAssociationPickerCanceller,
     ReaderFocusAdapter? focusAdapter,
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
@@ -618,6 +721,11 @@ final class ReaderController implements Listenable {
        _decoder = decoder,
        _noteEditor = noteEditor ?? ((_) async => null),
        _noteEditorCanceller = noteEditorCanceller ?? (() {}),
+       _annotationAssociationPicker =
+           annotationAssociationPicker ??
+           ((_) async => const AnnotationAssociationCancelled()),
+       _annotationAssociationPickerCanceller =
+           annotationAssociationPickerCanceller ?? (() {}),
        _focusAdapter = focusAdapter ?? ((_) {}),
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer;
@@ -626,6 +734,9 @@ final class ReaderController implements Listenable {
   final PageDecoder _decoder;
   final NoteEditor _noteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
+  final AnnotationAssociationPicker _annotationAssociationPicker;
+  final AnnotationAssociationPickerCanceller
+  _annotationAssociationPickerCanceller;
   final ReaderFocusAdapter _focusAdapter;
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
@@ -648,6 +759,7 @@ final class ReaderController implements Listenable {
   int _noteRevision = 0;
   _ReaderNoteTarget? _activeNoteEditor;
   int? _activeNoteEditorRevision;
+  bool _associationPickerActive = false;
   String? _recoverySelectionNotice;
   String? _recoveryAnnotationNotice;
   ReaderLayout _requestedLayout = const ReaderLayout();
@@ -694,7 +806,9 @@ final class ReaderController implements Listenable {
           ReaderAnnotationUpdated() ||
           ReaderAnnotationNoteRequested() ||
           ReaderAnnotationDeleted() ||
-          ReaderAnnotationNavigated() => true,
+          ReaderAnnotationNavigated() ||
+          ReaderAnnotationReloadRequested() ||
+          ReaderAnnotationAssociationRequested() => true,
           _ => false,
         }) {
       return;
@@ -788,6 +902,18 @@ final class ReaderController implements Listenable {
         unawaited(_deleteAnnotation(message.id));
       case ReaderAnnotationNavigated():
         _navigateAnnotation(message.id);
+      case ReaderAnnotationReloadRequested():
+        _annotationReloadRequested();
+      case ReaderAnnotationAssociationRequested():
+        _associationRequested();
+      case _ReaderAssociationSourcesLoaded():
+        _associationSourcesLoaded(message);
+      case _ReaderAssociationChoiceCompleted():
+        _associationChoiceCompleted(message);
+      case _ReaderAssociationPersisted():
+        _associationPersisted(message);
+      case _ReaderAssociationFinished():
+        _associationFinished(message);
       case ReaderSelectionCancelled():
         _selectionCancelled();
       case _ReaderDocumentOpened():
@@ -2019,7 +2145,15 @@ final class ReaderController implements Listenable {
       return;
     }
     if (message.items case final items?) {
-      _setAnnotations(items, annotationsReady: operation == null ? true : null);
+      _setAnnotations(
+        items,
+        annotationsReady:
+            operation == null ||
+                operation.startsWith('reload:') ||
+                operation.startsWith('associate:')
+            ? true
+            : null,
+      );
     }
     if (operation == null) return;
     final createsSelection = operation.startsWith('create:');
@@ -2091,6 +2225,323 @@ final class ReaderController implements Listenable {
       _focusAdapter(ReaderFocusTarget.surface);
     }
   }
+
+  void _associationRequested() {
+    final document = _model.document;
+    if (document == null ||
+        document.format == FlutterBookFormat.cbz ||
+        _model.busy ||
+        !_model.annotationsReady ||
+        _model.annotationOperations.isNotEmpty ||
+        _model.relayoutBusy ||
+        _associationPickerActive ||
+        _closing) {
+      return;
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(annotationError: error.toString()));
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_annotationRevision;
+    final operationId = 'associate:${++_nextOperationId}';
+    _annotationCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    _emit(
+      _model.copyWith(
+        annotationOperations: {operationId},
+        annotationError: null,
+      ),
+    );
+    unawaited(
+      _loadAssociationSourcesEffect(
+        document,
+        generation,
+        revision,
+        operationId,
+        cancellation,
+        null,
+      ),
+    );
+  }
+
+  void _annotationReloadRequested() {
+    final document = _model.document;
+    if (document == null ||
+        document.format == FlutterBookFormat.cbz ||
+        _model.busy ||
+        _model.annotationsReady ||
+        _model.annotationOperations.isNotEmpty ||
+        _model.relayoutBusy ||
+        _closing) {
+      return;
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(annotationError: error.toString()));
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_annotationRevision;
+    final operationId = 'reload:${++_nextOperationId}';
+    _annotationCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    _emit(
+      _model.copyWith(
+        annotationOperations: {operationId},
+        annotationError: null,
+      ),
+    );
+    unawaited(() async {
+      List<FlutterAnnotation>? annotations;
+      String? error;
+      try {
+        annotations = await _bridge.listAnnotations(
+          document: document.handle,
+          scale: _model.layout.scale,
+          cancellationId: cancellation,
+        );
+      } catch (caught) {
+        error = caught.toString();
+      }
+      if (_annotationCancellations.remove(cancellation)) {
+        dispatch(
+          _ReaderAnnotationsChanged(
+            generation,
+            revision,
+            operationId,
+            null,
+            annotations,
+            error,
+          ),
+        );
+        _bridge.releaseCancellation(id: cancellation);
+        dispatch(const _ReaderAnnotationOperationFinished());
+      }
+    }());
+  }
+
+  Future<void> _loadAssociationSourcesEffect(
+    FlutterDocumentSummary document,
+    int generation,
+    int revision,
+    String operationId,
+    BigInt cancellation,
+    String? cursor,
+  ) async {
+    try {
+      final page = await _bridge.listAnnotationAssociationSources(
+        target: document.handle,
+        cursor: cursor,
+        limit: BigInt.from(32),
+        cancellationId: cancellation,
+      );
+      dispatch(
+        _ReaderAssociationSourcesLoaded(
+          generation: generation,
+          revision: revision,
+          operationId: operationId,
+          cancellation: cancellation,
+          document: document,
+          cursor: cursor,
+          page: page,
+        ),
+      );
+    } catch (error) {
+      dispatch(
+        _ReaderAssociationFinished(
+          sources: _ReaderAssociationSourcesLoaded(
+            generation: generation,
+            revision: revision,
+            operationId: operationId,
+            cancellation: cancellation,
+            document: document,
+            cursor: cursor,
+            page: const FlutterAnnotationAssociationSourcePage(sources: []),
+          ),
+          error: error.toString(),
+        ),
+      );
+    }
+  }
+
+  void _associationSourcesLoaded(_ReaderAssociationSourcesLoaded message) {
+    if (!_isCurrentAssociation(message)) {
+      dispatch(_ReaderAssociationFinished(sources: message));
+      return;
+    }
+    if (message.page.sources.isEmpty) {
+      dispatch(
+        _ReaderAssociationFinished(
+          sources: message,
+          error: 'No saved highlights are available to associate.',
+        ),
+      );
+      return;
+    }
+    _associationPickerActive = true;
+    unawaited(() async {
+      AnnotationAssociationChoice? choice;
+      String? error;
+      try {
+        choice = await _annotationAssociationPicker(
+          AnnotationAssociationPage(
+            sources: message.page.sources,
+            canGoBack: message.cursor != null,
+            canGoForward: message.page.nextCursor != null,
+          ),
+        );
+      } catch (caught) {
+        error = caught.toString();
+      }
+      dispatch(
+        _ReaderAssociationChoiceCompleted(
+          sources: message,
+          choice: choice,
+          error: error,
+        ),
+      );
+    }());
+  }
+
+  void _associationChoiceCompleted(_ReaderAssociationChoiceCompleted message) {
+    final sources = message.sources;
+    if (!_isCurrentAssociation(sources)) {
+      dispatch(_ReaderAssociationFinished(sources: sources));
+      return;
+    }
+    _associationPickerActive = false;
+    if (message.error case final error?) {
+      dispatch(_ReaderAssociationFinished(sources: sources, error: error));
+      return;
+    }
+    switch (message.choice) {
+      case AnnotationAssociationSelected(:final source):
+        unawaited(_associateAnnotationVersionEffect(sources, source));
+      case AnnotationAssociationNextPage():
+        final cursor = sources.page.nextCursor;
+        if (cursor == null) {
+          dispatch(_ReaderAssociationFinished(sources: sources));
+          return;
+        }
+        unawaited(
+          _loadAssociationSourcesEffect(
+            sources.document,
+            sources.generation,
+            sources.revision,
+            sources.operationId,
+            sources.cancellation,
+            cursor,
+          ),
+        );
+      case AnnotationAssociationPreviousPage():
+        if (sources.cursor == null) {
+          dispatch(_ReaderAssociationFinished(sources: sources));
+          return;
+        }
+        unawaited(
+          _loadAssociationSourcesEffect(
+            sources.document,
+            sources.generation,
+            sources.revision,
+            sources.operationId,
+            sources.cancellation,
+            sources.page.previousCursor,
+          ),
+        );
+      case AnnotationAssociationCancelled() || null:
+        dispatch(
+          _ReaderAssociationFinished(
+            sources: sources,
+            items: _model.annotations,
+          ),
+        );
+    }
+  }
+
+  Future<void> _associateAnnotationVersionEffect(
+    _ReaderAssociationSourcesLoaded sources,
+    FlutterAnnotationAssociationSource selected,
+  ) async {
+    try {
+      final outcome = await _bridge.associateAnnotationVersion(
+        sourceVersionId: selected.versionId,
+        target: sources.document.handle,
+        cancellationId: sources.cancellation,
+      );
+      dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
+    } catch (error) {
+      dispatch(
+        _ReaderAssociationFinished(sources: sources, error: error.toString()),
+      );
+    }
+  }
+
+  void _associationPersisted(_ReaderAssociationPersisted message) {
+    final sources = message.sources;
+    if (!_isCurrentAssociation(sources)) {
+      dispatch(_ReaderAssociationFinished(sources: sources));
+      return;
+    }
+    switch (message.outcome) {
+      case FlutterAnnotationAssociationOutcome.associated ||
+          FlutterAnnotationAssociationOutcome.alreadyAssociated:
+        _setAnnotations(const [], annotationsReady: false);
+        unawaited(_reloadAssociatedAnnotationsEffect(sources));
+    }
+  }
+
+  Future<void> _reloadAssociatedAnnotationsEffect(
+    _ReaderAssociationSourcesLoaded sources,
+  ) async {
+    try {
+      final annotations = await _bridge.listAnnotations(
+        document: sources.document.handle,
+        scale: _model.layout.scale,
+        cancellationId: sources.cancellation,
+      );
+      dispatch(
+        _ReaderAssociationFinished(sources: sources, items: annotations),
+      );
+    } catch (error) {
+      dispatch(
+        _ReaderAssociationFinished(
+          sources: sources,
+          error:
+              'Association saved, but highlights could not be loaded: $error',
+        ),
+      );
+    }
+  }
+
+  void _associationFinished(_ReaderAssociationFinished message) {
+    final sources = message.sources;
+    if (_annotationCancellations.remove(sources.cancellation)) {
+      dispatch(
+        _ReaderAnnotationsChanged(
+          sources.generation,
+          sources.revision,
+          sources.operationId,
+          null,
+          message.items,
+          message.error,
+        ),
+      );
+      _bridge.releaseCancellation(id: sources.cancellation);
+      dispatch(const _ReaderAnnotationOperationFinished());
+    }
+  }
+
+  bool _isCurrentAssociation(_ReaderAssociationSourcesLoaded message) =>
+      _isCurrent(message.generation) &&
+      message.revision == _annotationRevision &&
+      _model.annotationOperations.contains(message.operationId) &&
+      _annotationCancellations.contains(message.cancellation);
 
   void _selectionCancelled() {
     _cancelSelectionCreates();
@@ -2187,6 +2638,7 @@ final class ReaderController implements Listenable {
         break;
     }
     _cancelActiveNoteEditor();
+    _cancelAssociationPicker();
     _releaseForRecovery = true;
     _reopenForRecovery = true;
     _interruptedNoteCreates.addAll(_noteCreateCancellations);
@@ -2345,6 +2797,7 @@ final class ReaderController implements Listenable {
     if (_closing) return;
     _closing = true;
     _cancelActiveNoteEditor();
+    _cancelAssociationPicker();
     final cancellation = _activeCancellation;
     if (cancellation != null) {
       _bridge.cancel(id: cancellation);
@@ -2365,6 +2818,24 @@ final class ReaderController implements Listenable {
     _activeNoteEditorRevision = null;
     try {
       _noteEditorCanceller();
+    } catch (error, stackTrace) {
+      scheduleMicrotask(
+        () => FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stackTrace,
+            library: 'shosai_flutter',
+          ),
+        ),
+      );
+    }
+  }
+
+  void _cancelAssociationPicker() {
+    if (!_associationPickerActive) return;
+    _associationPickerActive = false;
+    try {
+      _annotationAssociationPickerCanceller();
     } catch (error, stackTrace) {
       scheduleMicrotask(
         () => FlutterError.reportError(
