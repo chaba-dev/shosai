@@ -2344,11 +2344,18 @@ fn annotation_dtos(
             OpenDocument::Epub(document) => document
                 .presentation()
                 .chapter(unit)
-                .map(|chapter| bounded_epub_selection_text(chapter.search_text(), is_cancelled))
+                .map(|chapter| {
+                    bounded_epub_selection_text(chapter.search_text(), is_cancelled)
+                        .map(|text| (text, true))
+                })
                 .transpose()?,
             OpenDocument::Pdf(document) if unit < document.page_count() => Some(
                 document
-                    .page_text_bounded(unit, MAX_ANNOTATION_PDF_TEXT_BYTES, is_cancelled)
+                    .page_text_with_mapping_bounded(
+                        unit,
+                        MAX_ANNOTATION_PDF_TEXT_BYTES,
+                        is_cancelled,
+                    )
                     .map_err(|error| match error {
                         crate::pdf::BoundedPageTextError::Cancelled => BridgeError::Cancelled,
                         crate::pdf::BoundedPageTextError::Limit { .. } => BridgeError::BufferLimit,
@@ -2360,9 +2367,12 @@ fn annotation_dtos(
             OpenDocument::Pdf(_) => None,
             OpenDocument::Cbz(_) => None,
         };
-        let Some(text) = text else {
+        let Some((text, mapping_complete)) = text else {
             continue;
         };
+        if !mapping_complete {
+            continue;
+        }
         let scalar_index = TextScalarIndex::new(&text, &mut remaining_work, is_cancelled)
             .map_err(map_text_anchor_resolution_error)?;
         let mut unresolved = Vec::new();
@@ -3804,6 +3814,7 @@ mod tests {
             .position(|window| window.iter().collect::<String>() == "ordinary")
             .unwrap();
         let end = start + "ordinary".len();
+        assert!(bridge.release_buffer(surface.raster.unwrap().handle));
         assert!(bridge.release_selection(surface.handle));
 
         let created = bridge
@@ -4133,6 +4144,131 @@ mod tests {
         assert!(resolved[0].rectangles.is_empty());
     }
 
+    #[test]
+    fn changed_pdf_quote_recovery_requires_complete_target_mapping() {
+        let document =
+            crate::pdf::PdfDoc::from_bytes(selectable_pdf_with_media_box(50, 200, "A")).unwrap();
+        let (text, complete) = document
+            .page_text_with_mapping_bounded(0, usize::MAX, || false)
+            .unwrap();
+        assert_eq!(text, "\u{FFFD}");
+        assert!(!complete);
+        let annotation = Annotation {
+            id: AnnotationId::new(),
+            book_id: None,
+            local_path: Some("source.pdf".into()),
+            fingerprint: DocumentFingerprint::new("sha256", 1, vec![1; 32]).unwrap(),
+            quote: Some(QuoteSelector::new("\u{FFFD}", "", "").unwrap()),
+            target: AnnotationTarget::Pdf(
+                PdfAnchor::new(
+                    0,
+                    Some((0, 1)),
+                    vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()],
+                )
+                .unwrap(),
+            ),
+            color: HighlightColor::Yellow,
+            body: None,
+            provenance: None,
+            created_at: "now".into(),
+            modified_at: "now".into(),
+            deleted_at: None,
+        };
+        let current_fingerprint = DocumentFingerprint::new("sha256", 1, vec![2; 32]).unwrap();
+
+        let resolved = annotation_dtos(
+            vec![annotation],
+            &OpenDocument::Pdf(document.into()),
+            &current_fingerprint,
+            1.0,
+            true,
+            &|| false,
+        )
+        .unwrap();
+
+        assert_eq!(resolved[0].resolution, AnnotationResolution::Orphaned);
+        assert!(resolved[0].text_range.is_none());
+    }
+
+    #[tokio::test]
+    async fn explicit_bridge_association_recovers_changed_pdf_quote() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.pdf");
+        let target_path = directory.path().join("target.pdf");
+        let source_bytes = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ))
+        .unwrap();
+        let mut target_bytes = source_bytes.clone();
+        target_bytes.extend_from_slice(b"\n% changed version\n");
+        std::fs::write(&source_path, source_bytes).unwrap();
+        std::fs::write(&target_path, target_bytes).unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        let open = |path: &std::path::Path, local_id: &str| OpenRequest {
+            book_id: None,
+            local_id: local_id.into(),
+            path_key: crate::path_key::path_key(path),
+            format_hint: Some(BookFormat::Pdf),
+        };
+        let source = bridge
+            .open_document(open(&source_path, "source"), Cancellation::new())
+            .await
+            .unwrap();
+        let surface = bridge
+            .selection_surface(source.handle, 0, 1.0, 680.0, 18.0, Cancellation::new())
+            .await
+            .unwrap();
+        let endpoint = surface
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.range_start < endpoint.range_end)
+            .copied()
+            .unwrap();
+        assert!(bridge.release_selection(surface.handle));
+        let created = bridge
+            .create_annotation(
+                CreateAnnotationRequest {
+                    document: source.handle,
+                    unit: 0,
+                    start: endpoint.range_start,
+                    end: endpoint.range_end,
+                    display_scale: 1.0,
+                    color: HighlightColor::Yellow,
+                    body: None,
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let target = bridge
+            .open_document(open(&target_path, "target"), Cancellation::new())
+            .await
+            .unwrap();
+        let source_version = bridge
+            .list_annotation_association_sources(target.handle, None, 1, Cancellation::new())
+            .await
+            .unwrap()
+            .sources
+            .remove(0)
+            .version_id;
+
+        assert_eq!(
+            bridge
+                .associate_annotation_version(&source_version, target.handle, Cancellation::new(),)
+                .await
+                .unwrap(),
+            AnnotationAssociationOutcome::Associated
+        );
+        let recovered = bridge
+            .list_annotations(target.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].id, created.id);
+        assert_eq!(recovered[0].resolution, AnnotationResolution::Recovered);
+    }
+
     #[tokio::test]
     async fn explicit_bridge_association_recovers_changed_document_annotations() {
         let directory = tempfile::tempdir().unwrap();
@@ -4161,7 +4297,8 @@ mod tests {
             .position(|window| window.iter().collect::<String>() == "target")
             .unwrap();
         let end = start + "target".len();
-        bridge.release_selection(surface.handle);
+        assert!(bridge.release_buffer(surface.raster.unwrap().handle));
+        assert!(bridge.release_selection(surface.handle));
         let created = bridge
             .create_annotation(
                 CreateAnnotationRequest {
