@@ -493,6 +493,10 @@ final class ReaderAnnotationAssociationRequested extends ReaderMessage {
   const ReaderAnnotationAssociationRequested();
 }
 
+final class ReaderAnnotationReloadRequested extends ReaderMessage {
+  const ReaderAnnotationReloadRequested();
+}
+
 final class _ReaderAssociationSourcesLoaded extends ReaderMessage {
   const _ReaderAssociationSourcesLoaded({
     required this.generation,
@@ -523,6 +527,16 @@ final class _ReaderAssociationChoiceCompleted extends ReaderMessage {
   final _ReaderAssociationSourcesLoaded sources;
   final AnnotationAssociationChoice? choice;
   final String? error;
+}
+
+final class _ReaderAssociationPersisted extends ReaderMessage {
+  const _ReaderAssociationPersisted({
+    required this.sources,
+    required this.outcome,
+  });
+
+  final _ReaderAssociationSourcesLoaded sources;
+  final FlutterAnnotationAssociationOutcome outcome;
 }
 
 final class _ReaderAssociationFinished extends ReaderMessage {
@@ -793,6 +807,7 @@ final class ReaderController implements Listenable {
           ReaderAnnotationNoteRequested() ||
           ReaderAnnotationDeleted() ||
           ReaderAnnotationNavigated() ||
+          ReaderAnnotationReloadRequested() ||
           ReaderAnnotationAssociationRequested() => true,
           _ => false,
         }) {
@@ -887,12 +902,16 @@ final class ReaderController implements Listenable {
         unawaited(_deleteAnnotation(message.id));
       case ReaderAnnotationNavigated():
         _navigateAnnotation(message.id);
+      case ReaderAnnotationReloadRequested():
+        _annotationReloadRequested();
       case ReaderAnnotationAssociationRequested():
         _associationRequested();
       case _ReaderAssociationSourcesLoaded():
         _associationSourcesLoaded(message);
       case _ReaderAssociationChoiceCompleted():
         _associationChoiceCompleted(message);
+      case _ReaderAssociationPersisted():
+        _associationPersisted(message);
       case _ReaderAssociationFinished():
         _associationFinished(message);
       case ReaderSelectionCancelled():
@@ -2126,7 +2145,12 @@ final class ReaderController implements Listenable {
       return;
     }
     if (message.items case final items?) {
-      _setAnnotations(items, annotationsReady: operation == null ? true : null);
+      _setAnnotations(
+        items,
+        annotationsReady: operation == null || operation.startsWith('reload:')
+            ? true
+            : null,
+      );
     }
     if (operation == null) return;
     final createsSelection = operation.startsWith('create:');
@@ -2238,6 +2262,62 @@ final class ReaderController implements Listenable {
         null,
       ),
     );
+  }
+
+  void _annotationReloadRequested() {
+    final document = _model.document;
+    if (document == null ||
+        _model.annotationsReady ||
+        _model.annotationOperations.isNotEmpty ||
+        _model.relayoutBusy ||
+        _closing) {
+      return;
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(annotationError: error.toString()));
+      return;
+    }
+    final generation = _model.generation;
+    final revision = ++_annotationRevision;
+    final operationId = 'reload:${++_nextOperationId}';
+    _annotationCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    _emit(
+      _model.copyWith(
+        annotationOperations: {operationId},
+        annotationError: null,
+      ),
+    );
+    unawaited(() async {
+      List<FlutterAnnotation>? annotations;
+      String? error;
+      try {
+        annotations = await _bridge.listAnnotations(
+          document: document.handle,
+          scale: _model.layout.scale,
+          cancellationId: cancellation,
+        );
+      } catch (caught) {
+        error = caught.toString();
+      }
+      if (_annotationCancellations.remove(cancellation)) {
+        dispatch(
+          _ReaderAnnotationsChanged(
+            generation,
+            revision,
+            operationId,
+            null,
+            annotations,
+            error,
+          ),
+        );
+        _bridge.releaseCancellation(id: cancellation);
+        dispatch(const _ReaderAnnotationOperationFinished());
+      }
+    }());
   }
 
   Future<void> _loadAssociationSourcesEffect(
@@ -2383,11 +2463,37 @@ final class ReaderController implements Listenable {
     FlutterAnnotationAssociationSource selected,
   ) async {
     try {
-      await _bridge.associateAnnotationVersion(
+      final outcome = await _bridge.associateAnnotationVersion(
         sourceVersionId: selected.versionId,
         target: sources.document.handle,
         cancellationId: sources.cancellation,
       );
+      dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
+    } catch (error) {
+      dispatch(
+        _ReaderAssociationFinished(sources: sources, error: error.toString()),
+      );
+    }
+  }
+
+  void _associationPersisted(_ReaderAssociationPersisted message) {
+    final sources = message.sources;
+    if (!_isCurrentAssociation(sources)) {
+      dispatch(_ReaderAssociationFinished(sources: sources));
+      return;
+    }
+    switch (message.outcome) {
+      case FlutterAnnotationAssociationOutcome.associated ||
+          FlutterAnnotationAssociationOutcome.alreadyAssociated:
+        _setAnnotations(const [], annotationsReady: false);
+        unawaited(_reloadAssociatedAnnotationsEffect(sources));
+    }
+  }
+
+  Future<void> _reloadAssociatedAnnotationsEffect(
+    _ReaderAssociationSourcesLoaded sources,
+  ) async {
+    try {
       final annotations = await _bridge.listAnnotations(
         document: sources.document.handle,
         scale: _model.layout.scale,
@@ -2398,7 +2504,11 @@ final class ReaderController implements Listenable {
       );
     } catch (error) {
       dispatch(
-        _ReaderAssociationFinished(sources: sources, error: error.toString()),
+        _ReaderAssociationFinished(
+          sources: sources,
+          error:
+              'Association saved, but highlights could not be loaded: $error',
+        ),
       );
     }
   }

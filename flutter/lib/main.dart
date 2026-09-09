@@ -27,6 +27,7 @@ export 'package:shosai_flutter/reader_controller.dart'
         NoteEditorCanceller,
         ReaderController,
         ReaderAnnotationAssociationRequested,
+        ReaderAnnotationReloadRequested,
         ReaderAnnotationDeleted,
         ReaderAnnotationNavigated,
         ReaderAnnotationNoteRequested,
@@ -286,16 +287,22 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
-        actions: model.document != null && model.annotationsReady
+        actions: model.document != null
             ? [
                 IconButton(
-                  tooltip: 'Associate highlights from an earlier version…',
+                  tooltip: model.annotationsReady
+                      ? 'Associate highlights from an earlier version…'
+                      : 'Retry loading highlights',
                   onPressed: associationEnabled
                       ? () => _controller.dispatch(
-                          const ReaderAnnotationAssociationRequested(),
+                          model.annotationsReady
+                              ? const ReaderAnnotationAssociationRequested()
+                              : const ReaderAnnotationReloadRequested(),
                         )
                       : null,
-                  icon: const Icon(Icons.link),
+                  icon: Icon(
+                    model.annotationsReady ? Icons.link : Icons.refresh,
+                  ),
                 ),
               ]
             : null,
@@ -936,66 +943,72 @@ class _AnnotationAssociationDialogState
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('Associate highlights?'),
     content: SizedBox(
       width: 520,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.55,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Choose the earlier document version this file replaces. '
-                'Its notes and highlights will be shared with this version. '
-                'Highlights whose location cannot be recovered will remain marked '
-                'as ambiguous or unavailable.',
-              ),
-              const SizedBox(height: 12),
-              RadioGroup<FlutterAnnotationAssociationSource>(
-                groupValue: _selected,
-                onChanged: (value) => setState(() => _selected = value),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: widget.page.sources
-                      .map(
-                        (
-                          source,
-                        ) => RadioListTile<FlutterAnnotationAssociationSource>(
-                          value: source,
-                          title: Text(source.localPath),
-                          subtitle: Text(
-                            '${source.liveAnnotations} saved highlight'
-                            '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
-                            '${source.fingerprintAlgorithm} '
-                            '${_fingerprintLabel(source.fingerprint)}',
-                          ),
-                        ),
-                      )
-                      .toList(growable: false),
-                ),
-              ),
-            ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Choose the earlier document version this file replaces. '
+            'Its notes and highlights will be shared with this version. '
+            'Highlights whose location cannot be recovered will remain marked '
+            'as ambiguous or unavailable.',
           ),
-        ),
+          const SizedBox(height: 12),
+          RadioGroup<FlutterAnnotationAssociationSource>(
+            groupValue: _selected,
+            onChanged: (value) => setState(() => _selected = value),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: widget.page.sources
+                  .map(
+                    (
+                      source,
+                    ) => RadioListTile<FlutterAnnotationAssociationSource>(
+                      value: source,
+                      title: Text(source.localPath),
+                      subtitle: Text(
+                        '${source.liveAnnotations} saved highlight'
+                        '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
+                        '${source.fingerprintAlgorithm} '
+                        '${_fingerprintLabel(source.fingerprint)}',
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+          if (widget.page.canGoBack || widget.page.canGoForward) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.end,
+              children: [
+                if (widget.page.canGoBack)
+                  TextButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      const AnnotationAssociationPreviousPage(),
+                    ),
+                    child: const Text('Previous'),
+                  ),
+                if (widget.page.canGoForward)
+                  TextButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      const AnnotationAssociationNextPage(),
+                    ),
+                    child: const Text('Next'),
+                  ),
+              ],
+            ),
+          ],
+        ],
       ),
     ),
     actions: [
-      if (widget.page.canGoBack)
-        TextButton(
-          onPressed: () =>
-              Navigator.pop(context, const AnnotationAssociationPreviousPage()),
-          child: const Text('Previous'),
-        ),
-      if (widget.page.canGoForward)
-        TextButton(
-          onPressed: () =>
-              Navigator.pop(context, const AnnotationAssociationNextPage()),
-          child: const Text('Next'),
-        ),
       TextButton(
         onPressed: () =>
             Navigator.pop(context, const AnnotationAssociationCancelled()),

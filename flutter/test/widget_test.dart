@@ -1657,6 +1657,44 @@ void main() {
     },
   );
 
+  test('saved association survives a failed reload and can retry', () async {
+    final recovered = _resolutionAnnotations().first;
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      associatedAnnotations: [recovered],
+      immediateLists: true,
+    );
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async =>
+          AnnotationAssociationSelected(page.sources.single),
+    );
+    await _openControlled(controller, bridge, '/tmp/changed.epub');
+    bridge.listFailure = true;
+
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await bridge.waitForOp(2);
+
+    expect(bridge.associatedSourceIds, ['source-version']);
+    expect(controller.model.annotations, isEmpty);
+    expect(controller.model.annotationsReady, isFalse);
+    expect(
+      controller.model.annotationError,
+      contains('Association saved, but highlights could not be loaded'),
+    );
+
+    bridge.listFailure = false;
+    controller.dispatch(const ReaderAnnotationReloadRequested());
+    await bridge.waitForOp(3);
+
+    expect(controller.model.annotations.single.id, recovered.id);
+    expect(controller.model.annotationsReady, isTrue);
+    expect(controller.model.annotationError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test('suspend cancels an association choice before it can mutate', () async {
     final bridge = _ControlledBridge(
       associationSources: [_associationSource()],
@@ -1790,6 +1828,84 @@ void main() {
 
     expect(bridge.associatedSourceIds, ['source-version']);
     expect(find.textContaining('recovered'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('association pagination fits a compact short viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 390);
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      associationSources: List.generate(
+        65,
+        (index) => _associationSource('$index'),
+      ),
+      associatedAnnotations: [_resolutionAnnotations().first],
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: ReaderScreen(
+          bridge: bridge,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), '/tmp/changed.epub');
+    await tester.tap(find.text('Open document'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byTooltip('Associate highlights from an earlier version…'),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Next'));
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Previous'), findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    await tester.ensureVisible(find.text('Next'));
+    final source = find
+        .byType(RadioListTile<FlutterAnnotationAssociationSource>)
+        .last;
+    await tester.ensureVisible(source);
+    await tester.drag(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      const Offset(0, -100),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: source,
+        matching: find.byType(Radio<FlutterAnnotationAssociationSource>),
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Associate'))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.ensureVisible(find.text('Associate'));
+    await tester.tap(find.text('Associate'));
+    await tester.pumpAndSettle();
+
+    expect(bridge.associatedSourceIds, ['source-version-63']);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
