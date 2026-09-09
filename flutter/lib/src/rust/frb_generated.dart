@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1364596129;
+  int get rustContentHash => 1544787974;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -77,6 +77,14 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<FlutterAnnotationAssociationOutcome>
+  crateApiFlutterBridgeAssociateAnnotationVersion({
+    required FlutterBridge that,
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  });
+
   bool crateApiFlutterBridgeCancel({
     required FlutterBridge that,
     required BigInt id,
@@ -102,6 +110,14 @@ abstract class RustLibApi extends BaseApi {
     required FlutterBridge that,
     required FlutterDocumentHandle document,
     required String id,
+  });
+
+  Future<FlutterAnnotationAssociationSourcePage>
+  crateApiFlutterBridgeListAnnotationAssociationSources({
+    required FlutterBridge that,
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
   });
 
   Future<List<FlutterAnnotation>> crateApiFlutterBridgeListAnnotations({
@@ -193,6 +209,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required super.generalizedFrbRustBinding,
     required super.portManager,
   });
+
+  @override
+  Future<FlutterAnnotationAssociationOutcome>
+  crateApiFlutterBridgeAssociateAnnotationVersion({
+    required FlutterBridge that,
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_String(sourceVersionId);
+          var arg2 = cst_encode_box_autoadd_flutter_document_handle(target);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire
+              .wire__crate__api__FlutterBridge_associate_annotation_version(
+                port_,
+                arg0,
+                arg1,
+                arg2,
+                arg3,
+              );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_flutter_annotation_association_outcome,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeAssociateAnnotationVersionConstMeta,
+        argValues: [that, sourceVersionId, target, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeAssociateAnnotationVersionConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_associate_annotation_version",
+        argNames: ["that", "sourceVersionId", "target", "cancellationId"],
+      );
 
   @override
   bool crateApiFlutterBridgeCancel({
@@ -392,6 +452,53 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_delete_annotation",
         argNames: ["that", "document", "id"],
+      );
+
+  @override
+  Future<FlutterAnnotationAssociationSourcePage>
+  crateApiFlutterBridgeListAnnotationAssociationSources({
+    required FlutterBridge that,
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_opt_String(cursor);
+          var arg2 = cst_encode_usize(limit);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire
+              .wire__crate__api__FlutterBridge_list_annotation_association_sources(
+                port_,
+                arg0,
+                arg1,
+                arg2,
+                arg3,
+              );
+        },
+        codec: DcoCodec(
+          decodeSuccessData:
+              dco_decode_flutter_annotation_association_source_page,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta:
+            kCrateApiFlutterBridgeListAnnotationAssociationSourcesConstMeta,
+        argValues: [that, cursor, limit, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiFlutterBridgeListAnnotationAssociationSourcesConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_list_annotation_association_sources",
+        argNames: ["that", "cursor", "limit", "cancellationId"],
       );
 
   @override
@@ -1000,6 +1107,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterAnnotationAssociationOutcome
+  dco_decode_flutter_annotation_association_outcome(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return FlutterAnnotationAssociationOutcome.values[raw as int];
+  }
+
+  @protected
+  FlutterAnnotationAssociationSource
+  dco_decode_flutter_annotation_association_source(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return FlutterAnnotationAssociationSource(
+      versionId: dco_decode_String(arr[0]),
+      format: dco_decode_flutter_book_format(arr[1]),
+      localPath: dco_decode_String(arr[2]),
+      fingerprintAlgorithm: dco_decode_String(arr[3]),
+      fingerprintVersion: dco_decode_u_32(arr[4]),
+      fingerprint: dco_decode_list_prim_u_8_strict(arr[5]),
+      liveAnnotations: dco_decode_usize(arr[6]),
+    );
+  }
+
+  @protected
+  FlutterAnnotationAssociationSourcePage
+  dco_decode_flutter_annotation_association_source_page(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FlutterAnnotationAssociationSourcePage(
+      sources: dco_decode_list_flutter_annotation_association_source(arr[0]),
+      nextCursor: dco_decode_opt_String(arr[1]),
+    );
+  }
+
+  @protected
   FlutterAnnotationResolution dco_decode_flutter_annotation_resolution(
     dynamic raw,
   ) {
@@ -1216,6 +1361,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<FlutterAnnotation> dco_decode_list_flutter_annotation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_flutter_annotation).toList();
+  }
+
+  @protected
+  List<FlutterAnnotationAssociationSource>
+  dco_decode_list_flutter_annotation_association_source(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_flutter_annotation_association_source)
+        .toList();
   }
 
   @protected
@@ -1481,6 +1635,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterAnnotationAssociationOutcome
+  sse_decode_flutter_annotation_association_outcome(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return FlutterAnnotationAssociationOutcome.values[inner];
+  }
+
+  @protected
+  FlutterAnnotationAssociationSource
+  sse_decode_flutter_annotation_association_source(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_versionId = sse_decode_String(deserializer);
+    var var_format = sse_decode_flutter_book_format(deserializer);
+    var var_localPath = sse_decode_String(deserializer);
+    var var_fingerprintAlgorithm = sse_decode_String(deserializer);
+    var var_fingerprintVersion = sse_decode_u_32(deserializer);
+    var var_fingerprint = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_liveAnnotations = sse_decode_usize(deserializer);
+    return FlutterAnnotationAssociationSource(
+      versionId: var_versionId,
+      format: var_format,
+      localPath: var_localPath,
+      fingerprintAlgorithm: var_fingerprintAlgorithm,
+      fingerprintVersion: var_fingerprintVersion,
+      fingerprint: var_fingerprint,
+      liveAnnotations: var_liveAnnotations,
+    );
+  }
+
+  @protected
+  FlutterAnnotationAssociationSourcePage
+  sse_decode_flutter_annotation_association_source_page(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_sources = sse_decode_list_flutter_annotation_association_source(
+      deserializer,
+    );
+    var var_nextCursor = sse_decode_opt_String(deserializer);
+    return FlutterAnnotationAssociationSourcePage(
+      sources: var_sources,
+      nextCursor: var_nextCursor,
+    );
+  }
+
+  @protected
   FlutterAnnotationResolution sse_decode_flutter_annotation_resolution(
     SseDeserializer deserializer,
   ) {
@@ -1739,6 +1943,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<FlutterAnnotationAssociationSource>
+  sse_decode_list_flutter_annotation_association_source(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterAnnotationAssociationSource>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_annotation_association_source(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<FlutterSelectionCaret> sse_decode_list_flutter_selection_caret(
     SseDeserializer deserializer,
   ) {
@@ -1945,6 +2164,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int cst_encode_flutter_annotation_association_outcome(
+    FlutterAnnotationAssociationOutcome raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return cst_encode_i_32(raw.index);
+  }
+
+  @protected
   int cst_encode_flutter_annotation_resolution(
     FlutterAnnotationResolution raw,
   ) {
@@ -2131,6 +2358,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_list_flutter_selection_rect(self.rectangles, serializer);
     sse_encode_flutter_highlight_color(self.color, serializer);
     sse_encode_opt_String(self.body, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_annotation_association_outcome(
+    FlutterAnnotationAssociationOutcome self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_annotation_association_source(
+    FlutterAnnotationAssociationSource self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.versionId, serializer);
+    sse_encode_flutter_book_format(self.format, serializer);
+    sse_encode_String(self.localPath, serializer);
+    sse_encode_String(self.fingerprintAlgorithm, serializer);
+    sse_encode_u_32(self.fingerprintVersion, serializer);
+    sse_encode_list_prim_u_8_strict(self.fingerprint, serializer);
+    sse_encode_usize(self.liveAnnotations, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_annotation_association_source_page(
+    FlutterAnnotationAssociationSourcePage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_flutter_annotation_association_source(
+      self.sources,
+      serializer,
+    );
+    sse_encode_opt_String(self.nextCursor, serializer);
   }
 
   @protected
@@ -2339,6 +2603,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_flutter_annotation_association_source(
+    List<FlutterAnnotationAssociationSource> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_annotation_association_source(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_flutter_selection_caret(
     List<FlutterSelectionCaret> self,
     SseSerializer serializer,
@@ -2517,6 +2793,17 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
         RustLib.instance.api.rust_arc_decrement_strong_count_FlutterBridgePtr,
   );
 
+  Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeAssociateAnnotationVersion(
+    that: this,
+    sourceVersionId: sourceVersionId,
+    target: target,
+    cancellationId: cancellationId,
+  );
+
   bool cancel({required BigInt id}) =>
       RustLib.instance.api.crateApiFlutterBridgeCancel(that: this, id: id);
 
@@ -2552,6 +2839,19 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     document: document,
     id: id,
   );
+
+  Future<FlutterAnnotationAssociationSourcePage>
+  listAnnotationAssociationSources({
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api
+      .crateApiFlutterBridgeListAnnotationAssociationSources(
+        that: this,
+        cursor: cursor,
+        limit: limit,
+        cancellationId: cancellationId,
+      );
 
   Future<List<FlutterAnnotation>> listAnnotations({
     required FlutterDocumentHandle document,

@@ -7,10 +7,16 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `cancellation`, `from_bridge`, `invalid_request`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>
 abstract class FlutterBridge implements RustOpaqueInterface {
+  Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  });
+
   bool cancel({required BigInt id});
 
   Future<FlutterAnnotation> createAnnotation({
@@ -32,6 +38,13 @@ abstract class FlutterBridge implements RustOpaqueInterface {
   Future<bool> deleteAnnotation({
     required FlutterDocumentHandle document,
     required String id,
+  });
+
+  Future<FlutterAnnotationAssociationSourcePage>
+  listAnnotationAssociationSources({
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
   });
 
   Future<List<FlutterAnnotation>> listAnnotations({
@@ -132,6 +145,72 @@ class FlutterAnnotation {
           rectangles == other.rectangles &&
           color == other.color &&
           body == other.body;
+}
+
+enum FlutterAnnotationAssociationOutcome { associated, alreadyAssociated }
+
+class FlutterAnnotationAssociationSource {
+  final String versionId;
+  final FlutterBookFormat format;
+  final String localPath;
+  final String fingerprintAlgorithm;
+  final int fingerprintVersion;
+  final Uint8List fingerprint;
+  final BigInt liveAnnotations;
+
+  const FlutterAnnotationAssociationSource({
+    required this.versionId,
+    required this.format,
+    required this.localPath,
+    required this.fingerprintAlgorithm,
+    required this.fingerprintVersion,
+    required this.fingerprint,
+    required this.liveAnnotations,
+  });
+
+  @override
+  int get hashCode =>
+      versionId.hashCode ^
+      format.hashCode ^
+      localPath.hashCode ^
+      fingerprintAlgorithm.hashCode ^
+      fingerprintVersion.hashCode ^
+      fingerprint.hashCode ^
+      liveAnnotations.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterAnnotationAssociationSource &&
+          runtimeType == other.runtimeType &&
+          versionId == other.versionId &&
+          format == other.format &&
+          localPath == other.localPath &&
+          fingerprintAlgorithm == other.fingerprintAlgorithm &&
+          fingerprintVersion == other.fingerprintVersion &&
+          fingerprint == other.fingerprint &&
+          liveAnnotations == other.liveAnnotations;
+}
+
+class FlutterAnnotationAssociationSourcePage {
+  final List<FlutterAnnotationAssociationSource> sources;
+  final String? nextCursor;
+
+  const FlutterAnnotationAssociationSourcePage({
+    required this.sources,
+    this.nextCursor,
+  });
+
+  @override
+  int get hashCode => sources.hashCode ^ nextCursor.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterAnnotationAssociationSourcePage &&
+          runtimeType == other.runtimeType &&
+          sources == other.sources &&
+          nextCursor == other.nextCursor;
 }
 
 enum FlutterAnnotationResolution { exact, recovered, ambiguous, orphaned }

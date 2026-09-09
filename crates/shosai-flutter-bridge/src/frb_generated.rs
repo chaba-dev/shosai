@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1364596129;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1544787974;
 
 // Section: executor
 
@@ -46,6 +46,61 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
+fn wire__crate__api__FlutterBridge_associate_annotation_version_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    source_version_id: impl CstDecode<String>,
+    target: impl CstDecode<crate::api::FlutterDocumentHandle>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_associate_annotation_version",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_source_version_id = source_version_id.cst_decode();
+            let api_target = target.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::associate_annotation_version(
+                            &*api_that_guard,
+                            api_source_version_id,
+                            api_target,
+                            api_cancellation_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__FlutterBridge_cancel_impl(
     that: impl CstDecode<
         RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
@@ -252,6 +307,62 @@ fn wire__crate__api__FlutterBridge_delete_annotation_impl(
                             api_id,
                         )
                         .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    cursor: impl CstDecode<Option<String>>,
+    limit: impl CstDecode<usize>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_list_annotation_association_sources",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_cursor = cursor.cst_decode();
+            let api_limit = limit.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok =
+                            crate::api::FlutterBridge::list_annotation_association_sources(
+                                &*api_that_guard,
+                                api_cursor,
+                                api_limit,
+                                api_cancellation_id,
+                            )
+                            .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -809,6 +920,19 @@ impl CstDecode<f32> for f32 {
         self
     }
 }
+impl CstDecode<crate::api::FlutterAnnotationAssociationOutcome> for i32 {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    fn cst_decode(self) -> crate::api::FlutterAnnotationAssociationOutcome {
+        match self {
+            0 => crate::api::FlutterAnnotationAssociationOutcome::Associated,
+            1 => crate::api::FlutterAnnotationAssociationOutcome::AlreadyAssociated,
+            _ => unreachable!(
+                "Invalid variant for FlutterAnnotationAssociationOutcome: {}",
+                self
+            ),
+        }
+    }
+}
 impl CstDecode<crate::api::FlutterAnnotationResolution> for i32 {
     // Codec=Cst (C-struct based), see doc to use other codecs
     fn cst_decode(self) -> crate::api::FlutterAnnotationResolution {
@@ -957,6 +1081,56 @@ impl SseDecode for crate::api::FlutterAnnotation {
             rectangles: var_rectangles,
             color: var_color,
             body: var_body,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterAnnotationAssociationOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::FlutterAnnotationAssociationOutcome::Associated,
+            1 => crate::api::FlutterAnnotationAssociationOutcome::AlreadyAssociated,
+            _ => unreachable!(
+                "Invalid variant for FlutterAnnotationAssociationOutcome: {}",
+                inner
+            ),
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterAnnotationAssociationSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_versionId = <String>::sse_decode(deserializer);
+        let mut var_format = <crate::api::FlutterBookFormat>::sse_decode(deserializer);
+        let mut var_localPath = <String>::sse_decode(deserializer);
+        let mut var_fingerprintAlgorithm = <String>::sse_decode(deserializer);
+        let mut var_fingerprintVersion = <u32>::sse_decode(deserializer);
+        let mut var_fingerprint = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_liveAnnotations = <usize>::sse_decode(deserializer);
+        return crate::api::FlutterAnnotationAssociationSource {
+            version_id: var_versionId,
+            format: var_format,
+            local_path: var_localPath,
+            fingerprint_algorithm: var_fingerprintAlgorithm,
+            fingerprint_version: var_fingerprintVersion,
+            fingerprint: var_fingerprint,
+            live_annotations: var_liveAnnotations,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterAnnotationAssociationSourcePage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_sources =
+            <Vec<crate::api::FlutterAnnotationAssociationSource>>::sse_decode(deserializer);
+        let mut var_nextCursor = <Option<String>>::sse_decode(deserializer);
+        return crate::api::FlutterAnnotationAssociationSourcePage {
+            sources: var_sources,
+            next_cursor: var_nextCursor,
         };
     }
 }
@@ -1239,6 +1413,18 @@ impl SseDecode for Vec<crate::api::FlutterAnnotation> {
     }
 }
 
+impl SseDecode for Vec<crate::api::FlutterAnnotationAssociationSource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FlutterAnnotationAssociationSource>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::FlutterSelectionCaret> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1474,6 +1660,74 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterAnnotation>
     for crate::api::FlutterAnnotation
 {
     fn into_into_dart(self) -> crate::api::FlutterAnnotation {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterAnnotationAssociationOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Associated => 0.into_dart(),
+            Self::AlreadyAssociated => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterAnnotationAssociationOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterAnnotationAssociationOutcome>
+    for crate::api::FlutterAnnotationAssociationOutcome
+{
+    fn into_into_dart(self) -> crate::api::FlutterAnnotationAssociationOutcome {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterAnnotationAssociationSource {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.version_id.into_into_dart().into_dart(),
+            self.format.into_into_dart().into_dart(),
+            self.local_path.into_into_dart().into_dart(),
+            self.fingerprint_algorithm.into_into_dart().into_dart(),
+            self.fingerprint_version.into_into_dart().into_dart(),
+            self.fingerprint.into_into_dart().into_dart(),
+            self.live_annotations.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterAnnotationAssociationSource
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterAnnotationAssociationSource>
+    for crate::api::FlutterAnnotationAssociationSource
+{
+    fn into_into_dart(self) -> crate::api::FlutterAnnotationAssociationSource {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterAnnotationAssociationSourcePage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.sources.into_into_dart().into_dart(),
+            self.next_cursor.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterAnnotationAssociationSourcePage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterAnnotationAssociationSourcePage>
+    for crate::api::FlutterAnnotationAssociationSourcePage
+{
+    fn into_into_dart(self) -> crate::api::FlutterAnnotationAssociationSourcePage {
         self
     }
 }
@@ -1916,6 +2170,43 @@ impl SseEncode for crate::api::FlutterAnnotation {
     }
 }
 
+impl SseEncode for crate::api::FlutterAnnotationAssociationOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::FlutterAnnotationAssociationOutcome::Associated => 0,
+                crate::api::FlutterAnnotationAssociationOutcome::AlreadyAssociated => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::FlutterAnnotationAssociationSource {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.version_id, serializer);
+        <crate::api::FlutterBookFormat>::sse_encode(self.format, serializer);
+        <String>::sse_encode(self.local_path, serializer);
+        <String>::sse_encode(self.fingerprint_algorithm, serializer);
+        <u32>::sse_encode(self.fingerprint_version, serializer);
+        <Vec<u8>>::sse_encode(self.fingerprint, serializer);
+        <usize>::sse_encode(self.live_annotations, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterAnnotationAssociationSourcePage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::FlutterAnnotationAssociationSource>>::sse_encode(self.sources, serializer);
+        <Option<String>>::sse_encode(self.next_cursor, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FlutterAnnotationResolution {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2131,6 +2422,16 @@ impl SseEncode for Vec<crate::api::FlutterAnnotation> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::FlutterAnnotation>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FlutterAnnotationAssociationSource> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FlutterAnnotationAssociationSource>::sse_encode(item, serializer);
         }
     }
 }
@@ -2400,6 +2701,33 @@ mod io {
             }
         }
     }
+    impl CstDecode<crate::api::FlutterAnnotationAssociationSource>
+        for wire_cst_flutter_annotation_association_source
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterAnnotationAssociationSource {
+            crate::api::FlutterAnnotationAssociationSource {
+                version_id: self.version_id.cst_decode(),
+                format: self.format.cst_decode(),
+                local_path: self.local_path.cst_decode(),
+                fingerprint_algorithm: self.fingerprint_algorithm.cst_decode(),
+                fingerprint_version: self.fingerprint_version.cst_decode(),
+                fingerprint: self.fingerprint.cst_decode(),
+                live_annotations: self.live_annotations.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterAnnotationAssociationSourcePage>
+        for wire_cst_flutter_annotation_association_source_page
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterAnnotationAssociationSourcePage {
+            crate::api::FlutterAnnotationAssociationSourcePage {
+                sources: self.sources.cst_decode(),
+                next_cursor: self.next_cursor.cst_decode(),
+            }
+        }
+    }
     impl CstDecode<crate::api::FlutterAnnotationTextRange> for wire_cst_flutter_annotation_text_range {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterAnnotationTextRange {
@@ -2548,6 +2876,18 @@ mod io {
             vec.into_iter().map(CstDecode::cst_decode).collect()
         }
     }
+    impl CstDecode<Vec<crate::api::FlutterAnnotationAssociationSource>>
+        for *mut wire_cst_list_flutter_annotation_association_source
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::api::FlutterAnnotationAssociationSource> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
     impl CstDecode<Vec<crate::api::FlutterSelectionCaret>>
         for *mut wire_cst_list_flutter_selection_caret
     {
@@ -2629,6 +2969,37 @@ mod io {
         }
     }
     impl Default for wire_cst_flutter_annotation {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_annotation_association_source {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                version_id: core::ptr::null_mut(),
+                format: Default::default(),
+                local_path: core::ptr::null_mut(),
+                fingerprint_algorithm: core::ptr::null_mut(),
+                fingerprint_version: Default::default(),
+                fingerprint: core::ptr::null_mut(),
+                live_annotations: Default::default(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_annotation_association_source {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_annotation_association_source_page {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                sources: core::ptr::null_mut(),
+                next_cursor: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_annotation_association_source_page {
         fn default() -> Self {
             Self::new_with_null_ptr()
         }
@@ -2825,6 +3196,23 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_associate_annotation_version(
+        port_: i64,
+        that: usize,
+        source_version_id: *mut wire_cst_list_prim_u_8_strict,
+        target: *mut wire_cst_flutter_document_handle,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_associate_annotation_version_impl(
+            port_,
+            that,
+            source_version_id,
+            target,
+            cancellation_id,
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_cancel(
         that: usize,
         id: u64,
@@ -2879,6 +3267,23 @@ mod io {
         id: *mut wire_cst_list_prim_u_8_strict,
     ) {
         wire__crate__api__FlutterBridge_delete_annotation_impl(port_, that, document, id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_annotation_association_sources(
+        port_: i64,
+        that: usize,
+        cursor: *mut wire_cst_list_prim_u_8_strict,
+        limit: usize,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
+            port_,
+            that,
+            cursor,
+            limit,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -3110,6 +3515,20 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_annotation_association_source(
+        len: i32,
+    ) -> *mut wire_cst_list_flutter_annotation_association_source {
+        let wrap = wire_cst_list_flutter_annotation_association_source {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_flutter_annotation_association_source>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_selection_caret(
         len: i32,
     ) -> *mut wire_cst_list_flutter_selection_caret {
@@ -3198,6 +3617,23 @@ mod io {
         rectangles: *mut wire_cst_list_flutter_selection_rect,
         color: i32,
         body: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_annotation_association_source {
+        version_id: *mut wire_cst_list_prim_u_8_strict,
+        format: i32,
+        local_path: *mut wire_cst_list_prim_u_8_strict,
+        fingerprint_algorithm: *mut wire_cst_list_prim_u_8_strict,
+        fingerprint_version: u32,
+        fingerprint: *mut wire_cst_list_prim_u_8_strict,
+        live_annotations: usize,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_annotation_association_source_page {
+        sources: *mut wire_cst_list_flutter_annotation_association_source,
+        next_cursor: *mut wire_cst_list_prim_u_8_strict,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -3302,6 +3738,12 @@ mod io {
     #[derive(Clone, Copy)]
     pub struct wire_cst_list_flutter_annotation {
         ptr: *mut wire_cst_flutter_annotation,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_flutter_annotation_association_source {
+        ptr: *mut wire_cst_flutter_annotation_association_source,
         len: i32,
     }
     #[repr(C)]
