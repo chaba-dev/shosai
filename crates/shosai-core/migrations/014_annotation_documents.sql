@@ -77,3 +77,6 @@ CREATE INDEX annotations_document_active_idx
 
 CREATE INDEX annotation_document_versions_document_idx
     ON annotation_document_versions(document_id, associated_at, id);
+
+CREATE INDEX annotation_document_versions_format_id_idx
+    ON annotation_document_versions(format, id);

@@ -12,7 +12,8 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::annotations::{
     ANNOTATION_SNAPSHOT_BASE_BYTES, Annotation, AnnotationAssociationConflict,
-    AnnotationAssociationOutcome, AnnotationDocumentFormat, AnnotationDocumentVersionId,
+    AnnotationAssociationOutcome, AnnotationAssociationSourceCancelled,
+    AnnotationAssociationSourceWorkLimit, AnnotationDocumentFormat, AnnotationDocumentVersionId,
     AnnotationId, AnnotationResolution, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget,
     DocumentFingerprint, EpubAnchor, HighlightColor, MAX_ANNOTATION_BODY_SCALARS,
     MAX_ANNOTATION_SNAPSHOT_BYTES, MAX_TEXT_ANCHOR_RESOLUTION_WORK, NewAnnotation, PageRect,
@@ -982,18 +983,20 @@ impl Bridge {
             store = self.annotation_store() => store?,
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
         };
-        let page = tokio::select! {
-            page = store.list_association_sources_async(
+        let page = store
+            .list_association_sources_cancellable_async(
                 format,
                 &target.local_path,
                 &target.fingerprint,
                 cursor.as_ref(),
                 limit,
-            ) => {
-                page.map_err(annotation_storage_error)?
-            }
-            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
-        };
+                {
+                    let cancellation = cancellation.clone();
+                    move || cancellation.is_cancelled()
+                },
+            )
+            .await
+            .map_err(annotation_storage_error)?;
         check_cancelled(&cancellation)?;
         Ok(AnnotationAssociationSourcePageDto {
             sources: page
@@ -2221,7 +2224,11 @@ fn storage_error(error: impl std::fmt::Display) -> BridgeError {
 }
 
 fn annotation_storage_error(error: anyhow::Error) -> BridgeError {
-    if error.is::<AnnotationSnapshotLimit>() {
+    if error.is::<AnnotationAssociationSourceCancelled>() {
+        BridgeError::Cancelled
+    } else if error.is::<AnnotationAssociationSourceWorkLimit>() {
+        BridgeError::BufferLimit
+    } else if error.is::<AnnotationSnapshotLimit>() {
         BridgeError::AnnotationLimit
     } else if error.is::<AnnotationAssociationConflict>() {
         BridgeError::InvalidRequest(error.to_string())

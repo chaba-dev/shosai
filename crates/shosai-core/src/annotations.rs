@@ -2,8 +2,8 @@
 
 use std::ops::Range;
 use std::str::FromStr;
-#[cfg(test)]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::Row;
@@ -37,11 +37,21 @@ pub const MAX_PROVENANCE_ID_BYTES: usize = 4_096;
 pub const MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE: usize = 100;
 pub const MAX_ANNOTATION_DOCUMENT_VERSIONS: usize = 128;
 pub(crate) const MAX_TEXT_ANCHOR_RESOLUTION_WORK: usize = 64 * 1024 * 1024;
+const ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL: usize = 1_000;
+const MAX_ANNOTATION_ASSOCIATION_DISCOVERY_WORK: usize = 10_000_000;
 const MAX_TEXT_ANCHOR_GRAPHEME_SCALARS: usize = 1_024;
 
 #[derive(Debug, Error)]
 #[error("annotation snapshot exceeds its aggregate retention limit")]
 pub struct AnnotationSnapshotLimit;
+
+#[derive(Debug, Error)]
+#[error("annotation association source discovery was cancelled")]
+pub struct AnnotationAssociationSourceCancelled;
+
+#[derive(Debug, Error)]
+#[error("annotation association source discovery exceeded its work limit")]
+pub struct AnnotationAssociationSourceWorkLimit;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnnotationId(Uuid);
@@ -1381,13 +1391,75 @@ impl AnnotationStore {
         cursor: Option<&AnnotationDocumentVersionId>,
         limit: usize,
     ) -> Result<AnnotationAssociationSourcePage> {
+        self.list_association_sources_cancellable_async(
+            format,
+            target_local_path,
+            target_fingerprint,
+            cursor,
+            limit,
+            || false,
+        )
+        .await
+    }
+
+    pub async fn list_association_sources_cancellable_async<F>(
+        &self,
+        format: AnnotationDocumentFormat,
+        target_local_path: &str,
+        target_fingerprint: &DocumentFingerprint,
+        cursor: Option<&AnnotationDocumentVersionId>,
+        limit: usize,
+        is_cancelled: F,
+    ) -> Result<AnnotationAssociationSourcePage>
+    where
+        F: Fn() -> bool + Send + 'static,
+    {
         if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
             bail!(
                 "annotation association source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
             );
         }
-        let rows = sqlx::query(
-            "WITH candidates AS MATERIALIZED (
+        if is_cancelled() {
+            return Err(AnnotationAssociationSourceCancelled.into());
+        }
+        let mut connection = self
+            .pool
+            .acquire()
+            .await
+            .context("failed to acquire annotation association source connection")?;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let work_exhausted = Arc::new(AtomicBool::new(false));
+        let completed_work = Arc::new(AtomicUsize::new(0));
+        {
+            let cancelled = Arc::clone(&cancelled);
+            let work_exhausted = Arc::clone(&work_exhausted);
+            let completed_work = Arc::clone(&completed_work);
+            connection
+                .lock_handle()
+                .await
+                .context("failed to configure annotation association source query")?
+                .set_progress_handler(
+                    i32::try_from(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL)
+                        .expect("SQLite progress interval fits in i32"),
+                    move || {
+                        if is_cancelled() {
+                            cancelled.store(true, Ordering::Release);
+                            return false;
+                        }
+                        let work = completed_work
+                            .fetch_add(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL, Ordering::Relaxed)
+                            + ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL;
+                        if work >= MAX_ANNOTATION_ASSOCIATION_DISCOVERY_WORK {
+                            work_exhausted.store(true, Ordering::Release);
+                            return false;
+                        }
+                        true
+                    },
+                );
+        }
+        let result: Result<AnnotationAssociationSourcePage> = async {
+            let rows = sqlx::query(
+                "WITH candidates AS MATERIALIZED (
                SELECT v.id, v.document_id, v.format, v.local_path,
                       v.fingerprint_algorithm, v.fingerprint_version, v.fingerprint
                FROM annotation_document_versions v
@@ -1398,7 +1470,7 @@ impl AnnotationStore {
                      AND target.fingerprint_algorithm = ?
                      AND target.fingerprint_version = ? AND target.fingerprint = ?
                  ), '')
-                 AND (? IS NULL OR v.id > ?)
+                 AND v.id > ?
                  AND EXISTS (
                    SELECT 1 FROM annotations a
                    WHERE a.annotation_document_id = v.document_id
@@ -1413,44 +1485,45 @@ impl AnnotationStore {
                      WHERE a.annotation_document_id = c.document_id
                        AND a.deleted_at IS NULL) AS live_annotations
              FROM candidates c ORDER BY c.id",
-        )
-        .bind(format.as_str())
-        .bind(target_local_path)
-        .bind(format.as_str())
-        .bind(&target_fingerprint.algorithm)
-        .bind(i64::from(target_fingerprint.version))
-        .bind(&target_fingerprint.bytes)
-        .bind(cursor.map(ToString::to_string))
-        .bind(cursor.map(ToString::to_string))
-        .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
-        .fetch_all(&self.pool)
-        .await
-        .context("failed to list annotation association sources")?;
-        let has_more = rows.len() > limit;
-        let mut sources = Vec::with_capacity(rows.len().min(limit));
-        for row in rows.into_iter().take(limit) {
-            let version_id =
-                AnnotationDocumentVersionId::from_str(&row.try_get::<String, _>("id")?)
-                    .context("invalid annotation document version ID in database")?;
-            sources.push(AnnotationAssociationSource {
-                version_id,
-                format: AnnotationDocumentFormat::from_db(&row.try_get::<String, _>("format")?)?,
-                local_path: row.try_get("local_path")?,
-                fingerprint: DocumentFingerprint::new(
-                    row.try_get::<String, _>("fingerprint_algorithm")?,
-                    positive_u32(row.try_get("fingerprint_version")?, "fingerprint version")?,
-                    row.try_get("fingerprint")?,
-                )?,
-                live_annotations: usize::try_from(row.try_get::<i64, _>("live_annotations")?)
-                    .context("invalid live annotation count in database")?,
-            });
-        }
-        let next_cursor = has_more
-            .then(|| sources.last().map(|source| source.version_id.clone()))
-            .flatten();
-        let previous_cursor = if let Some(cursor) = cursor {
-            let previous = sqlx::query_scalar::<_, String>(
-                "SELECT v.id FROM annotation_document_versions v
+            )
+            .bind(format.as_str())
+            .bind(target_local_path)
+            .bind(format.as_str())
+            .bind(&target_fingerprint.algorithm)
+            .bind(i64::from(target_fingerprint.version))
+            .bind(&target_fingerprint.bytes)
+            .bind(cursor.map(ToString::to_string).unwrap_or_default())
+            .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
+            .fetch_all(&mut *connection)
+            .await
+            .context("failed to list annotation association sources")?;
+            let has_more = rows.len() > limit;
+            let mut sources = Vec::with_capacity(rows.len().min(limit));
+            for row in rows.into_iter().take(limit) {
+                let version_id =
+                    AnnotationDocumentVersionId::from_str(&row.try_get::<String, _>("id")?)
+                        .context("invalid annotation document version ID in database")?;
+                sources.push(AnnotationAssociationSource {
+                    version_id,
+                    format: AnnotationDocumentFormat::from_db(
+                        &row.try_get::<String, _>("format")?,
+                    )?,
+                    local_path: row.try_get("local_path")?,
+                    fingerprint: DocumentFingerprint::new(
+                        row.try_get::<String, _>("fingerprint_algorithm")?,
+                        positive_u32(row.try_get("fingerprint_version")?, "fingerprint version")?,
+                        row.try_get("fingerprint")?,
+                    )?,
+                    live_annotations: usize::try_from(row.try_get::<i64, _>("live_annotations")?)
+                        .context("invalid live annotation count in database")?,
+                });
+            }
+            let next_cursor = has_more
+                .then(|| sources.last().map(|source| source.version_id.clone()))
+                .flatten();
+            let previous_cursor = if let Some(cursor) = cursor {
+                let previous = sqlx::query_scalar::<_, String>(
+                    "SELECT v.id FROM annotation_document_versions v
                  WHERE v.format = ?
                    AND v.document_id != COALESCE((
                      SELECT target.document_id FROM annotation_document_versions target
@@ -1465,34 +1538,48 @@ impl AnnotationStore {
                        AND a.deleted_at IS NULL
                    )
                  ORDER BY v.id DESC LIMIT ?",
-            )
-            .bind(format.as_str())
-            .bind(target_local_path)
-            .bind(format.as_str())
-            .bind(&target_fingerprint.algorithm)
-            .bind(i64::from(target_fingerprint.version))
-            .bind(&target_fingerprint.bytes)
-            .bind(cursor.to_string())
-            .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
-            .fetch_all(&self.pool)
-            .await
-            .context("failed to locate previous annotation association source page")?;
-            if previous.len() > limit {
-                Some(
-                    AnnotationDocumentVersionId::from_str(&previous[limit])
-                        .context("invalid previous annotation version cursor in database")?,
                 )
+                .bind(format.as_str())
+                .bind(target_local_path)
+                .bind(format.as_str())
+                .bind(&target_fingerprint.algorithm)
+                .bind(i64::from(target_fingerprint.version))
+                .bind(&target_fingerprint.bytes)
+                .bind(cursor.to_string())
+                .bind(i64::try_from(limit + 1).expect("bounded source page limit fits in i64"))
+                .fetch_all(&mut *connection)
+                .await
+                .context("failed to locate previous annotation association source page")?;
+                if previous.len() > limit {
+                    Some(
+                        AnnotationDocumentVersionId::from_str(&previous[limit])
+                            .context("invalid previous annotation version cursor in database")?,
+                    )
+                } else {
+                    None
+                }
             } else {
                 None
-            }
+            };
+            Ok(AnnotationAssociationSourcePage {
+                sources,
+                next_cursor,
+                previous_cursor,
+            })
+        }
+        .await;
+        connection
+            .lock_handle()
+            .await
+            .context("failed to clear annotation association source query budget")?
+            .remove_progress_handler();
+        if cancelled.load(Ordering::Acquire) {
+            Err(AnnotationAssociationSourceCancelled.into())
+        } else if work_exhausted.load(Ordering::Acquire) {
+            Err(AnnotationAssociationSourceWorkLimit.into())
         } else {
-            None
-        };
-        Ok(AnnotationAssociationSourcePage {
-            sources,
-            next_cursor,
-            previous_cursor,
-        })
+            result
+        }
     }
 
     pub async fn associate_document_version_async(

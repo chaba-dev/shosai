@@ -1,11 +1,14 @@
 use std::borrow::Cow;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use shosai_core::annotations::{
-    AnnotationAssociationConflict, AnnotationAssociationOutcome, AnnotationDocumentFormat,
-    AnnotationId, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint,
-    EpubAnchor, HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS,
-    MAX_EPUB_RESOURCE_PATH_BYTES, MAX_FINGERPRINT_ALGORITHM_BYTES, MAX_FINGERPRINT_BYTES,
-    MAX_LOCAL_PATH_BYTES, MAX_PDF_RECTANGLES, MAX_PROVENANCE_ID_BYTES, MAX_PROVENANCE_SYSTEM_BYTES,
+    AnnotationAssociationConflict, AnnotationAssociationOutcome,
+    AnnotationAssociationSourceCancelled, AnnotationDocumentFormat, AnnotationId,
+    AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint, EpubAnchor,
+    HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS, MAX_EPUB_RESOURCE_PATH_BYTES,
+    MAX_FINGERPRINT_ALGORITHM_BYTES, MAX_FINGERPRINT_BYTES, MAX_LOCAL_PATH_BYTES,
+    MAX_PDF_RECTANGLES, MAX_PROVENANCE_ID_BYTES, MAX_PROVENANCE_SYSTEM_BYTES,
     MAX_QUOTE_CONTEXT_INPUT_SCALARS, MAX_QUOTE_SCALARS, NewAnnotation, PageRect, PdfAnchor,
     QuoteSelector, normalize_quote_v1, scalar_range_to_utf16,
 };
@@ -481,10 +484,35 @@ async fn tombstone_only_collections_are_not_association_choices() {
 #[tokio::test]
 async fn association_source_pages_filter_format_and_tombstones_before_limit() {
     let (store, pool, _dir) = temp_store().await;
-    for _ in 0..100 {
-        let deleted = store.create_async(&epub_annotation(None)).await.unwrap();
+    for index in 0..100 {
+        let mut annotation = epub_annotation(None);
+        annotation.local_path = Some(format!("/books/deleted-{index}.epub"));
+        annotation.fingerprint =
+            DocumentFingerprint::new("sha256", 1, vec![u8::try_from(index).unwrap(); 32]).unwrap();
+        let deleted = store.create_async(&annotation).await.unwrap();
         store.delete_async(&deleted.id).await.unwrap();
     }
+    let cancellation_checks = Arc::new(AtomicUsize::new(0));
+    let error = store
+        .list_association_sources_cancellable_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+            None,
+            1,
+            {
+                let cancellation_checks = Arc::clone(&cancellation_checks);
+                move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 0
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<AnnotationAssociationSourceCancelled>());
+    assert!(
+        cancellation_checks.load(Ordering::Relaxed) > 1,
+        "cancellation must be observed by SQLite's progress handler"
+    );
+
     let live = store.create_async(&epub_annotation(None)).await.unwrap();
     let mut pdf = epub_annotation(None);
     pdf.target = AnnotationTarget::Pdf(
@@ -530,6 +558,36 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
         plan.iter()
             .any(|(_, _, _, detail)| detail.contains("annotations_document_active_idx")),
         "live-source lookup must use the collection/deletion index: {plan:?}"
+    );
+    let page_plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT v.id FROM annotation_document_versions v
+         WHERE v.format = ? AND v.id > ?
+           AND EXISTS (
+             SELECT 1 FROM annotations a
+             WHERE a.annotation_document_id = v.document_id
+               AND a.deleted_at IS NULL
+           )
+         ORDER BY v.id LIMIT ?",
+    )
+    .bind("epub")
+    .bind("")
+    .bind(2_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        page_plan.iter().any(|(_, _, _, detail)| {
+            detail.contains("annotation_document_versions_format_id_idx")
+                && detail.contains("format=? AND id>?")
+        }),
+        "source-page lookup must seek by format and cursor: {page_plan:?}"
+    );
+    assert!(
+        page_plan
+            .iter()
+            .any(|(_, _, _, detail)| detail.contains("annotations_document_active_idx")),
+        "source-page filtering must use the live annotation index: {page_plan:?}"
     );
 }
 
