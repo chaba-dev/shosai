@@ -37,6 +37,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Add shared selection interactions (#89)
 - *(flutter)* Preserve annotations across relayout (#90)
 - *(flutter)* Add responsive lifecycle-safe reader (#91)
+- Recover annotations across document versions (#92)
 
 ### 🐛 Bug Fixes
 
