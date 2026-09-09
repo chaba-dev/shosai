@@ -15,9 +15,18 @@ import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
 export 'package:shosai_flutter/reader_controller.dart'
     show
+        AnnotationAssociationPicker,
+        AnnotationAssociationPickerCanceller,
+        AnnotationAssociationCancelled,
+        AnnotationAssociationChoice,
+        AnnotationAssociationNextPage,
+        AnnotationAssociationPage,
+        AnnotationAssociationPreviousPage,
+        AnnotationAssociationSelected,
         PageDecoder,
         NoteEditorCanceller,
         ReaderController,
+        ReaderAnnotationAssociationRequested,
         ReaderAnnotationDeleted,
         ReaderAnnotationNavigated,
         ReaderAnnotationNoteRequested,
@@ -127,6 +136,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   final FocusNode _readerFocus = FocusNode(debugLabel: 'reader surface');
   final FocusNode _actionFocus = FocusNode(debugLabel: 'selection actions');
   DialogRoute<String>? _noteDialogRoute;
+  DialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
 
   @override
@@ -139,6 +149,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           widget.decoder(pixels, width: width, height: height),
       noteEditor: _editNote,
       noteEditorCanceller: _cancelNoteEditor,
+      annotationAssociationPicker: _pickAnnotationAssociation,
+      annotationAssociationPickerCanceller: _cancelAnnotationAssociationPicker,
       focusAdapter: (target) => switch (target) {
         ReaderFocusTarget.surface => _readerFocus.requestFocus(),
         ReaderFocusTarget.actions => _actionFocus.requestFocus(),
@@ -184,6 +196,35 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _cancelNoteEditor() {
     final route = _noteDialogRoute;
     _noteDialogRoute = null;
+    if (route == null) return;
+    scheduleMicrotask(() {
+      final navigator = route.navigator;
+      if (route.isActive && navigator != null) navigator.removeRoute(route);
+    });
+  }
+
+  Future<AnnotationAssociationChoice> _pickAnnotationAssociation(
+    AnnotationAssociationPage page,
+  ) async {
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = DialogRoute<AnnotationAssociationChoice>(
+      context: context,
+      builder: (context) => _AnnotationAssociationDialog(page: page),
+    );
+    _associationDialogRoute = route;
+    try {
+      return await navigator.push(route) ??
+          const AnnotationAssociationCancelled();
+    } finally {
+      if (identical(_associationDialogRoute, route)) {
+        _associationDialogRoute = null;
+      }
+    }
+  }
+
+  void _cancelAnnotationAssociationPicker() {
+    final route = _associationDialogRoute;
+    _associationDialogRoute = null;
     if (route == null) return;
     scheduleMicrotask(() {
       final navigator = route.navigator;
@@ -240,9 +281,24 @@ class _ReaderScreenState extends State<ReaderScreen>
   Widget build(BuildContext context) {
     final model = _controller.model;
     final compact = MediaQuery.sizeOf(context).width < 600;
+    final associationEnabled =
+        model.annotationOperations.isEmpty && !model.relayoutBusy;
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
+        actions: model.document != null && model.annotationsReady
+            ? [
+                IconButton(
+                  tooltip: 'Associate highlights from an earlier version…',
+                  onPressed: associationEnabled
+                      ? () => _controller.dispatch(
+                          const ReaderAnnotationAssociationRequested(),
+                        )
+                      : null,
+                  icon: const Icon(Icons.link),
+                ),
+              ]
+            : null,
       ),
       body: SafeArea(
         child: _ResponsiveReaderBody(
@@ -862,6 +918,107 @@ class _DocumentView extends StatelessWidget {
       ),
     );
   }
+}
+
+class _AnnotationAssociationDialog extends StatefulWidget {
+  const _AnnotationAssociationDialog({required this.page});
+
+  final AnnotationAssociationPage page;
+
+  @override
+  State<_AnnotationAssociationDialog> createState() =>
+      _AnnotationAssociationDialogState();
+}
+
+class _AnnotationAssociationDialogState
+    extends State<_AnnotationAssociationDialog> {
+  FlutterAnnotationAssociationSource? _selected;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Associate highlights?'),
+    content: SizedBox(
+      width: 520,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.55,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Choose the earlier document version this file replaces. '
+                'Its notes and highlights will be shared with this version. '
+                'Highlights whose location cannot be recovered will remain marked '
+                'as ambiguous or unavailable.',
+              ),
+              const SizedBox(height: 12),
+              RadioGroup<FlutterAnnotationAssociationSource>(
+                groupValue: _selected,
+                onChanged: (value) => setState(() => _selected = value),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: widget.page.sources
+                      .map(
+                        (
+                          source,
+                        ) => RadioListTile<FlutterAnnotationAssociationSource>(
+                          value: source,
+                          title: Text(source.localPath),
+                          subtitle: Text(
+                            '${source.liveAnnotations} saved highlight'
+                            '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
+                            '${source.fingerprintAlgorithm} '
+                            '${_fingerprintLabel(source.fingerprint)}',
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      if (widget.page.canGoBack)
+        TextButton(
+          onPressed: () =>
+              Navigator.pop(context, const AnnotationAssociationPreviousPage()),
+          child: const Text('Previous'),
+        ),
+      if (widget.page.canGoForward)
+        TextButton(
+          onPressed: () =>
+              Navigator.pop(context, const AnnotationAssociationNextPage()),
+          child: const Text('Next'),
+        ),
+      TextButton(
+        onPressed: () =>
+            Navigator.pop(context, const AnnotationAssociationCancelled()),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: _selected == null
+            ? null
+            : () => Navigator.pop(
+                context,
+                AnnotationAssociationSelected(_selected!),
+              ),
+        child: const Text('Associate'),
+      ),
+    ],
+  );
+}
+
+String _fingerprintLabel(Uint8List fingerprint) {
+  final shown = fingerprint
+      .take(6)
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'));
+  return shown.join();
 }
 
 class _SelectionActions extends StatelessWidget {
