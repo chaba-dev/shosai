@@ -519,7 +519,7 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
             (
                 {
                     let cancellation_checks = Arc::clone(&cancellation_checks);
-                    move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 0
+                    move || cancellation_checks.fetch_add(1, Ordering::Relaxed) > 1
                 },
                 std::future::pending(),
             ),
@@ -528,7 +528,7 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
         .unwrap_err();
     assert!(error.is::<AnnotationAssociationSourceCancelled>());
     assert!(
-        cancellation_checks.load(Ordering::Relaxed) > 1,
+        cancellation_checks.load(Ordering::Relaxed) > 2,
         "cancellation must be observed by SQLite's progress handler"
     );
 
@@ -704,6 +704,65 @@ async fn source_discovery_cancels_while_waiting_for_a_connection() {
     .expect("cancellation must not wait for the held connection")
     .unwrap_err();
     assert!(error.is::<AnnotationAssociationSourceCancelled>());
+}
+
+#[tokio::test]
+async fn source_discovery_cancels_while_sqlite_waits_on_a_lock() {
+    let dir = TempDir::new().unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(2)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(dir.path().join("shosai.db"))
+                .create_if_missing(true)
+                .busy_timeout(Duration::from_secs(5)),
+        )
+        .await
+        .unwrap();
+    MIGRATOR.run(&pool).await.unwrap();
+    let store = AnnotationStore::new(pool.clone());
+    let mut locking_connection = pool.acquire().await.unwrap();
+    let spare_connection = pool.acquire().await.unwrap();
+    drop(spare_connection);
+    sqlx::query("BEGIN EXCLUSIVE")
+        .execute(&mut *locking_connection)
+        .await
+        .unwrap();
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancellation = Arc::new(tokio::sync::Notify::new());
+    let task = {
+        let cancelled = Arc::clone(&cancelled);
+        let cancellation = Arc::clone(&cancellation);
+        tokio::spawn(async move {
+            store
+                .list_association_sources_cancellable_async(
+                    AnnotationDocumentFormat::Epub,
+                    "/target.epub",
+                    &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
+                    None,
+                    1,
+                    (move || cancelled.load(Ordering::Acquire), async move {
+                        cancellation.notified().await
+                    }),
+                )
+                .await
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    cancelled.store(true, Ordering::Release);
+    cancellation.notify_one();
+
+    let error = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("cancellation must interrupt SQLite's lock wait")
+        .unwrap()
+        .unwrap_err();
+    assert!(error.is::<AnnotationAssociationSourceCancelled>());
+    sqlx::query("ROLLBACK")
+        .execute(&mut *locking_connection)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

@@ -1417,6 +1417,7 @@ impl AnnotationStore {
         C: Future<Output = ()> + Send,
     {
         let (is_cancelled, cancelled) = cancellation;
+        tokio::pin!(cancelled);
         if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
             bail!(
                 "annotation association source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
@@ -1428,44 +1429,48 @@ impl AnnotationStore {
         let mut connection = tokio::select! {
             connection = self.pool.acquire() => connection
                 .context("failed to acquire annotation association source connection")?,
-            () = cancelled => return Err(AnnotationAssociationSourceCancelled.into()),
+            () = &mut cancelled => return Err(AnnotationAssociationSourceCancelled.into()),
         };
         connection.close_on_drop();
         if is_cancelled() {
             return Err(AnnotationAssociationSourceCancelled.into());
         }
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let query_cancelled = Arc::new(AtomicBool::new(false));
         let work_exhausted = Arc::new(AtomicBool::new(false));
         let completed_work = Arc::new(AtomicUsize::new(0));
         {
-            let cancelled = Arc::clone(&cancelled);
+            let query_cancelled = Arc::clone(&query_cancelled);
             let work_exhausted = Arc::clone(&work_exhausted);
             let completed_work = Arc::clone(&completed_work);
-            connection
-                .lock_handle()
-                .await
-                .context("failed to configure annotation association source query")?
-                .set_progress_handler(
-                    i32::try_from(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL)
-                        .expect("SQLite progress interval fits in i32"),
-                    move || {
-                        if is_cancelled() {
-                            cancelled.store(true, Ordering::Release);
-                            return false;
-                        }
-                        let work = completed_work
-                            .fetch_add(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL, Ordering::Relaxed)
-                            + ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL;
-                        if work >= MAX_ANNOTATION_ASSOCIATION_DISCOVERY_WORK {
-                            work_exhausted.store(true, Ordering::Release);
-                            return false;
-                        }
-                        true
-                    },
-                );
+            let mut handle = tokio::select! {
+                handle = connection.lock_handle() => handle
+                    .context("failed to configure annotation association source query")?,
+                () = &mut cancelled => {
+                    return Err(AnnotationAssociationSourceCancelled.into());
+                }
+            };
+            handle.set_progress_handler(
+                i32::try_from(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL)
+                    .expect("SQLite progress interval fits in i32"),
+                move || {
+                    if is_cancelled() {
+                        query_cancelled.store(true, Ordering::Release);
+                        return false;
+                    }
+                    let work = completed_work
+                        .fetch_add(ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL, Ordering::Relaxed)
+                        + ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL;
+                    if work >= MAX_ANNOTATION_ASSOCIATION_DISCOVERY_WORK {
+                        work_exhausted.store(true, Ordering::Release);
+                        return false;
+                    }
+                    true
+                },
+            );
         }
-        let result: Result<AnnotationAssociationSourcePage> = async {
-            let rows = sqlx::query(
+        let result: Result<AnnotationAssociationSourcePage> = tokio::select! {
+            result = async {
+                let rows = sqlx::query(
                 "WITH candidates AS MATERIALIZED (
                SELECT v.id, v.document_id, v.format, v.local_path,
                       v.fingerprint_algorithm, v.fingerprint_version, v.fingerprint
@@ -1568,19 +1573,25 @@ impl AnnotationStore {
             } else {
                 None
             };
-            Ok(AnnotationAssociationSourcePage {
-                sources,
-                next_cursor,
-                previous_cursor,
-            })
+                Ok(AnnotationAssociationSourcePage {
+                    sources,
+                    next_cursor,
+                    previous_cursor,
+                })
+            } => result,
+            () = &mut cancelled => {
+                return Err(AnnotationAssociationSourceCancelled.into());
+            }
+        };
+        tokio::select! {
+            handle = connection.lock_handle() => handle
+                .context("failed to clear annotation association source query budget")?
+                .remove_progress_handler(),
+            () = &mut cancelled => {
+                return Err(AnnotationAssociationSourceCancelled.into());
+            }
         }
-        .await;
-        connection
-            .lock_handle()
-            .await
-            .context("failed to clear annotation association source query budget")?
-            .remove_progress_handler();
-        if cancelled.load(Ordering::Acquire) {
+        if query_cancelled.load(Ordering::Acquire) {
             Err(AnnotationAssociationSourceCancelled.into())
         } else if work_exhausted.load(Ordering::Acquire) {
             Err(AnnotationAssociationSourceWorkLimit.into())
