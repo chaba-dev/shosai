@@ -11,11 +11,12 @@ use thiserror::Error;
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::annotations::{
-    ANNOTATION_SNAPSHOT_BASE_BYTES, Annotation, AnnotationId, AnnotationResolution,
-    AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint, EpubAnchor,
-    HighlightColor, MAX_ANNOTATION_BODY_SCALARS, MAX_ANNOTATION_SNAPSHOT_BYTES,
-    MAX_TEXT_ANCHOR_RESOLUTION_WORK, NewAnnotation, PageRect, PdfAnchor, QuoteSelector,
-    TextAnchorResolutionError, TextAnchorResolver, TextScalarIndex,
+    ANNOTATION_SNAPSHOT_BASE_BYTES, Annotation, AnnotationAssociationConflict,
+    AnnotationAssociationOutcome, AnnotationDocumentFormat, AnnotationDocumentVersionId,
+    AnnotationId, AnnotationResolution, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget,
+    DocumentFingerprint, EpubAnchor, HighlightColor, MAX_ANNOTATION_BODY_SCALARS,
+    MAX_ANNOTATION_SNAPSHOT_BYTES, MAX_TEXT_ANCHOR_RESOLUTION_WORK, NewAnnotation, PageRect,
+    PdfAnchor, QuoteSelector, TextAnchorResolutionError, TextAnchorResolver, TextScalarIndex,
 };
 #[cfg(test)]
 use crate::annotations::{AnnotationPersistenceTestGate, MAX_ANNOTATIONS_PER_SNAPSHOT};
@@ -195,6 +196,23 @@ pub struct BridgeAnnotation {
 pub struct AnnotationTextRange {
     pub start: usize,
     pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationAssociationSourceDto {
+    pub version_id: String,
+    pub format: BookFormat,
+    pub local_path: String,
+    pub fingerprint_algorithm: String,
+    pub fingerprint_version: u32,
+    pub fingerprint: Vec<u8>,
+    pub live_annotations: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationAssociationSourcePageDto {
+    pub sources: Vec<AnnotationAssociationSourceDto>,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -925,12 +943,7 @@ impl Bridge {
             },
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
         };
-        let items = bounded_annotation_snapshot(
-            listed
-                .into_iter()
-                .filter(|item| item.fingerprint == retained.fingerprint)
-                .collect(),
-        )?;
+        let items = bounded_annotation_snapshot(listed)?;
         let render_slot =
             acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
         self.resolve_annotation_dtos(
@@ -943,6 +956,89 @@ impl Bridge {
         )
         .await
         .map(|(items, _guards)| items)
+    }
+
+    pub async fn list_annotation_association_sources(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+        cancellation: Cancellation,
+    ) -> Result<AnnotationAssociationSourcePageDto, BridgeError> {
+        let _request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let cursor = cursor
+            .map(AnnotationDocumentVersionId::from_str)
+            .transpose()
+            .map_err(|_| BridgeError::InvalidRequest("invalid association source cursor".into()))?;
+        let store = tokio::select! {
+            store = self.annotation_store() => store?,
+            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
+        };
+        let page = tokio::select! {
+            page = store.list_association_sources_async(cursor.as_ref(), limit) => {
+                page.map_err(annotation_storage_error)?
+            }
+            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
+        };
+        check_cancelled(&cancellation)?;
+        Ok(AnnotationAssociationSourcePageDto {
+            sources: page
+                .sources
+                .into_iter()
+                .map(|source| AnnotationAssociationSourceDto {
+                    version_id: source.version_id.to_string(),
+                    format: match source.format {
+                        AnnotationDocumentFormat::Epub => BookFormat::Epub,
+                        AnnotationDocumentFormat::Pdf => BookFormat::Pdf,
+                    },
+                    local_path: source.local_path,
+                    fingerprint_algorithm: source.fingerprint.algorithm,
+                    fingerprint_version: source.fingerprint.version,
+                    fingerprint: source.fingerprint.bytes,
+                    live_annotations: source.live_annotations,
+                })
+                .collect(),
+            next_cursor: page.next_cursor.map(|cursor| cursor.to_string()),
+        })
+    }
+
+    pub async fn associate_annotation_version(
+        &self,
+        source_version_id: &str,
+        target: DocumentHandle,
+        cancellation: Cancellation,
+    ) -> Result<AnnotationAssociationOutcome, BridgeError> {
+        let _request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let source = AnnotationDocumentVersionId::from_str(source_version_id)
+            .map_err(|_| BridgeError::InvalidRequest("invalid association source ID".into()))?;
+        let target = self.document(target)?;
+        let format = match &target.document {
+            OpenDocument::Epub(_) => AnnotationDocumentFormat::Epub,
+            OpenDocument::Pdf(_) => AnnotationDocumentFormat::Pdf,
+            OpenDocument::Cbz(_) => {
+                return Err(BridgeError::UnsupportedOperation(BookFormat::Cbz));
+            }
+        };
+        let store = tokio::select! {
+            store = self.annotation_store() => store?,
+            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
+        };
+        let outcome = tokio::select! {
+            outcome = store.associate_document_version_async(
+                &source,
+                format,
+                &target.local_path,
+                &target.fingerprint,
+            ) => outcome.map_err(annotation_storage_error)?,
+            () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
+        };
+        check_cancelled(&cancellation)?;
+        Ok(outcome)
     }
 
     async fn resolve_annotation_dtos(
@@ -985,6 +1081,7 @@ impl Bridge {
         let worker_cancellation = cancellation.clone();
         #[cfg(test)]
         let worker_barrier = self.annotation_resolution_worker_barrier.clone();
+        let current_fingerprint = retained.fingerprint.clone();
         let (result, guards) = tokio::task::spawn_blocking(move || {
             #[cfg(test)]
             if let Some(barrier) = worker_barrier {
@@ -995,6 +1092,7 @@ impl Bridge {
                 annotation_dtos(
                     annotations,
                     &retained.document,
+                    &current_fingerprint,
                     scale,
                     resolve_persisted_text,
                     &|| worker_cancellation.is_cancelled(),
@@ -1023,15 +1121,15 @@ impl Bridge {
         let retained = self.document(document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
-        if !self
-            .annotation_belongs_to(&id, &retained.local_path, &retained.fingerprint)
-            .await?
-        {
-            return Ok(false);
-        }
         self.annotation_store()
             .await?
-            .update_async(&id, color, body.as_deref())
+            .update_for_local_document_async(
+                &id,
+                &retained.local_path,
+                &retained.fingerprint,
+                color,
+                body.as_deref(),
+            )
             .await
             .map_err(annotation_storage_error)
     }
@@ -1048,37 +1146,11 @@ impl Bridge {
         let retained = self.document(document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
-        if !self
-            .annotation_belongs_to(&id, &retained.local_path, &retained.fingerprint)
-            .await?
-        {
-            return Ok(false);
-        }
         self.annotation_store()
             .await?
-            .delete_async(&id)
+            .delete_for_local_document_async(&id, &retained.local_path, &retained.fingerprint)
             .await
             .map_err(storage_error)
-    }
-
-    async fn annotation_belongs_to(
-        &self,
-        id: &AnnotationId,
-        local_path: &str,
-        fingerprint: &DocumentFingerprint,
-    ) -> Result<bool, BridgeError> {
-        self.annotation_store()
-            .await?
-            .get_async(id, false)
-            .await
-            .map_err(storage_error)
-            .map(|annotation| {
-                annotation.is_some_and(|value| {
-                    value.book_id.is_none()
-                        && value.local_path.as_deref() == Some(local_path)
-                        && value.fingerprint == *fingerprint
-                })
-            })
     }
 
     pub async fn render_page(
@@ -2113,6 +2185,8 @@ fn storage_error(error: impl std::fmt::Display) -> BridgeError {
 fn annotation_storage_error(error: anyhow::Error) -> BridgeError {
     if error.is::<AnnotationSnapshotLimit>() {
         BridgeError::AnnotationLimit
+    } else if error.is::<AnnotationAssociationConflict>() {
+        BridgeError::InvalidRequest(error.to_string())
     } else {
         storage_error(error)
     }
@@ -2151,6 +2225,7 @@ fn bounded_annotation_snapshot(
 fn annotation_dtos(
     annotations: Vec<Annotation>,
     document: &OpenDocument,
+    current_fingerprint: &DocumentFingerprint,
     scale: f32,
     resolve_persisted_text: bool,
     is_cancelled: &dyn Fn() -> bool,
@@ -2248,11 +2323,15 @@ fn annotation_dtos(
                     }
                     _ => continue,
                 };
-            if let Some(resolved) = scalar_index
-                .resolve_exact(stored_range, quote, &mut remaining_work, is_cancelled)
-                .map_err(map_text_anchor_resolution_error)?
-            {
-                resolved_texts[index] = Some(resolved);
+            if annotations[index].fingerprint == *current_fingerprint {
+                if let Some(resolved) = scalar_index
+                    .resolve_exact(stored_range, quote, &mut remaining_work, is_cancelled)
+                    .map_err(map_text_anchor_resolution_error)?
+                {
+                    resolved_texts[index] = Some(resolved);
+                } else {
+                    unresolved.push(index);
+                }
             } else {
                 unresolved.push(index);
             }
@@ -2264,7 +2343,7 @@ fn annotation_dtos(
             TextAnchorResolver::from_index(scalar_index, &mut remaining_work, is_cancelled)
                 .map_err(map_text_anchor_resolution_error)?;
         for index in unresolved {
-            let (stored_range, quote) =
+            let (mut stored_range, quote) =
                 match (&annotations[index].target, &annotations[index].quote) {
                     (AnnotationTarget::Epub(anchor), Some(quote)) => (
                         anchor.scalar_start as usize..anchor.scalar_end as usize,
@@ -2278,6 +2357,9 @@ fn annotation_dtos(
                     }
                     _ => continue,
                 };
+            if annotations[index].fingerprint != *current_fingerprint {
+                stored_range = usize::MAX..usize::MAX;
+            }
             resolved_texts[index] = Some(
                 resolver
                     .resolve(stored_range, quote, &mut remaining_work, is_cancelled)
@@ -2291,6 +2373,7 @@ fn annotation_dtos(
         .filter_map(|(index, annotation)| match (&annotation.target, document) {
             (AnnotationTarget::Pdf(anchor), OpenDocument::Pdf(pdf))
                 if anchor.character_range.is_none()
+                    && annotation.fingerprint == *current_fingerprint
                     && (anchor.page as usize) < pdf.page_count() =>
             {
                 Some((
@@ -2731,10 +2814,12 @@ mod tests {
             modified_at: "now".into(),
             deleted_at: None,
         };
+        let current_fingerprint = annotation.fingerprint.clone();
 
         let dto = annotation_dtos(
             vec![annotation],
             &OpenDocument::Pdf(pdf.into()),
+            &current_fingerprint,
             2.0,
             true,
             &|| false,
@@ -2814,6 +2899,7 @@ mod tests {
         let resolved = annotation_dtos(
             vec![geometry, text, valid_geometry, incompatible],
             &OpenDocument::Pdf(pdf.into()),
+            &fingerprint,
             1.0,
             true,
             &|| false,
@@ -3858,13 +3944,198 @@ mod tests {
                 deleted_at: None,
             })
             .collect();
+        let current_fingerprint = DocumentFingerprint::new("sha256", 1, vec![7; 32]).unwrap();
 
-        let resolved = annotation_dtos(annotations, &document, 1.0, true, &|| false).unwrap();
+        let resolved = annotation_dtos(
+            annotations,
+            &document,
+            &current_fingerprint,
+            1.0,
+            true,
+            &|| false,
+        )
+        .unwrap();
         assert_eq!(resolved.len(), MAX_ANNOTATIONS_PER_SNAPSHOT);
         assert!(
             resolved
                 .iter()
                 .all(|annotation| annotation.resolution == AnnotationResolution::Exact)
+        );
+    }
+
+    #[test]
+    fn changed_fingerprint_bypasses_offsets_and_orphans_pdf_geometry() {
+        let directory = tempfile::tempdir().unwrap();
+        let epub_path = directory.path().join("changed.epub");
+        std::fs::write(&epub_path, epub_with_body("target target")).unwrap();
+        let epub = OpenDocument::open(&DeviceFileLocator::from_path(&epub_path)).unwrap();
+        let stored_fingerprint = DocumentFingerprint::new("sha256", 1, vec![1; 32]).unwrap();
+        let current_fingerprint = DocumentFingerprint::new("sha256", 1, vec![2; 32]).unwrap();
+        let annotation = Annotation {
+            id: AnnotationId::new(),
+            book_id: None,
+            local_path: Some("old.epub".into()),
+            fingerprint: stored_fingerprint.clone(),
+            quote: Some(QuoteSelector::new("target", "", "").unwrap()),
+            target: AnnotationTarget::Epub(EpubAnchor::new(0, "OPS/chapter.xhtml", 0, 6).unwrap()),
+            color: HighlightColor::Yellow,
+            body: None,
+            provenance: None,
+            created_at: "now".into(),
+            modified_at: "now".into(),
+            deleted_at: None,
+        };
+        let resolved = annotation_dtos(
+            vec![annotation],
+            &epub,
+            &current_fingerprint,
+            1.0,
+            true,
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(resolved[0].resolution, AnnotationResolution::Ambiguous);
+        assert!(resolved[0].text_range.is_none());
+
+        let pdf = crate::pdf::PdfDoc::open(std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        )))
+        .unwrap();
+        let geometry = Annotation {
+            id: AnnotationId::new(),
+            book_id: None,
+            local_path: Some("old.pdf".into()),
+            fingerprint: stored_fingerprint,
+            quote: None,
+            target: AnnotationTarget::Pdf(
+                PdfAnchor::new(0, None, vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()]).unwrap(),
+            ),
+            color: HighlightColor::Yellow,
+            body: None,
+            provenance: None,
+            created_at: "now".into(),
+            modified_at: "now".into(),
+            deleted_at: None,
+        };
+        let resolved = annotation_dtos(
+            vec![geometry],
+            &OpenDocument::Pdf(pdf.into()),
+            &current_fingerprint,
+            1.0,
+            true,
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(resolved[0].resolution, AnnotationResolution::Orphaned);
+        assert!(resolved[0].rectangles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_bridge_association_recovers_changed_document_annotations() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_path = directory.path().join("source.epub");
+        let target_path = directory.path().join("target.epub");
+        std::fs::write(&source_path, epub_with_body("lead target tail")).unwrap();
+        std::fs::write(&target_path, epub_with_body("inserted lead target tail")).unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        let open = |path: &std::path::Path, local_id: &str| OpenRequest {
+            book_id: None,
+            local_id: local_id.into(),
+            path_key: crate::path_key::path_key(path),
+            format_hint: Some(BookFormat::Epub),
+        };
+        let source = bridge
+            .open_document(open(&source_path, "source"), Cancellation::new())
+            .await
+            .unwrap();
+        let surface = bridge
+            .selection_surface(source.handle, 0, 1.0, 680.0, 18.0, Cancellation::new())
+            .await
+            .unwrap();
+        let chars = surface.text.chars().collect::<Vec<_>>();
+        let start = chars
+            .windows("target".len())
+            .position(|window| window.iter().collect::<String>() == "target")
+            .unwrap();
+        let end = start + "target".len();
+        bridge.release_selection(surface.handle);
+        let created = bridge
+            .create_annotation(
+                CreateAnnotationRequest {
+                    document: source.handle,
+                    unit: 0,
+                    start,
+                    end,
+                    display_scale: 1.0,
+                    color: HighlightColor::Yellow,
+                    body: Some("shared note".into()),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let sources = bridge
+            .list_annotation_association_sources(None, 10, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(sources.sources.len(), 1);
+
+        let target = bridge
+            .open_document(open(&target_path, "target"), Cancellation::new())
+            .await
+            .unwrap();
+        assert!(
+            bridge
+                .list_annotations(target.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .is_empty(),
+            "changed bytes must not infer association"
+        );
+        assert_eq!(
+            bridge
+                .associate_annotation_version(
+                    &sources.sources[0].version_id,
+                    target.handle,
+                    Cancellation::new(),
+                )
+                .await
+                .unwrap(),
+            AnnotationAssociationOutcome::Associated
+        );
+        let recovered = bridge
+            .list_annotations(target.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].id, created.id);
+        assert_eq!(recovered[0].resolution, AnnotationResolution::Recovered);
+        assert_eq!(recovered[0].body.as_deref(), Some("shared note"));
+        assert!(
+            bridge
+                .update_annotation(
+                    target.handle,
+                    &created.id,
+                    HighlightColor::Green,
+                    Some("updated through target".into()),
+                )
+                .await
+                .unwrap()
+        );
+        assert!(
+            bridge
+                .delete_annotation(source.handle, &created.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            bridge
+                .list_annotations(target.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .is_empty(),
+            "a shared tombstone must prevent resurrection on every version"
         );
     }
 

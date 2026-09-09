@@ -1564,6 +1564,49 @@ impl AnnotationStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub(crate) async fn update_for_local_document_async(
+        &self,
+        id: &AnnotationId,
+        local_path: &str,
+        fingerprint: &DocumentFingerprint,
+        color: HighlightColor,
+        body: Option<&str>,
+    ) -> Result<bool> {
+        if let Some(body) = body {
+            ensure_scalar_limit(body, MAX_ANNOTATION_BODY_SCALARS, "annotation body")?;
+        }
+        let mut transaction = self.pool.begin().await?;
+        let result = sqlx::query(
+            "UPDATE annotations
+             SET color = ?, body = ?, modified_at =
+                 CASE
+                     WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > modified_at
+                     THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     ELSE strftime('%Y-%m-%dT%H:%M:%fZ', modified_at, '+0.001 seconds')
+                 END
+             WHERE id = ? AND deleted_at IS NULL
+               AND annotation_document_id = (
+                 SELECT document_id FROM annotation_document_versions
+                 WHERE local_path = ? AND fingerprint_algorithm = ?
+                   AND fingerprint_version = ? AND fingerprint = ?
+               )",
+        )
+        .bind(color.as_str())
+        .bind(body)
+        .bind(id.to_string())
+        .bind(local_path)
+        .bind(&fingerprint.algorithm)
+        .bind(i64::from(fingerprint.version))
+        .bind(&fingerprint.bytes)
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() == 1 {
+            ensure_annotation_snapshot_within_limits(&mut transaction, id).await?;
+        }
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn delete_async(&self, id: &AnnotationId) -> Result<bool> {
         let result = sqlx::query(
             "UPDATE annotations
@@ -1580,6 +1623,38 @@ impl AnnotationStore {
         .execute(&self.pool)
         .await
         .context("failed to delete annotation")?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn delete_for_local_document_async(
+        &self,
+        id: &AnnotationId,
+        local_path: &str,
+        fingerprint: &DocumentFingerprint,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE annotations
+             SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                 modified_at =
+                 CASE
+                     WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > modified_at
+                     THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     ELSE strftime('%Y-%m-%dT%H:%M:%fZ', modified_at, '+0.001 seconds')
+                 END
+             WHERE id = ? AND deleted_at IS NULL
+               AND annotation_document_id = (
+                 SELECT document_id FROM annotation_document_versions
+                 WHERE local_path = ? AND fingerprint_algorithm = ?
+                   AND fingerprint_version = ? AND fingerprint = ?
+               )",
+        )
+        .bind(id.to_string())
+        .bind(local_path)
+        .bind(&fingerprint.algorithm)
+        .bind(i64::from(fingerprint.version))
+        .bind(&fingerprint.bytes)
+        .execute(&self.pool)
+        .await?;
         Ok(result.rows_affected() == 1)
     }
 
