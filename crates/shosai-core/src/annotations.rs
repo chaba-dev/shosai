@@ -1055,6 +1055,18 @@ impl AnnotationStore {
             AnnotationTarget::Epub(anchor) => ("epub", Some(anchor), None),
             AnnotationTarget::Pdf(anchor) => ("pdf", None, Some(anchor)),
         };
+        let annotation_document_id = match (annotation.book_id, &annotation.local_path) {
+            (None, Some(local_path)) => Some(
+                ensure_annotation_document_version(
+                    &mut transaction,
+                    format,
+                    local_path,
+                    &annotation.fingerprint,
+                )
+                .await?,
+            ),
+            _ => None,
+        };
         let (char_start, char_end) = pdf
             .and_then(|anchor| anchor.character_range)
             .map_or((None, None), |(start, end)| {
@@ -1064,18 +1076,19 @@ impl AnnotationStore {
         let provenance = annotation.provenance.as_ref();
         sqlx::query(
             "INSERT INTO annotations (
-                id, book_id, local_path, format, anchor_version,
+                id, book_id, local_path, annotation_document_id, format, anchor_version,
                 fingerprint_algorithm, fingerprint_version, fingerprint,
                 original_quote, normalization_profile, normalized_exact,
                 normalized_prefix, normalized_suffix, color, body,
                 source_system, source_id, epub_spine_occurrence,
                 epub_resource_path, epub_scalar_start, epub_scalar_end,
                 pdf_page, pdf_char_start, pdf_char_end)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(annotation.id.to_string())
         .bind(annotation.book_id)
         .bind(&annotation.local_path)
+        .bind(annotation_document_id)
         .bind(format)
         .bind(i64::from(ANCHOR_VERSION))
         .bind(&annotation.fingerprint.algorithm)
@@ -1225,25 +1238,38 @@ impl AnnotationStore {
             gate.entered.add_permits(1);
             gate.release.acquire().await.unwrap().forget();
         }
-        let rows = sqlx::query(
-            "SELECT * FROM annotations
-             WHERE book_id IS NULL AND local_path = ? AND deleted_at IS NULL
-               AND (? IS NULL OR (
-                 fingerprint_algorithm = ? AND fingerprint_version = ? AND fingerprint = ?
-               ))
-             ORDER BY created_at, id LIMIT ?",
-        )
-        .bind(local_path)
-        .bind(fingerprint.map(|value| value.algorithm.as_str()))
-        .bind(fingerprint.map(|value| value.algorithm.as_str()))
-        .bind(fingerprint.map(|value| i64::from(value.version)))
-        .bind(fingerprint.map(|value| value.bytes.as_slice()))
-        .bind(
-            i64::try_from(MAX_ANNOTATIONS_PER_SNAPSHOT + 1)
-                .expect("annotation snapshot limit fits in i64"),
-        )
-        .fetch_all(&mut *transaction)
-        .await
+        let limit = i64::try_from(MAX_ANNOTATIONS_PER_SNAPSHOT + 1)
+            .expect("annotation snapshot limit fits in i64");
+        let rows = if let Some(fingerprint) = fingerprint {
+            sqlx::query(
+                "SELECT a.* FROM annotations a
+                 JOIN annotation_document_versions v
+                   ON v.document_id = a.annotation_document_id
+                 WHERE v.local_path = ?
+                   AND v.fingerprint_algorithm = ?
+                   AND v.fingerprint_version = ?
+                   AND v.fingerprint = ?
+                   AND a.deleted_at IS NULL
+                 ORDER BY a.created_at, a.id LIMIT ?",
+            )
+            .bind(local_path)
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .bind(limit)
+            .fetch_all(&mut *transaction)
+            .await
+        } else {
+            sqlx::query(
+                "SELECT * FROM annotations
+                 WHERE book_id IS NULL AND local_path = ? AND deleted_at IS NULL
+                 ORDER BY created_at, id LIMIT ?",
+            )
+            .bind(local_path)
+            .bind(limit)
+            .fetch_all(&mut *transaction)
+            .await
+        }
         .context("failed to list annotations for local path")?;
         if rows.len() > MAX_ANNOTATIONS_PER_SNAPSHOT {
             return Err(AnnotationSnapshotLimit.into());
@@ -1348,13 +1374,72 @@ impl AnnotationStore {
     }
 }
 
+async fn ensure_annotation_document_version(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    format: &str,
+    local_path: &str,
+    fingerprint: &DocumentFingerprint,
+) -> Result<String> {
+    // Acquire SQLite's write lock before checking the binding so two first
+    // annotations cannot both observe an absent version and deadlock while
+    // upgrading deferred transactions.
+    let document_id = Uuid::new_v4().to_string();
+    sqlx::query("INSERT INTO annotation_documents (id, format) VALUES (?, ?)")
+        .bind(&document_id)
+        .bind(format)
+        .execute(&mut **transaction)
+        .await
+        .context("failed to reserve annotation document")?;
+    if let Some(retained_document_id) = sqlx::query_scalar::<_, String>(
+        "SELECT document_id FROM annotation_document_versions
+         WHERE local_path = ? AND fingerprint_algorithm = ?
+           AND fingerprint_version = ? AND fingerprint = ?",
+    )
+    .bind(local_path)
+    .bind(&fingerprint.algorithm)
+    .bind(i64::from(fingerprint.version))
+    .bind(&fingerprint.bytes)
+    .fetch_optional(&mut **transaction)
+    .await
+    .context("failed to resolve annotation document version")?
+    {
+        sqlx::query("DELETE FROM annotation_documents WHERE id = ?")
+            .bind(&document_id)
+            .execute(&mut **transaction)
+            .await
+            .context("failed to remove unused annotation document")?;
+        return Ok(retained_document_id);
+    }
+
+    let version_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO annotation_document_versions (
+            id, document_id, local_path, fingerprint_algorithm,
+            fingerprint_version, fingerprint)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(local_path, fingerprint_algorithm, fingerprint_version, fingerprint)
+         DO NOTHING",
+    )
+    .bind(version_id)
+    .bind(&document_id)
+    .bind(local_path)
+    .bind(&fingerprint.algorithm)
+    .bind(i64::from(fingerprint.version))
+    .bind(&fingerprint.bytes)
+    .execute(&mut **transaction)
+    .await
+    .context("failed to create annotation document version")?;
+    Ok(document_id)
+}
+
 async fn ensure_annotation_snapshot_within_limits(
     connection: &mut SqliteConnection,
     annotation_id: &AnnotationId,
 ) -> Result<()> {
     let usage = sqlx::query(
         "WITH target AS (
-           SELECT book_id, local_path, fingerprint_algorithm, fingerprint_version, fingerprint
+           SELECT book_id, annotation_document_id, local_path,
+                  fingerprint_algorithm, fingerprint_version, fingerprint
            FROM annotations WHERE id = ?
          )
          SELECT COUNT(*) AS annotation_count,
@@ -1369,7 +1454,10 @@ async fn ensure_annotation_snapshot_within_limits(
          FROM annotations a, target t
          WHERE a.deleted_at IS NULL AND (
            (t.book_id IS NOT NULL AND a.book_id = t.book_id) OR
-           (t.book_id IS NULL AND a.book_id IS NULL AND
+           (t.book_id IS NULL AND t.annotation_document_id IS NOT NULL AND
+            a.annotation_document_id = t.annotation_document_id) OR
+           (t.book_id IS NULL AND t.annotation_document_id IS NULL AND
+            a.book_id IS NULL AND
             a.local_path = t.local_path AND
             a.fingerprint_algorithm = t.fingerprint_algorithm AND
             a.fingerprint_version = t.fingerprint_version AND
@@ -1387,7 +1475,8 @@ async fn ensure_annotation_snapshot_within_limits(
     let rectangle_count = usize::try_from(
         sqlx::query_scalar::<_, i64>(
             "WITH target AS (
-               SELECT book_id, local_path, fingerprint_algorithm, fingerprint_version, fingerprint
+               SELECT book_id, annotation_document_id, local_path,
+                      fingerprint_algorithm, fingerprint_version, fingerprint
                FROM annotations WHERE id = ?
              )
              SELECT COUNT(*)
@@ -1396,7 +1485,10 @@ async fn ensure_annotation_snapshot_within_limits(
              JOIN target t
              WHERE a.deleted_at IS NULL AND (
                (t.book_id IS NOT NULL AND a.book_id = t.book_id) OR
-               (t.book_id IS NULL AND a.book_id IS NULL AND
+               (t.book_id IS NULL AND t.annotation_document_id IS NOT NULL AND
+                a.annotation_document_id = t.annotation_document_id) OR
+               (t.book_id IS NULL AND t.annotation_document_id IS NULL AND
+                a.book_id IS NULL AND
                 a.local_path = t.local_path AND
                 a.fingerprint_algorithm = t.fingerprint_algorithm AND
                 a.fingerprint_version = t.fingerprint_version AND

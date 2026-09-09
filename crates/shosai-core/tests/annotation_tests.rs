@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use shosai_core::annotations::{
     AnnotationId, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint,
     EpubAnchor, HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS,
@@ -7,7 +9,10 @@ use shosai_core::annotations::{
     QuoteSelector, normalize_quote_v1, scalar_range_to_utf16,
 };
 use shosai_core::reading_state::ReadingStateStore;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use tempfile::TempDir;
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 async fn temp_store() -> (AnnotationStore, sqlx::SqlitePool, TempDir) {
     let dir = TempDir::new().unwrap();
@@ -229,6 +234,169 @@ async fn untracked_annotations_reopen_by_device_local_path() {
         .unwrap();
     assert_eq!(reopened.len(), 1);
     assert_eq!(reopened[0].id, first.id);
+}
+
+#[tokio::test]
+async fn untracked_annotations_share_only_their_exact_document_version() {
+    let (store, pool, _dir) = temp_store().await;
+    let first = epub_annotation(None);
+    let second = epub_annotation(None);
+    let mut changed = epub_annotation(None);
+    changed.fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
+
+    store.create_async(&first).await.unwrap();
+    store.create_async(&second).await.unwrap();
+    store.create_async(&changed).await.unwrap();
+
+    let first_document: String =
+        sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+            .bind(first.id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let second_document: String =
+        sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+            .bind(second.id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let changed_document: String =
+        sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+            .bind(changed.id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(first_document, second_document);
+    assert_ne!(first_document, changed_document);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM annotation_documents")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        store
+            .list_for_local_path_async("/books/example.epub")
+            .await
+            .unwrap()
+            .len(),
+        3,
+        "path-only discovery remains able to show explicit association sources"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_first_annotations_create_one_exact_document_version() {
+    let (store, pool, _dir) = temp_store().await;
+    let first = epub_annotation(None);
+    let second = epub_annotation(None);
+    let (first_result, second_result) =
+        tokio::join!(store.create_async(&first), store.create_async(&second),);
+    first_result.unwrap();
+    second_result.unwrap();
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM annotation_documents")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM annotation_document_versions")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        store
+            .list_for_local_path_async("/books/example.epub")
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn annotation_document_migration_backfills_exact_versions_including_tombstones() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("shosai.db");
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    let v13_migrator = sqlx::migrate::Migrator {
+        migrations: Cow::Owned(MIGRATOR.migrations[..13].to_vec()),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    v13_migrator.run(&pool).await.unwrap();
+    let ids = [
+        AnnotationId::new().to_string(),
+        AnnotationId::new().to_string(),
+        AnnotationId::new().to_string(),
+    ];
+    for (index, id) in ids.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO annotations (
+                id, local_path, format, anchor_version,
+                fingerprint_algorithm, fingerprint_version, fingerprint,
+                original_quote, normalization_profile, normalized_exact,
+                normalized_prefix, normalized_suffix, color,
+                epub_spine_occurrence, epub_resource_path,
+                epub_scalar_start, epub_scalar_end, deleted_at)
+             VALUES (?, '/books/example.epub', 'epub', 1,
+                     'sha256', 1, ?, 'selected', 'shosai-quote-v1',
+                     'selected', '', '', 'yellow', 0, 'chapter.xhtml', 0, 8, ?)",
+        )
+        .bind(id)
+        .bind(if index == 2 {
+            vec![0xcd; 32]
+        } else {
+            vec![0xab; 32]
+        })
+        .bind((index == 1).then_some("2026-01-01T00:00:00Z"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let documents: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, annotation_document_id FROM annotations ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let first_document = documents
+        .iter()
+        .find(|(id, _)| id == &ids[0])
+        .unwrap()
+        .1
+        .clone();
+    assert_eq!(
+        documents.iter().find(|(id, _)| id == &ids[1]).unwrap().1,
+        first_document,
+        "deleted records remain in the same durable collection"
+    );
+    assert_ne!(
+        documents.iter().find(|(id, _)| id == &ids[2]).unwrap().1,
+        first_document,
+        "path equality must not associate changed bytes"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM annotation_document_versions")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        2
+    );
 }
 
 #[tokio::test]
