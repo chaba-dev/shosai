@@ -1600,7 +1600,13 @@ void main() {
         controller.model.annotations.single.resolution,
         FlutterAnnotationResolution.recovered,
       );
+      expect(controller.model.annotationsReady, isTrue);
       expect(controller.model.annotationOperations, isEmpty);
+
+      controller.dispatch(ReaderAnnotationDeleted(recovered.id));
+      await _waitUntil(() => controller.model.annotationOperations.isEmpty);
+      expect(bridge.deleteCalls, 1);
+      expect(controller.model.annotations, isEmpty);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -1691,6 +1697,38 @@ void main() {
     expect(controller.model.annotations.single.id, recovered.id);
     expect(controller.model.annotationsReady, isTrue);
     expect(controller.model.annotationError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('association and reload intents are rejected while opening', () async {
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      immediateLists: true,
+    );
+    final selection = Completer<FlutterSelectionSurface>();
+    bridge.selectionCompleters.add(selection);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async =>
+          AnnotationAssociationSelected(page.sources.single),
+    );
+
+    controller.dispatch(const ReaderOpenRequested('/tmp/changed.epub'));
+    await _waitUntil(() => bridge.selectionCalls == 1);
+    expect(controller.model.busy, isTrue);
+
+    controller.dispatch(const ReaderAnnotationReloadRequested());
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await Future<void>.delayed(Duration.zero);
+
+    expect(bridge.createdCancellations, hasLength(1));
+    expect(bridge.associationListCalls, 0);
+    expect(bridge.associationCalls, 0);
+
+    selection.complete(_surface(BigInt.from(70), raster: true));
+    await bridge.waitForOp(1);
     controller.dispose();
     await bridge.disposed.future;
   });

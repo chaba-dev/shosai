@@ -283,7 +283,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     final model = _controller.model;
     final compact = MediaQuery.sizeOf(context).width < 600;
     final associationEnabled =
-        model.annotationOperations.isEmpty && !model.relayoutBusy;
+        !model.busy &&
+        model.annotationOperations.isEmpty &&
+        !model.relayoutBusy;
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
