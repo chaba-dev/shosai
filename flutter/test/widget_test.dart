@@ -420,6 +420,7 @@ void main() {
     await tester.pump();
     expect(find.byType(RawImage), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.byTooltip('Retry loading highlights'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -1564,6 +1565,387 @@ void main() {
     );
 
     controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test(
+    'changed document annotations require explicit association and reload',
+    () async {
+      final source = _associationSource();
+      final recovered = _resolutionAnnotations().first;
+      final bridge = _ControlledBridge(
+        associationSources: [source],
+        associatedAnnotations: [recovered],
+        immediateLists: true,
+      );
+      List<FlutterAnnotationAssociationSource>? offered;
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        annotationAssociationPicker: (page) async {
+          offered = page.sources;
+          return AnnotationAssociationSelected(page.sources.single);
+        },
+      );
+
+      await _openControlled(controller, bridge, '/tmp/changed.epub');
+      expect(controller.model.annotations, isEmpty);
+
+      controller.dispatch(const ReaderAnnotationAssociationRequested());
+      await bridge.waitForOp(2);
+
+      expect(() => offered!.clear(), throwsUnsupportedError);
+      expect(bridge.associatedSourceIds, ['source-version']);
+      expect(controller.model.annotations.single.id, recovered.id);
+      expect(
+        controller.model.annotations.single.resolution,
+        FlutterAnnotationResolution.recovered,
+      );
+      expect(controller.model.annotationsReady, isTrue);
+      expect(controller.model.annotationOperations, isEmpty);
+
+      controller.dispatch(ReaderAnnotationDeleted(recovered.id));
+      await _waitUntil(() => controller.model.annotationOperations.isEmpty);
+      expect(bridge.deleteCalls, 1);
+      expect(controller.model.annotations, isEmpty);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('cancelled document association does not infer identity', () async {
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      immediateLists: true,
+    );
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (_) async =>
+          const AnnotationAssociationCancelled(),
+    );
+    await _openControlled(controller, bridge, '/tmp/changed.epub');
+
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await bridge.waitForOp(2);
+
+    expect(bridge.associationCalls, 0);
+    expect(controller.model.annotations, isEmpty);
+    expect(controller.model.annotationError, isNull);
+    expect(controller.model.annotationOperations, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test(
+    'document association conflict is surfaced without publishing',
+    () async {
+      final bridge = _ControlledBridge(
+        associationSources: [_associationSource()],
+        immediateLists: true,
+        associationFailure: StateError('version belongs to another document'),
+      );
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        annotationAssociationPicker: (page) async =>
+            AnnotationAssociationSelected(page.sources.single),
+      );
+      await _openControlled(controller, bridge, '/tmp/changed.epub');
+
+      controller.dispatch(const ReaderAnnotationAssociationRequested());
+      await bridge.waitForOp(2);
+
+      expect(controller.model.annotations, isEmpty);
+      expect(controller.model.annotationError, contains('another document'));
+      expect(controller.model.annotationOperations, isEmpty);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('saved association survives a failed reload and can retry', () async {
+    final recovered = _resolutionAnnotations().first;
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      associatedAnnotations: [recovered],
+      immediateLists: true,
+    );
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async =>
+          AnnotationAssociationSelected(page.sources.single),
+    );
+    await _openControlled(controller, bridge, '/tmp/changed.epub');
+    bridge.listFailure = true;
+
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await bridge.waitForOp(2);
+
+    expect(bridge.associatedSourceIds, ['source-version']);
+    expect(controller.model.annotations, isEmpty);
+    expect(controller.model.annotationsReady, isFalse);
+    expect(
+      controller.model.annotationError,
+      contains('Association saved, but highlights could not be loaded'),
+    );
+
+    bridge.listFailure = false;
+    controller.dispatch(const ReaderAnnotationReloadRequested());
+    await bridge.waitForOp(3);
+
+    expect(controller.model.annotations.single.id, recovered.id);
+    expect(controller.model.annotationsReady, isTrue);
+    expect(controller.model.annotationError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('association and reload intents are rejected while opening', () async {
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      immediateLists: true,
+    );
+    final selection = Completer<FlutterSelectionSurface>();
+    bridge.selectionCompleters.add(selection);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async =>
+          AnnotationAssociationSelected(page.sources.single),
+    );
+
+    controller.dispatch(const ReaderOpenRequested('/tmp/changed.epub'));
+    await _waitUntil(() => bridge.selectionCalls == 1);
+    expect(controller.model.busy, isTrue);
+
+    controller.dispatch(const ReaderAnnotationReloadRequested());
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await Future<void>.delayed(Duration.zero);
+
+    expect(bridge.createdCancellations, hasLength(1));
+    expect(bridge.associationListCalls, 0);
+    expect(bridge.associationCalls, 0);
+
+    selection.complete(_surface(BigInt.from(70), raster: true));
+    await bridge.waitForOp(1);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('suspend cancels an association choice before it can mutate', () async {
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      immediateLists: true,
+    );
+    final choice = Completer<AnnotationAssociationChoice>();
+    var pickerStarted = false;
+    var pickerCancelled = false;
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) {
+        pickerStarted = true;
+        return choice.future;
+      },
+      annotationAssociationPickerCanceller: () {
+        pickerCancelled = true;
+      },
+    );
+    await _openControlled(controller, bridge, '/tmp/changed.epub');
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await _waitUntil(() => pickerStarted);
+
+    controller.dispatch(const ReaderSuspended());
+    expect(pickerCancelled, isTrue);
+    choice.complete(AnnotationAssociationSelected(_associationSource()));
+    await bridge.waitForOp(2);
+
+    expect(bridge.associationCalls, 0);
+    expect(controller.model.annotations, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('association sources remain reachable across bounded pages', () async {
+    final sources = List.generate(33, (index) => _associationSource('$index'));
+    final bridge = _ControlledBridge(
+      associationSources: sources,
+      associatedAnnotations: [_resolutionAnnotations().first],
+      immediateLists: true,
+    );
+    var pageCount = 0;
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async {
+        pageCount += 1;
+        switch (pageCount) {
+          case 1:
+            expect(page.sources, hasLength(32));
+            expect(page.canGoBack, isFalse);
+            expect(page.canGoForward, isTrue);
+            return const AnnotationAssociationNextPage();
+          case 2:
+            expect(page.sources.single.versionId, 'source-version-32');
+            expect(page.canGoBack, isTrue);
+            expect(page.canGoForward, isFalse);
+            return const AnnotationAssociationPreviousPage();
+          case 3:
+            expect(page.sources, hasLength(32));
+            expect(page.canGoBack, isFalse);
+            return const AnnotationAssociationNextPage();
+          default:
+            return AnnotationAssociationSelected(page.sources.single);
+        }
+      },
+    );
+    await _openControlled(controller, bridge, '/tmp/changed.epub');
+
+    controller.dispatch(const ReaderAnnotationAssociationRequested());
+    await bridge.waitForOp(2);
+
+    expect(pageCount, 4);
+    expect(bridge.associationListCalls, 4);
+    expect(bridge.associatedSourceIds, ['source-version-32']);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  testWidgets('association dialog requires a source and explains recovery', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(844, 390);
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      associationSources: [_associationSource()],
+      associatedAnnotations: [_resolutionAnnotations().first],
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: ReaderScreen(
+          bridge: bridge,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), '/tmp/changed.epub');
+    await tester.tap(find.text('Open document'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byTooltip('Associate highlights from an earlier version…'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Associate highlights?'), findsOneWidget);
+    expect(
+      find.textContaining('notes and highlights will be shared'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('ambiguous or unavailable'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    final associate = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Associate'),
+    );
+    expect(associate.onPressed, isNull);
+
+    await tester.ensureVisible(find.text('/tmp/original.epub'));
+    await tester.tap(find.text('/tmp/original.epub'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Associate'));
+    await tester.pumpAndSettle();
+
+    expect(bridge.associatedSourceIds, ['source-version']);
+    expect(find.textContaining('recovered'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('association pagination fits a compact short viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 390);
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      associationSources: List.generate(
+        65,
+        (index) => _associationSource('$index'),
+      ),
+      associatedAnnotations: [_resolutionAnnotations().first],
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: ReaderScreen(
+          bridge: bridge,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), '/tmp/changed.epub');
+    await tester.tap(find.text('Open document'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byTooltip('Associate highlights from an earlier version…'),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Next'));
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Previous'), findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    await tester.ensureVisible(find.text('Next'));
+    final source = find
+        .byType(RadioListTile<FlutterAnnotationAssociationSource>)
+        .last;
+    await tester.ensureVisible(source);
+    await tester.drag(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(SingleChildScrollView),
+      ),
+      const Offset(0, -100),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: source,
+        matching: find.byType(Radio<FlutterAnnotationAssociationSource>),
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Associate'))
+          .onPressed,
+      isNotNull,
+    );
+    await tester.ensureVisible(find.text('Associate'));
+    await tester.tap(find.text('Associate'));
+    await tester.pumpAndSettle();
+
+    expect(bridge.associatedSourceIds, ['source-version-63']);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
 
@@ -4564,6 +4946,17 @@ FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
   color: FlutterHighlightColor.yellow,
 );
 
+FlutterAnnotationAssociationSource _associationSource([String suffix = '']) =>
+    FlutterAnnotationAssociationSource(
+      versionId: 'source-version${suffix.isEmpty ? '' : '-$suffix'}',
+      format: FlutterBookFormat.epub,
+      localPath: '/tmp/original.epub',
+      fingerprintAlgorithm: 'blake3',
+      fingerprintVersion: 1,
+      fingerprint: Uint8List.fromList([1, 2, 3, 4]),
+      liveAnnotations: BigInt.one,
+    );
+
 FlutterRenderedBuffer _buffer(BigInt id) => FlutterRenderedBuffer(
   handle: FlutterBufferHandle(registry: BigInt.one, id: id),
   width: 1,
@@ -4633,6 +5026,9 @@ final class _ControlledBridge implements FlutterBridge {
   _ControlledBridge({
     this.format = FlutterBookFormat.epub,
     List<FlutterAnnotation> initialAnnotations = const [],
+    List<FlutterAnnotationAssociationSource> associationSources = const [],
+    List<FlutterAnnotation> associatedAnnotations = const [],
+    this.associationFailure,
     this.selectionFailure = false,
     this.listFailure = false,
     this.immediateLists = false,
@@ -4640,11 +5036,16 @@ final class _ControlledBridge implements FlutterBridge {
     this.selectionVisualLines,
     this.copyEligible = true,
   }) : initialAnnotations = List.of(initialAnnotations),
-       storedAnnotations = List.of(initialAnnotations);
+       storedAnnotations = List.of(initialAnnotations),
+       associationSources = List.of(associationSources),
+       associatedAnnotations = List.of(associatedAnnotations);
 
   FlutterBookFormat format;
   final List<FlutterAnnotation> initialAnnotations;
   final List<FlutterAnnotation> storedAnnotations;
+  final List<FlutterAnnotationAssociationSource> associationSources;
+  final List<FlutterAnnotation> associatedAnnotations;
+  final Object? associationFailure;
   final bool selectionFailure;
   bool listFailure;
   final bool immediateLists;
@@ -4673,6 +5074,8 @@ final class _ControlledBridge implements FlutterBridge {
   var updateCalls = 0;
   var createCalls = 0;
   var deleteCalls = 0;
+  var associationListCalls = 0;
+  var associationCalls = 0;
   var selectionCalls = 0;
   var renderCalls = 0;
   var finishedOperations = 0;
@@ -4687,6 +5090,7 @@ final class _ControlledBridge implements FlutterBridge {
   final renderScales = <double>[];
   final listScales = <double>[];
   final openRequests = <FlutterOpenRequest>[];
+  final associatedSourceIds = <String>[];
 
   Future<void> waitForOp(int count) async {
     while (finishedOperations < count) {
@@ -4888,6 +5292,39 @@ final class _ControlledBridge implements FlutterBridge {
   }
 
   @override
+  Future<FlutterAnnotationAssociationSourcePage>
+  listAnnotationAssociationSources({
+    required FlutterDocumentHandle target,
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
+  }) async {
+    associationListCalls += 1;
+    final start = int.tryParse(cursor ?? '') ?? 0;
+    final end = (start + limit.toInt()).clamp(0, associationSources.length);
+    return FlutterAnnotationAssociationSourcePage(
+      sources: associationSources.sublist(start, end),
+      nextCursor: end < associationSources.length ? '$end' : null,
+      previousCursor: start > limit.toInt() ? '${start - limit.toInt()}' : null,
+    );
+  }
+
+  @override
+  Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  }) async {
+    associationCalls += 1;
+    if (associationFailure case final failure?) throw failure;
+    associatedSourceIds.add(sourceVersionId);
+    storedAnnotations
+      ..clear()
+      ..addAll(associatedAnnotations);
+    return FlutterAnnotationAssociationOutcome.associated;
+  }
+
+  @override
   Future<FlutterAnnotation> createAnnotation({
     required FlutterDocumentHandle document,
     required BigInt unit,
@@ -5072,6 +5509,22 @@ class _FakeBridge implements FlutterBridge {
 
   @override
   bool get isDisposed => disposeCount != 0;
+
+  @override
+  Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  }) async => FlutterAnnotationAssociationOutcome.associated;
+
+  @override
+  Future<FlutterAnnotationAssociationSourcePage>
+  listAnnotationAssociationSources({
+    required FlutterDocumentHandle target,
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
+  }) async => const FlutterAnnotationAssociationSourcePage(sources: []);
 
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
@@ -5272,6 +5725,22 @@ final class _SequentialBridge implements FlutterBridge {
 
   @override
   bool get isDisposed => disposeCount != 0;
+
+  @override
+  Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
+    required String sourceVersionId,
+    required FlutterDocumentHandle target,
+    required BigInt cancellationId,
+  }) async => FlutterAnnotationAssociationOutcome.associated;
+
+  @override
+  Future<FlutterAnnotationAssociationSourcePage>
+  listAnnotationAssociationSources({
+    required FlutterDocumentHandle target,
+    String? cursor,
+    required BigInt limit,
+    required BigInt cancellationId,
+  }) async => const FlutterAnnotationAssociationSourcePage(sources: []);
 
   @override
   Future<List<FlutterAnnotation>> listAnnotations({
