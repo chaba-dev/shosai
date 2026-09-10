@@ -4202,6 +4202,10 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final surface = Completer<FlutterSelectionSurface>()
+      ..complete(_surface(BigInt.from(90), raster: true, text: 'A😀B'));
+    bridge.selectionCompleters.add(surface);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     try {
       await tester.pumpWidget(
         MaterialApp(
@@ -4221,14 +4225,9 @@ void main() {
       );
       final data = content.getSemanticsData();
       expect(data.hasAction(ui.SemanticsAction.tap), isTrue);
-      final properties = tester
-          .widget<Semantics>(
-            find.byKey(const ValueKey('reader-content-semantics')),
-          )
-          .properties;
-      expect(properties.hintOverrides?.onTapHint, 'select document text');
+      expect(data.hint, 'Selects this text and shows selection actions.');
 
-      properties.onTap!();
+      content.owner!.performAction(content.id, ui.SemanticsAction.tap);
       await tester.pump();
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
@@ -4243,16 +4242,106 @@ void main() {
                   )
                   .painter!
               as PagePainter;
-      expect(painter.anchor, 1);
-      expect(painter.focus, 8);
+      expect(painter.anchor, 0);
+      expect(painter.focus, 3);
       expect(
         tester
             .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
             .getSemanticsData()
             .label,
-        'Selected text: electab',
+        'Selected text: A😀B',
       );
     } finally {
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      debugDefaultTargetPlatformOverride = null;
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('empty document text has no screen-reader selection action', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    final surface = Completer<FlutterSelectionSurface>()
+      ..complete(_surface(BigInt.from(91), raster: true, text: ''));
+    bridge.selectionCompleters.add(surface);
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '/tmp/empty.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+
+      final data = tester
+          .getSemantics(find.byKey(const ValueKey('reader-content-semantics')))
+          .getSemanticsData();
+      expect(data.hasAction(ui.SemanticsAction.tap), isFalse);
+      expect(data.hint, isEmpty);
+      expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('screen-reader selection is unavailable during relayout', (
+    tester,
+  ) async {
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.epub,
+      immediateLists: true,
+    );
+    final pending = Completer<FlutterSelectionSurface>();
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+
+      SemanticsData contentData() => tester
+          .getSemantics(find.byKey(const ValueKey('reader-content-semantics')))
+          .getSemanticsData();
+
+      expect(contentData().hasAction(ui.SemanticsAction.tap), isTrue);
+      bridge.selectionCompleters.add(pending);
+      tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2 ? 3 : 2;
+      await tester.pump();
+      await tester.pump();
+
+      expect(contentData().hasAction(ui.SemanticsAction.tap), isFalse);
+      expect(contentData().hint, isEmpty);
+
+      pending.complete(_surface(BigInt.from(92), raster: true));
+      await tester.pumpAndSettle();
+      expect(contentData().hasAction(ui.SemanticsAction.tap), isTrue);
+      expect(
+        contentData().hint,
+        'Selects this text and shows selection actions.',
+      );
+    } finally {
+      if (!pending.isCompleted) {
+        pending.complete(_surface(BigInt.from(92), raster: true));
+      }
       await tester.pumpWidget(const SizedBox());
       await bridge.disposed.future;
       semantics.dispose();
@@ -5039,8 +5128,12 @@ FlutterSelectionSurface _surface(
   copyEligible: true,
   raster: raster ? _buffer(id) : null,
   endpoints: const [],
-  graphemeBoundaries: Uint32List.fromList([0, 1]),
-  wordBoundaries: Uint32List.fromList([0, 1]),
+  graphemeBoundaries: Uint32List.fromList(
+    List.generate(text.runes.length + 1, (index) => index),
+  ),
+  wordBoundaries: Uint32List.fromList(
+    text.isEmpty ? [0] : [0, text.runes.length],
+  ),
   visualLines: const [],
 );
 
