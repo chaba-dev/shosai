@@ -1,0 +1,128 @@
+= RFD 4 Phase 2 evidence
+
+Phase 2 implements and measures the packaged highlighting feasibility slice. It
+does not convert simulator or automated evidence into a manual accessibility or
+physical-lifecycle claim.
+
+== Packaged targets
+
+[cols="1,2,3",options="header"]
+|===
+|Target |Evidence |Result
+
+|Linux x86_64
+|Profile Flutter host with the Rust bridge and PDFium in the application
+bundle; measurement record at
+link:evidence/m2-linux-framework16.json[m2-linux-framework16.json]
+|Passes the measured bridge, visible-scene DTO, selection-submission, RSS, and
+PDF-raster gates.
+
+|Android arm64
+|Profile APK on physical Pixel 5a `19291JEG500637`, Android 14/API 34;
+measurement record at
+link:evidence/m2-android-pixel-5a.json[m2-android-pixel-5a.json]
+|Passes the same measured gates. The packaged native slice opens PDF and EPUB,
+transfers their visible surfaces and rasters, and creates, reopens, updates, and
+deletes an annotation in each format through SQLite.
+
+|iOS
+|iPad Air 5th generation on iOS 26.6 and iPhone 15 Pro Max on iOS 26.6.2 are
+paired, trusted, developer-enabled, and visible to Flutter. An iOS 26.5
+simulator runtime is installed.
+|Repository host/native integration is being validated separately. Physical
+installation remains blocked until the local Xcode account has a development
+certificate and provisioning profile. Simulator evidence cannot satisfy the
+physical VoiceOver or lifecycle gates.
+|===
+
+Android packages `libshosai_flutter_bridge.so` and the pinned
+chromium/7999 PDFium arm64 artifact in the APK. PDFium is resolved by soname in
+Android's package namespace rather than by interpreting the Android runtime
+executable as a desktop installation path. Both downloaded PDFium archives and
+the Rust bridge build are produced by the checked-in host build scripts.
+
+== Measurement protocol
+
+Run:
+
+----
+make measure-flutter-m2 DEVICE=<flutter-device-id> OUTPUT=<evidence.json>
+----
+
+The profile harness performs five warmups and 50 measured samples. A synchronous
+full-scene diagnostic round trip isolates generated bridge transfer and Dart DTO
+materialization from Rust document extraction and layout. Selection timing uses
+Flutter's build interval because the RFD boundary ends when the overlay is
+submitted; raster work is reported by Flutter but is not added to that
+pipelined boundary. Static page content is behind a repaint boundary and the
+dynamic painter draws only annotation and selection overlays.
+
+Resource evidence discards five complete open/render/release warmup cycles and
+records RSS after 20 further cycles. The retained-growth decision compares the
+median of the first and final five-sample windows with a 1 MiB tolerance for
+allocator and page-accounting noise. Raw samples and the ordinary least-squares
+slope remain in each JSON record. The logical resource checks additionally
+assert that document, raster, selection, and cancellation handles release
+successfully.
+
+[cols="2,1,1",options="header"]
+|===
+|Measured gate |Linux Framework 16 |Physical Pixel 5a
+
+|Warm bridge round-trip p95 <= 1 ms
+|0.002 ms
+|0.058 ms
+
+|Visible-scene DTO round-trip p95 <= 4 ms
+|0.148 ms
+|0.605 ms
+
+|Pointer update to overlay submission p95 / max <= 8 / 16.7 ms
+|1.301 / 1.857 ms
+|3.468 / 4.051 ms
+
+|Peak cycle RSS <= 512 MiB desktop / 384 MiB mobile
+|195.9 MiB
+|198.5 MiB
+
+|Final-window median RSS growth <= 1 MiB
+|+0.37 MiB
+|+0.64 MiB
+
+|Uncached PDF raster p50 / p95 / max (reported, no acceptance ceiling)
+|0.569 / 1.317 / 30.701 ms
+|7.892 / 22.390 / 23.209 ms
+|===
+
+The Android profile APK is 64 MiB and the Linux profile bundle is 60 MiB. These
+are build-artifact observations, not the RFD's installed-release-payload or
+Flutter-over-native binary-size measurements. The fixture RSS is evidence for
+the packaged feasibility slice, not the representative large-document ceiling.
+Startup, installed release size, large-document steady RSS, full EPUB navigation
+budgets, and comparison with the Iced reference therefore remain unclaimed.
+
+== Accessibility, lifecycle, and visual evidence
+
+Widget and controller regressions cover compact, medium, and expanded layouts;
+safe areas and rotation; 200% text scaling; semantics and focus order; non-color
+selection indication; lifecycle draining; process restoration; missing and
+inaccessible locators; memory pressure; and renderer recovery. The physical
+Pixel profile run verifies that the packaged PDF and EPUB bridge path and local
+selection interaction execute on Android hardware. Its captured phone rendering
+shows an aligned selected range and action surface without page-raster damage.
+
+These checks do not replace the required manual run. TalkBack explore-by-touch,
+real touch target confirmation, focus after an actual background/resume cycle,
+and platform contrast/reduced-motion checks remain open on Android. VoiceOver,
+rotor order, physical touch/orientation, and lifecycle recovery remain open on
+each claimed Apple device. Missing files and revoked document-provider
+capabilities also require a real provider rather than a path-only fixture.
+
+== Exit assessment
+
+The packaged Flutter/Rust highlighting slice works end to end for PDF and EPUB
+on Linux and one physical Android device, and its scoped performance gates pass.
+That satisfies the M2 go/no-go evidence for continuing the Flutter migration.
+It does not make iOS, Windows, or the deferred manual accessibility, lifecycle,
+startup, large-document, and release-size checks pass; those remain explicit
+target-specific work and may not be inferred from Android or simulator results.
