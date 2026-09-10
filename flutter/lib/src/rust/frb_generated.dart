@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -588008765;
+  int get rustContentHash => 1306103135;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -112,6 +112,31 @@ abstract class RustLibApi extends BaseApi {
     required String id,
   });
 
+  Future<void> crateApiFlutterBridgeDeleteBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 id,
+  });
+
+  Future<String> crateApiFlutterBridgeExportBookmarks({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  });
+
+  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+    required FlutterBridge that,
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  });
+
+  Future<FlutterLibraryPage> crateApiFlutterBridgeLibraryPage({
+    required FlutterBridge that,
+    String? query,
+    FlutterBookFormat? format,
+    required int limit,
+    required int offset,
+  });
+
   Future<FlutterAnnotationAssociationSourcePage>
   crateApiFlutterBridgeListAnnotationAssociationSources({
     required FlutterBridge that,
@@ -128,11 +153,31 @@ abstract class RustLibApi extends BaseApi {
     required BigInt cancellationId,
   });
 
+  Future<List<FlutterBookmark>> crateApiFlutterBridgeListBookmarks({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  });
+
+  Future<FlutterReaderSettings> crateApiFlutterBridgeLoadReaderSettings({
+    required FlutterBridge that,
+  });
+
+  Future<FlutterReadingState?> crateApiFlutterBridgeLoadReadingState({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  });
+
   FlutterBridge crateApiFlutterBridgeNew();
 
   Future<FlutterDocumentSummary> crateApiFlutterBridgeOpenDocument({
     required FlutterBridge that,
     required FlutterOpenRequest request,
+    required BigInt cancellationId,
+  });
+
+  Future<FlutterDocumentSummary> crateApiFlutterBridgeOpenLibraryBook({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
     required BigInt cancellationId,
   });
 
@@ -156,6 +201,11 @@ abstract class RustLibApi extends BaseApi {
     required FlutterSelectionHandle handle,
   });
 
+  Future<bool> crateApiFlutterBridgeRemoveLibraryBook({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  });
+
   Future<FlutterRenderedBuffer> crateApiFlutterBridgeRenderPage({
     required FlutterBridge that,
     required FlutterDocumentHandle document,
@@ -167,6 +217,24 @@ abstract class RustLibApi extends BaseApi {
   FlutterSelectionSurface crateApiFlutterBridgeRoundTripVisibleScene({
     required FlutterBridge that,
     required FlutterSelectionSurface scene,
+  });
+
+  Future<void> crateApiFlutterBridgeSaveReaderSettings({
+    required FlutterBridge that,
+    required FlutterReaderSettings value,
+  });
+
+  Future<void> crateApiFlutterBridgeSaveReadingState({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+    required FlutterReadingState value,
+  });
+
+  Future<List<FlutterSearchMatch>> crateApiFlutterBridgeSearchDocument({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required String query,
+    required BigInt cancellationId,
   });
 
   Future<FlutterSelectionSurface> crateApiFlutterBridgeSelectionSurface({
@@ -184,12 +252,27 @@ abstract class RustLibApi extends BaseApi {
     required FlutterBufferHandle handle,
   });
 
+  Future<FlutterBookmark?> crateApiFlutterBridgeToggleBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+    required BigInt unit,
+    BigInt? offset,
+    String? title,
+  });
+
   Future<bool> crateApiFlutterBridgeUpdateAnnotation({
     required FlutterBridge that,
     required FlutterDocumentHandle document,
     required String id,
     required FlutterHighlightColor color,
     String? body,
+  });
+
+  Future<void> crateApiFlutterBridgeUpdateBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 id,
+    String? title,
+    String? note,
   });
 
   FlutterBridge crateApiFlutterBridgeWithDatabasePath({
@@ -461,6 +544,165 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiFlutterBridgeDeleteBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 id,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(id);
+          return wire.wire__crate__api__FlutterBridge_delete_bookmark(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeDeleteBookmarkConstMeta,
+        argValues: [that, id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeDeleteBookmarkConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_delete_bookmark",
+        argNames: ["that", "id"],
+      );
+
+  @override
+  Future<String> crateApiFlutterBridgeExportBookmarks({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          return wire.wire__crate__api__FlutterBridge_export_bookmarks(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_String,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeExportBookmarksConstMeta,
+        argValues: [that, bookId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeExportBookmarksConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_export_bookmarks",
+        argNames: ["that", "bookId"],
+      );
+
+  @override
+  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+    required FlutterBridge that,
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_list_String(pathKeys);
+          var arg2 = cst_encode_bool(managed);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_import_paths(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_list_flutter_import_item,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeImportPathsConstMeta,
+        argValues: [that, pathKeys, managed, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeImportPathsConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_import_paths",
+        argNames: ["that", "pathKeys", "managed", "cancellationId"],
+      );
+
+  @override
+  Future<FlutterLibraryPage> crateApiFlutterBridgeLibraryPage({
+    required FlutterBridge that,
+    String? query,
+    FlutterBookFormat? format,
+    required int limit,
+    required int offset,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_opt_String(query);
+          var arg2 = cst_encode_opt_box_autoadd_flutter_book_format(format);
+          var arg3 = cst_encode_u_32(limit);
+          var arg4 = cst_encode_u_32(offset);
+          return wire.wire__crate__api__FlutterBridge_library_page(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_flutter_library_page,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeLibraryPageConstMeta,
+        argValues: [that, query, format, limit, offset],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeLibraryPageConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_library_page",
+        argNames: ["that", "query", "format", "limit", "offset"],
+      );
+
+  @override
   Future<FlutterAnnotationAssociationSourcePage>
   crateApiFlutterBridgeListAnnotationAssociationSources({
     required FlutterBridge that,
@@ -553,6 +795,111 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<FlutterBookmark>> crateApiFlutterBridgeListBookmarks({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          return wire.wire__crate__api__FlutterBridge_list_bookmarks(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_list_flutter_bookmark,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeListBookmarksConstMeta,
+        argValues: [that, bookId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeListBookmarksConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_list_bookmarks",
+        argNames: ["that", "bookId"],
+      );
+
+  @override
+  Future<FlutterReaderSettings> crateApiFlutterBridgeLoadReaderSettings({
+    required FlutterBridge that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          return wire.wire__crate__api__FlutterBridge_load_reader_settings(
+            port_,
+            arg0,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_flutter_reader_settings,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeLoadReaderSettingsConstMeta,
+        argValues: [that],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeLoadReaderSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_load_reader_settings",
+        argNames: ["that"],
+      );
+
+  @override
+  Future<FlutterReadingState?> crateApiFlutterBridgeLoadReadingState({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          return wire.wire__crate__api__FlutterBridge_load_reading_state(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_opt_box_autoadd_flutter_reading_state,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeLoadReadingStateConstMeta,
+        argValues: [that, bookId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeLoadReadingStateConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_load_reading_state",
+        argNames: ["that", "bookId"],
+      );
+
+  @override
   FlutterBridge crateApiFlutterBridgeNew() {
     return handler.executeSync(
       SyncTask(
@@ -611,6 +958,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_open_document",
         argNames: ["that", "request", "cancellationId"],
+      );
+
+  @override
+  Future<FlutterDocumentSummary> crateApiFlutterBridgeOpenLibraryBook({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          var arg2 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_open_library_book(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_flutter_document_summary,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeOpenLibraryBookConstMeta,
+        argValues: [that, bookId, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeOpenLibraryBookConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_open_library_book",
+        argNames: ["that", "bookId", "cancellationId"],
       );
 
   @override
@@ -754,6 +1140,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<bool> crateApiFlutterBridgeRemoveLibraryBook({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          return wire.wire__crate__api__FlutterBridge_remove_library_book(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_bool,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeRemoveLibraryBookConstMeta,
+        argValues: [that, bookId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeRemoveLibraryBookConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_remove_library_book",
+        argNames: ["that", "bookId"],
+      );
+
+  @override
   Future<FlutterRenderedBuffer> crateApiFlutterBridgeRenderPage({
     required FlutterBridge that,
     required FlutterDocumentHandle document,
@@ -831,6 +1253,123 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_round_trip_visible_scene",
         argNames: ["that", "scene"],
+      );
+
+  @override
+  Future<void> crateApiFlutterBridgeSaveReaderSettings({
+    required FlutterBridge that,
+    required FlutterReaderSettings value,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_box_autoadd_flutter_reader_settings(value);
+          return wire.wire__crate__api__FlutterBridge_save_reader_settings(
+            port_,
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeSaveReaderSettingsConstMeta,
+        argValues: [that, value],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeSaveReaderSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_save_reader_settings",
+        argNames: ["that", "value"],
+      );
+
+  @override
+  Future<void> crateApiFlutterBridgeSaveReadingState({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+    required FlutterReadingState value,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          var arg2 = cst_encode_box_autoadd_flutter_reading_state(value);
+          return wire.wire__crate__api__FlutterBridge_save_reading_state(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeSaveReadingStateConstMeta,
+        argValues: [that, bookId, value],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeSaveReadingStateConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_save_reading_state",
+        argNames: ["that", "bookId", "value"],
+      );
+
+  @override
+  Future<List<FlutterSearchMatch>> crateApiFlutterBridgeSearchDocument({
+    required FlutterBridge that,
+    required FlutterDocumentHandle document,
+    required String query,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_box_autoadd_flutter_document_handle(document);
+          var arg2 = cst_encode_String(query);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_search_document(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_list_flutter_search_match,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeSearchDocumentConstMeta,
+        argValues: [that, document, query, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeSearchDocumentConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_search_document",
+        argNames: ["that", "document", "query", "cancellationId"],
       );
 
   @override
@@ -933,6 +1472,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<FlutterBookmark?> crateApiFlutterBridgeToggleBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 bookId,
+    required BigInt unit,
+    BigInt? offset,
+    String? title,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(bookId);
+          var arg2 = cst_encode_usize(unit);
+          var arg3 = cst_encode_opt_box_autoadd_usize(offset);
+          var arg4 = cst_encode_opt_String(title);
+          return wire.wire__crate__api__FlutterBridge_toggle_bookmark(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+            arg4,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_opt_box_autoadd_flutter_bookmark,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeToggleBookmarkConstMeta,
+        argValues: [that, bookId, unit, offset, title],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeToggleBookmarkConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_toggle_bookmark",
+        argNames: ["that", "bookId", "unit", "offset", "title"],
+      );
+
+  @override
   Future<bool> crateApiFlutterBridgeUpdateAnnotation({
     required FlutterBridge that,
     required FlutterDocumentHandle document,
@@ -975,6 +1559,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_update_annotation",
         argNames: ["that", "document", "id", "color", "body"],
+      );
+
+  @override
+  Future<void> crateApiFlutterBridgeUpdateBookmark({
+    required FlutterBridge that,
+    required PlatformInt64 id,
+    String? title,
+    String? note,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(id);
+          var arg2 = cst_encode_opt_String(title);
+          var arg3 = cst_encode_opt_String(note);
+          return wire.wire__crate__api__FlutterBridge_update_bookmark(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeUpdateBookmarkConstMeta,
+        argValues: [that, id, title, note],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeUpdateBookmarkConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_update_bookmark",
+        argNames: ["that", "id", "title", "note"],
       );
 
   @override
@@ -1087,6 +1713,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark dco_decode_box_autoadd_flutter_bookmark(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_bookmark(raw);
+  }
+
+  @protected
   FlutterBufferHandle dco_decode_box_autoadd_flutter_buffer_handle(
     dynamic raw,
   ) {
@@ -1103,9 +1735,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterLibraryBook dco_decode_box_autoadd_flutter_library_book(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_library_book(raw);
+  }
+
+  @protected
   FlutterOpenRequest dco_decode_box_autoadd_flutter_open_request(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_flutter_open_request(raw);
+  }
+
+  @protected
+  FlutterReaderSettings dco_decode_box_autoadd_flutter_reader_settings(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_reader_settings(raw);
+  }
+
+  @protected
+  FlutterReadingState dco_decode_box_autoadd_flutter_reading_state(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_reading_state(raw);
   }
 
   @protected
@@ -1133,7 +1787,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_i_64(raw);
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_usize(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_usize(raw);
+  }
+
+  @protected
   double dco_decode_f_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  double dco_decode_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
   }
@@ -1226,6 +1898,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark dco_decode_flutter_bookmark(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return FlutterBookmark(
+      id: dco_decode_i_64(arr[0]),
+      bookId: dco_decode_opt_box_autoadd_i_64(arr[1]),
+      unit: dco_decode_usize(arr[2]),
+      offset: dco_decode_opt_box_autoadd_usize(arr[3]),
+      title: dco_decode_opt_String(arr[4]),
+      note: dco_decode_opt_String(arr[5]),
+      color: dco_decode_String(arr[6]),
+      createdAt: dco_decode_String(arr[7]),
+    );
+  }
+
+  @protected
   FlutterBridgeError dco_decode_flutter_bridge_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1271,13 +1961,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterDocumentSummary dco_decode_flutter_document_summary(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return FlutterDocumentSummary(
       handle: dco_decode_flutter_document_handle(arr[0]),
-      format: dco_decode_flutter_book_format(arr[1]),
-      title: dco_decode_opt_String(arr[2]),
-      logicalUnitCount: dco_decode_usize(arr[3]),
+      bookId: dco_decode_opt_box_autoadd_i_64(arr[1]),
+      format: dco_decode_flutter_book_format(arr[2]),
+      title: dco_decode_opt_String(arr[3]),
+      logicalUnitCount: dco_decode_usize(arr[4]),
     );
   }
 
@@ -1285,6 +1976,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterHighlightColor dco_decode_flutter_highlight_color(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return FlutterHighlightColor.values[raw as int];
+  }
+
+  @protected
+  FlutterImportItem dco_decode_flutter_import_item(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FlutterImportItem(
+      pathKey: dco_decode_String(arr[0]),
+      book: dco_decode_opt_box_autoadd_flutter_library_book(arr[1]),
+      error: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
+  FlutterLibraryBook dco_decode_flutter_library_book(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return FlutterLibraryBook(
+      bookId: dco_decode_i_64(arr[0]),
+      title: dco_decode_String(arr[1]),
+      author: dco_decode_opt_String(arr[2]),
+      format: dco_decode_flutter_book_format(arr[3]),
+      pathKey: dco_decode_String(arr[4]),
+      managed: dco_decode_bool(arr[5]),
+      progress: dco_decode_f_64(arr[6]),
+      dateAdded: dco_decode_String(arr[7]),
+      lastRead: dco_decode_opt_String(arr[8]),
+    );
+  }
+
+  @protected
+  FlutterLibraryPage dco_decode_flutter_library_page(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FlutterLibraryPage(
+      books: dco_decode_list_flutter_library_book(arr[0]),
+      hasMore: dco_decode_bool(arr[1]),
+    );
   }
 
   @protected
@@ -1301,6 +2036,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterReaderSettings dco_decode_flutter_reader_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FlutterReaderSettings(
+      continuous: dco_decode_bool(arr[0]),
+      epubFontSize: dco_decode_f_32(arr[1]),
+      epubLineSpacing: dco_decode_f_32(arr[2]),
+      pdfZoom: dco_decode_f_32(arr[3]),
+    );
+  }
+
+  @protected
+  FlutterReadingState dco_decode_flutter_reading_state(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FlutterReadingState(
+      unit: dco_decode_usize(arr[0]),
+      offset: dco_decode_opt_box_autoadd_usize(arr[1]),
+      zoom: dco_decode_f_32(arr[2]),
+    );
+  }
+
+  @protected
   FlutterRenderedBuffer dco_decode_flutter_rendered_buffer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1311,6 +2073,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       width: dco_decode_u_32(arr[1]),
       height: dco_decode_u_32(arr[2]),
       byteLen: dco_decode_usize(arr[3]),
+    );
+  }
+
+  @protected
+  FlutterSearchMatch dco_decode_flutter_search_match(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return FlutterSearchMatch(
+      unit: dco_decode_usize(arr[0]),
+      offset: dco_decode_usize(arr[1]),
+      length: dco_decode_usize(arr[2]),
+      context: dco_decode_String(arr[3]),
     );
   }
 
@@ -1411,6 +2187,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeI64(raw);
+  }
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
   List<FlutterAnnotation> dco_decode_list_flutter_annotation(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_flutter_annotation).toList();
@@ -1423,6 +2211,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return (raw as List<dynamic>)
         .map(dco_decode_flutter_annotation_association_source)
         .toList();
+  }
+
+  @protected
+  List<FlutterBookmark> dco_decode_list_flutter_bookmark(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_flutter_bookmark).toList();
+  }
+
+  @protected
+  List<FlutterImportItem> dco_decode_list_flutter_import_item(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_flutter_import_item).toList();
+  }
+
+  @protected
+  List<FlutterLibraryBook> dco_decode_list_flutter_library_book(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_flutter_library_book).toList();
+  }
+
+  @protected
+  List<FlutterSearchMatch> dco_decode_list_flutter_search_match(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_flutter_search_match).toList();
   }
 
   @protected
@@ -1500,6 +2312,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark? dco_decode_opt_box_autoadd_flutter_bookmark(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_flutter_bookmark(raw);
+  }
+
+  @protected
+  FlutterLibraryBook? dco_decode_opt_box_autoadd_flutter_library_book(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_flutter_library_book(raw);
+  }
+
+  @protected
+  FlutterReadingState? dco_decode_opt_box_autoadd_flutter_reading_state(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_flutter_reading_state(raw);
+  }
+
+  @protected
   FlutterRenderedBuffer? dco_decode_opt_box_autoadd_flutter_rendered_buffer(
     dynamic raw,
   ) {
@@ -1507,6 +2345,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return raw == null
         ? null
         : dco_decode_box_autoadd_flutter_rendered_buffer(raw);
+  }
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_usize(raw);
   }
 
   @protected
@@ -1614,6 +2464,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark sse_decode_box_autoadd_flutter_bookmark(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_bookmark(deserializer));
+  }
+
+  @protected
   FlutterBufferHandle sse_decode_box_autoadd_flutter_buffer_handle(
     SseDeserializer deserializer,
   ) {
@@ -1630,11 +2488,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterLibraryBook sse_decode_box_autoadd_flutter_library_book(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_library_book(deserializer));
+  }
+
+  @protected
   FlutterOpenRequest sse_decode_box_autoadd_flutter_open_request(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_flutter_open_request(deserializer));
+  }
+
+  @protected
+  FlutterReaderSettings sse_decode_box_autoadd_flutter_reader_settings(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_reader_settings(deserializer));
+  }
+
+  @protected
+  FlutterReadingState sse_decode_box_autoadd_flutter_reading_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_reading_state(deserializer));
   }
 
   @protected
@@ -1662,9 +2544,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_usize(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_usize(deserializer));
+  }
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getFloat32();
+  }
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat64();
   }
 
   @protected
@@ -1776,6 +2676,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark sse_decode_flutter_bookmark(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_i_64(deserializer);
+    var var_bookId = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_unit = sse_decode_usize(deserializer);
+    var var_offset = sse_decode_opt_box_autoadd_usize(deserializer);
+    var var_title = sse_decode_opt_String(deserializer);
+    var var_note = sse_decode_opt_String(deserializer);
+    var var_color = sse_decode_String(deserializer);
+    var var_createdAt = sse_decode_String(deserializer);
+    return FlutterBookmark(
+      id: var_id,
+      bookId: var_bookId,
+      unit: var_unit,
+      offset: var_offset,
+      title: var_title,
+      note: var_note,
+      color: var_color,
+      createdAt: var_createdAt,
+    );
+  }
+
+  @protected
   FlutterBridgeError sse_decode_flutter_bridge_error(
     SseDeserializer deserializer,
   ) {
@@ -1820,11 +2743,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_handle = sse_decode_flutter_document_handle(deserializer);
+    var var_bookId = sse_decode_opt_box_autoadd_i_64(deserializer);
     var var_format = sse_decode_flutter_book_format(deserializer);
     var var_title = sse_decode_opt_String(deserializer);
     var var_logicalUnitCount = sse_decode_usize(deserializer);
     return FlutterDocumentSummary(
       handle: var_handle,
+      bookId: var_bookId,
       format: var_format,
       title: var_title,
       logicalUnitCount: var_logicalUnitCount,
@@ -1838,6 +2763,60 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return FlutterHighlightColor.values[inner];
+  }
+
+  @protected
+  FlutterImportItem sse_decode_flutter_import_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pathKey = sse_decode_String(deserializer);
+    var var_book = sse_decode_opt_box_autoadd_flutter_library_book(
+      deserializer,
+    );
+    var var_error = sse_decode_opt_String(deserializer);
+    return FlutterImportItem(
+      pathKey: var_pathKey,
+      book: var_book,
+      error: var_error,
+    );
+  }
+
+  @protected
+  FlutterLibraryBook sse_decode_flutter_library_book(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_bookId = sse_decode_i_64(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_author = sse_decode_opt_String(deserializer);
+    var var_format = sse_decode_flutter_book_format(deserializer);
+    var var_pathKey = sse_decode_String(deserializer);
+    var var_managed = sse_decode_bool(deserializer);
+    var var_progress = sse_decode_f_64(deserializer);
+    var var_dateAdded = sse_decode_String(deserializer);
+    var var_lastRead = sse_decode_opt_String(deserializer);
+    return FlutterLibraryBook(
+      bookId: var_bookId,
+      title: var_title,
+      author: var_author,
+      format: var_format,
+      pathKey: var_pathKey,
+      managed: var_managed,
+      progress: var_progress,
+      dateAdded: var_dateAdded,
+      lastRead: var_lastRead,
+    );
+  }
+
+  @protected
+  FlutterLibraryPage sse_decode_flutter_library_page(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_books = sse_decode_list_flutter_library_book(deserializer);
+    var var_hasMore = sse_decode_bool(deserializer);
+    return FlutterLibraryPage(books: var_books, hasMore: var_hasMore);
   }
 
   @protected
@@ -1858,6 +2837,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterReaderSettings sse_decode_flutter_reader_settings(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_continuous = sse_decode_bool(deserializer);
+    var var_epubFontSize = sse_decode_f_32(deserializer);
+    var var_epubLineSpacing = sse_decode_f_32(deserializer);
+    var var_pdfZoom = sse_decode_f_32(deserializer);
+    return FlutterReaderSettings(
+      continuous: var_continuous,
+      epubFontSize: var_epubFontSize,
+      epubLineSpacing: var_epubLineSpacing,
+      pdfZoom: var_pdfZoom,
+    );
+  }
+
+  @protected
+  FlutterReadingState sse_decode_flutter_reading_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_unit = sse_decode_usize(deserializer);
+    var var_offset = sse_decode_opt_box_autoadd_usize(deserializer);
+    var var_zoom = sse_decode_f_32(deserializer);
+    return FlutterReadingState(
+      unit: var_unit,
+      offset: var_offset,
+      zoom: var_zoom,
+    );
+  }
+
+  @protected
   FlutterRenderedBuffer sse_decode_flutter_rendered_buffer(
     SseDeserializer deserializer,
   ) {
@@ -1871,6 +2882,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       width: var_width,
       height: var_height,
       byteLen: var_byteLen,
+    );
+  }
+
+  @protected
+  FlutterSearchMatch sse_decode_flutter_search_match(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_unit = sse_decode_usize(deserializer);
+    var var_offset = sse_decode_usize(deserializer);
+    var var_length = sse_decode_usize(deserializer);
+    var var_context = sse_decode_String(deserializer);
+    return FlutterSearchMatch(
+      unit: var_unit,
+      offset: var_offset,
+      length: var_length,
+      context: var_context,
     );
   }
 
@@ -1992,6 +3020,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getPlatformInt64();
+  }
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <String>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<FlutterAnnotation> sse_decode_list_flutter_annotation(
     SseDeserializer deserializer,
   ) {
@@ -2016,6 +3062,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <FlutterAnnotationAssociationSource>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_flutter_annotation_association_source(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FlutterBookmark> sse_decode_list_flutter_bookmark(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterBookmark>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_bookmark(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FlutterImportItem> sse_decode_list_flutter_import_item(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterImportItem>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_import_item(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FlutterLibraryBook> sse_decode_list_flutter_library_book(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterLibraryBook>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_library_book(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<FlutterSearchMatch> sse_decode_list_flutter_search_match(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <FlutterSearchMatch>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_flutter_search_match(deserializer));
     }
     return ans_;
   }
@@ -2130,6 +3232,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterBookmark? sse_decode_opt_box_autoadd_flutter_bookmark(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_flutter_bookmark(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FlutterLibraryBook? sse_decode_opt_box_autoadd_flutter_library_book(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_flutter_library_book(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  FlutterReadingState? sse_decode_opt_box_autoadd_flutter_reading_state(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_flutter_reading_state(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   FlutterRenderedBuffer? sse_decode_opt_box_autoadd_flutter_rendered_buffer(
     SseDeserializer deserializer,
   ) {
@@ -2137,6 +3278,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_flutter_rendered_buffer(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_usize(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_usize(deserializer));
     } else {
       return null;
     }
@@ -2222,6 +3385,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   double cst_encode_f_32(double raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw;
+  }
+
+  @protected
+  double cst_encode_f_64(double raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw;
   }
@@ -2354,6 +3523,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_flutter_bookmark(
+    FlutterBookmark self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_bookmark(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_flutter_buffer_handle(
     FlutterBufferHandle self,
     SseSerializer serializer,
@@ -2372,12 +3550,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_flutter_library_book(
+    FlutterLibraryBook self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_library_book(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_flutter_open_request(
     FlutterOpenRequest self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_flutter_open_request(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_flutter_reader_settings(
+    FlutterReaderSettings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_reader_settings(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_flutter_reading_state(
+    FlutterReadingState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_reading_state(self, serializer);
   }
 
   @protected
@@ -2408,9 +3613,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_usize(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(self, serializer);
+  }
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat32(self);
+  }
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat64(self);
   }
 
   @protected
@@ -2499,6 +3725,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_flutter_bookmark(
+    FlutterBookmark self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.id, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.bookId, serializer);
+    sse_encode_usize(self.unit, serializer);
+    sse_encode_opt_box_autoadd_usize(self.offset, serializer);
+    sse_encode_opt_String(self.title, serializer);
+    sse_encode_opt_String(self.note, serializer);
+    sse_encode_String(self.color, serializer);
+    sse_encode_String(self.createdAt, serializer);
+  }
+
+  @protected
   void sse_encode_flutter_bridge_error(
     FlutterBridgeError self,
     SseSerializer serializer,
@@ -2544,6 +3786,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_flutter_document_handle(self.handle, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.bookId, serializer);
     sse_encode_flutter_book_format(self.format, serializer);
     sse_encode_opt_String(self.title, serializer);
     sse_encode_usize(self.logicalUnitCount, serializer);
@@ -2559,6 +3802,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_flutter_import_item(
+    FlutterImportItem self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.pathKey, serializer);
+    sse_encode_opt_box_autoadd_flutter_library_book(self.book, serializer);
+    sse_encode_opt_String(self.error, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_library_book(
+    FlutterLibraryBook self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.bookId, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_opt_String(self.author, serializer);
+    sse_encode_flutter_book_format(self.format, serializer);
+    sse_encode_String(self.pathKey, serializer);
+    sse_encode_bool(self.managed, serializer);
+    sse_encode_f_64(self.progress, serializer);
+    sse_encode_String(self.dateAdded, serializer);
+    sse_encode_opt_String(self.lastRead, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_library_page(
+    FlutterLibraryPage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_flutter_library_book(self.books, serializer);
+    sse_encode_bool(self.hasMore, serializer);
+  }
+
+  @protected
   void sse_encode_flutter_open_request(
     FlutterOpenRequest self,
     SseSerializer serializer,
@@ -2567,6 +3848,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.localId, serializer);
     sse_encode_String(self.pathKey, serializer);
     sse_encode_opt_box_autoadd_flutter_book_format(self.formatHint, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_reader_settings(
+    FlutterReaderSettings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.continuous, serializer);
+    sse_encode_f_32(self.epubFontSize, serializer);
+    sse_encode_f_32(self.epubLineSpacing, serializer);
+    sse_encode_f_32(self.pdfZoom, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_reading_state(
+    FlutterReadingState self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(self.unit, serializer);
+    sse_encode_opt_box_autoadd_usize(self.offset, serializer);
+    sse_encode_f_32(self.zoom, serializer);
   }
 
   @protected
@@ -2579,6 +3883,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.width, serializer);
     sse_encode_u_32(self.height, serializer);
     sse_encode_usize(self.byteLen, serializer);
+  }
+
+  @protected
+  void sse_encode_flutter_search_match(
+    FlutterSearchMatch self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_usize(self.unit, serializer);
+    sse_encode_usize(self.offset, serializer);
+    sse_encode_usize(self.length, serializer);
+    sse_encode_String(self.context, serializer);
   }
 
   @protected
@@ -2664,6 +3980,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putPlatformInt64(self);
+  }
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_flutter_annotation(
     List<FlutterAnnotation> self,
     SseSerializer serializer,
@@ -2684,6 +4015,54 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_flutter_annotation_association_source(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_flutter_bookmark(
+    List<FlutterBookmark> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_bookmark(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_flutter_import_item(
+    List<FlutterImportItem> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_import_item(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_flutter_library_book(
+    List<FlutterLibraryBook> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_library_book(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_flutter_search_match(
+    List<FlutterSearchMatch> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_flutter_search_match(item, serializer);
     }
   }
 
@@ -2792,6 +4171,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_flutter_bookmark(
+    FlutterBookmark? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_flutter_bookmark(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_flutter_library_book(
+    FlutterLibraryBook? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_flutter_library_book(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_flutter_reading_state(
+    FlutterReadingState? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_flutter_reading_state(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_flutter_rendered_buffer(
     FlutterRenderedBuffer? self,
     SseSerializer serializer,
@@ -2801,6 +4219,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_flutter_rendered_buffer(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_usize(
+    BigInt? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_usize(self, serializer);
     }
   }
 
@@ -2913,6 +4357,40 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     id: id,
   );
 
+  Future<void> deleteBookmark({required PlatformInt64 id}) => RustLib
+      .instance
+      .api
+      .crateApiFlutterBridgeDeleteBookmark(that: this, id: id);
+
+  Future<String> exportBookmarks({required PlatformInt64 bookId}) => RustLib
+      .instance
+      .api
+      .crateApiFlutterBridgeExportBookmarks(that: this, bookId: bookId);
+
+  Future<List<FlutterImportItem>> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeImportPaths(
+    that: this,
+    pathKeys: pathKeys,
+    managed: managed,
+    cancellationId: cancellationId,
+  );
+
+  Future<FlutterLibraryPage> libraryPage({
+    String? query,
+    FlutterBookFormat? format,
+    required int limit,
+    required int offset,
+  }) => RustLib.instance.api.crateApiFlutterBridgeLibraryPage(
+    that: this,
+    query: query,
+    format: format,
+    limit: limit,
+    offset: offset,
+  );
+
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
     required FlutterDocumentHandle target,
@@ -2939,12 +4417,38 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     cancellationId: cancellationId,
   );
 
+  Future<List<FlutterBookmark>> listBookmarks({
+    required PlatformInt64 bookId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeListBookmarks(
+    that: this,
+    bookId: bookId,
+  );
+
+  Future<FlutterReaderSettings> loadReaderSettings() =>
+      RustLib.instance.api.crateApiFlutterBridgeLoadReaderSettings(that: this);
+
+  Future<FlutterReadingState?> loadReadingState({
+    required PlatformInt64 bookId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeLoadReadingState(
+    that: this,
+    bookId: bookId,
+  );
+
   Future<FlutterDocumentSummary> openDocument({
     required FlutterOpenRequest request,
     required BigInt cancellationId,
   }) => RustLib.instance.api.crateApiFlutterBridgeOpenDocument(
     that: this,
     request: request,
+    cancellationId: cancellationId,
+  );
+
+  Future<FlutterDocumentSummary> openLibraryBook({
+    required PlatformInt64 bookId,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeOpenLibraryBook(
+    that: this,
+    bookId: bookId,
     cancellationId: cancellationId,
   );
 
@@ -2966,6 +4470,11 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
       .api
       .crateApiFlutterBridgeReleaseSelection(that: this, handle: handle);
 
+  Future<bool> removeLibraryBook({required PlatformInt64 bookId}) => RustLib
+      .instance
+      .api
+      .crateApiFlutterBridgeRemoveLibraryBook(that: this, bookId: bookId);
+
   Future<FlutterRenderedBuffer> renderPage({
     required FlutterDocumentHandle document,
     required BigInt page,
@@ -2986,6 +4495,32 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
   }) => RustLib.instance.api.crateApiFlutterBridgeRoundTripVisibleScene(
     that: this,
     scene: scene,
+  );
+
+  Future<void> saveReaderSettings({required FlutterReaderSettings value}) =>
+      RustLib.instance.api.crateApiFlutterBridgeSaveReaderSettings(
+        that: this,
+        value: value,
+      );
+
+  Future<void> saveReadingState({
+    required PlatformInt64 bookId,
+    required FlutterReadingState value,
+  }) => RustLib.instance.api.crateApiFlutterBridgeSaveReadingState(
+    that: this,
+    bookId: bookId,
+    value: value,
+  );
+
+  Future<List<FlutterSearchMatch>> searchDocument({
+    required FlutterDocumentHandle document,
+    required String query,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeSearchDocument(
+    that: this,
+    document: document,
+    query: query,
+    cancellationId: cancellationId,
   );
 
   Future<FlutterSelectionSurface> selectionSurface({
@@ -3010,6 +4545,19 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
       .api
       .crateApiFlutterBridgeTakeBuffer(that: this, handle: handle);
 
+  Future<FlutterBookmark?> toggleBookmark({
+    required PlatformInt64 bookId,
+    required BigInt unit,
+    BigInt? offset,
+    String? title,
+  }) => RustLib.instance.api.crateApiFlutterBridgeToggleBookmark(
+    that: this,
+    bookId: bookId,
+    unit: unit,
+    offset: offset,
+    title: title,
+  );
+
   Future<bool> updateAnnotation({
     required FlutterDocumentHandle document,
     required String id,
@@ -3021,5 +4569,16 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     id: id,
     color: color,
     body: body,
+  );
+
+  Future<void> updateBookmark({
+    required PlatformInt64 id,
+    String? title,
+    String? note,
+  }) => RustLib.instance.api.crateApiFlutterBridgeUpdateBookmark(
+    that: this,
+    id: id,
+    title: title,
+    note: note,
   );
 }

@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `cancellation`, `from_bridge`, `invalid_request`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>
 abstract class FlutterBridge implements RustOpaqueInterface {
@@ -40,6 +40,23 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required String id,
   });
 
+  Future<void> deleteBookmark({required PlatformInt64 id});
+
+  Future<String> exportBookmarks({required PlatformInt64 bookId});
+
+  Future<List<FlutterImportItem>> importPaths({
+    required List<String> pathKeys,
+    required bool managed,
+    required BigInt cancellationId,
+  });
+
+  Future<FlutterLibraryPage> libraryPage({
+    String? query,
+    FlutterBookFormat? format,
+    required int limit,
+    required int offset,
+  });
+
   Future<FlutterAnnotationAssociationSourcePage>
   listAnnotationAssociationSources({
     required FlutterDocumentHandle target,
@@ -54,10 +71,23 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt cancellationId,
   });
 
+  Future<List<FlutterBookmark>> listBookmarks({required PlatformInt64 bookId});
+
+  Future<FlutterReaderSettings> loadReaderSettings();
+
+  Future<FlutterReadingState?> loadReadingState({
+    required PlatformInt64 bookId,
+  });
+
   factory FlutterBridge() => RustLib.instance.api.crateApiFlutterBridgeNew();
 
   Future<FlutterDocumentSummary> openDocument({
     required FlutterOpenRequest request,
+    required BigInt cancellationId,
+  });
+
+  Future<FlutterDocumentSummary> openLibraryBook({
+    required PlatformInt64 bookId,
     required BigInt cancellationId,
   });
 
@@ -68,6 +98,8 @@ abstract class FlutterBridge implements RustOpaqueInterface {
   bool releaseDocument({required FlutterDocumentHandle handle});
 
   bool releaseSelection({required FlutterSelectionHandle handle});
+
+  Future<bool> removeLibraryBook({required PlatformInt64 bookId});
 
   Future<FlutterRenderedBuffer> renderPage({
     required FlutterDocumentHandle document,
@@ -82,6 +114,19 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required FlutterSelectionSurface scene,
   });
 
+  Future<void> saveReaderSettings({required FlutterReaderSettings value});
+
+  Future<void> saveReadingState({
+    required PlatformInt64 bookId,
+    required FlutterReadingState value,
+  });
+
+  Future<List<FlutterSearchMatch>> searchDocument({
+    required FlutterDocumentHandle document,
+    required String query,
+    required BigInt cancellationId,
+  });
+
   Future<FlutterSelectionSurface> selectionSurface({
     required FlutterDocumentHandle document,
     required BigInt unit,
@@ -93,11 +138,24 @@ abstract class FlutterBridge implements RustOpaqueInterface {
 
   Uint8List takeBuffer({required FlutterBufferHandle handle});
 
+  Future<FlutterBookmark?> toggleBookmark({
+    required PlatformInt64 bookId,
+    required BigInt unit,
+    BigInt? offset,
+    String? title,
+  });
+
   Future<bool> updateAnnotation({
     required FlutterDocumentHandle document,
     required String id,
     required FlutterHighlightColor color,
     String? body,
+  });
+
+  Future<void> updateBookmark({
+    required PlatformInt64 id,
+    String? title,
+    String? note,
   });
 
   /// Construct a bridge with a host-provided SQLite database path.
@@ -246,6 +304,53 @@ class FlutterAnnotationTextRange {
 
 enum FlutterBookFormat { pdf, epub, cbz }
 
+class FlutterBookmark {
+  final PlatformInt64 id;
+  final PlatformInt64? bookId;
+  final BigInt unit;
+  final BigInt? offset;
+  final String? title;
+  final String? note;
+  final String color;
+  final String createdAt;
+
+  const FlutterBookmark({
+    required this.id,
+    this.bookId,
+    required this.unit,
+    this.offset,
+    this.title,
+    this.note,
+    required this.color,
+    required this.createdAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      bookId.hashCode ^
+      unit.hashCode ^
+      offset.hashCode ^
+      title.hashCode ^
+      note.hashCode ^
+      color.hashCode ^
+      createdAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterBookmark &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          bookId == other.bookId &&
+          unit == other.unit &&
+          offset == other.offset &&
+          title == other.title &&
+          note == other.note &&
+          color == other.color &&
+          createdAt == other.createdAt;
+}
+
 class FlutterBridgeError implements FrbException {
   final FlutterBridgeErrorKind kind;
   final String message;
@@ -314,12 +419,14 @@ class FlutterDocumentHandle {
 
 class FlutterDocumentSummary {
   final FlutterDocumentHandle handle;
+  final PlatformInt64? bookId;
   final FlutterBookFormat format;
   final String? title;
   final BigInt logicalUnitCount;
 
   const FlutterDocumentSummary({
     required this.handle,
+    this.bookId,
     required this.format,
     this.title,
     required this.logicalUnitCount,
@@ -328,6 +435,7 @@ class FlutterDocumentSummary {
   @override
   int get hashCode =>
       handle.hashCode ^
+      bookId.hashCode ^
       format.hashCode ^
       title.hashCode ^
       logicalUnitCount.hashCode;
@@ -338,12 +446,102 @@ class FlutterDocumentSummary {
       other is FlutterDocumentSummary &&
           runtimeType == other.runtimeType &&
           handle == other.handle &&
+          bookId == other.bookId &&
           format == other.format &&
           title == other.title &&
           logicalUnitCount == other.logicalUnitCount;
 }
 
 enum FlutterHighlightColor { yellow, green, blue, pink, purple }
+
+class FlutterImportItem {
+  final String pathKey;
+  final FlutterLibraryBook? book;
+  final String? error;
+
+  const FlutterImportItem({required this.pathKey, this.book, this.error});
+
+  @override
+  int get hashCode => pathKey.hashCode ^ book.hashCode ^ error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterImportItem &&
+          runtimeType == other.runtimeType &&
+          pathKey == other.pathKey &&
+          book == other.book &&
+          error == other.error;
+}
+
+class FlutterLibraryBook {
+  final PlatformInt64 bookId;
+  final String title;
+  final String? author;
+  final FlutterBookFormat format;
+  final String pathKey;
+  final bool managed;
+  final double progress;
+  final String dateAdded;
+  final String? lastRead;
+
+  const FlutterLibraryBook({
+    required this.bookId,
+    required this.title,
+    this.author,
+    required this.format,
+    required this.pathKey,
+    required this.managed,
+    required this.progress,
+    required this.dateAdded,
+    this.lastRead,
+  });
+
+  @override
+  int get hashCode =>
+      bookId.hashCode ^
+      title.hashCode ^
+      author.hashCode ^
+      format.hashCode ^
+      pathKey.hashCode ^
+      managed.hashCode ^
+      progress.hashCode ^
+      dateAdded.hashCode ^
+      lastRead.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterLibraryBook &&
+          runtimeType == other.runtimeType &&
+          bookId == other.bookId &&
+          title == other.title &&
+          author == other.author &&
+          format == other.format &&
+          pathKey == other.pathKey &&
+          managed == other.managed &&
+          progress == other.progress &&
+          dateAdded == other.dateAdded &&
+          lastRead == other.lastRead;
+}
+
+class FlutterLibraryPage {
+  final List<FlutterLibraryBook> books;
+  final bool hasMore;
+
+  const FlutterLibraryPage({required this.books, required this.hasMore});
+
+  @override
+  int get hashCode => books.hashCode ^ hasMore.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterLibraryPage &&
+          runtimeType == other.runtimeType &&
+          books == other.books &&
+          hasMore == other.hasMore;
+}
 
 class FlutterOpenRequest {
   final String localId;
@@ -367,6 +565,61 @@ class FlutterOpenRequest {
           localId == other.localId &&
           pathKey == other.pathKey &&
           formatHint == other.formatHint;
+}
+
+class FlutterReaderSettings {
+  final bool continuous;
+  final double epubFontSize;
+  final double epubLineSpacing;
+  final double pdfZoom;
+
+  const FlutterReaderSettings({
+    required this.continuous,
+    required this.epubFontSize,
+    required this.epubLineSpacing,
+    required this.pdfZoom,
+  });
+
+  @override
+  int get hashCode =>
+      continuous.hashCode ^
+      epubFontSize.hashCode ^
+      epubLineSpacing.hashCode ^
+      pdfZoom.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterReaderSettings &&
+          runtimeType == other.runtimeType &&
+          continuous == other.continuous &&
+          epubFontSize == other.epubFontSize &&
+          epubLineSpacing == other.epubLineSpacing &&
+          pdfZoom == other.pdfZoom;
+}
+
+class FlutterReadingState {
+  final BigInt unit;
+  final BigInt? offset;
+  final double zoom;
+
+  const FlutterReadingState({
+    required this.unit,
+    this.offset,
+    required this.zoom,
+  });
+
+  @override
+  int get hashCode => unit.hashCode ^ offset.hashCode ^ zoom.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterReadingState &&
+          runtimeType == other.runtimeType &&
+          unit == other.unit &&
+          offset == other.offset &&
+          zoom == other.zoom;
 }
 
 class FlutterRenderedBuffer {
@@ -395,6 +648,34 @@ class FlutterRenderedBuffer {
           width == other.width &&
           height == other.height &&
           byteLen == other.byteLen;
+}
+
+class FlutterSearchMatch {
+  final BigInt unit;
+  final BigInt offset;
+  final BigInt length;
+  final String context;
+
+  const FlutterSearchMatch({
+    required this.unit,
+    required this.offset,
+    required this.length,
+    required this.context,
+  });
+
+  @override
+  int get hashCode =>
+      unit.hashCode ^ offset.hashCode ^ length.hashCode ^ context.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterSearchMatch &&
+          runtimeType == other.runtimeType &&
+          unit == other.unit &&
+          offset == other.offset &&
+          length == other.length &&
+          context == other.context;
 }
 
 class FlutterSelectionCaret {

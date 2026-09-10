@@ -23,6 +23,7 @@ use crate::annotations::{
 use crate::annotations::{AnnotationPersistenceTestGate, MAX_ANNOTATIONS_PER_SNAPSHOT};
 
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan};
+use crate::bookmarks::{Bookmark, BookmarkStore};
 use crate::document::{Document, RenderedPage};
 #[cfg(test)]
 use crate::epub::EpubLimits;
@@ -31,6 +32,10 @@ use crate::epub::{
     EpubTextDirection, EpubTextEndpoint, EpubTextRequest, EpubTextRun,
 };
 use crate::library::BookFormat;
+use crate::library::{Book, BookPage, Library, StorageKind};
+use crate::reader::{ReaderPreferences, ReadingMode, ZoomMode};
+use crate::reading_state::{FileReadingState, ReadingStateStore};
+use crate::search::{SearchCancellation, SearchError, SearchLimits, SearchMatch};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const MAX_BRIDGE_BUFFER_BYTES: usize = 160 * 1024 * 1024;
@@ -94,6 +99,106 @@ pub struct DocumentSummary {
     pub title: Option<String>,
     pub logical_unit: LogicalUnit,
     pub logical_unit_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryBookDto {
+    pub book_id: i64,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: BookFormat,
+    pub path_key: String,
+    pub managed: bool,
+    pub progress: f64,
+    pub date_added: String,
+    pub last_read: Option<String>,
+}
+
+impl From<Book> for LibraryBookDto {
+    fn from(book: Book) -> Self {
+        Self {
+            book_id: book.id,
+            title: book.title,
+            author: book.author,
+            format: book.format,
+            path_key: book.file_path,
+            managed: book.storage_kind == StorageKind::Managed,
+            progress: book.progress,
+            date_added: book.date_added,
+            last_read: book.last_read,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryPageDto {
+    pub books: Vec<LibraryBookDto>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportItemDto {
+    pub path_key: String,
+    pub book: Option<LibraryBookDto>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BookmarkDto {
+    pub id: i64,
+    pub book_id: Option<i64>,
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub title: Option<String>,
+    pub note: Option<String>,
+    pub color: String,
+    pub created_at: String,
+}
+
+impl From<Bookmark> for BookmarkDto {
+    fn from(value: Bookmark) -> Self {
+        Self {
+            id: value.id,
+            book_id: value.book_id,
+            unit: value.page,
+            offset: value.location_offset,
+            title: value.title,
+            note: value.note,
+            color: value.color,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReadingStateDto {
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub zoom: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReaderSettingsDto {
+    pub continuous: bool,
+    pub epub_font_size: f32,
+    pub epub_line_spacing: f32,
+    /// Zero is fit-page, -1 is fit-width, and a positive value is manual scale.
+    pub pdf_zoom: f32,
+}
+
+impl From<ReaderPreferences> for ReaderSettingsDto {
+    fn from(value: ReaderPreferences) -> Self {
+        Self {
+            continuous: value.reading_mode == ReadingMode::Continuous,
+            epub_font_size: value.epub_font_size,
+            epub_line_spacing: value.epub_line_spacing,
+            pdf_zoom: match value.pdf_zoom {
+                ZoomMode::FitPage => 0.0,
+                ZoomMode::FitWidth => -1.0,
+                ZoomMode::Manual(v) => v,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -470,6 +575,7 @@ pub struct Bridge {
     admission: Arc<BridgeAdmission>,
     annotation_store: Arc<tokio::sync::OnceCell<AnnotationStore>>,
     annotation_database: Option<Arc<PathBuf>>,
+    state_store: Arc<tokio::sync::OnceCell<ReadingStateStore>>,
     #[cfg(test)]
     selection_worker_barrier: Option<Arc<std::sync::Barrier>>,
     #[cfg(test)]
@@ -531,6 +637,7 @@ impl Bridge {
             admission,
             annotation_store: Arc::new(tokio::sync::OnceCell::new()),
             annotation_database,
+            state_store: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             selection_worker_barrier: None,
             #[cfg(test)]
@@ -672,6 +779,362 @@ impl Bridge {
                 }),
             );
         Ok(summary)
+    }
+
+    async fn state_store(&self) -> Result<&ReadingStateStore, BridgeError> {
+        self.state_store
+            .get_or_try_init(|| async {
+                match self.annotation_database.as_deref() {
+                    Some(path) => ReadingStateStore::open_at_async_deferred_backfill(path).await,
+                    None => ReadingStateStore::open_async_deferred_backfill().await,
+                }
+                .map_err(|error| BridgeError::Storage(error.to_string()))
+            })
+            .await
+    }
+
+    async fn library(&self) -> Result<Library, BridgeError> {
+        let state = self.state_store().await?;
+        Ok(Library::new(
+            state.pool().clone(),
+            state.managed_books_dir(),
+        ))
+    }
+
+    pub async fn library_page(
+        &self,
+        query: Option<String>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<LibraryPageDto, BridgeError> {
+        let BookPage { books, has_more } = self
+            .library()
+            .await?
+            .page(query.as_deref(), format, limit, offset)
+            .await
+            .map_err(storage_error)?;
+        Ok(LibraryPageDto {
+            books: books.into_iter().map(Into::into).collect(),
+            has_more,
+        })
+    }
+
+    pub async fn import_paths(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+        if path_keys.len() > 256 {
+            return Err(BridgeError::InvalidRequest(
+                "at most 256 selected paths may be imported".into(),
+            ));
+        }
+        let library = self.library().await?;
+        let mut items = Vec::with_capacity(path_keys.len());
+        for path_key in path_keys {
+            check_cancelled(&cancellation)?;
+            if path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
+                return Err(BridgeError::InvalidRequest(
+                    "import path key is too long".into(),
+                ));
+            }
+            let path = crate::path_key::try_path_from_key(&path_key)
+                .map_err(|_| BridgeError::InvalidRequest("invalid import path key".into()))?;
+            let result = if managed {
+                library.import_managed_file(&path).await
+            } else {
+                library.import_file(&path).await
+            };
+            items.push(match result {
+                Ok(book) => ImportItemDto {
+                    path_key,
+                    book: Some(book.into()),
+                    error: None,
+                },
+                Err(error) => ImportItemDto {
+                    path_key,
+                    book: None,
+                    error: Some(error.to_string()),
+                },
+            });
+        }
+        check_cancelled(&cancellation)?;
+        Ok(items)
+    }
+
+    pub async fn open_library_book(
+        &self,
+        book_id: i64,
+        cancellation: Cancellation,
+    ) -> Result<DocumentSummary, BridgeError> {
+        let book = self
+            .library()
+            .await?
+            .get(book_id)
+            .await
+            .map_err(storage_error)?
+            .ok_or(BridgeError::DocumentNotFound)?;
+        let mut summary = self
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: format!("library:{book_id}"),
+                    path_key: book.file_path,
+                    format_hint: Some(book.format),
+                },
+                cancellation,
+            )
+            .await?;
+        summary.book_id = Some(book_id);
+        Ok(summary)
+    }
+
+    pub async fn search_document(
+        &self,
+        handle: DocumentHandle,
+        query: String,
+        cancellation: Cancellation,
+    ) -> Result<Vec<SearchMatch>, BridgeError> {
+        let document = self.document(handle)?.document.clone();
+        let format = document.format();
+        let search_cancel = SearchCancellation::new();
+        let worker_cancel = search_cancel.clone();
+        let mut worker = tokio::task::spawn_blocking(move || match &document {
+            OpenDocument::Pdf(pdf) => {
+                crate::search::search_pdf_with(pdf, &query, SearchLimits::default(), &worker_cancel)
+            }
+            OpenDocument::Epub(epub) => crate::search::search_epub_with(
+                epub,
+                &query,
+                SearchLimits::default(),
+                &worker_cancel,
+            ),
+            OpenDocument::Cbz(_) => Err(SearchError::Document("CBZ has no searchable text".into())),
+        });
+        tokio::select! {
+            result = &mut worker => result.map_err(|_| BridgeError::Worker)?.map_err(|error| match error {
+                SearchError::Cancelled => BridgeError::Cancelled,
+                SearchError::QueryLimit { .. } | SearchError::InvalidLimit { .. } => BridgeError::InvalidRequest(error.to_string()),
+                SearchError::ResultLimit { .. } | SearchError::TextLimit { .. } | SearchError::MatchLimit { .. } => BridgeError::OpenLimit { format, detail: error.to_string() },
+                _ => BridgeError::Render(error.to_string()),
+            }),
+            () = cancellation.cancelled() => {
+                search_cancel.cancel();
+                let _ = worker.await.map_err(|_| BridgeError::Worker)?;
+                Err(BridgeError::Cancelled)
+            }
+        }
+    }
+
+    pub async fn list_bookmarks(&self, book_id: i64) -> Result<Vec<BookmarkDto>, BridgeError> {
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .list_for_book_async(book_id)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(storage_error)
+    }
+
+    pub async fn toggle_bookmark(
+        &self,
+        book_id: i64,
+        unit: usize,
+        offset: Option<usize>,
+        title: Option<String>,
+    ) -> Result<Option<BookmarkDto>, BridgeError> {
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .toggle_for_book_at_async(
+                book_id,
+                std::path::Path::new(""),
+                unit,
+                offset,
+                title.as_deref(),
+            )
+            .await
+            .map(|v| v.map(Into::into))
+            .map_err(storage_error)
+    }
+
+    pub async fn update_bookmark(
+        &self,
+        id: i64,
+        title: Option<String>,
+        note: Option<String>,
+    ) -> Result<(), BridgeError> {
+        let store = self.state_store().await?;
+        let bookmarks = BookmarkStore::new(store.pool().clone());
+        bookmarks
+            .update_title_async(id, title.as_deref())
+            .await
+            .map_err(storage_error)?;
+        bookmarks
+            .update_note_async(id, note.as_deref())
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn delete_bookmark(&self, id: i64) -> Result<(), BridgeError> {
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .remove_async(id)
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn export_bookmarks(&self, book_id: i64) -> Result<String, BridgeError> {
+        let state = self.state_store().await?;
+        let book = self
+            .library()
+            .await?
+            .get(book_id)
+            .await
+            .map_err(storage_error)?
+            .ok_or(BridgeError::DocumentNotFound)?;
+        let hash = book
+            .content_hash
+            .ok_or_else(|| BridgeError::Storage("book has no content fingerprint".into()))?;
+        BookmarkStore::new(state.pool().clone())
+            .export_markdown_async(&crate::path_from_key(&book.file_path), &hash)
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn load_reading_state(
+        &self,
+        book_id: i64,
+    ) -> Result<Option<ReadingStateDto>, BridgeError> {
+        self.state_store()
+            .await?
+            .get_for_book_async(book_id)
+            .await
+            .map(|v| {
+                v.map(|s| ReadingStateDto {
+                    unit: s.page,
+                    offset: s.location_offset,
+                    zoom: s.zoom,
+                })
+            })
+            .map_err(storage_error)
+    }
+
+    pub async fn save_reading_state(
+        &self,
+        book_id: i64,
+        value: ReadingStateDto,
+    ) -> Result<(), BridgeError> {
+        if !value.zoom.is_finite() || value.zoom <= 0.0 {
+            return Err(BridgeError::InvalidRequest(
+                "zoom must be finite and positive".into(),
+            ));
+        }
+        let state = FileReadingState {
+            page: value.unit,
+            location_offset: value.offset,
+            zoom: value.zoom,
+        };
+        self.state_store()
+            .await?
+            .set_for_book_async(book_id, &state)
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn load_reader_settings(&self) -> Result<ReaderSettingsDto, BridgeError> {
+        let store = self.state_store().await?;
+        let mut p = ReaderPreferences {
+            reading_mode: ReadingMode::from_stored(
+                store
+                    .get_pref_async("reader.mode")
+                    .await
+                    .map_err(storage_error)?
+                    .as_deref(),
+            ),
+            ..ReaderPreferences::default()
+        };
+        if let Some(v) = store
+            .get_pref_async("reader.epub_font_size")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse().ok())
+        {
+            p.epub_font_size = v;
+        }
+        if let Some(v) = store
+            .get_pref_async("reader.epub_line_spacing")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse().ok())
+        {
+            p.epub_line_spacing = v;
+        }
+        if let Some(v) = store
+            .get_pref_async("reader.pdf_zoom")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            p.pdf_zoom = if v == 0.0 {
+                ZoomMode::FitPage
+            } else if v == -1.0 {
+                ZoomMode::FitWidth
+            } else {
+                ZoomMode::Manual(v)
+            };
+        }
+        Ok(p.into())
+    }
+
+    pub async fn save_reader_settings(&self, value: ReaderSettingsDto) -> Result<(), BridgeError> {
+        if !(8.0..=72.0).contains(&value.epub_font_size)
+            || !(1.0..=3.0).contains(&value.epub_line_spacing)
+            || !value.pdf_zoom.is_finite()
+            || (value.pdf_zoom != 0.0
+                && value.pdf_zoom != -1.0
+                && !(0.25..=8.0).contains(&value.pdf_zoom))
+        {
+            return Err(BridgeError::InvalidRequest(
+                "reader settings are outside supported bounds".into(),
+            ));
+        }
+        let store = self.state_store().await?;
+        store
+            .set_pref_async(
+                "reader.mode",
+                if value.continuous {
+                    "continuous"
+                } else {
+                    "paginated"
+                },
+            )
+            .await
+            .map_err(storage_error)?;
+        store
+            .set_pref_async("reader.epub_font_size", &value.epub_font_size.to_string())
+            .await
+            .map_err(storage_error)?;
+        store
+            .set_pref_async(
+                "reader.epub_line_spacing",
+                &value.epub_line_spacing.to_string(),
+            )
+            .await
+            .map_err(storage_error)?;
+        store
+            .set_pref_async("reader.pdf_zoom", &value.pdf_zoom.to_string())
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn remove_library_book(&self, book_id: i64) -> Result<bool, BridgeError> {
+        let library = self.library().await?;
+        if library.get(book_id).await.map_err(storage_error)?.is_none() {
+            return Ok(false);
+        }
+        library.remove(book_id).await.map_err(storage_error)?;
+        Ok(true)
     }
 
     async fn annotation_store(&self) -> Result<&AnnotationStore, BridgeError> {
@@ -5321,6 +5784,61 @@ mod tests {
                 )
                 .await,
             Err(BridgeError::BufferLimit)
+        );
+    }
+
+    #[tokio::test]
+    async fn product_bridge_library_state_settings_and_removal_round_trip() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        let page = bridge
+            .library_page(Some("sample".into()), Some(BookFormat::Pdf), 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(page.books[0].book_id, book_id);
+        bridge
+            .save_reading_state(
+                book_id,
+                ReadingStateDto {
+                    unit: 1,
+                    offset: None,
+                    zoom: 1.5,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .load_reading_state(book_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .unit,
+            1
+        );
+        let settings = ReaderSettingsDto {
+            continuous: true,
+            epub_font_size: 18.0,
+            epub_line_spacing: 1.8,
+            pdf_zoom: -1.0,
+        };
+        bridge.save_reader_settings(settings).await.unwrap();
+        assert_eq!(bridge.load_reader_settings().await.unwrap(), settings);
+        assert!(bridge.remove_library_book(book_id).await.unwrap());
+        assert!(!bridge.remove_library_book(book_id).await.unwrap());
+        assert!(
+            source.exists(),
+            "referenced imports must not delete user files"
         );
     }
 }

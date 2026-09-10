@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -588008765;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1306103135;
 
 // Section: executor
 
@@ -315,6 +315,215 @@ fn wire__crate__api__FlutterBridge_delete_annotation_impl(
         },
     )
 }
+fn wire__crate__api__FlutterBridge_delete_bookmark_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    id: impl CstDecode<i64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_delete_bookmark",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_id = id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok =
+                            crate::api::FlutterBridge::delete_bookmark(&*api_that_guard, api_id)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_export_bookmarks_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_export_bookmarks",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::export_bookmarks(
+                            &*api_that_guard,
+                            api_book_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_import_paths_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    path_keys: impl CstDecode<Vec<String>>,
+    managed: impl CstDecode<bool>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_import_paths",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_path_keys = path_keys.cst_decode();
+            let api_managed = managed.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::import_paths(
+                            &*api_that_guard,
+                            api_path_keys,
+                            api_managed,
+                            api_cancellation_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_library_page_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    query: impl CstDecode<Option<String>>,
+    format: impl CstDecode<Option<crate::api::FlutterBookFormat>>,
+    limit: impl CstDecode<u32>,
+    offset: impl CstDecode<u32>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_library_page",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_query = query.cst_decode();
+            let api_format = format.cst_decode();
+            let api_limit = limit.cst_decode();
+            let api_offset = offset.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::library_page(
+                            &*api_that_guard,
+                            api_query,
+                            api_format,
+                            api_limit,
+                            api_offset,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__FlutterBridge_list_annotation_association_sources_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     that: impl CstDecode<
@@ -429,6 +638,149 @@ fn wire__crate__api__FlutterBridge_list_annotations_impl(
         },
     )
 }
+fn wire__crate__api__FlutterBridge_list_bookmarks_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_list_bookmarks",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::list_bookmarks(
+                            &*api_that_guard,
+                            api_book_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_load_reader_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_load_reader_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok =
+                            crate::api::FlutterBridge::load_reader_settings(&*api_that_guard)
+                                .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_load_reading_state_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_load_reading_state",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::load_reading_state(
+                            &*api_that_guard,
+                            api_book_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__FlutterBridge_new_impl()
 -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
@@ -486,6 +838,58 @@ fn wire__crate__api__FlutterBridge_open_document_impl(
                         let output_ok = crate::api::FlutterBridge::open_document(
                             &*api_that_guard,
                             api_request,
+                            api_cancellation_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_open_library_book_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_open_library_book",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::open_library_book(
+                            &*api_that_guard,
+                            api_book_id,
                             api_cancellation_id,
                         )
                         .await?;
@@ -652,6 +1056,55 @@ fn wire__crate__api__FlutterBridge_release_selection_impl(
         },
     )
 }
+fn wire__crate__api__FlutterBridge_remove_library_book_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_remove_library_book",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::remove_library_book(
+                            &*api_that_guard,
+                            api_book_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__FlutterBridge_render_page_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     that: impl CstDecode<
@@ -747,6 +1200,162 @@ fn wire__crate__api__FlutterBridge_round_trip_visible_scene_impl(
                     ))?;
                 Ok(output_ok)
             })())
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_save_reader_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    value: impl CstDecode<crate::api::FlutterReaderSettings>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_save_reader_settings",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_value = value.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::save_reader_settings(
+                            &*api_that_guard,
+                            api_value,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_save_reading_state_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+    value: impl CstDecode<crate::api::FlutterReadingState>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_save_reading_state",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            let api_value = value.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::save_reading_state(
+                            &*api_that_guard,
+                            api_book_id,
+                            api_value,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_search_document_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    document: impl CstDecode<crate::api::FlutterDocumentHandle>,
+    query: impl CstDecode<String>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_search_document",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_document = document.cst_decode();
+            let api_query = query.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::search_document(
+                            &*api_that_guard,
+                            api_document,
+                            api_query,
+                            api_cancellation_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
         },
     )
 }
@@ -851,6 +1460,64 @@ fn wire__crate__api__FlutterBridge_take_buffer_impl(
         },
     )
 }
+fn wire__crate__api__FlutterBridge_toggle_bookmark_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+    unit: impl CstDecode<usize>,
+    offset: impl CstDecode<Option<usize>>,
+    title: impl CstDecode<Option<String>>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_toggle_bookmark",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            let api_unit = unit.cst_decode();
+            let api_offset = offset.cst_decode();
+            let api_title = title.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::toggle_bookmark(
+                            &*api_that_guard,
+                            api_book_id,
+                            api_unit,
+                            api_offset,
+                            api_title,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__FlutterBridge_update_annotation_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     that: impl CstDecode<
@@ -899,6 +1566,61 @@ fn wire__crate__api__FlutterBridge_update_annotation_impl(
                             api_id,
                             api_color,
                             api_body,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_update_bookmark_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    id: impl CstDecode<i64>,
+    title: impl CstDecode<Option<String>>,
+    note: impl CstDecode<Option<String>>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_update_bookmark",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_id = id.cst_decode();
+            let api_title = title.cst_decode();
+            let api_note = note.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::update_bookmark(
+                            &*api_that_guard,
+                            api_id,
+                            api_title,
+                            api_note,
                         )
                         .await?;
                         Ok(output_ok)
@@ -960,6 +1682,12 @@ impl CstDecode<bool> for bool {
 impl CstDecode<f32> for f32 {
     // Codec=Cst (C-struct based), see doc to use other codecs
     fn cst_decode(self) -> f32 {
+        self
+    }
+}
+impl CstDecode<f64> for f64 {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    fn cst_decode(self) -> f64 {
         self
     }
 }
@@ -1035,6 +1763,12 @@ impl CstDecode<i32> for i32 {
         self
     }
 }
+impl CstDecode<i64> for i64 {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    fn cst_decode(self) -> i64 {
+        self
+    }
+}
 impl CstDecode<u32> for u32 {
     // Codec=Cst (C-struct based), see doc to use other codecs
     fn cst_decode(self) -> u32 {
@@ -1098,6 +1832,13 @@ impl SseDecode for f32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         deserializer.cursor.read_f32::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_f64::<NativeEndian>().unwrap()
     }
 }
 
@@ -1219,6 +1960,30 @@ impl SseDecode for crate::api::FlutterBookFormat {
     }
 }
 
+impl SseDecode for crate::api::FlutterBookmark {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <i64>::sse_decode(deserializer);
+        let mut var_bookId = <Option<i64>>::sse_decode(deserializer);
+        let mut var_unit = <usize>::sse_decode(deserializer);
+        let mut var_offset = <Option<usize>>::sse_decode(deserializer);
+        let mut var_title = <Option<String>>::sse_decode(deserializer);
+        let mut var_note = <Option<String>>::sse_decode(deserializer);
+        let mut var_color = <String>::sse_decode(deserializer);
+        let mut var_createdAt = <String>::sse_decode(deserializer);
+        return crate::api::FlutterBookmark {
+            id: var_id,
+            book_id: var_bookId,
+            unit: var_unit,
+            offset: var_offset,
+            title: var_title,
+            note: var_note,
+            color: var_color,
+            created_at: var_createdAt,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FlutterBridgeError {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1278,11 +2043,13 @@ impl SseDecode for crate::api::FlutterDocumentSummary {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_handle = <crate::api::FlutterDocumentHandle>::sse_decode(deserializer);
+        let mut var_bookId = <Option<i64>>::sse_decode(deserializer);
         let mut var_format = <crate::api::FlutterBookFormat>::sse_decode(deserializer);
         let mut var_title = <Option<String>>::sse_decode(deserializer);
         let mut var_logicalUnitCount = <usize>::sse_decode(deserializer);
         return crate::api::FlutterDocumentSummary {
             handle: var_handle,
+            book_id: var_bookId,
             format: var_format,
             title: var_title,
             logical_unit_count: var_logicalUnitCount,
@@ -1305,6 +2072,58 @@ impl SseDecode for crate::api::FlutterHighlightColor {
     }
 }
 
+impl SseDecode for crate::api::FlutterImportItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_pathKey = <String>::sse_decode(deserializer);
+        let mut var_book = <Option<crate::api::FlutterLibraryBook>>::sse_decode(deserializer);
+        let mut var_error = <Option<String>>::sse_decode(deserializer);
+        return crate::api::FlutterImportItem {
+            path_key: var_pathKey,
+            book: var_book,
+            error: var_error,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterLibraryBook {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_bookId = <i64>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        let mut var_author = <Option<String>>::sse_decode(deserializer);
+        let mut var_format = <crate::api::FlutterBookFormat>::sse_decode(deserializer);
+        let mut var_pathKey = <String>::sse_decode(deserializer);
+        let mut var_managed = <bool>::sse_decode(deserializer);
+        let mut var_progress = <f64>::sse_decode(deserializer);
+        let mut var_dateAdded = <String>::sse_decode(deserializer);
+        let mut var_lastRead = <Option<String>>::sse_decode(deserializer);
+        return crate::api::FlutterLibraryBook {
+            book_id: var_bookId,
+            title: var_title,
+            author: var_author,
+            format: var_format,
+            path_key: var_pathKey,
+            managed: var_managed,
+            progress: var_progress,
+            date_added: var_dateAdded,
+            last_read: var_lastRead,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterLibraryPage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_books = <Vec<crate::api::FlutterLibraryBook>>::sse_decode(deserializer);
+        let mut var_hasMore = <bool>::sse_decode(deserializer);
+        return crate::api::FlutterLibraryPage {
+            books: var_books,
+            has_more: var_hasMore,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FlutterOpenRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1315,6 +2134,36 @@ impl SseDecode for crate::api::FlutterOpenRequest {
             local_id: var_localId,
             path_key: var_pathKey,
             format_hint: var_formatHint,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterReaderSettings {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_continuous = <bool>::sse_decode(deserializer);
+        let mut var_epubFontSize = <f32>::sse_decode(deserializer);
+        let mut var_epubLineSpacing = <f32>::sse_decode(deserializer);
+        let mut var_pdfZoom = <f32>::sse_decode(deserializer);
+        return crate::api::FlutterReaderSettings {
+            continuous: var_continuous,
+            epub_font_size: var_epubFontSize,
+            epub_line_spacing: var_epubLineSpacing,
+            pdf_zoom: var_pdfZoom,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterReadingState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_unit = <usize>::sse_decode(deserializer);
+        let mut var_offset = <Option<usize>>::sse_decode(deserializer);
+        let mut var_zoom = <f32>::sse_decode(deserializer);
+        return crate::api::FlutterReadingState {
+            unit: var_unit,
+            offset: var_offset,
+            zoom: var_zoom,
         };
     }
 }
@@ -1331,6 +2180,22 @@ impl SseDecode for crate::api::FlutterRenderedBuffer {
             width: var_width,
             height: var_height,
             byte_len: var_byteLen,
+        };
+    }
+}
+
+impl SseDecode for crate::api::FlutterSearchMatch {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_unit = <usize>::sse_decode(deserializer);
+        let mut var_offset = <usize>::sse_decode(deserializer);
+        let mut var_length = <usize>::sse_decode(deserializer);
+        let mut var_context = <String>::sse_decode(deserializer);
+        return crate::api::FlutterSearchMatch {
+            unit: var_unit,
+            offset: var_offset,
+            length: var_length,
+            context: var_context,
         };
     }
 }
@@ -1446,6 +2311,25 @@ impl SseDecode for i32 {
     }
 }
 
+impl SseDecode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_i64::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<String>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::FlutterAnnotation> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1465,6 +2349,54 @@ impl SseDecode for Vec<crate::api::FlutterAnnotationAssociationSource> {
         let mut ans_ = vec![];
         for idx_ in 0..len_ {
             ans_.push(<crate::api::FlutterAnnotationAssociationSource>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FlutterBookmark> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FlutterBookmark>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FlutterImportItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FlutterImportItem>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FlutterLibraryBook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FlutterLibraryBook>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::FlutterSearchMatch> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = vec![];
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::FlutterSearchMatch>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -1583,6 +2515,39 @@ impl SseDecode for Option<crate::api::FlutterBookFormat> {
     }
 }
 
+impl SseDecode for Option<crate::api::FlutterBookmark> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::FlutterBookmark>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::FlutterLibraryBook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::FlutterLibraryBook>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::FlutterReadingState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::FlutterReadingState>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::FlutterRenderedBuffer> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1590,6 +2555,28 @@ impl SseDecode for Option<crate::api::FlutterRenderedBuffer> {
             return Some(<crate::api::FlutterRenderedBuffer>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<i64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<usize> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<usize>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -1841,6 +2828,30 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterBookFormat>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterBookmark {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.book_id.into_into_dart().into_dart(),
+            self.unit.into_into_dart().into_dart(),
+            self.offset.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.note.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
+            self.created_at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::FlutterBookmark {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterBookmark>
+    for crate::api::FlutterBookmark
+{
+    fn into_into_dart(self) -> crate::api::FlutterBookmark {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FlutterBridgeError {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1936,6 +2947,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterDocumentSummary {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.handle.into_into_dart().into_dart(),
+            self.book_id.into_into_dart().into_dart(),
             self.format.into_into_dart().into_dart(),
             self.title.into_into_dart().into_dart(),
             self.logical_unit_count.into_into_dart().into_dart(),
@@ -1979,6 +2991,74 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterHighlightColor>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterImportItem {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.path_key.into_into_dart().into_dart(),
+            self.book.into_into_dart().into_dart(),
+            self.error.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::FlutterImportItem {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterImportItem>
+    for crate::api::FlutterImportItem
+{
+    fn into_into_dart(self) -> crate::api::FlutterImportItem {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterLibraryBook {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.book_id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+            self.author.into_into_dart().into_dart(),
+            self.format.into_into_dart().into_dart(),
+            self.path_key.into_into_dart().into_dart(),
+            self.managed.into_into_dart().into_dart(),
+            self.progress.into_into_dart().into_dart(),
+            self.date_added.into_into_dart().into_dart(),
+            self.last_read.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterLibraryBook
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterLibraryBook>
+    for crate::api::FlutterLibraryBook
+{
+    fn into_into_dart(self) -> crate::api::FlutterLibraryBook {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterLibraryPage {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.books.into_into_dart().into_dart(),
+            self.has_more.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterLibraryPage
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterLibraryPage>
+    for crate::api::FlutterLibraryPage
+{
+    fn into_into_dart(self) -> crate::api::FlutterLibraryPage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FlutterOpenRequest {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1997,6 +3077,51 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterOpenRequest>
     for crate::api::FlutterOpenRequest
 {
     fn into_into_dart(self) -> crate::api::FlutterOpenRequest {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterReaderSettings {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.continuous.into_into_dart().into_dart(),
+            self.epub_font_size.into_into_dart().into_dart(),
+            self.epub_line_spacing.into_into_dart().into_dart(),
+            self.pdf_zoom.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterReaderSettings
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterReaderSettings>
+    for crate::api::FlutterReaderSettings
+{
+    fn into_into_dart(self) -> crate::api::FlutterReaderSettings {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterReadingState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.unit.into_into_dart().into_dart(),
+            self.offset.into_into_dart().into_dart(),
+            self.zoom.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterReadingState
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterReadingState>
+    for crate::api::FlutterReadingState
+{
+    fn into_into_dart(self) -> crate::api::FlutterReadingState {
         self
     }
 }
@@ -2020,6 +3145,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterRenderedBuffer>
     for crate::api::FlutterRenderedBuffer
 {
     fn into_into_dart(self) -> crate::api::FlutterRenderedBuffer {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterSearchMatch {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.unit.into_into_dart().into_dart(),
+            self.offset.into_into_dart().into_dart(),
+            self.length.into_into_dart().into_dart(),
+            self.context.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterSearchMatch
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterSearchMatch>
+    for crate::api::FlutterSearchMatch
+{
+    fn into_into_dart(self) -> crate::api::FlutterSearchMatch {
         self
     }
 }
@@ -2202,6 +3350,13 @@ impl SseEncode for f32 {
     }
 }
 
+impl SseEncode for f64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_f64::<NativeEndian>(self).unwrap();
+    }
+}
+
 impl SseEncode for crate::api::FlutterAnnotation {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2297,6 +3452,20 @@ impl SseEncode for crate::api::FlutterBookFormat {
     }
 }
 
+impl SseEncode for crate::api::FlutterBookmark {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.id, serializer);
+        <Option<i64>>::sse_encode(self.book_id, serializer);
+        <usize>::sse_encode(self.unit, serializer);
+        <Option<usize>>::sse_encode(self.offset, serializer);
+        <Option<String>>::sse_encode(self.title, serializer);
+        <Option<String>>::sse_encode(self.note, serializer);
+        <String>::sse_encode(self.color, serializer);
+        <String>::sse_encode(self.created_at, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FlutterBridgeError {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2348,6 +3517,7 @@ impl SseEncode for crate::api::FlutterDocumentSummary {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::FlutterDocumentHandle>::sse_encode(self.handle, serializer);
+        <Option<i64>>::sse_encode(self.book_id, serializer);
         <crate::api::FlutterBookFormat>::sse_encode(self.format, serializer);
         <Option<String>>::sse_encode(self.title, serializer);
         <usize>::sse_encode(self.logical_unit_count, serializer);
@@ -2373,12 +3543,63 @@ impl SseEncode for crate::api::FlutterHighlightColor {
     }
 }
 
+impl SseEncode for crate::api::FlutterImportItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.path_key, serializer);
+        <Option<crate::api::FlutterLibraryBook>>::sse_encode(self.book, serializer);
+        <Option<String>>::sse_encode(self.error, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterLibraryBook {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.book_id, serializer);
+        <String>::sse_encode(self.title, serializer);
+        <Option<String>>::sse_encode(self.author, serializer);
+        <crate::api::FlutterBookFormat>::sse_encode(self.format, serializer);
+        <String>::sse_encode(self.path_key, serializer);
+        <bool>::sse_encode(self.managed, serializer);
+        <f64>::sse_encode(self.progress, serializer);
+        <String>::sse_encode(self.date_added, serializer);
+        <Option<String>>::sse_encode(self.last_read, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterLibraryPage {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<crate::api::FlutterLibraryBook>>::sse_encode(self.books, serializer);
+        <bool>::sse_encode(self.has_more, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FlutterOpenRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.local_id, serializer);
         <String>::sse_encode(self.path_key, serializer);
         <Option<crate::api::FlutterBookFormat>>::sse_encode(self.format_hint, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterReaderSettings {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.continuous, serializer);
+        <f32>::sse_encode(self.epub_font_size, serializer);
+        <f32>::sse_encode(self.epub_line_spacing, serializer);
+        <f32>::sse_encode(self.pdf_zoom, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterReadingState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <usize>::sse_encode(self.unit, serializer);
+        <Option<usize>>::sse_encode(self.offset, serializer);
+        <f32>::sse_encode(self.zoom, serializer);
     }
 }
 
@@ -2389,6 +3610,16 @@ impl SseEncode for crate::api::FlutterRenderedBuffer {
         <u32>::sse_encode(self.width, serializer);
         <u32>::sse_encode(self.height, serializer);
         <usize>::sse_encode(self.byte_len, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterSearchMatch {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <usize>::sse_encode(self.unit, serializer);
+        <usize>::sse_encode(self.offset, serializer);
+        <usize>::sse_encode(self.length, serializer);
+        <String>::sse_encode(self.context, serializer);
     }
 }
 
@@ -2463,6 +3694,23 @@ impl SseEncode for i32 {
     }
 }
 
+impl SseEncode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for Vec<String> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <String>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::FlutterAnnotation> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2479,6 +3727,46 @@ impl SseEncode for Vec<crate::api::FlutterAnnotationAssociationSource> {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::FlutterAnnotationAssociationSource>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FlutterBookmark> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FlutterBookmark>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FlutterImportItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FlutterImportItem>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FlutterLibraryBook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FlutterLibraryBook>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::FlutterSearchMatch> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::FlutterSearchMatch>::sse_encode(item, serializer);
         }
     }
 }
@@ -2573,12 +3861,62 @@ impl SseEncode for Option<crate::api::FlutterBookFormat> {
     }
 }
 
+impl SseEncode for Option<crate::api::FlutterBookmark> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::FlutterBookmark>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::FlutterLibraryBook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::FlutterLibraryBook>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::FlutterReadingState> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::FlutterReadingState>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::FlutterRenderedBuffer> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::FlutterRenderedBuffer>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <i64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<usize> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <usize>::sse_encode(value, serializer);
         }
     }
 }
@@ -2698,6 +4036,13 @@ mod io {
             CstDecode::<crate::api::FlutterBookFormat>::cst_decode(*wrap).into()
         }
     }
+    impl CstDecode<crate::api::FlutterBookmark> for *mut wire_cst_flutter_bookmark {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterBookmark {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::api::FlutterBookmark>::cst_decode(*wrap).into()
+        }
+    }
     impl CstDecode<crate::api::FlutterBufferHandle> for *mut wire_cst_flutter_buffer_handle {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterBufferHandle {
@@ -2712,11 +4057,32 @@ mod io {
             CstDecode::<crate::api::FlutterDocumentHandle>::cst_decode(*wrap).into()
         }
     }
+    impl CstDecode<crate::api::FlutterLibraryBook> for *mut wire_cst_flutter_library_book {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterLibraryBook {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::api::FlutterLibraryBook>::cst_decode(*wrap).into()
+        }
+    }
     impl CstDecode<crate::api::FlutterOpenRequest> for *mut wire_cst_flutter_open_request {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterOpenRequest {
             let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
             CstDecode::<crate::api::FlutterOpenRequest>::cst_decode(*wrap).into()
+        }
+    }
+    impl CstDecode<crate::api::FlutterReaderSettings> for *mut wire_cst_flutter_reader_settings {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterReaderSettings {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::api::FlutterReaderSettings>::cst_decode(*wrap).into()
+        }
+    }
+    impl CstDecode<crate::api::FlutterReadingState> for *mut wire_cst_flutter_reading_state {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterReadingState {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::api::FlutterReadingState>::cst_decode(*wrap).into()
         }
     }
     impl CstDecode<crate::api::FlutterRenderedBuffer> for *mut wire_cst_flutter_rendered_buffer {
@@ -2738,6 +4104,18 @@ mod io {
         fn cst_decode(self) -> crate::api::FlutterSelectionSurface {
             let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
             CstDecode::<crate::api::FlutterSelectionSurface>::cst_decode(*wrap).into()
+        }
+    }
+    impl CstDecode<i64> for *mut i64 {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> i64 {
+            unsafe { *flutter_rust_bridge::for_generated::box_from_leak_ptr(self) }
+        }
+    }
+    impl CstDecode<usize> for *mut usize {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> usize {
+            unsafe { *flutter_rust_bridge::for_generated::box_from_leak_ptr(self) }
         }
     }
     impl CstDecode<crate::api::FlutterAnnotation> for wire_cst_flutter_annotation {
@@ -2792,6 +4170,21 @@ mod io {
             }
         }
     }
+    impl CstDecode<crate::api::FlutterBookmark> for wire_cst_flutter_bookmark {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterBookmark {
+            crate::api::FlutterBookmark {
+                id: self.id.cst_decode(),
+                book_id: self.book_id.cst_decode(),
+                unit: self.unit.cst_decode(),
+                offset: self.offset.cst_decode(),
+                title: self.title.cst_decode(),
+                note: self.note.cst_decode(),
+                color: self.color.cst_decode(),
+                created_at: self.created_at.cst_decode(),
+            }
+        }
+    }
     impl CstDecode<crate::api::FlutterBridgeError> for wire_cst_flutter_bridge_error {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterBridgeError {
@@ -2824,9 +4217,45 @@ mod io {
         fn cst_decode(self) -> crate::api::FlutterDocumentSummary {
             crate::api::FlutterDocumentSummary {
                 handle: self.handle.cst_decode(),
+                book_id: self.book_id.cst_decode(),
                 format: self.format.cst_decode(),
                 title: self.title.cst_decode(),
                 logical_unit_count: self.logical_unit_count.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterImportItem> for wire_cst_flutter_import_item {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterImportItem {
+            crate::api::FlutterImportItem {
+                path_key: self.path_key.cst_decode(),
+                book: self.book.cst_decode(),
+                error: self.error.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterLibraryBook> for wire_cst_flutter_library_book {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterLibraryBook {
+            crate::api::FlutterLibraryBook {
+                book_id: self.book_id.cst_decode(),
+                title: self.title.cst_decode(),
+                author: self.author.cst_decode(),
+                format: self.format.cst_decode(),
+                path_key: self.path_key.cst_decode(),
+                managed: self.managed.cst_decode(),
+                progress: self.progress.cst_decode(),
+                date_added: self.date_added.cst_decode(),
+                last_read: self.last_read.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterLibraryPage> for wire_cst_flutter_library_page {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterLibraryPage {
+            crate::api::FlutterLibraryPage {
+                books: self.books.cst_decode(),
+                has_more: self.has_more.cst_decode(),
             }
         }
     }
@@ -2840,6 +4269,27 @@ mod io {
             }
         }
     }
+    impl CstDecode<crate::api::FlutterReaderSettings> for wire_cst_flutter_reader_settings {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterReaderSettings {
+            crate::api::FlutterReaderSettings {
+                continuous: self.continuous.cst_decode(),
+                epub_font_size: self.epub_font_size.cst_decode(),
+                epub_line_spacing: self.epub_line_spacing.cst_decode(),
+                pdf_zoom: self.pdf_zoom.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterReadingState> for wire_cst_flutter_reading_state {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterReadingState {
+            crate::api::FlutterReadingState {
+                unit: self.unit.cst_decode(),
+                offset: self.offset.cst_decode(),
+                zoom: self.zoom.cst_decode(),
+            }
+        }
+    }
     impl CstDecode<crate::api::FlutterRenderedBuffer> for wire_cst_flutter_rendered_buffer {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterRenderedBuffer {
@@ -2848,6 +4298,17 @@ mod io {
                 width: self.width.cst_decode(),
                 height: self.height.cst_decode(),
                 byte_len: self.byte_len.cst_decode(),
+            }
+        }
+    }
+    impl CstDecode<crate::api::FlutterSearchMatch> for wire_cst_flutter_search_match {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterSearchMatch {
+            crate::api::FlutterSearchMatch {
+                unit: self.unit.cst_decode(),
+                offset: self.offset.cst_decode(),
+                length: self.length.cst_decode(),
+                context: self.context.cst_decode(),
             }
         }
     }
@@ -2921,6 +4382,16 @@ mod io {
             }
         }
     }
+    impl CstDecode<Vec<String>> for *mut wire_cst_list_String {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<String> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
     impl CstDecode<Vec<crate::api::FlutterAnnotation>> for *mut wire_cst_list_flutter_annotation {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> Vec<crate::api::FlutterAnnotation> {
@@ -2936,6 +4407,46 @@ mod io {
     {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> Vec<crate::api::FlutterAnnotationAssociationSource> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
+    impl CstDecode<Vec<crate::api::FlutterBookmark>> for *mut wire_cst_list_flutter_bookmark {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::api::FlutterBookmark> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
+    impl CstDecode<Vec<crate::api::FlutterImportItem>> for *mut wire_cst_list_flutter_import_item {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::api::FlutterImportItem> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
+    impl CstDecode<Vec<crate::api::FlutterLibraryBook>> for *mut wire_cst_list_flutter_library_book {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::api::FlutterLibraryBook> {
+            let vec = unsafe {
+                let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
+                flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
+            };
+            vec.into_iter().map(CstDecode::cst_decode).collect()
+        }
+    }
+    impl CstDecode<Vec<crate::api::FlutterSearchMatch>> for *mut wire_cst_list_flutter_search_match {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> Vec<crate::api::FlutterSearchMatch> {
             let vec = unsafe {
                 let wrap = flutter_rust_bridge::for_generated::box_from_leak_ptr(self);
                 flutter_rust_bridge::for_generated::vec_from_leak_ptr(wrap.ptr, wrap.len)
@@ -3073,6 +4584,25 @@ mod io {
             Self::new_with_null_ptr()
         }
     }
+    impl NewWithNullPtr for wire_cst_flutter_bookmark {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                id: Default::default(),
+                book_id: core::ptr::null_mut(),
+                unit: Default::default(),
+                offset: core::ptr::null_mut(),
+                title: core::ptr::null_mut(),
+                note: core::ptr::null_mut(),
+                color: core::ptr::null_mut(),
+                created_at: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_bookmark {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
     impl NewWithNullPtr for wire_cst_flutter_bridge_error {
         fn new_with_null_ptr() -> Self {
             Self {
@@ -3116,6 +4646,7 @@ mod io {
         fn new_with_null_ptr() -> Self {
             Self {
                 handle: Default::default(),
+                book_id: core::ptr::null_mut(),
                 format: Default::default(),
                 title: core::ptr::null_mut(),
                 logical_unit_count: Default::default(),
@@ -3123,6 +4654,53 @@ mod io {
         }
     }
     impl Default for wire_cst_flutter_document_summary {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_import_item {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                path_key: core::ptr::null_mut(),
+                book: core::ptr::null_mut(),
+                error: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_import_item {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_library_book {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                book_id: Default::default(),
+                title: core::ptr::null_mut(),
+                author: core::ptr::null_mut(),
+                format: Default::default(),
+                path_key: core::ptr::null_mut(),
+                managed: Default::default(),
+                progress: Default::default(),
+                date_added: core::ptr::null_mut(),
+                last_read: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_library_book {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_library_page {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                books: core::ptr::null_mut(),
+                has_more: Default::default(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_library_page {
         fn default() -> Self {
             Self::new_with_null_ptr()
         }
@@ -3141,6 +4719,35 @@ mod io {
             Self::new_with_null_ptr()
         }
     }
+    impl NewWithNullPtr for wire_cst_flutter_reader_settings {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                continuous: Default::default(),
+                epub_font_size: Default::default(),
+                epub_line_spacing: Default::default(),
+                pdf_zoom: Default::default(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_reader_settings {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_reading_state {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                unit: Default::default(),
+                offset: core::ptr::null_mut(),
+                zoom: Default::default(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_reading_state {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
     impl NewWithNullPtr for wire_cst_flutter_rendered_buffer {
         fn new_with_null_ptr() -> Self {
             Self {
@@ -3152,6 +4759,21 @@ mod io {
         }
     }
     impl Default for wire_cst_flutter_rendered_buffer {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_search_match {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                unit: Default::default(),
+                offset: Default::default(),
+                length: Default::default(),
+                context: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_search_match {
         fn default() -> Self {
             Self::new_with_null_ptr()
         }
@@ -3326,6 +4948,53 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_delete_bookmark(
+        port_: i64,
+        that: usize,
+        id: i64,
+    ) {
+        wire__crate__api__FlutterBridge_delete_bookmark_impl(port_, that, id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_export_bookmarks(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+    ) {
+        wire__crate__api__FlutterBridge_export_bookmarks_impl(port_, that, book_id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_import_paths(
+        port_: i64,
+        that: usize,
+        path_keys: *mut wire_cst_list_String,
+        managed: bool,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_import_paths_impl(
+            port_,
+            that,
+            path_keys,
+            managed,
+            cancellation_id,
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_library_page(
+        port_: i64,
+        that: usize,
+        query: *mut wire_cst_list_prim_u_8_strict,
+        format: *mut i32,
+        limit: u32,
+        offset: u32,
+    ) {
+        wire__crate__api__FlutterBridge_library_page_impl(port_, that, query, format, limit, offset)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_annotation_association_sources(
         port_: i64,
         that: usize,
@@ -3362,6 +5031,32 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_bookmarks(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+    ) {
+        wire__crate__api__FlutterBridge_list_bookmarks_impl(port_, that, book_id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reader_settings(
+        port_: i64,
+        that: usize,
+    ) {
+        wire__crate__api__FlutterBridge_load_reader_settings_impl(port_, that)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reading_state(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+    ) {
+        wire__crate__api__FlutterBridge_load_reading_state_impl(port_, that, book_id)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_new()
     -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
         wire__crate__api__FlutterBridge_new_impl()
@@ -3375,6 +5070,21 @@ mod io {
         cancellation_id: u64,
     ) {
         wire__crate__api__FlutterBridge_open_document_impl(port_, that, request, cancellation_id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_open_library_book(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_open_library_book_impl(
+            port_,
+            that,
+            book_id,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -3410,6 +5120,15 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_remove_library_book(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+    ) {
+        wire__crate__api__FlutterBridge_remove_library_book_impl(port_, that, book_id)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_render_page(
         port_: i64,
         that: usize,
@@ -3434,6 +5153,42 @@ mod io {
         scene: *mut wire_cst_flutter_selection_surface,
     ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
         wire__crate__api__FlutterBridge_round_trip_visible_scene_impl(that, scene)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_save_reader_settings(
+        port_: i64,
+        that: usize,
+        value: *mut wire_cst_flutter_reader_settings,
+    ) {
+        wire__crate__api__FlutterBridge_save_reader_settings_impl(port_, that, value)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_save_reading_state(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+        value: *mut wire_cst_flutter_reading_state,
+    ) {
+        wire__crate__api__FlutterBridge_save_reading_state_impl(port_, that, book_id, value)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_search_document(
+        port_: i64,
+        that: usize,
+        document: *mut wire_cst_flutter_document_handle,
+        query: *mut wire_cst_list_prim_u_8_strict,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_search_document_impl(
+            port_,
+            that,
+            document,
+            query,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -3468,6 +5223,20 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_toggle_bookmark(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+        unit: usize,
+        offset: *mut usize,
+        title: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__api__FlutterBridge_toggle_bookmark_impl(
+            port_, that, book_id, unit, offset, title,
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_update_annotation(
         port_: i64,
         that: usize,
@@ -3479,6 +5248,17 @@ mod io {
         wire__crate__api__FlutterBridge_update_annotation_impl(
             port_, that, document, id, color, body,
         )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_update_bookmark(
+        port_: i64,
+        that: usize,
+        id: i64,
+        title: *mut wire_cst_list_prim_u_8_strict,
+        note: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__api__FlutterBridge_update_bookmark_impl(port_, that, id, title, note)
     }
 
     #[unsafe(no_mangle)]
@@ -3527,6 +5307,14 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_bookmark()
+    -> *mut wire_cst_flutter_bookmark {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_flutter_bookmark::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_buffer_handle()
     -> *mut wire_cst_flutter_buffer_handle {
         flutter_rust_bridge::for_generated::new_leak_box_ptr(
@@ -3543,10 +5331,34 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_library_book()
+    -> *mut wire_cst_flutter_library_book {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_flutter_library_book::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_open_request()
     -> *mut wire_cst_flutter_open_request {
         flutter_rust_bridge::for_generated::new_leak_box_ptr(
             wire_cst_flutter_open_request::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_reader_settings()
+    -> *mut wire_cst_flutter_reader_settings {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_flutter_reader_settings::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_reading_state()
+    -> *mut wire_cst_flutter_reading_state {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_flutter_reading_state::new_with_null_ptr(),
         )
     }
 
@@ -3575,6 +5387,30 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_i_64(value: i64) -> *mut i64 {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(value)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_usize(value: usize) -> *mut usize {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(value)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_String(
+        len: i32,
+    ) -> *mut wire_cst_list_String {
+        let wrap = wire_cst_list_String {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <*mut wire_cst_list_prim_u_8_strict>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_annotation(
         len: i32,
     ) -> *mut wire_cst_list_flutter_annotation {
@@ -3595,6 +5431,62 @@ mod io {
         let wrap = wire_cst_list_flutter_annotation_association_source {
             ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
                 <wire_cst_flutter_annotation_association_source>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_bookmark(
+        len: i32,
+    ) -> *mut wire_cst_list_flutter_bookmark {
+        let wrap = wire_cst_list_flutter_bookmark {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_flutter_bookmark>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_import_item(
+        len: i32,
+    ) -> *mut wire_cst_list_flutter_import_item {
+        let wrap = wire_cst_list_flutter_import_item {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_flutter_import_item>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_library_book(
+        len: i32,
+    ) -> *mut wire_cst_list_flutter_library_book {
+        let wrap = wire_cst_list_flutter_library_book {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_flutter_library_book>::new_with_null_ptr(),
+                len,
+            ),
+            len,
+        };
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(wrap)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_list_flutter_search_match(
+        len: i32,
+    ) -> *mut wire_cst_list_flutter_search_match {
+        let wrap = wire_cst_list_flutter_search_match {
+            ptr: flutter_rust_bridge::for_generated::new_leak_vec_ptr(
+                <wire_cst_flutter_search_match>::new_with_null_ptr(),
                 len,
             ),
             len,
@@ -3718,6 +5610,18 @@ mod io {
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_bookmark {
+        id: i64,
+        book_id: *mut i64,
+        unit: usize,
+        offset: *mut usize,
+        title: *mut wire_cst_list_prim_u_8_strict,
+        note: *mut wire_cst_list_prim_u_8_strict,
+        color: *mut wire_cst_list_prim_u_8_strict,
+        created_at: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_flutter_bridge_error {
         kind: i32,
         message: *mut wire_cst_list_prim_u_8_strict,
@@ -3738,9 +5642,36 @@ mod io {
     #[derive(Clone, Copy)]
     pub struct wire_cst_flutter_document_summary {
         handle: wire_cst_flutter_document_handle,
+        book_id: *mut i64,
         format: i32,
         title: *mut wire_cst_list_prim_u_8_strict,
         logical_unit_count: usize,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_import_item {
+        path_key: *mut wire_cst_list_prim_u_8_strict,
+        book: *mut wire_cst_flutter_library_book,
+        error: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_library_book {
+        book_id: i64,
+        title: *mut wire_cst_list_prim_u_8_strict,
+        author: *mut wire_cst_list_prim_u_8_strict,
+        format: i32,
+        path_key: *mut wire_cst_list_prim_u_8_strict,
+        managed: bool,
+        progress: f64,
+        date_added: *mut wire_cst_list_prim_u_8_strict,
+        last_read: *mut wire_cst_list_prim_u_8_strict,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_library_page {
+        books: *mut wire_cst_list_flutter_library_book,
+        has_more: bool,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -3751,11 +5682,34 @@ mod io {
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_reader_settings {
+        continuous: bool,
+        epub_font_size: f32,
+        epub_line_spacing: f32,
+        pdf_zoom: f32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_reading_state {
+        unit: usize,
+        offset: *mut usize,
+        zoom: f32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_flutter_rendered_buffer {
         handle: wire_cst_flutter_buffer_handle,
         width: u32,
         height: u32,
         byte_len: usize,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_search_match {
+        unit: usize,
+        offset: usize,
+        length: usize,
+        context: *mut wire_cst_list_prim_u_8_strict,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -3811,6 +5765,12 @@ mod io {
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_list_String {
+        ptr: *mut *mut wire_cst_list_prim_u_8_strict,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_list_flutter_annotation {
         ptr: *mut wire_cst_flutter_annotation,
         len: i32,
@@ -3819,6 +5779,30 @@ mod io {
     #[derive(Clone, Copy)]
     pub struct wire_cst_list_flutter_annotation_association_source {
         ptr: *mut wire_cst_flutter_annotation_association_source,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_flutter_bookmark {
+        ptr: *mut wire_cst_flutter_bookmark,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_flutter_import_item {
+        ptr: *mut wire_cst_flutter_import_item,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_flutter_library_book {
+        ptr: *mut wire_cst_flutter_library_book,
+        len: i32,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_list_flutter_search_match {
+        ptr: *mut wire_cst_flutter_search_match,
         len: i32,
     }
     #[repr(C)]
