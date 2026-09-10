@@ -37,9 +37,15 @@ provisioning profile, but the project deliberately has no checked-in development
 team. A locally signed build installs and launches on the profiled iPhone after
 the user explicitly trusts its development profile. Local deep-signature
 verification and the certificate/profile match pass. VoiceOver services are
-active on that phone, but traversal was not observed before it locked. The iPad
-is absent from the profile. Neither launch nor service presence alone satisfies
-the physical VoiceOver or lifecycle gates.
+active on that phone. On-device accessibility inspection traverses the initial
+reader as `Shōsai` header, document-path label, path field, Open document button,
+bridge instruction, and selection status; its spoken descriptions report the
+expected labels and traits, and the seven supported platform audits report no
+findings. A real
+background/foreground cycle preserves a responsive, correctly rendered host and
+the same traversable elements. The iPad is absent from the profile. Remote
+inspection does not satisfy the remaining touch, rotor, document-selection,
+orientation, large-text, or exact focus-preservation gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -146,17 +152,29 @@ selection, persistence, and metrics flow on both simulators; the final rerun was
 blocked by an unrelated orphaned Flutter native-assets lock before launch. This
 simulator evidence does not replace physical-device evidence. A signed copy of
 the same iOS host installs and launches on the profile-covered iPhone 15 Pro Max
-after the user explicitly trusts its development profile. LLDB device process
-inspection confirms that the VoiceOver services are active, but the phone locked
-before traversal could be observed. No focus order, label, announcement, touch,
-orientation, or lifecycle result is inferred from service presence or launch.
+after the user explicitly trusts its development profile. Device process
+inspection confirms that the VoiceOver services are active. With VoiceOver
+enabled, on-device accessibility inspection traverses the initial reader in the
+order `Shōsai` header, document-path label, path field, Open document button,
+bridge instruction, and selection status. The spoken descriptions expose the
+expected header and button traits, and the platform's sufficient-description,
+contrast, hit-region, element-detection, text-clipping, trait, and dynamic-text
+audits return no findings. Captures before and after foregrounding the same
+process through Settings show the responsive host intact without clipping,
+corruption, overlap, or safe-area intrusion, and post-resume traversal still
+exposes every element. The inspection focus overlay returns to the header rather
+than proving preservation of the user's exact VoiceOver focus.
 
 These checks do not replace the required manual run. TalkBack explore-by-touch,
 real touch target confirmation, focus after an actual background/resume cycle,
-and platform contrast/reduced-motion checks remain open on Android. VoiceOver,
-rotor order, physical touch/orientation, and lifecycle recovery remain open on
-each claimed Apple device. Missing files and revoked document-provider
-capabilities also require a real provider rather than a path-only fixture.
+and platform contrast/reduced-motion checks remain open on Android.
+Gesture-driven VoiceOver traversal and rotor order, physical touch and document
+selection/actions, orientation, large-text interaction, and exact user-focus
+recovery remain open on Apple hardware. The signed iPhone host's
+background/resume rendering and semantics availability are proven, but the iPad
+cannot be installed until its UDID is in a profile. Missing files and revoked
+document-provider capabilities also require a real provider rather than a
+path-only fixture.
 
 == Exit assessment
 
