@@ -11,6 +11,9 @@ Pod::Spec.new do |spec|
   spec.platform = :ios, '13.0'
   spec.swift_version = '5.0'
   spec.frameworks = 'CoreGraphics'
+  spec.resource_bundles = {
+    'PDFiumLicenses' => ['generated/PDFiumLicenses/**/*'],
+  }
 
   spec.script_phase = {
     :name => 'Build Rust library',
