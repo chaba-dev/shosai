@@ -286,23 +286,26 @@ fn configured_pdfium_path() -> Option<PathBuf> {
 }
 
 fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
+    bundled_pdfium_path_for(executable, std::env::consts::OS)
+}
+
+fn bundled_pdfium_path_for(executable: &Path, target_os: &str) -> Option<PathBuf> {
+    if target_os == "android" {
+        return None;
+    }
     let executable_dir = executable.parent()?;
 
-    #[cfg(target_os = "macos")]
-    {
+    if target_os == "macos" {
         let contents_dir = executable_dir.parent()?;
-        Some(contents_dir.join("Frameworks/libpdfium.dylib"))
+        return Some(contents_dir.join("Frameworks/libpdfium.dylib"));
     }
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let adjacent_library = executable_dir.join("lib/libpdfium.so");
-        if adjacent_library.is_file() {
-            return Some(adjacent_library);
-        }
-        let package_dir = executable_dir.parent()?;
-        Some(package_dir.join("lib/libpdfium.so"))
+    let adjacent_library = executable_dir.join("lib/libpdfium.so");
+    if adjacent_library.is_file() {
+        return Some(adjacent_library);
     }
+    let package_dir = executable_dir.parent()?;
+    Some(package_dir.join("lib/libpdfium.so"))
 }
 
 #[cfg(test)]
@@ -311,9 +314,9 @@ mod tests {
 
     use super::{
         BoundedPageTextError, PdfDoc, PdfSelectionEndpoint, PdfSelectionRect, PdfSelectionZone,
-        bundled_pdfium_path, grapheme_boundary_for_character, grapheme_ranges, pdf_selection_rows,
-        read_pdf_file_with_limit, validate_pdf_bitmap_size, validate_pdf_preflight,
-        validate_pdf_selection_endpoint_count,
+        bundled_pdfium_path, bundled_pdfium_path_for, grapheme_boundary_for_character,
+        grapheme_ranges, pdf_selection_rows, read_pdf_file_with_limit, validate_pdf_bitmap_size,
+        validate_pdf_preflight, validate_pdf_selection_endpoint_count,
     };
     use std::cell::Cell;
     use std::fs::File;
@@ -425,6 +428,13 @@ mod tests {
 
             assert_eq!(bundled_pdfium_path(&executable), Some(expected));
         }
+    }
+
+    #[test]
+    fn android_uses_the_packaged_library_namespace_instead_of_system_paths() {
+        let executable = Path::new("/system/bin/app_process64");
+
+        assert_eq!(bundled_pdfium_path_for(executable, "android"), None);
     }
 
     #[test]
