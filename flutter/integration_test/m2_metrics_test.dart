@@ -203,10 +203,10 @@ void main() {
     final previousFramePolicy = binding.framePolicy;
     binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.benchmark;
     await Future<void>.delayed(const Duration(milliseconds: 100));
-    var frame = 0;
+    var frameTime = binding.currentSystemFrameTimeStamp;
     Future<void> pumpBenchmark() {
-      frame += 1;
-      return tester.pumpBenchmark(Duration(milliseconds: frame * 16));
+      frameTime += const Duration(milliseconds: 16);
+      return tester.pumpBenchmark(frameTime);
     }
 
     for (var index = 0; index < _warmups; index += 1) {
