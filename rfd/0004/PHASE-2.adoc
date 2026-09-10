@@ -88,30 +88,30 @@ a claim about repeated Flutter image decoding.
 
 |Warm bridge round-trip p95 <= 1 ms
 |0.003 ms
-|0.008 ms
+|0.014 ms
 
 |Visible-scene DTO round-trip p95 <= 4 ms
 |0.110 ms
-|0.514 ms
+|0.481 ms
 
 |Pointer update to overlay submission p95 / max <= 8 / 16.7 ms
 |3.619 / 3.790 ms
-|5.409 / 7.265 ms
+|5.202 / 5.555 ms
 
 |Peak cycle RSS <= 512 MiB desktop / 384 MiB mobile
 |196.4 MiB
-|192.3 MiB
+|199.5 MiB
 
 |Final-window median RSS growth <= 1 MiB
 |+0.82 MiB
-|+0.35 MiB
+|-0.07 MiB
 
 |Uncached PDF raster p50 / p95 / max (reported, no acceptance ceiling)
 |0.970 / 2.043 / 37.663 ms
-|8.044 / 24.883 / 25.367 ms
+|7.567 / 10.531 / 15.087 ms
 |===
 
-The Android profile APK is 64 MiB and the Linux profile bundle is 60 MiB. These
+The Android profile APK is 55.6 MiB and the Linux profile bundle is 60 MiB. These
 are build-artifact observations, not the RFD's installed-release-payload or
 Flutter-over-native binary-size measurements. The fixture RSS is evidence for
 the packaged feasibility slice, not the representative large-document ceiling.
