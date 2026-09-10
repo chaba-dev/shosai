@@ -329,13 +329,19 @@ mod tests {
 
     use super::{
         BoundedPageTextError, PdfDoc, PdfSelectionEndpoint, PdfSelectionRect, PdfSelectionZone,
-        bundled_pdfium_path, bundled_pdfium_path_for, grapheme_boundary_for_character,
-        grapheme_ranges, pdf_selection_rows, read_pdf_file_with_limit, validate_pdf_bitmap_size,
-        validate_pdf_preflight, validate_pdf_selection_endpoint_count,
+        grapheme_boundary_for_character, grapheme_ranges, pdf_selection_rows,
+        read_pdf_file_with_limit, validate_pdf_bitmap_size, validate_pdf_preflight,
+        validate_pdf_selection_endpoint_count,
     };
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use super::bundled_pdfium_path;
+    #[cfg(not(target_os = "ios"))]
+    use super::bundled_pdfium_path_for;
     use std::cell::Cell;
     use std::fs::File;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use std::path::PathBuf;
 
     fn selectable_pdf(text: &str) -> Vec<u8> {
         selectable_pdf_content(&format!("BT /F1 24 Tf 1 0 0 1 130 120 Tm ({text}) Tj ET"))
@@ -417,6 +423,7 @@ mod tests {
         assert!(super::read_pdf_snapshot(File::open(&path).unwrap(), &path, 6, None).is_err());
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn bundled_pdfium_is_resolved_relative_to_executable() {
         #[cfg(target_os = "macos")]
@@ -445,6 +452,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_os = "ios"))]
     #[test]
     fn android_uses_the_packaged_library_namespace_instead_of_system_paths() {
         let executable = Path::new("/system/bin/app_process64");
