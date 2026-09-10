@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_os = "ios"))]
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use pdfium_render::prelude::*;
@@ -258,66 +260,89 @@ pub(crate) fn is_backend_unavailable(error: &anyhow::Error) -> bool {
 }
 
 fn create_pdfium() -> Result<Pdfium> {
-    let library = std::env::current_exe()
-        .ok()
-        .and_then(|executable| bundled_pdfium_path(&executable))
-        .filter(|path| path.is_file())
-        .or_else(configured_pdfium_path);
+    #[cfg(target_os = "ios")]
+    let bindings = Pdfium::bind_to_statically_linked_library()
+        .context("failed to bind statically linked PDFium")
+        .map_err(|error| PdfBackendUnavailable(error.to_string()))?;
 
-    let bindings = match library {
-        Some(path) => Pdfium::bind_to_library(&path)
-            .with_context(|| format!("failed to load PDFium library at {}", path.display())),
-        None => Pdfium::bind_to_system_library().context("failed to load PDFium system library"),
-    }
-    .map_err(|error| {
-        PdfBackendUnavailable(format!(
-            "{error}. Install a Shosai package containing PDFium, or ensure \
+    #[cfg(not(target_os = "ios"))]
+    let bindings = {
+        let library = std::env::current_exe()
+            .ok()
+            .and_then(|executable| bundled_pdfium_path(&executable))
+            .filter(|path| path.is_file())
+            .or_else(configured_pdfium_path);
+
+        match library {
+            Some(path) => Pdfium::bind_to_library(&path)
+                .with_context(|| format!("failed to load PDFium library at {}", path.display())),
+            None => {
+                Pdfium::bind_to_system_library().context("failed to load PDFium system library")
+            }
+        }
+        .map_err(|error| {
+            PdfBackendUnavailable(format!(
+                "{error}. Install a Shosai package containing PDFium, or ensure \
              pdfium-binaries is available through the system library path"
-        ))
-    })?;
+            ))
+        })?
+    };
 
     Ok(Pdfium::new(bindings))
 }
 
+#[cfg(not(target_os = "ios"))]
 fn configured_pdfium_path() -> Option<PathBuf> {
     std::env::var_os("SHOSAI_PDFIUM_LIBRARY")
         .map(PathBuf::from)
         .filter(|path| path.is_file())
 }
 
+#[cfg(not(target_os = "ios"))]
 fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
+    bundled_pdfium_path_for(executable, std::env::consts::OS)
+}
+
+#[cfg(not(target_os = "ios"))]
+fn bundled_pdfium_path_for(executable: &Path, target_os: &str) -> Option<PathBuf> {
+    if target_os == "android" {
+        return None;
+    }
     let executable_dir = executable.parent()?;
 
-    #[cfg(target_os = "macos")]
-    {
+    if target_os == "macos" {
         let contents_dir = executable_dir.parent()?;
-        Some(contents_dir.join("Frameworks/libpdfium.dylib"))
+        return Some(contents_dir.join("Frameworks/libpdfium.dylib"));
     }
 
-    #[cfg(not(target_os = "macos"))]
-    {
-        let adjacent_library = executable_dir.join("lib/libpdfium.so");
-        if adjacent_library.is_file() {
-            return Some(adjacent_library);
-        }
-        let package_dir = executable_dir.parent()?;
-        Some(package_dir.join("lib/libpdfium.so"))
+    let adjacent_library = executable_dir.join("lib/libpdfium.so");
+    if adjacent_library.is_file() {
+        return Some(adjacent_library);
     }
+    let package_dir = executable_dir.parent()?;
+    Some(package_dir.join("lib/libpdfium.so"))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::document::Document;
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use super::bundled_pdfium_path;
+    #[cfg(not(target_os = "ios"))]
+    use super::bundled_pdfium_path_for;
     use super::{
         BoundedPageTextError, PdfDoc, PdfSelectionEndpoint, PdfSelectionRect, PdfSelectionZone,
-        bundled_pdfium_path, grapheme_boundary_for_character, grapheme_ranges, pdf_selection_rows,
+        grapheme_boundary_for_character, grapheme_ranges, pdf_selection_rows,
         read_pdf_file_with_limit, validate_pdf_bitmap_size, validate_pdf_preflight,
         validate_pdf_selection_endpoint_count,
     };
     use std::cell::Cell;
     use std::fs::File;
-    use std::path::{Path, PathBuf};
+    #[cfg(not(target_os = "ios"))]
+    use std::path::Path;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use std::path::PathBuf;
 
     fn selectable_pdf(text: &str) -> Vec<u8> {
         selectable_pdf_content(&format!("BT /F1 24 Tf 1 0 0 1 130 120 Tm ({text}) Tj ET"))
@@ -399,6 +424,7 @@ mod tests {
         assert!(super::read_pdf_snapshot(File::open(&path).unwrap(), &path, 6, None).is_err());
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn bundled_pdfium_is_resolved_relative_to_executable() {
         #[cfg(target_os = "macos")]
@@ -425,6 +451,14 @@ mod tests {
 
             assert_eq!(bundled_pdfium_path(&executable), Some(expected));
         }
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    #[test]
+    fn android_uses_the_packaged_library_namespace_instead_of_system_paths() {
+        let executable = Path::new("/system/bin/app_process64");
+
+        assert_eq!(bundled_pdfium_path_for(executable, "android"), None);
     }
 
     #[test]

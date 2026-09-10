@@ -1,0 +1,92 @@
+import pathlib
+import unittest
+import xml.etree.ElementTree as ET
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+class FlutterIosIntegrationTest(unittest.TestCase):
+    def test_initial_ios_controller_enables_native_state_restoration(self):
+        storyboard = ET.parse(
+            ROOT / "flutter/ios/Runner/Base.lproj/Main.storyboard"
+        ).getroot()
+        initial_controller_id = storyboard.attrib["initialViewController"]
+        initial_controller = storyboard.find(
+            f".//viewController[@id='{initial_controller_id}']"
+        )
+
+        self.assertIsNotNone(initial_controller)
+        self.assertEqual(
+            initial_controller.attrib.get("customClass"), "FlutterViewController"
+        )
+        self.assertEqual(
+            initial_controller.attrib.get("restorationIdentifier"), "shosai-reader"
+        )
+
+    def test_dart_loads_the_embedded_ios_framework(self):
+        source = (ROOT / "flutter/lib/main.dart").read_text()
+
+        self.assertIn("if (Platform.isIOS)", source)
+        self.assertIn(
+            "'shosai_flutter_bridge.framework/shosai_flutter_bridge'", source
+        )
+
+    def test_rust_builder_maps_device_and_simulator_architectures(self):
+        script = (ROOT / "flutter/rust_builder/ios/build.sh").read_text()
+
+        self.assertIn("ios-pdfium/8046b", script)
+        self.assertIn('pdfium_root="$pdfium_cache_root/release"', script)
+        self.assertIn("iphoneos)", script)
+        self.assertIn("rust_target=aarch64-apple-ios", script)
+        self.assertIn("rust_target=aarch64-apple-ios-sim", script)
+        self.assertIn("rust_target=x86_64-apple-ios", script)
+        self.assertIn("for rust_arch in $ARCHS", script)
+        self.assertIn("lipo -create", script)
+        self.assertIn("/usr/bin/lipo", script)
+        self.assertIn("--crate-type staticlib", script)
+
+    def test_pod_force_loads_rust_and_links_pdfium_dependencies(self):
+        podspec = (
+            ROOT
+            / "flutter/rust_builder/ios/shosai_flutter_bridge.podspec"
+        ).read_text()
+
+        self.assertIn("-force_load ${BUILT_PRODUCTS_DIR}/libshosai_flutter_bridge.a", podspec)
+        self.assertIn("-lc++ -lz", podspec)
+        self.assertIn("spec.frameworks = 'CoreGraphics'", podspec)
+        self.assertIn(":always_out_of_date => '1'", podspec)
+        self.assertIn("PDFiumLicenses", podspec)
+
+    def test_ios_core_uses_static_pdfium(self):
+        manifest = (ROOT / "crates/shosai-core/Cargo.toml").read_text()
+        source = (ROOT / "crates/shosai-core/src/pdf.rs").read_text()
+
+        self.assertIn("cfg(target_os = \"ios\")", manifest)
+        self.assertIn('"static"', manifest)
+        self.assertIn("Pdfium::bind_to_statically_linked_library()", source)
+        self.assertIn(
+            '#[cfg(not(target_os = "ios"))]\nfn bundled_pdfium_path_for',
+            source,
+        )
+        self.assertIn(
+            '#[cfg(not(any(target_os = "android", target_os = "ios")))]\n'
+            "    #[test]\n"
+            "    fn bundled_pdfium_is_resolved_relative_to_executable",
+            source,
+        )
+        self.assertIn(
+            '#[cfg(not(target_os = "ios"))]\n    use std::path::Path;', source
+        )
+
+    def test_pdfium_override_has_one_cache_root_meaning(self):
+        fetch = (ROOT / "scripts/fetch-ios-pdfium.sh").read_text()
+        build = (ROOT / "flutter/rust_builder/ios/build.sh").read_text()
+
+        self.assertIn("SHOSAI_IOS_PDFIUM_ROOT", fetch)
+        self.assertIn("pdfium_cache_root=${SHOSAI_IOS_PDFIUM_ROOT", build)
+        self.assertIn('pdfium_root="$pdfium_cache_root/release"', build)
+
+
+if __name__ == "__main__":
+    unittest.main()
