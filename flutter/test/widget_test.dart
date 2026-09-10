@@ -3661,6 +3661,7 @@ void main() {
             as PagePainter;
     expect(painter.image, same(page));
     expect(painter.recolorImage, isFalse);
+    expect(painter.paintContent, isFalse);
 
     await tester.pumpWidget(const SizedBox());
     expect(bridge.disposeCount, 1);

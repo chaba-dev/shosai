@@ -1353,26 +1353,46 @@ class _SelectableSurface extends StatelessWidget {
               dispatch(ReaderSelectionPointerEnded(event.pointer)),
           onPointerCancel: (event) =>
               dispatch(ReaderSelectionPointerCancelled(event.pointer)),
-          child: RepaintBoundary(
-            key: const ValueKey('reader-page-paint'),
-            child: CustomPaint(
-              painter: PagePainter(
-                image: image,
-                surface: surface,
-                backgroundColor: pageColors(
-                  Theme.of(context).colorScheme,
-                ).background,
-                foregroundColor: pageColors(
-                  Theme.of(context).colorScheme,
-                ).foreground,
-                recolorImage: model.document?.format == FlutterBookFormat.epub,
-                anchor: model.anchor,
-                focus: model.focus,
-                savedSelections: model.savedSelections,
-                annotations: model.annotations,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              RepaintBoundary(
+                key: const ValueKey('reader-page-paint'),
+                child: CustomPaint(
+                  painter: _PageContentPainter(
+                    image: image,
+                    surface: surface,
+                    backgroundColor: pageColors(
+                      Theme.of(context).colorScheme,
+                    ).background,
+                    foregroundColor: pageColors(
+                      Theme.of(context).colorScheme,
+                    ).foreground,
+                    recolorImage:
+                        model.document?.format == FlutterBookFormat.epub,
+                  ),
+                ),
               ),
-              child: const SizedBox.expand(),
-            ),
+              CustomPaint(
+                painter: PagePainter(
+                  image: image,
+                  surface: surface,
+                  backgroundColor: pageColors(
+                    Theme.of(context).colorScheme,
+                  ).background,
+                  foregroundColor: pageColors(
+                    Theme.of(context).colorScheme,
+                  ).foreground,
+                  recolorImage:
+                      model.document?.format == FlutterBookFormat.epub,
+                  anchor: model.anchor,
+                  focus: model.focus,
+                  savedSelections: model.savedSelections,
+                  annotations: model.annotations,
+                  paintContent: false,
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -1391,6 +1411,7 @@ class PagePainter extends CustomPainter {
     required this.focus,
     required this.savedSelections,
     required this.annotations,
+    this.paintContent = true,
   });
 
   final ui.Image? image;
@@ -1402,6 +1423,7 @@ class PagePainter extends CustomPainter {
   final int? focus;
   final List<ReaderSelection> savedSelections;
   final List<FlutterAnnotation> annotations;
+  final bool paintContent;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1418,17 +1440,14 @@ class PagePainter extends CustomPainter {
     canvas.save();
     canvas.translate(destination.left, destination.top);
     canvas.scale(scale);
-    canvas.drawRect(source, Paint()..color = backgroundColor);
-    if (image case final page?) {
-      final pixelSource = pageImageSource(page);
-      canvas.drawImageRect(
-        page,
-        pixelSource,
+    if (paintContent) {
+      _paintPageContent(
+        canvas,
         source,
-        Paint()
-          ..colorFilter = recolorImage
-              ? ColorFilter.mode(foregroundColor, BlendMode.srcIn)
-              : null,
+        image,
+        backgroundColor,
+        foregroundColor,
+        recolorImage,
       );
     }
     for (final saved in savedSelections) {
@@ -1510,10 +1529,82 @@ class PagePainter extends CustomPainter {
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.foregroundColor != foregroundColor ||
       oldDelegate.recolorImage != recolorImage ||
+      oldDelegate.paintContent != paintContent ||
       oldDelegate.anchor != anchor ||
       oldDelegate.focus != focus ||
       oldDelegate.savedSelections != savedSelections ||
       oldDelegate.annotations != annotations;
+}
+
+class _PageContentPainter extends CustomPainter {
+  const _PageContentPainter({
+    required this.image,
+    required this.surface,
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.recolorImage,
+  });
+
+  final ui.Image? image;
+  final FlutterSelectionSurface surface;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final bool recolorImage;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
+    final scale = (size.width / source.width).clamp(
+      0.0,
+      size.height / source.height,
+    );
+    final destination = Alignment.center.inscribe(
+      Size(source.width * scale, source.height * scale),
+      Offset.zero & size,
+    );
+    canvas.save();
+    canvas.translate(destination.left, destination.top);
+    canvas.scale(scale);
+    _paintPageContent(
+      canvas,
+      source,
+      image,
+      backgroundColor,
+      foregroundColor,
+      recolorImage,
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_PageContentPainter oldDelegate) =>
+      oldDelegate.image != image ||
+      oldDelegate.surface != surface ||
+      oldDelegate.backgroundColor != backgroundColor ||
+      oldDelegate.foregroundColor != foregroundColor ||
+      oldDelegate.recolorImage != recolorImage;
+}
+
+void _paintPageContent(
+  Canvas canvas,
+  Rect source,
+  ui.Image? image,
+  Color backgroundColor,
+  Color foregroundColor,
+  bool recolorImage,
+) {
+  canvas.drawRect(source, Paint()..color = backgroundColor);
+  if (image case final page?) {
+    canvas.drawImageRect(
+      page,
+      pageImageSource(page),
+      source,
+      Paint()
+        ..colorFilter = recolorImage
+            ? ColorFilter.mode(foregroundColor, BlendMode.srcIn)
+            : null,
+    );
+  }
 }
 
 ({Color background, Color foreground}) pageColors(ColorScheme scheme) =>
