@@ -32,9 +32,10 @@ simulator runtime is installed.
 |The checked-in iOS host builds and launches on iPhone 17 Pro and iPad Air
 simulators with the Rust bridge and PDFium framework loaded. Unsigned arm64
 profile and release device builds succeed and are compatible with both physical
-devices. Installation remains blocked only by the local absence of an Apple
-Development identity and provisioning profile. Simulator evidence cannot
-satisfy the physical VoiceOver or lifecycle gates.
+devices. The builder has one Apple Development identity and an iPhone-only
+provisioning profile, but the project deliberately has no checked-in development
+team; the iPad is absent from that profile and no signed install was attempted.
+Simulator evidence cannot satisfy the physical VoiceOver or lifecycle gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -132,11 +133,14 @@ inaccessible locators; memory pressure; and renderer recovery. The physical
 Pixel profile run verifies that the packaged PDF and EPUB bridge path and local
 selection interaction execute on Android hardware. Its captured phone rendering
 shows an aligned selected range and action surface without page-raster damage.
-The iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same initial
-reader UI without a blank screen, native-library error, clipping, corruption, or
-safe-area overlap. Because application startup awaits bridge initialization,
-these launches exercise the packaged iOS framework load. They do not exercise a
-document or replace physical-device evidence.
+The final iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same
+initial reader UI without a blank screen, native-library error, clipping,
+corruption, or safe-area overlap. Because application startup awaits bridge
+initialization, these launches exercise the packaged iOS framework load. The
+immediately preceding branch lineage also completed the packaged PDF, EPUB,
+selection, persistence, and metrics flow on both simulators; the final rerun was
+blocked by an unrelated orphaned Flutter native-assets lock before launch. This
+simulator evidence does not replace physical-device evidence.
 
 These checks do not replace the required manual run. TalkBack explore-by-touch,
 real touch target confirmation, focus after an actual background/resume cycle,
