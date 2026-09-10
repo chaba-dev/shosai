@@ -37,11 +37,12 @@ provisioning profile containing both devices, but the project deliberately has
 no checked-in development team. Locally signed profile and release builds install
 and launch on both devices after the user explicitly trusts the development
 profile. Local deep-signature verification and the certificate/profile match
-pass. VoiceOver services are active on the phone. On-device accessibility
-inspection traverses each initial reader as a `Shōsai` header, document-path
-label, path field, Open document button, bridge instruction, and selection
-status; its spoken descriptions report the expected labels and traits. The seven
-supported platform audits report no findings on the phone. A real phone
+pass. VoiceOver services are active on the phone, and the user directly confirms
+audible VoiceOver speech and visible focus on both devices. On-device
+accessibility inspection traverses each initial reader as a `Shōsai` header,
+document-path label, path field, Open document button, bridge instruction, and
+selection status; its spoken descriptions report the expected labels and traits.
+The seven supported platform audits report no findings on the phone. A real phone
 background/foreground cycle preserves a responsive, correctly rendered host and
 the same traversable elements. The iPad release capture is unobstructed and has
 no blank screen, native-load failure, clipping, corruption, overlap, or safe-area
@@ -174,9 +175,10 @@ selection/actions, orientation, large-text interaction, and exact user-focus
 recovery remain open on Apple hardware. The signed iPhone host's
 background/resume rendering and semantics availability are proven. Signed iPad
 profile and release installation, launch, initial rendering, and semantics
-availability are also proven, but not its manual accessibility interactions.
-Missing files and revoked document-provider capabilities also require a real
-provider rather than a path-only fixture.
+availability are also proven, as are audible VoiceOver speech and visible focus,
+but not its gesture-driven accessibility interactions. Missing files and revoked
+document-provider capabilities also require a real provider rather than a
+path-only fixture.
 
 == Exit assessment
 
