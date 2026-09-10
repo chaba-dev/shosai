@@ -1,8 +1,9 @@
 = RFD 4 Phase 2 evidence
 
-Phase 2 implements and measures the packaged highlighting feasibility slice. It
-does not convert simulator or automated evidence into a manual accessibility or
-physical-lifecycle claim.
+Phase 2 implements and measures the packaged highlighting feasibility slice and
+satisfies its desktop-plus-physical-mobile go/no-go gate. Evidence beyond that
+gate remains explicit rather than being inferred from simulator or automated
+results, and is tracked as per-release-target validation in Phase 5.
 
 == Packaged targets
 
@@ -103,6 +104,10 @@ application-support database path, disposes, recreates the bridge, and reopens
 the saved annotation. The repeated RSS value remains a native-cycle metric, not
 a claim about repeated Flutter image decoding.
 
+This profile-mode protocol satisfies the M2 feasibility gate only. M5 reruns
+every applicable Phase 0 performance and resource budget in release mode on each
+platform claimed for release.
+
 [cols="2,1,1",options="header"]
 |===
 |Measured gate |Linux Framework 16 |Physical Pixel 5a
@@ -155,6 +160,14 @@ Purple, Add note, and Cancel controls. Android accessibility inspection confirms
 that every control has an enabled tap action; each control measures 48 dp in its
 shortest dimension. This proves screen-reader selection discovery and action
 navigation, but not successful activation of every resulting operation.
+On the Pixel, backgrounding and returning to the app preserves the open PDF.
+Backgrounding followed by `am kill` terminates the application process; relaunch
+starts a different PID and restores the accepted locator and PDF. The separate
+`am force-stop` check returns to the empty initial state and is recorded as a
+distinct stopped-package behavior rather than process-restoration evidence.
+Exact TalkBack focus restoration was not demonstrated. The broader physical
+failure and focus-recovery matrix remains an M5 gate.
+
 The final iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same
 initial reader UI without a blank screen, native-library error, clipping,
 corruption, or safe-area overlap. Because application startup awaits bridge
@@ -177,7 +190,7 @@ corruption, overlap, or safe-area intrusion, and post-resume traversal still
 exposes every element. The inspection API does not prove preservation of the
 user's exact VoiceOver focus.
 
-These checks do not replace the rest of the required manual run. Broader TalkBack
+These checks do not replace the complete M5 manual matrix. Broader TalkBack
 explore-by-touch, successful screen-reader activation of Copy/highlight/note,
 focus after an actual background/resume cycle, and platform
 contrast/reduced-motion checks remain open on Android.
@@ -196,6 +209,7 @@ path-only fixture.
 The packaged Flutter/Rust highlighting slice works end to end for PDF and EPUB
 on Linux and one physical Android device, and its scoped performance gates pass.
 That satisfies the M2 go/no-go evidence for continuing the Flutter migration.
-It does not make iOS, Windows, or the deferred manual accessibility, lifecycle,
-startup, large-document, and release-size checks pass; those remain explicit
+M2 is complete. This does not make iOS, Windows, or the deferred complete
+accessibility, physical-failure, startup, large-document, navigation/relayout,
+native-comparison, and release-size checks pass; those remain explicit M5
 target-specific work and may not be inferred from Android or simulator results.

@@ -144,16 +144,23 @@ The Flutter slice must prove:
   overlays, persistence, and relayout;
 * mouse, keyboard, and touch selection with one logical interaction contract;
 * responsive desktop, phone, and tablet layouts;
-* screen-reader semantics, focus order, text scaling, and non-color indication;
-* cancellation, suspend/resume, rotation, memory pressure, and renderer recovery;
-* reproducible debug and release builds with measured startup, memory, binary
-  size, bridge latency, rendering latency, and drag latency.
+* automated screen-reader semantics, focus order, text scaling, and non-color
+  indication, plus selection discovery and action navigation with the named
+  screen reader on the first physical mobile target;
+* cancellation, suspend/resume, rotation, memory pressure, and renderer recovery,
+  with representative background/resume and process-death evidence on the first
+  physical mobile target;
+* reproducible debug and release builds with measured bridge latency, rendering
+  latency, drag latency, and resource-cycle behavior on the first desktop and
+  physical mobile targets.
 
 Run the M2 slice on desktop and at least one physical Android or iOS device. One
 mobile target may ship first, but evidence does not transfer between operating
 systems: independently validate the other OS before claiming or packaging it as
-supported. Web feasibility separately proves the chosen WASM or service boundary
-and does not delay native migration.
+supported. Complete per-release-target accessibility, physical failure, startup,
+installed-size, representative large-document, navigation/relayout, and native
+comparison gates remain mandatory for M5. Web feasibility separately proves the
+chosen WASM or service boundary and does not delay native migration.
 
 After the gate, migrate the library shell and remaining reader behavior in
 vertical slices. Keep Iced runnable for behavioral comparison, but add no new

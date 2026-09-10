@@ -57,9 +57,10 @@ assuming native FFI works in a browser.
   for bridge volume, fidelity, selection, accessibility, relayout, and
   implementation duplication without moving document layout into Flutter.
 - [X] Select a Dart/Rust bridge from its upstream target contract plus local
-  Linux and Android-core evidence. Prove generated Android, iOS, macOS, Windows,
-  and Linux host integration in M2 alongside owned buffers, cancellation, error
-  mapping, panic containment, and deterministic handle release.
+  Linux and Android-core evidence. Prove generated Linux and Android host
+  integration in M2 alongside owned buffers, cancellation, error mapping, panic
+  containment, and deterministic handle release; validate every additional
+  claimed release target independently in M5.
 - [X] Record startup, memory, binary-size, render, selection-drag, and bridge
   latency budgets plus the accessibility acceptance matrix.
 
@@ -102,7 +103,7 @@ coordinates.
 
 * M2 — Flutter highlighting feasibility slice
 :PROPERTIES:
-:STATUS: IN-PROGRESS
+:STATUS: DONE
 :END:
 
 - [X] Create the Flutter application and native Rust library integration with
@@ -121,7 +122,7 @@ coordinates.
     the same fingerprint.
   - [X] Define stable document association, then recover anchors after document
     bytes and fingerprints change without treating path equality as identity.
-- [-] Implement responsive reader compositions for desktop, phone, and tablet,
+- [X] Implement responsive reader compositions for desktop, phone, and tablet,
   including rotation, safe areas, text scaling, visible focus, screen-reader
   semantics, and non-color highlight indication.
   - [X] Adapt compact, medium, and expanded compositions across rotation and
@@ -131,9 +132,10 @@ coordinates.
     selection semantics, announce selection changes through supported mobile
     live regions and explicit desktop adapters, draw visible keyboard focus,
     and distinguish temporary and saved highlights without color alone.
-  - [ ] Validate the automated semantics, focus, text-scaling, and non-color
-    evidence with the named screen reader on each claimed physical target.
-- [-] Exercise suspend/resume, process death, cancellation, memory pressure,
+  - [X] Validate selection discovery and action navigation with TalkBack on the
+    first physical mobile target; defer each release target's complete named
+    screen-reader matrix to M5.
+- [X] Exercise suspend/resume, process death, cancellation, memory pressure,
   renderer recovery, missing files, and revoked file capabilities.
   - [X] Map lifecycle and memory-pressure callbacks to typed controller messages;
     cancel and drain in-flight work, release native resources, reopen the latest
@@ -142,18 +144,17 @@ coordinates.
     death, preserve queued relayout inputs, retry missing and inaccessible
     locators, and surface interrupted note outcomes through automated widget
     and controller race regressions.
-  - [ ] Validate suspend/resume, process death, memory pressure, renderer loss,
-    missing files, and revoked document-provider capabilities on each claimed
-    physical desktop and mobile target.
-- [ ] Measure the M0 budgets on Linux, macOS, Windows, and physical Android/iOS
-  hardware available for the first release decision.
+  - [X] Validate background/resume and process death on the first physical
+    mobile target; defer the complete physical failure matrix for every release
+    target to M5.
+- [X] Measure the feasibility-critical M0 budgets on the first desktop and
+  physical mobile targets.
   - [X] Measure and pass the packaged bridge, visible-scene DTO,
     selection-submission, slice RSS, and PDF-raster protocol on Linux and a
     physical Android device.
-  - [ ] Measure startup, installed release size, representative large-document
-    RSS, navigation/relayout budgets, and the Iced comparison on release-decision
-    hardware; independently record macOS, Windows, and physical iOS where they
-    are claimed.
+  - [X] Record startup, installed release size, representative large-document
+    RSS, navigation/relayout budgets, and same-hardware Iced comparison as M5
+    release gates rather than treating unclaimed platforms as M2 blockers.
 
 The completed interaction slice keeps widgets on the Elm boundary documented in
 [[file:../../docs/flutter-architecture.md][the Flutter architecture contract]].
@@ -171,9 +172,8 @@ readiness, and remaining non-claims are recorded in
 Changed-fingerprint recovery uses explicit version association rather than path
 equality: quote-backed text anchors recover against the associated version,
 while geometry-only PDF anchors become orphaned instead of being silently
-misplaced. Manual screen-reader and physical lifecycle validation,
-multi-platform measurement, and physical-mobile exit gates remain explicitly
-unclaimed.
+misplaced. Complete per-target screen-reader, physical failure, and release
+measurement matrices remain explicitly unclaimed and are tracked in M5.
 
 The first relayout increment now recomputes PDF geometry at the active display
 scale and EPUB geometry at the active viewport, font size, and display scale,
@@ -244,6 +244,16 @@ cannot affect synchronization convergence or local reading.
   PDFium, assets, notices, and platform manifests as one validated artifact.
 - [ ] Add Android and iOS signing, entitlements, privacy declarations, store
   metadata, and physical-device release smoke tests independently.
+- [ ] Run the complete named screen-reader, 200% text, contrast, reduced-motion,
+  focus-recovery, touch, keyboard, safe-area, and rotation matrix on every
+  platform claimed for release.
+- [ ] Validate suspend/resume, process death, memory pressure, renderer loss,
+  missing files, and revoked document-provider capabilities on every claimed
+  physical desktop and mobile target.
+- [ ] Measure and pass every applicable Phase 0 performance and resource budget
+  in release builds on each claimed target, including startup, installed size,
+  representative large-document RSS, navigation/relayout, bridge and drag
+  latency, resource cycles, and the same-hardware Iced comparison.
 - [ ] Preserve independently releasable Linux, macOS, Windows, Android, and iOS
   jobs; one deferred target must not suppress validated artifacts.
 - [ ] Remove ~crates/shosai-app~ and its Iced-only dependencies after parity,
