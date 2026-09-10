@@ -464,10 +464,7 @@ Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
   fail('reader did not become operable: $visibleText');
 }
 
-Future<void> _pumpUntilEnabledButton(
-  WidgetTester tester,
-  Finder finder,
-) async {
+Future<void> _pumpUntilEnabledButton(WidgetTester tester, Finder finder) async {
   for (var attempt = 0; attempt < 300; attempt += 1) {
     await tester.pump(const Duration(milliseconds: 16));
     final buttons = tester.widgetList<FilledButton>(finder);
