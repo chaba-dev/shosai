@@ -2,7 +2,8 @@
 
 This document freezes the frontend boundary for the migration.  It records
 decisions and acceptance targets; measurements not explicitly identified as a
-baseline are gates for Phase 2, not claims about a Flutter application that does
+baseline are split between the Phase 2 feasibility gate and Phase 5 release
+validation as described below, not claims about a Flutter application that does
 not exist yet.
 
 == Direction and first target matrix
@@ -14,35 +15,39 @@ feature implementation.  Highlighting from RFD 6 is the first vertical slice.
 
 [cols="1,1,2,2"]
 |===
-|Target |Initial disposition |Phase 2 gate |Current evidence
+|Target |Initial disposition |Validation scope |Current evidence
 
 |Linux desktop
 |First desktop development target
-|Build and launch the Flutter host; open EPUB/PDF; run mouse, keyboard,
-accessibility, lifecycle, release, and budget checks
+|For M2, build and launch the Flutter host, open EPUB/PDF, and run interaction,
+automated recovery, and scoped feasibility-budget checks. Complete release
+validation remains in M5.
 |Rust workspace tests and the existing Iced application run on Linux
 
 |Android arm64
 |First mobile validation target
-|Build and launch on a physical device; run touch, TalkBack, rotation,
-background/process-death, memory, and release checks
+|For M2, build and launch on a physical device; run touch, TalkBack selection
+discovery, representative background/process-death, and scoped
+feasibility-budget checks. Complete release validation remains in M5.
 |The extracted core cross-compiles with the Android NDK.  This is not a host or
 physical-device claim.
 
 |macOS arm64/x86-64
 |Planned desktop target, currently unclaimed
-|Native host build, signing/package, VoiceOver, lifecycle, and performance
+|Before a release claim in M5: native host build, signing/package, VoiceOver,
+lifecycle, and performance
 |Existing Iced benchmark data only; no Flutter host evidence
 
 |Windows x86-64
 |Planned desktop target, currently unclaimed
-|Native host build/package, Narrator, lifecycle, and performance
+|Before a release claim in M5: native host build/package, Narrator, lifecycle,
+and performance
 |No Flutter host evidence
 
 |iOS arm64
 |Planned mobile target, currently unclaimed
-|Native host build/signing and physical-device VoiceOver, touch, rotation,
-lifecycle, memory, and release checks
+|Before a release claim in M5: native host build/signing and physical-device
+VoiceOver, touch, rotation, lifecycle, memory, and release checks
 |No Flutter host or physical-device evidence
 
 |Web
@@ -165,8 +170,9 @@ limited to 160 MiB and all retained bridge buffers to 320 MiB.
 The selection is based on the upstream target/API contract plus a Linux core
 test and Android arm64 core cross-build.  It does not claim that generated host
 projects, PDFium packaging, Apple signing, Windows loading, or mobile lifecycle
-already work.  Those are deliberately Phase 2 per-target gates; requiring them
-before selecting a bridge would duplicate Phase 2 and make the plan circular.
+already work. Feasibility host integration and packaging begin in Phase 2;
+complete validation remains a Phase 5 gate for each release target. Requiring
+either before selecting a bridge would make the plan circular.
 
 Upstream references:
 
@@ -273,5 +279,7 @@ HOST_CC=clang HOST_AR=ar .agents/dev cargo ndk -t arm64-v8a check -p shosai-core
 There is intentionally no Flutter application or claimed platform package in
 Phase 0.  Phase 1 added a disposable code-generation smoke test, but no binding
 is checked in or linked into a host.  Phase 2 must replace upstream capability
-claims with local host builds and physical mobile evidence and must measure all
-unmeasured budgets above.
+claims with local host builds, physical mobile evidence, and the scoped bridge,
+render, drag, and resource-cycle budgets. Phase 5 must measure the remaining
+startup, installed-size, representative large-document, navigation/relayout,
+and same-hardware comparison gates before claiming a release target.

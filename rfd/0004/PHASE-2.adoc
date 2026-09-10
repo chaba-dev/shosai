@@ -1,8 +1,9 @@
 = RFD 4 Phase 2 evidence
 
-Phase 2 implements and measures the packaged highlighting feasibility slice. It
-does not convert simulator or automated evidence into a manual accessibility or
-physical-lifecycle claim.
+Phase 2 implements and measures the packaged highlighting feasibility slice and
+satisfies its desktop-plus-physical-mobile go/no-go gate. Evidence beyond that
+gate remains explicit rather than being inferred from simulator or automated
+results, and is tracked as per-release-target validation in Phase 5.
 
 == Packaged targets
 
@@ -23,7 +24,10 @@ measurement record at
 link:evidence/m2-android-pixel-5a.json[m2-android-pixel-5a.json]
 |Passes the same measured gates. The packaged native slice opens PDF and EPUB,
 transfers their visible surfaces and rasters, and creates, reopens, updates, and
-deletes an annotation in each format through SQLite.
+deletes an annotation in each format through SQLite. With TalkBack enabled, the
+user activates the document's selection semantics action and confirms that
+TalkBack announces and navigates Copy, all five highlight colors, Add note, and
+Cancel on the physical device.
 
 |iOS
 |iPad Air 5th generation on iOS 26.6 and iPhone 15 Pro Max on iOS 26.6.2 are
@@ -32,10 +36,22 @@ simulator runtime is installed.
 |The checked-in iOS host builds and launches on iPhone 17 Pro and iPad Air
 simulators with the Rust bridge and PDFium framework loaded. Unsigned arm64
 profile and release device builds succeed and are compatible with both physical
-devices. The builder has one Apple Development identity and an iPhone-only
-provisioning profile, but the project deliberately has no checked-in development
-team; the iPad is absent from that profile and no signed install was attempted.
-Simulator evidence cannot satisfy the physical VoiceOver or lifecycle gates.
+devices. The builder has one Apple Development identity and a locally generated
+provisioning profile containing both devices, but the project deliberately has
+no checked-in development team. Locally signed profile and release builds install
+and launch on both devices after the user explicitly trusts the development
+profile. Local deep-signature verification and the certificate/profile match
+pass. VoiceOver services are active on the phone, and the user directly confirms
+audible VoiceOver speech and visible focus on both devices. On-device
+accessibility inspection traverses each initial reader as a `Shōsai` header,
+document-path label, path field, Open document button, bridge instruction, and
+selection status; its spoken descriptions report the expected labels and traits.
+The seven supported platform audits report no findings on the phone. A real phone
+background/foreground cycle preserves a responsive, correctly rendered host and
+the same traversable elements. The iPad release capture is unobstructed and has
+no blank screen, native-load failure, clipping, corruption, overlap, or safe-area
+intrusion. Remote inspection does not satisfy the remaining touch, rotor,
+document-selection, orientation, large-text, or exact focus-preservation gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -88,6 +104,10 @@ application-support database path, disposes, recreates the bridge, and reopens
 the saved annotation. The repeated RSS value remains a native-cycle metric, not
 a claim about repeated Flutter image decoding.
 
+This profile-mode protocol satisfies the M2 feasibility gate only. M5 reruns
+every applicable Phase 0 performance and resource budget in release mode on each
+platform claimed for release.
+
 [cols="2,1,1",options="header"]
 |===
 |Measured gate |Linux Framework 16 |Physical Pixel 5a
@@ -133,6 +153,21 @@ inaccessible locators; memory pressure; and renderer recovery. The physical
 Pixel profile run verifies that the packaged PDF and EPUB bridge path and local
 selection interaction execute on Android hardware. Its captured phone rendering
 shows an aligned selected range and action surface without page-raster damage.
+The final physical TalkBack run focuses the loaded PDF, announces the selection
+action's purpose, activates it without a pointer drag, and exposes a selected-text
+status plus individually announced, navigable Copy, Yellow, Green, Blue, Pink,
+Purple, Add note, and Cancel controls. Android accessibility inspection confirms
+that every control has an enabled tap action; each control measures 48 dp in its
+shortest dimension. This proves screen-reader selection discovery and action
+navigation, but not successful activation of every resulting operation.
+On the Pixel, backgrounding and returning to the app preserves the open PDF.
+Backgrounding followed by `am kill` terminates the application process; relaunch
+starts a different PID and restores the accepted locator and PDF. The separate
+`am force-stop` check returns to the empty initial state and is recorded as a
+distinct stopped-package behavior rather than process-restoration evidence.
+Exact TalkBack focus restoration was not demonstrated. The broader physical
+failure and focus-recovery matrix remains an M5 gate.
+
 The final iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same
 initial reader UI without a blank screen, native-library error, clipping,
 corruption, or safe-area overlap. Because application startup awaits bridge
@@ -140,20 +175,41 @@ initialization, these launches exercise the packaged iOS framework load. The
 immediately preceding branch lineage also completed the packaged PDF, EPUB,
 selection, persistence, and metrics flow on both simulators; the final rerun was
 blocked by an unrelated orphaned Flutter native-assets lock before launch. This
-simulator evidence does not replace physical-device evidence.
+simulator evidence does not replace physical-device evidence. A signed copy of
+the same iOS host installs and launches on the profile-covered iPhone 15 Pro Max
+after the user explicitly trusts its development profile. Device process
+inspection confirms that the VoiceOver services are active. With VoiceOver
+enabled, on-device accessibility inspection traverses the initial reader in the
+order `Shōsai` header, document-path label, path field, Open document button,
+bridge instruction, and selection status. The spoken descriptions expose the
+expected header and button traits, and the platform's sufficient-description,
+contrast, hit-region, element-detection, text-clipping, trait, and dynamic-text
+audits return no findings. Captures before and after foregrounding the same
+process through Settings show the responsive host intact without clipping,
+corruption, overlap, or safe-area intrusion, and post-resume traversal still
+exposes every element. The inspection API does not prove preservation of the
+user's exact VoiceOver focus.
 
-These checks do not replace the required manual run. TalkBack explore-by-touch,
-real touch target confirmation, focus after an actual background/resume cycle,
-and platform contrast/reduced-motion checks remain open on Android. VoiceOver,
-rotor order, physical touch/orientation, and lifecycle recovery remain open on
-each claimed Apple device. Missing files and revoked document-provider
-capabilities also require a real provider rather than a path-only fixture.
+These checks do not replace the complete M5 manual matrix. Broader TalkBack
+explore-by-touch, successful screen-reader activation of Copy/highlight/note,
+focus after an actual background/resume cycle, and platform
+contrast/reduced-motion checks remain open on Android.
+Gesture-driven VoiceOver traversal and rotor order, physical touch and document
+selection/actions, orientation, large-text interaction, and exact user-focus
+recovery remain open on Apple hardware. The signed iPhone host's
+background/resume rendering and semantics availability are proven. Signed iPad
+profile and release installation, launch, initial rendering, and semantics
+availability are also proven, as are audible VoiceOver speech and visible focus,
+but not its gesture-driven accessibility interactions. Missing files and revoked
+document-provider capabilities also require a real provider rather than a
+path-only fixture.
 
 == Exit assessment
 
 The packaged Flutter/Rust highlighting slice works end to end for PDF and EPUB
 on Linux and one physical Android device, and its scoped performance gates pass.
 That satisfies the M2 go/no-go evidence for continuing the Flutter migration.
-It does not make iOS, Windows, or the deferred manual accessibility, lifecycle,
-startup, large-document, and release-size checks pass; those remain explicit
+M2 is complete. This does not make iOS, Windows, or the deferred complete
+accessibility, physical-failure, startup, large-document, navigation/relayout,
+native-comparison, and release-size checks pass; those remain explicit M5
 target-specific work and may not be inferred from Android or simulator results.

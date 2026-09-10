@@ -42,6 +42,7 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderOpenRequested,
         ReaderResumed,
         ReaderSelection,
+        ReaderSelectionAllRequested,
         ReaderSelectionAnnouncer,
         ReaderSelectionActionsRequested,
         ReaderSelectionCancelled,
@@ -175,6 +176,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         ReaderFocusTarget.surface => _readerFocus.requestFocus(),
         ReaderFocusTarget.actions => _actionFocus.requestFocus(),
       },
+      frameScheduler: (callback) =>
+          WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
       selectionCopier: (text) => Clipboard.setData(ClipboardData(text: text)),
       selectionAnnouncer:
           usesExplicitSelectionAnnouncements(defaultTargetPlatform)
@@ -668,6 +671,12 @@ class _DocumentView extends StatelessWidget {
         ),
       );
     }
+    final screenReaderSelectionAvailable =
+        !model.busy &&
+        !model.relayoutBusy &&
+        !model.relayoutPending &&
+        surface.graphemeBoundaries.length >= 2 &&
+        surface.graphemeBoundaries.first != surface.graphemeBoundaries.last;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
@@ -829,6 +838,14 @@ class _DocumentView extends StatelessWidget {
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
                                 label: 'Document text: ${surface.text}',
+                                hint: screenReaderSelectionAvailable
+                                    ? 'Selects this text and shows selection actions.'
+                                    : null,
+                                onTap: screenReaderSelectionAvailable
+                                    ? () => dispatch(
+                                        const ReaderSelectionAllRequested(),
+                                      )
+                                    : null,
                                 child: DecoratedBox(
                                   key: const ValueKey('reader-focus-indicator'),
                                   position: DecorationPosition.foreground,
