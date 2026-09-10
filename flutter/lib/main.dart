@@ -71,11 +71,12 @@ Future<void> main() async {
 
 Future<FlutterBridge> createApplicationBridge({
   Future<Directory> Function()? applicationSupportDirectory,
+  String databaseName = 'annotations.sqlite3',
 }) async {
   final directory =
       await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
   return FlutterBridge.withDatabasePath(
-    databasePath: '${directory.path}/annotations.sqlite3',
+    databasePath: '${directory.path}/$databaseName',
   );
 }
 

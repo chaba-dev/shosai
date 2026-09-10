@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -254,10 +255,21 @@ void main() {
     }
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();
+    final applicationSupportDirectory = await getApplicationSupportDirectory();
+    final databaseName =
+        'm2-${DateTime.now().microsecondsSinceEpoch}-annotations.sqlite3';
+    addTearDown(() async {
+      for (final suffix in ['', '-shm', '-wal']) {
+        final file = File(
+          '${applicationSupportDirectory.path}/$databaseName$suffix',
+        );
+        if (await file.exists()) await file.delete();
+      }
+    });
     await _exerciseRenderedPersistence(
       tester,
-      directory,
       FlutterOpenRequest(localId: epubFixture, pathKey: epubFixture),
+      databaseName,
     );
 
     final driverReport = binding.reportData;
@@ -287,13 +299,10 @@ void main() {
 
 Future<void> _exerciseRenderedPersistence(
   WidgetTester tester,
-  Directory applicationSupportDirectory,
   FlutterOpenRequest request,
+  String databaseName,
 ) async {
-  Future<Directory> supportDirectory() async => applicationSupportDirectory;
-  final bridge = await createApplicationBridge(
-    applicationSupportDirectory: supportDirectory,
-  );
+  final bridge = await createApplicationBridge(databaseName: databaseName);
   await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
   await tester.pumpAndSettle();
   tester.widget<TextField>(find.byType(TextField)).controller!.text =
@@ -334,13 +343,15 @@ Future<void> _exerciseRenderedPersistence(
   await gesture.moveTo(position(painter.surface.endpoints.last));
   await gesture.up();
   await tester.pump();
-  await tester.tap(find.widgetWithText(FilledButton, 'Yellow'));
+  final yellowAction = find.widgetWithText(FilledButton, 'Yellow');
+  await _pumpUntilEnabledButton(tester, yellowAction);
+  await tester.tap(yellowAction);
   await _pumpUntilFound(tester, find.textContaining('Highlight 1'));
   await tester.pumpWidget(const SizedBox());
   await tester.pumpAndSettle();
 
   final reopenedBridge = await createApplicationBridge(
-    applicationSupportDirectory: supportDirectory,
+    databaseName: databaseName,
   );
   final cancellation = reopenedBridge.createCancellation();
   final document = await reopenedBridge.openDocument(
@@ -451,6 +462,18 @@ Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
       .whereType<String>()
       .join(' | ');
   fail('reader did not become operable: $visibleText');
+}
+
+Future<void> _pumpUntilEnabledButton(
+  WidgetTester tester,
+  Finder finder,
+) async {
+  for (var attempt = 0; attempt < 300; attempt += 1) {
+    await tester.pump(const Duration(milliseconds: 16));
+    final buttons = tester.widgetList<FilledButton>(finder);
+    if (buttons.any((button) => button.onPressed != null)) return;
+  }
+  fail('reader action did not become enabled');
 }
 
 Uint8List _selectablePdf() {
