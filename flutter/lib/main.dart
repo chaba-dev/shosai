@@ -11,6 +11,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
 import 'package:shosai_flutter/reader_controller.dart';
+import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
@@ -62,12 +63,24 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderContentState,
         ReaderSelectionStarted,
         ReaderSuspended,
+        ReaderUnitRequested,
+        ReaderSearchRequested,
+        ReaderBookmarkToggled,
+        ReaderBookmarkNavigated,
+        ReaderToolsToggled,
         premultiplyRgba;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init(externalLibrary: nativeLibrary());
-  runApp(ShosaiApp(bridge: await createApplicationBridge()));
+  final directory = await getApplicationSupportDirectory();
+  final databasePath = '${directory.path}/shosai.sqlite3';
+  runApp(
+    ShosaiApp(
+      productBridgeFactory: () =>
+          FlutterBridge.withDatabasePath(databasePath: databasePath),
+    ),
+  );
 }
 
 Future<FlutterBridge> createApplicationBridge({
@@ -102,9 +115,10 @@ ExternalLibrary? nativeLibrary() {
 }
 
 class ShosaiApp extends StatelessWidget {
-  const ShosaiApp({super.key, this.bridge});
+  const ShosaiApp({super.key, this.bridge, this.productBridgeFactory});
 
   final FlutterBridge? bridge;
+  final FlutterBridge Function()? productBridgeFactory;
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +130,7 @@ class ShosaiApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
+        fontFamily: 'Inter',
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -123,9 +138,19 @@ class ShosaiApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
+        fontFamily: 'Inter',
       ),
       restorationScopeId: 'shosai',
-      home: ReaderScreen(bridge: bridge),
+      home: productBridgeFactory == null
+          ? ReaderScreen(bridge: bridge)
+          : ProductShell(
+              bridgeFactory: productBridgeFactory!,
+              readerBuilder: (bridge, book) => ReaderScreen(
+                bridge: bridge,
+                initialPath: book.pathKey,
+                initialBookId: book.bookId,
+              ),
+            ),
     );
   }
 }
@@ -136,11 +161,15 @@ class ReaderScreen extends StatefulWidget {
     this.bridge,
     this.bridgeFactory,
     this.decoder = _decodeRgba,
+    this.initialPath,
+    this.initialBookId,
   }) : assert(bridge == null || bridgeFactory == null);
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? bridgeFactory;
   final PageDecoder decoder;
+  final String? initialPath;
+  final int? initialBookId;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -199,6 +228,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     registerForRestoration(_openDocumentPath, 'open_document_path');
     if (_openDocumentPath.value case final path?) {
       _controller.dispatch(ReaderOpenRequested(path));
+    } else if (widget.initialPath case final path?) {
+      _path.value.text = path;
+      _controller.dispatch(
+        ReaderOpenRequested(path, bookId: widget.initialBookId),
+      );
     }
   }
 
@@ -311,25 +345,30 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
-        actions:
-            model.document != null &&
-                model.document!.format != FlutterBookFormat.cbz
+        actions: model.document != null
             ? [
                 IconButton(
-                  tooltip: model.annotationsReady
-                      ? 'Associate highlights from an earlier version…'
-                      : 'Retry loading highlights',
-                  onPressed: associationEnabled
-                      ? () => _controller.dispatch(
-                          model.annotationsReady
-                              ? const ReaderAnnotationAssociationRequested()
-                              : const ReaderAnnotationReloadRequested(),
-                        )
-                      : null,
-                  icon: Icon(
-                    model.annotationsReady ? Icons.link : Icons.refresh,
-                  ),
+                  tooltip: 'Search and bookmarks',
+                  onPressed: () =>
+                      _controller.dispatch(const ReaderToolsToggled()),
+                  icon: const Icon(Icons.manage_search),
                 ),
+                if (model.document!.format != FlutterBookFormat.cbz)
+                  IconButton(
+                    tooltip: model.annotationsReady
+                        ? 'Associate highlights from an earlier version…'
+                        : 'Retry loading highlights',
+                    onPressed: associationEnabled
+                        ? () => _controller.dispatch(
+                            model.annotationsReady
+                                ? const ReaderAnnotationAssociationRequested()
+                                : const ReaderAnnotationReloadRequested(),
+                          )
+                        : null,
+                    icon: Icon(
+                      model.annotationsReady ? Icons.link : Icons.refresh,
+                    ),
+                  ),
               ]
             : null,
       ),
@@ -685,6 +724,10 @@ class _DocumentView extends StatelessWidget {
             dispatch(const ReaderSelectionCopyRequested()),
         const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>
             dispatch(const ReaderSelectionCopyRequested()),
+        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+            dispatch(ReaderUnitRequested(model.unit - 1)),
+        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+            dispatch(ReaderUnitRequested(model.unit + 1)),
       },
       child: Column(
         children: [
@@ -961,6 +1004,117 @@ class _DocumentView extends StatelessWidget {
                     .toList(),
               ),
             ),
+          if (document.logicalUnitCount > BigInt.one)
+            Semantics(
+              container: true,
+              label:
+                  '${document.format == FlutterBookFormat.epub ? 'Chapter' : 'Page'} ${model.unit + 1} of ${document.logicalUnitCount}',
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'Previous',
+                    onPressed: model.unit > 0 && !model.relayoutBusy
+                        ? () => dispatch(ReaderUnitRequested(model.unit - 1))
+                        : null,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Text('${model.unit + 1} / ${document.logicalUnitCount}'),
+                  IconButton(
+                    tooltip: 'Next',
+                    onPressed:
+                        model.unit + 1 < document.logicalUnitCount.toInt() &&
+                            !model.relayoutBusy
+                        ? () => dispatch(ReaderUnitRequested(model.unit + 1))
+                        : null,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+            ),
+          if (model.toolsVisible && document.format != FlutterBookFormat.cbz)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: TextField(
+                decoration: InputDecoration(
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Search this document',
+                  suffixIcon: model.searchBusy
+                      ? const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : null,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (query) => dispatch(ReaderSearchRequested(query)),
+              ),
+            ),
+          if (model.toolsVisible && model.searchResults.isNotEmpty)
+            SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: model.searchResults
+                    .take(100)
+                    .map(
+                      (result) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: ActionChip(
+                          label: Text(
+                            result.context,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onPressed: () => dispatch(
+                            ReaderUnitRequested(result.unit.toInt()),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          if (model.toolsVisible && document.bookId != null)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip:
+                      model.bookmarks.any(
+                        (bookmark) => bookmark.unit.toInt() == model.unit,
+                      )
+                      ? 'Remove bookmark'
+                      : 'Bookmark this location',
+                  onPressed: model.bookmarkBusy
+                      ? null
+                      : () => dispatch(const ReaderBookmarkToggled()),
+                  icon: Icon(
+                    model.bookmarks.any(
+                          (bookmark) => bookmark.unit.toInt() == model.unit,
+                        )
+                        ? Icons.bookmark
+                        : Icons.bookmark_border,
+                  ),
+                ),
+                for (final bookmark in model.bookmarks.take(20))
+                  TextButton(
+                    onPressed: () => dispatch(
+                      ReaderBookmarkNavigated(bookmark.unit.toInt()),
+                    ),
+                    child: Text('${bookmark.unit.toInt() + 1}'),
+                  ),
+              ],
+            ),
+          if (model.toolsVisible)
+            if (model.toolError case final error?)
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  error,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
         ],
       ),
     );
