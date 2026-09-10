@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-release measure-flutter-m2 check-rfds changelog next-version
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -98,6 +98,18 @@ flutter-android-profile:
 ## Build the macOS Flutter host in debug mode
 flutter-macos-debug:
 	@./scripts/build-flutter-macos.sh
+
+## Build the iOS host for an Apple Silicon simulator in debug mode
+flutter-ios-simulator-debug:
+	@./scripts/build-flutter-ios.sh simulator debug
+
+## Build the iOS host for physical devices in unsigned profile mode
+flutter-ios-device-profile:
+	@./scripts/build-flutter-ios.sh device profile
+
+## Build the iOS host for physical devices in unsigned release mode
+flutter-ios-device-release:
+	@./scripts/build-flutter-ios.sh device release
 
 ## Launch the packaged macOS host and verify that it remains running
 flutter-macos-smoke: flutter-macos-debug

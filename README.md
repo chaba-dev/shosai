@@ -51,7 +51,15 @@ The project is a Cargo workspace:
 
 - `crates/shosai-core` contains document formats, library storage, and reader logic.
 - `crates/shosai-app` contains the native Iced application.
+- `flutter` contains the cross-platform Flutter host and Rust bridge.
 - `website` contains the Hugo source for the project website.
+
+On macOS, build the Flutter iOS host with `make flutter-ios-simulator-debug`,
+`make flutter-ios-device-profile`, or `make flutter-ios-device-release`. These
+targets download checksum-pinned, writable Flutter and PDFium artifacts under
+`target` and remove Nix compiler and SDK variables before Xcode runs. Physical
+device builds are intentionally unsigned; local development signing must be
+configured in Xcode before installing them.
 
 Architecture and product proposals follow the
 [Requests for Discussion process](rfd/README.md). The
