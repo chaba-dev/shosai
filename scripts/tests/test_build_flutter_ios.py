@@ -56,6 +56,9 @@ class FlutterIosBuildTest(unittest.TestCase):
         self.flutter_project.mkdir()
         (self.flutter_sdk / "bin").mkdir(parents=True)
         shutil.copy2(BUILDER, self.scripts / BUILDER.name)
+        self.tools = self.repository / "tools"
+        self.tools.mkdir()
+        self._write_executable(self.tools / "uname", "printf 'Darwin\\n'")
         (self.flutter_sdk / ".shosai-archive-sha256").write_text(
             f"{ARCHIVE_SHA256}\n"
         )
@@ -89,6 +92,7 @@ class FlutterIosBuildTest(unittest.TestCase):
                 "SHOSAI_FLUTTER_IOS_SDK": str(self.sdk_cache),
                 "CAPTURE": str(self.capture),
                 "FETCH_CAPTURE": str(self.fetch_capture),
+                "PATH": f"{self.tools}:{environment['PATH']}",
             }
         )
         return subprocess.run(
