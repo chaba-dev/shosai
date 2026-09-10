@@ -383,6 +383,10 @@ final class ReaderSelectionActionsRequested extends ReaderMessage {
   const ReaderSelectionActionsRequested();
 }
 
+final class ReaderSelectionAllRequested extends ReaderMessage {
+  const ReaderSelectionAllRequested();
+}
+
 final class ReaderSelectionCommitted extends ReaderMessage {
   const ReaderSelectionCommitted({
     this.color = FlutterHighlightColor.yellow,
@@ -799,6 +803,7 @@ final class ReaderController implements Listenable {
           ReaderSelectionKeyboardExtended() ||
           ReaderSelectionEnded() ||
           ReaderSelectionActionsRequested() ||
+          ReaderSelectionAllRequested() ||
           ReaderSelectionCommitted() ||
           ReaderSelectionNoteRequested() ||
           ReaderSelectionCopyRequested() ||
@@ -861,6 +866,8 @@ final class ReaderController implements Listenable {
           _emit(_model.copyWith(keyboardActionInvocation: true));
           _focusAdapter(ReaderFocusTarget.actions);
         }
+      case ReaderSelectionAllRequested():
+        _selectionAllRequested();
       case ReaderSelectionCommitted():
         _selectionCommitted(message.color, message.body);
       case ReaderSelectionNoteRequested():
@@ -1738,6 +1745,34 @@ final class ReaderController implements Listenable {
         keyboardActionInvocation: false,
       ),
     );
+  }
+
+  void _selectionAllRequested() {
+    final surface = _model.selectionSurface;
+    if (surface == null ||
+        surface.graphemeBoundaries.length < 2 ||
+        _model.relayoutBusy ||
+        _closing) {
+      return;
+    }
+    final start = surface.graphemeBoundaries.first;
+    final end = surface.graphemeBoundaries.last;
+    if (start == end) return;
+    _cancelSelectionCreates();
+    _selectionRevision += 1;
+    _emit(
+      _model.copyWith(
+        selectionPhase: ReaderSelectionPhase.selected,
+        anchor: start,
+        focus: end,
+        selectionPointer: null,
+        selectionVisualLine: null,
+        selectionPreferredX: null,
+        selectionActionError: null,
+        keyboardActionInvocation: true,
+      ),
+    );
+    _focusAdapter(ReaderFocusTarget.actions);
   }
 
   void _selectionNoteRequested() {

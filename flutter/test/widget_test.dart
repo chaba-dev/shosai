@@ -4221,12 +4221,14 @@ void main() {
       );
       final data = content.getSemanticsData();
       expect(data.hasAction(ui.SemanticsAction.tap), isTrue);
-      expect(data.hint, 'Select document text');
+      final properties = tester
+          .widget<Semantics>(
+            find.byKey(const ValueKey('reader-content-semantics')),
+          )
+          .properties;
+      expect(properties.hintOverrides?.onTapHint, 'select document text');
 
-      tester.binding.pipelineOwner.semanticsOwner!.performAction(
-        content.id,
-        ui.SemanticsAction.tap,
-      );
+      properties.onTap!();
       await tester.pump();
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
@@ -4235,7 +4237,8 @@ void main() {
                   .widget<CustomPaint>(
                     find.byWidgetPredicate(
                       (widget) =>
-                          widget is CustomPaint && widget.painter is PagePainter,
+                          widget is CustomPaint &&
+                          widget.painter is PagePainter,
                     ),
                   )
                   .painter!
@@ -4244,9 +4247,7 @@ void main() {
       expect(painter.focus, 8);
       expect(
         tester
-            .getSemantics(
-              find.byKey(const ValueKey('reader-selection-status')),
-            )
+            .getSemantics(find.byKey(const ValueKey('reader-selection-status')))
             .getSemanticsData()
             .label,
         'Selected text: electab',

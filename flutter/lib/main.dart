@@ -42,6 +42,7 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderOpenRequested,
         ReaderResumed,
         ReaderSelection,
+        ReaderSelectionAllRequested,
         ReaderSelectionAnnouncer,
         ReaderSelectionActionsRequested,
         ReaderSelectionCancelled,
@@ -829,6 +830,10 @@ class _DocumentView extends StatelessWidget {
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
                                 label: 'Document text: ${surface.text}',
+                                onTap: () => dispatch(
+                                  const ReaderSelectionAllRequested(),
+                                ),
+                                onTapHint: 'select document text',
                                 child: DecoratedBox(
                                   key: const ValueKey('reader-focus-indicator'),
                                   position: DecorationPosition.foreground,
