@@ -58,7 +58,11 @@ class FlutterIosBuildTest(unittest.TestCase):
         shutil.copy2(BUILDER, self.scripts / BUILDER.name)
         self.tools = self.repository / "tools"
         self.tools.mkdir()
-        self._write_executable(self.tools / "uname", "printf 'Darwin\\n'")
+        self._write_executable(
+            self.tools / "uname",
+            "if [ \"$1\" = -s ]; then printf 'Darwin\\n'; "
+            "else printf '%s\\n' \"${TEST_UNAME_MACHINE:-arm64}\"; fi",
+        )
         (self.flutter_sdk / ".shosai-archive-sha256").write_text(
             f"{ARCHIVE_SHA256}\n"
         )
@@ -131,6 +135,17 @@ class FlutterIosBuildTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("debug mode only", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_rejects_intel_macos_before_downloading_arm64_sdk(self):
+        os.environ["TEST_UNAME_MACHINE"] = "x86_64"
+        try:
+            result = self._run("simulator", "debug")
+        finally:
+            os.environ.pop("TEST_UNAME_MACHINE")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Apple Silicon", result.stderr)
         self.assertFalse(self.capture.exists())
 
 

@@ -23,6 +23,8 @@ class FlutterIosIntegrationTest(unittest.TestCase):
         self.assertIn("rust_target=aarch64-apple-ios", script)
         self.assertIn("rust_target=aarch64-apple-ios-sim", script)
         self.assertIn("rust_target=x86_64-apple-ios", script)
+        self.assertIn("for rust_arch in $ARCHS", script)
+        self.assertIn("lipo -create", script)
         self.assertIn("/usr/bin/lipo", script)
         self.assertIn("--crate-type staticlib", script)
 
@@ -36,6 +38,7 @@ class FlutterIosIntegrationTest(unittest.TestCase):
         self.assertIn("-lc++ -lz", podspec)
         self.assertIn("spec.frameworks = 'CoreGraphics'", podspec)
         self.assertIn(":always_out_of_date => '1'", podspec)
+        self.assertIn("PDFiumLicenses", podspec)
 
     def test_ios_core_uses_static_pdfium(self):
         manifest = (ROOT / "crates/shosai-core/Cargo.toml").read_text()
@@ -46,6 +49,12 @@ class FlutterIosIntegrationTest(unittest.TestCase):
         self.assertIn("Pdfium::bind_to_statically_linked_library()", source)
         self.assertIn(
             '#[cfg(not(target_os = "ios"))]\nfn bundled_pdfium_path_for',
+            source,
+        )
+        self.assertIn(
+            '#[cfg(not(any(target_os = "android", target_os = "ios")))]\n'
+            "    #[test]\n"
+            "    fn bundled_pdfium_is_resolved_relative_to_executable",
             source,
         )
 
