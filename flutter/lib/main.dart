@@ -91,6 +91,11 @@ ExternalLibrary? nativeLibrary() {
       '$executableDirectory/../Frameworks/libshosai_flutter_bridge.dylib',
     );
   }
+  if (Platform.isIOS) {
+    return ExternalLibrary.open(
+      'shosai_flutter_bridge.framework/shosai_flutter_bridge',
+    );
+  }
   return null;
 }
 
