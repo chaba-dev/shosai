@@ -22,16 +22,17 @@ class M2MeasurementsTest(unittest.TestCase):
         values = list(range(1, 51))
         self.assertEqual(MODULE.nearest_rank(values, 0.95), 48)
 
-    def test_evaluation_measures_overlay_submission_without_raster_time(self):
+    def test_evaluation_measures_pointer_handling_through_overlay_submission(self):
         report = {
             "drag_frames": {
-                "frame_build_times": [3_000] * 49 + [20_000],
+                "frame_build_times": [3_000] * 50,
                 "frame_rasterizer_times": [20_000] * 50,
             },
             "m2": {
                 "platform": "linux",
                 "bridge_round_trip_ms": {"p95": 0.5},
                 "visible_scene_dto_round_trip_ms": {"p95": 3.5},
+                "drag_overlay_submission_ms": [3.0] * 49 + [20.0],
                 "peak_rss_bytes": 256 * 1024 * 1024,
                 "resource_cycle_rss_bytes": [200_000_000] * 20,
                 "resource_cycle_rss_slope_bytes": -1,
@@ -54,6 +55,7 @@ class M2MeasurementsTest(unittest.TestCase):
                 "platform": "android",
                 "bridge_round_trip_ms": {"p95": 0.5},
                 "visible_scene_dto_round_trip_ms": {"p95": 3.5},
+                "drag_overlay_submission_ms": [1.0] * 50,
                 "peak_rss_bytes": 256 * 1024 * 1024,
                 "resource_cycle_rss_bytes": [200_000_000] * 15
                 + [202_000_000] * 5,

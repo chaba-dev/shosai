@@ -63,7 +63,10 @@ def evaluate(report: dict[str, object]) -> dict[str, object]:
     raster = frames["frame_rasterizer_times"]
     if not isinstance(build, list) or not isinstance(raster, list) or len(build) != len(raster):
         raise ValueError("frame timing vectors must have equal lengths")
-    submission_ms = [float(value) / 1000 for value in build]
+    submission = m2["drag_overlay_submission_ms"]
+    if not isinstance(submission, list) or len(submission) < 50:
+        raise ValueError("drag overlay submission requires at least 50 samples")
+    submission_ms = [float(value) for value in submission]
     rss = m2["resource_cycle_rss_bytes"]
     if not isinstance(rss, list) or len(rss) < RSS_WINDOW * 2:
         raise ValueError("resource cycle RSS requires two complete windows")

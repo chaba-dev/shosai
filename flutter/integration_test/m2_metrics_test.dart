@@ -198,12 +198,21 @@ void main() {
             scale;
     final dragStart = endpointPosition(painter.surface.endpoints.first);
     final dragEnd = endpointPosition(painter.surface.endpoints.last);
+    final gesture = await tester.startGesture(dragStart);
+    for (var index = 0; index < _warmups; index += 1) {
+      final progress = (math.sin(index * math.pi / 12) + 1) / 2;
+      await gesture.moveTo(Offset.lerp(dragStart, dragEnd, progress)!);
+      await tester.pump();
+    }
+    final overlaySubmissionMs = <double>[];
     await binding.watchPerformance(() async {
-      final gesture = await tester.startGesture(dragStart);
       for (var index = 0; index < _samples; index += 1) {
         final progress = (math.sin(index * math.pi / 12) + 1) / 2;
+        final stopwatch = Stopwatch()..start();
         await gesture.moveTo(Offset.lerp(dragStart, dragEnd, progress)!);
         await tester.pump();
+        stopwatch.stop();
+        overlaySubmissionMs.add(stopwatch.elapsedMicroseconds / 1000);
       }
       await gesture.up();
       await tester.pump();
@@ -235,6 +244,7 @@ void main() {
         'bridge_round_trip_ms': _summary(bridgeRoundTrips),
         'visible_scene_dto_round_trip_ms': _summary(sceneRoundTrips),
         'uncached_pdf_render_ms': _summary(renderRoundTrips),
+        'drag_overlay_submission_ms': overlaySubmissionMs,
         'resource_cycle_rss_bytes': rssByCycle,
         'resource_cycle_rss_slope_bytes': _slope(rssByCycle),
         'peak_rss_bytes': rssByCycle.reduce(math.max),
