@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-09
+## [0.1.0] - 2026-09-10
 
 ### 🚀 Features
 
@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Preserve annotations across relayout (#90)
 - *(flutter)* Add responsive lifecycle-safe reader (#91)
 - Recover annotations across document versions (#92)
+- *(flutter)* Deliver RFD 4 M2 highlighting feasibility slice (#93)
 
 ### 🐛 Bug Fixes
 
