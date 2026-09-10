@@ -327,16 +327,16 @@ fn bundled_pdfium_path_for(executable: &Path, target_os: &str) -> Option<PathBuf
 mod tests {
     use crate::document::Document;
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    use super::bundled_pdfium_path;
+    #[cfg(not(target_os = "ios"))]
+    use super::bundled_pdfium_path_for;
     use super::{
         BoundedPageTextError, PdfDoc, PdfSelectionEndpoint, PdfSelectionRect, PdfSelectionZone,
         grapheme_boundary_for_character, grapheme_ranges, pdf_selection_rows,
         read_pdf_file_with_limit, validate_pdf_bitmap_size, validate_pdf_preflight,
         validate_pdf_selection_endpoint_count,
     };
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    use super::bundled_pdfium_path;
-    #[cfg(not(target_os = "ios"))]
-    use super::bundled_pdfium_path_for;
     use std::cell::Cell;
     use std::fs::File;
     #[cfg(not(target_os = "ios"))]
