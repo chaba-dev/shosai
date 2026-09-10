@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(target_os = "ios"))]
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use pdfium_render::prelude::*;
@@ -258,33 +260,45 @@ pub(crate) fn is_backend_unavailable(error: &anyhow::Error) -> bool {
 }
 
 fn create_pdfium() -> Result<Pdfium> {
-    let library = std::env::current_exe()
-        .ok()
-        .and_then(|executable| bundled_pdfium_path(&executable))
-        .filter(|path| path.is_file())
-        .or_else(configured_pdfium_path);
+    #[cfg(target_os = "ios")]
+    let bindings = Pdfium::bind_to_statically_linked_library()
+        .context("failed to bind statically linked PDFium")
+        .map_err(|error| PdfBackendUnavailable(error.to_string()))?;
 
-    let bindings = match library {
-        Some(path) => Pdfium::bind_to_library(&path)
-            .with_context(|| format!("failed to load PDFium library at {}", path.display())),
-        None => Pdfium::bind_to_system_library().context("failed to load PDFium system library"),
-    }
-    .map_err(|error| {
-        PdfBackendUnavailable(format!(
-            "{error}. Install a Shosai package containing PDFium, or ensure \
+    #[cfg(not(target_os = "ios"))]
+    let bindings = {
+        let library = std::env::current_exe()
+            .ok()
+            .and_then(|executable| bundled_pdfium_path(&executable))
+            .filter(|path| path.is_file())
+            .or_else(configured_pdfium_path);
+
+        match library {
+            Some(path) => Pdfium::bind_to_library(&path)
+                .with_context(|| format!("failed to load PDFium library at {}", path.display())),
+            None => {
+                Pdfium::bind_to_system_library().context("failed to load PDFium system library")
+            }
+        }
+        .map_err(|error| {
+            PdfBackendUnavailable(format!(
+                "{error}. Install a Shosai package containing PDFium, or ensure \
              pdfium-binaries is available through the system library path"
-        ))
-    })?;
+            ))
+        })?
+    };
 
     Ok(Pdfium::new(bindings))
 }
 
+#[cfg(not(target_os = "ios"))]
 fn configured_pdfium_path() -> Option<PathBuf> {
     std::env::var_os("SHOSAI_PDFIUM_LIBRARY")
         .map(PathBuf::from)
         .filter(|path| path.is_file())
 }
 
+#[cfg(not(target_os = "ios"))]
 fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
     let executable_dir = executable.parent()?;
 
