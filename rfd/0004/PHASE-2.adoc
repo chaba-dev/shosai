@@ -34,11 +34,12 @@ simulators with the Rust bridge and PDFium framework loaded. Unsigned arm64
 profile and release device builds succeed and are compatible with both physical
 devices. The builder has one Apple Development identity and an iPhone-only
 provisioning profile, but the project deliberately has no checked-in development
-team. A locally signed build installs on the profiled iPhone, but iOS rejects
-launch with its signature, entitlement, or explicit profile-trust security error.
-Local deep-signature verification and the certificate/profile match pass. The
-iPad is absent from the profile. Simulator evidence and an unlaunched physical
-install cannot satisfy the physical VoiceOver or lifecycle gates.
+team. A locally signed build installs and launches on the profiled iPhone after
+the user explicitly trusts its development profile. Local deep-signature
+verification and the certificate/profile match pass. VoiceOver services are
+active on that phone, but traversal was not observed before it locked. The iPad
+is absent from the profile. Neither launch nor service presence alone satisfies
+the physical VoiceOver or lifecycle gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -144,10 +145,11 @@ immediately preceding branch lineage also completed the packaged PDF, EPUB,
 selection, persistence, and metrics flow on both simulators; the final rerun was
 blocked by an unrelated orphaned Flutter native-assets lock before launch. This
 simulator evidence does not replace physical-device evidence. A signed copy of
-the same iOS host installs on the profile-covered iPhone 15 Pro Max, but the
-device rejects launch with its signature, entitlement, or explicit profile-trust
-security error. No VoiceOver, touch, orientation, or lifecycle result is inferred
-from that install.
+the same iOS host installs and launches on the profile-covered iPhone 15 Pro Max
+after the user explicitly trusts its development profile. LLDB device process
+inspection confirms that the VoiceOver services are active, but the phone locked
+before traversal could be observed. No focus order, label, announcement, touch,
+orientation, or lifecycle result is inferred from service presence or launch.
 
 These checks do not replace the required manual run. TalkBack explore-by-touch,
 real touch target confirmation, focus after an actual background/resume cycle,
