@@ -41,7 +41,8 @@ Android packages `libshosai_flutter_bridge.so` and the pinned
 chromium/7999 PDFium arm64 artifact in the APK. PDFium is resolved by soname in
 Android's package namespace rather than by interpreting the Android runtime
 executable as a desktop installation path. Both downloaded PDFium archives and
-the Rust bridge build are produced by the checked-in host build scripts.
+the Rust bridge build are produced by the checked-in host build scripts. The APK
+also carries the PDFium and third-party notices from that exact pinned archive.
 
 iOS builds the bridge as a static library for arm64 devices and arm64/x86_64
 simulators, then wraps and force-loads it with pinned PDFium 8046b in the
@@ -50,7 +51,11 @@ the official Flutter 3.41.5 and PDFium archive checksums, uses writable SDK
 artifacts, and removes inherited Nix SDK, compiler, deployment-target, and linker
 settings before invoking Xcode. `make flutter-ios-simulator-debug`,
 `flutter-ios-device-profile`, and `flutter-ios-device-release` all pass on the
-macOS builder; the latter two deliberately produce unsigned artifacts.
+Apple Silicon macOS builder; the latter two deliberately produce unsigned
+artifacts. Because the 8046b distributor omits generated notices, the build
+packages its MIT license plus a checksum-pinned conservative PDFium notice set
+generated for the nearest available chromium/8044 branch and records that source
+alongside the notices.
 
 == Measurement protocol
 
@@ -111,7 +116,7 @@ a claim about repeated Flutter image decoding.
 |7.567 / 10.531 / 15.087 ms
 |===
 
-The Android profile APK is 55.6 MiB and the Linux profile bundle is 60 MiB. These
+The Android profile APK is 47.4 MiB and the Linux profile bundle is 60 MiB. These
 are build-artifact observations, not the RFD's installed-release-payload or
 Flutter-over-native binary-size measurements. The fixture RSS is evidence for
 the packaged feasibility slice, not the representative large-document ceiling.
