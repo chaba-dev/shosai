@@ -57,6 +57,9 @@ class FlutterIosIntegrationTest(unittest.TestCase):
             "    fn bundled_pdfium_is_resolved_relative_to_executable",
             source,
         )
+        self.assertIn(
+            '#[cfg(not(target_os = "ios"))]\n    use std::path::Path;', source
+        )
 
     def test_pdfium_override_has_one_cache_root_meaning(self):
         fetch = (ROOT / "scripts/fetch-ios-pdfium.sh").read_text()
