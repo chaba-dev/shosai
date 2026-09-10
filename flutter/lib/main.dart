@@ -176,6 +176,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         ReaderFocusTarget.surface => _readerFocus.requestFocus(),
         ReaderFocusTarget.actions => _actionFocus.requestFocus(),
       },
+      frameScheduler: (callback) =>
+          WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
       selectionCopier: (text) => Clipboard.setData(ClipboardData(text: text)),
       selectionAnnouncer:
           usesExplicitSelectionAnnouncements(defaultTargetPlatform)
@@ -670,7 +672,9 @@ class _DocumentView extends StatelessWidget {
       );
     }
     final screenReaderSelectionAvailable =
+        !model.busy &&
         !model.relayoutBusy &&
+        !model.relayoutPending &&
         surface.graphemeBoundaries.length >= 2 &&
         surface.graphemeBoundaries.first != surface.graphemeBoundaries.last;
     return CallbackShortcuts(

@@ -21,6 +21,7 @@ typedef AnnotationAssociationPicker =
     );
 typedef AnnotationAssociationPickerCanceller = void Function();
 typedef ReaderFocusAdapter = void Function(ReaderFocusTarget target);
+typedef ReaderFrameScheduler = void Function(VoidCallback callback);
 typedef SelectionCopier = Future<void> Function(String text);
 typedef ReaderSelectionAnnouncer = Future<void> Function(String description);
 
@@ -110,6 +111,7 @@ final class ReaderModel {
     this.annotationsReady = false,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
+    this.relayoutPending = false,
     this.contentState = ReaderContentState.loading,
     this.error,
     this.busy = false,
@@ -141,6 +143,7 @@ final class ReaderModel {
   final bool annotationsReady;
   final ReaderLayout layout;
   final bool relayoutBusy;
+  final bool relayoutPending;
   final ReaderContentState contentState;
   final String? error;
   final bool busy;
@@ -197,6 +200,7 @@ final class ReaderModel {
     bool? annotationsReady,
     ReaderLayout? layout,
     bool? relayoutBusy,
+    bool? relayoutPending,
     ReaderContentState? contentState,
     Object? error = _unchanged,
     bool? busy,
@@ -250,6 +254,7 @@ final class ReaderModel {
       annotationsReady: annotationsReady ?? this.annotationsReady,
       layout: layout ?? this.layout,
       relayoutBusy: relayoutBusy ?? this.relayoutBusy,
+      relayoutPending: relayoutPending ?? this.relayoutPending,
       contentState: contentState ?? this.contentState,
       error: identical(error, _unchanged) ? this.error : error as String?,
       busy: busy ?? this.busy,
@@ -701,6 +706,13 @@ final class _ReaderAnnotationOperationFinished extends ReaderMessage {
   const _ReaderAnnotationOperationFinished();
 }
 
+final class _ReaderSelectionActionFocusReady extends ReaderMessage {
+  const _ReaderSelectionActionFocusReady(this.generation, this.revision);
+
+  final int generation;
+  final int revision;
+}
+
 final class _ReaderNoteEditorFinished extends ReaderMessage {
   const _ReaderNoteEditorFinished(this.revision);
   final int revision;
@@ -719,6 +731,7 @@ final class ReaderController implements Listenable {
     AnnotationAssociationPicker? annotationAssociationPicker,
     AnnotationAssociationPickerCanceller? annotationAssociationPickerCanceller,
     ReaderFocusAdapter? focusAdapter,
+    ReaderFrameScheduler? frameScheduler,
     SelectionCopier? selectionCopier,
     ReaderSelectionAnnouncer? selectionAnnouncer,
   }) : _bridge = bridge,
@@ -731,6 +744,7 @@ final class ReaderController implements Listenable {
        _annotationAssociationPickerCanceller =
            annotationAssociationPickerCanceller ?? (() {}),
        _focusAdapter = focusAdapter ?? ((_) {}),
+       _frameScheduler = frameScheduler ?? ((callback) => callback()),
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer;
 
@@ -742,6 +756,7 @@ final class ReaderController implements Listenable {
   final AnnotationAssociationPickerCanceller
   _annotationAssociationPickerCanceller;
   final ReaderFocusAdapter _focusAdapter;
+  final ReaderFrameScheduler _frameScheduler;
   final SelectionCopier _selectionCopier;
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
 
@@ -868,6 +883,14 @@ final class ReaderController implements Listenable {
         }
       case ReaderSelectionAllRequested():
         _selectionAllRequested();
+      case _ReaderSelectionActionFocusReady():
+        if (_isCurrent(message.generation) &&
+            message.revision == _selectionRevision &&
+            _model.selectionPhase == ReaderSelectionPhase.selected &&
+            _model.keyboardActionInvocation &&
+            !_closing) {
+          _focusAdapter(ReaderFocusTarget.actions);
+        }
       case ReaderSelectionCommitted():
         _selectionCommitted(message.color, message.body);
       case ReaderSelectionNoteRequested():
@@ -973,6 +996,7 @@ final class ReaderController implements Listenable {
           _emit(
             _model.copyWith(
               relayoutBusy: false,
+              relayoutPending: false,
               selectionError: 'Relayout failed: ${message.error}',
             ),
           );
@@ -1066,6 +1090,7 @@ final class ReaderController implements Listenable {
           error: _consumeRecoveryNotices(error.message),
           generation: generation,
           relayoutBusy: false,
+          relayoutPending: false,
         ),
       );
       return;
@@ -1076,6 +1101,7 @@ final class ReaderController implements Listenable {
           error: _consumeRecoveryNotices(error.toString()),
           generation: generation,
           relayoutBusy: false,
+          relayoutPending: false,
         ),
       );
       return;
@@ -1104,6 +1130,7 @@ final class ReaderController implements Listenable {
         annotationError: null,
         annotationsReady: false,
         relayoutBusy: false,
+        relayoutPending: false,
         contentState: ReaderContentState.loading,
         busy: true,
         generation: generation,
@@ -1294,17 +1321,19 @@ final class ReaderController implements Listenable {
     if (_suspended || _recovering) {
       _requestedLayout = layout;
       _failedLayout = null;
+      _setRelayoutPending(layout != _model.layout);
       return;
     }
     if (_model.busy) {
       _requestedLayout = layout;
       _failedLayout = null;
+      _setRelayoutPending(layout != _model.layout);
       return;
     }
     final document = _model.document;
     if (document == null) {
       _requestedLayout = layout;
-      _emit(_model.copyWith(layout: layout));
+      _emit(_model.copyWith(layout: layout, relayoutPending: false));
       return;
     }
     if (layout == _model.layout && _relayoutCancellations.isNotEmpty) {
@@ -1314,24 +1343,38 @@ final class ReaderController implements Listenable {
       for (final active in _relayoutCancellations) {
         _bridge.cancel(id: active);
       }
-      _emit(_model.copyWith(relayoutBusy: false, selectionError: null));
+      _emit(
+        _model.copyWith(
+          relayoutBusy: false,
+          relayoutPending: false,
+          selectionError: null,
+        ),
+      );
       return;
     }
     if (_model.annotationOperations.isNotEmpty) {
       _requestedLayout = layout;
       _failedLayout = null;
+      _setRelayoutPending(layout != _model.layout);
       return;
     }
     if (_model.contentState != ReaderContentState.ready ||
         document.format == FlutterBookFormat.cbz) {
       _requestedLayout = layout;
       _failedLayout = null;
+      _setRelayoutPending(false);
       return;
     }
     if (layout == _requestedLayout || layout == _failedLayout) {
       return;
     }
     _startRelayout(document, layout);
+  }
+
+  void _setRelayoutPending(bool pending) {
+    if (_model.relayoutPending != pending) {
+      _emit(_model.copyWith(relayoutPending: pending));
+    }
   }
 
   void _startRelayout(FlutterDocumentSummary document, ReaderLayout layout) {
@@ -1343,7 +1386,10 @@ final class ReaderController implements Listenable {
     } catch (error) {
       _failedLayout = layout;
       _emit(
-        _model.copyWith(selectionError: 'Relayout failed: ${error.toString()}'),
+        _model.copyWith(
+          relayoutPending: false,
+          selectionError: 'Relayout failed: ${error.toString()}',
+        ),
       );
       return;
     }
@@ -1359,6 +1405,7 @@ final class ReaderController implements Listenable {
     _emit(
       _model.copyWith(
         relayoutBusy: true,
+        relayoutPending: false,
         selectionError: null,
         selectionActionError: selectionActionError,
       ),
@@ -1486,6 +1533,7 @@ final class ReaderController implements Listenable {
             : null,
         layout: message.layout,
         relayoutBusy: false,
+        relayoutPending: false,
         selectionError: null,
         selectionVisualLine: null,
         selectionPreferredX: null,
@@ -1607,7 +1655,9 @@ final class ReaderController implements Listenable {
     final surface = _model.selectionSurface;
     if (surface == null ||
         surface.graphemeBoundaries.length < 2 ||
+        _model.busy ||
         _model.relayoutBusy ||
+        _model.relayoutPending ||
         _closing) {
       return;
     }
@@ -1751,7 +1801,9 @@ final class ReaderController implements Listenable {
     final surface = _model.selectionSurface;
     if (surface == null ||
         surface.graphemeBoundaries.length < 2 ||
+        _model.busy ||
         _model.relayoutBusy ||
+        _model.relayoutPending ||
         _closing) {
       return;
     }
@@ -1759,7 +1811,8 @@ final class ReaderController implements Listenable {
     final end = surface.graphemeBoundaries.last;
     if (start == end) return;
     _cancelSelectionCreates();
-    _selectionRevision += 1;
+    final revision = ++_selectionRevision;
+    final generation = _model.generation;
     _emit(
       _model.copyWith(
         selectionPhase: ReaderSelectionPhase.selected,
@@ -1772,7 +1825,9 @@ final class ReaderController implements Listenable {
         keyboardActionInvocation: true,
       ),
     );
-    _focusAdapter(ReaderFocusTarget.actions);
+    _frameScheduler(
+      () => dispatch(_ReaderSelectionActionFocusReady(generation, revision)),
+    );
   }
 
   void _selectionNoteRequested() {
@@ -2694,6 +2749,7 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         busy: true,
         relayoutBusy: false,
+        relayoutPending: false,
         annotationOperations: const {},
         selectionPhase: ReaderSelectionPhase.idle,
         anchor: null,

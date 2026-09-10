@@ -4348,99 +4348,58 @@ void main() {
     }
   });
 
-  testWidgets('cancelled screen-reader focus cannot steal a later selection', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
-    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
-    try {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: ReaderScreen(
-            bridge: bridge,
-            decoder: (pixels, {required width, required height}) =>
-                _testImage(),
-          ),
+  test(
+    'cancelled screen-reader focus cannot steal a later selection',
+    () async {
+      final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+      final scheduled = <VoidCallback>[];
+      final focusTargets = <ReaderFocusTarget>[];
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        focusAdapter: focusTargets.add,
+        frameScheduler: scheduled.add,
+      );
+      await _openControlled(controller, bridge, '/tmp/book.epub');
+
+      controller.dispatch(const ReaderSelectionAllRequested());
+      expect(scheduled, hasLength(1));
+      controller.dispatch(const ReaderSelectionCancelled());
+      scheduled.single();
+      controller.dispatch(
+        const ReaderSelectionKeyboardExtended(
+          ReaderSelectionMovement.nextGrapheme,
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
-      await tester.tap(find.text('Open document'));
-      await tester.pumpAndSettle();
 
-      final content = tester.getSemantics(
-        find.byKey(const ValueKey('reader-content-semantics')),
-      );
-      content.owner!.performAction(content.id, ui.SemanticsAction.tap);
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.pump();
-
-      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
-      expect(
-        tester
-            .widget<Focus>(find.byKey(const ValueKey('reader-selection-focus')))
-            .focusNode!
-            .hasFocus,
-        isTrue,
-      );
-    } finally {
-      await tester.pumpWidget(const SizedBox());
+      expect(controller.model.selectionPhase, ReaderSelectionPhase.selected);
+      expect(focusTargets, [ReaderFocusTarget.surface]);
+      controller.dispose();
       await bridge.disposed.future;
-      semantics.dispose();
-    }
-  });
+    },
+  );
 
-  testWidgets('replaced screen-reader focus cannot steal a later selection', (
-    tester,
-  ) async {
-    final semantics = tester.ensureSemantics();
+  test('replaced screen-reader focus cannot steal a later selection', () async {
     final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
-    try {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: ReaderScreen(
-            bridge: bridge,
-            decoder: (pixels, {required width, required height}) =>
-                _testImage(),
-          ),
-        ),
-      );
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
-      await tester.tap(find.text('Open document'));
-      await tester.pumpAndSettle();
+    final scheduled = <VoidCallback>[];
+    final focusTargets = <ReaderFocusTarget>[];
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      focusAdapter: focusTargets.add,
+      frameScheduler: scheduled.add,
+    );
+    await _openControlled(controller, bridge, '/tmp/book.epub');
 
-      final content = tester.getSemantics(
-        find.byKey(const ValueKey('reader-content-semantics')),
-      );
-      content.owner!.performAction(content.id, ui.SemanticsAction.tap);
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Open document'),
-          )
-          .onPressed!();
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('reader-selection-surface')));
-      await tester.pump();
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.pump();
+    controller.dispatch(const ReaderSelectionAllRequested());
+    expect(scheduled, hasLength(1));
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+    scheduled.single();
+    await bridge.waitForOp(2);
 
-      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
-      expect(
-        tester
-            .widget<Focus>(find.byKey(const ValueKey('reader-selection-focus')))
-            .focusNode!
-            .hasFocus,
-        isTrue,
-      );
-    } finally {
-      await tester.pumpWidget(const SizedBox());
-      await bridge.disposed.future;
-      semantics.dispose();
-    }
+    expect(focusTargets, isNot(contains(ReaderFocusTarget.actions)));
+    controller.dispose();
+    await bridge.disposed.future;
   });
 
   testWidgets(
