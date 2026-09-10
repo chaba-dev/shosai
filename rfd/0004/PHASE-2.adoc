@@ -32,20 +32,21 @@ simulator runtime is installed.
 |The checked-in iOS host builds and launches on iPhone 17 Pro and iPad Air
 simulators with the Rust bridge and PDFium framework loaded. Unsigned arm64
 profile and release device builds succeed and are compatible with both physical
-devices. The builder has one Apple Development identity and an iPhone-only
-provisioning profile, but the project deliberately has no checked-in development
-team. A locally signed build installs and launches on the profiled iPhone after
-the user explicitly trusts its development profile. Local deep-signature
-verification and the certificate/profile match pass. VoiceOver services are
-active on that phone. On-device accessibility inspection traverses the initial
-reader as `Shōsai` header, document-path label, path field, Open document button,
-bridge instruction, and selection status; its spoken descriptions report the
-expected labels and traits, and the seven supported platform audits report no
-findings. A real
+devices. The builder has one Apple Development identity and a locally generated
+provisioning profile containing both devices, but the project deliberately has
+no checked-in development team. Locally signed profile and release builds install
+and launch on both devices after the user explicitly trusts the development
+profile. Local deep-signature verification and the certificate/profile match
+pass. VoiceOver services are active on the phone. On-device accessibility
+inspection traverses each initial reader as a `Shōsai` header, document-path
+label, path field, Open document button, bridge instruction, and selection
+status; its spoken descriptions report the expected labels and traits. The seven
+supported platform audits report no findings on the phone. A real phone
 background/foreground cycle preserves a responsive, correctly rendered host and
-the same traversable elements. The iPad is absent from the profile. Remote
-inspection does not satisfy the remaining touch, rotor, document-selection,
-orientation, large-text, or exact focus-preservation gates.
+the same traversable elements. The iPad release capture is unobstructed and has
+no blank screen, native-load failure, clipping, corruption, overlap, or safe-area
+intrusion. Remote inspection does not satisfy the remaining touch, rotor,
+document-selection, orientation, large-text, or exact focus-preservation gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -171,10 +172,11 @@ and platform contrast/reduced-motion checks remain open on Android.
 Gesture-driven VoiceOver traversal and rotor order, physical touch and document
 selection/actions, orientation, large-text interaction, and exact user-focus
 recovery remain open on Apple hardware. The signed iPhone host's
-background/resume rendering and semantics availability are proven, but the iPad
-cannot be installed until its UDID is in a profile. Missing files and revoked
-document-provider capabilities also require a real provider rather than a
-path-only fixture.
+background/resume rendering and semantics availability are proven. Signed iPad
+profile and release installation, launch, initial rendering, and semantics
+availability are also proven, but not its manual accessibility interactions.
+Missing files and revoked document-provider capabilities also require a real
+provider rather than a path-only fixture.
 
 == Exit assessment
 
