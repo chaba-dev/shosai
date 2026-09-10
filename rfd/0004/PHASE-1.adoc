@@ -97,8 +97,9 @@ viewport coordinate is in the contract.
 |The native SQLite/PDFium core emits an intentional ~wasm32~ compile error with
 the required future adapter.  Native dependencies compile for Android arm64
 with the NDK instead of failing at runtime.
-|Host projects and packaging still gate each claimed native target in M2/M5;
-the Android core check alone is not a mobile-support claim.
+|Host integration and feasibility packaging still gate M2; complete packaging
+still gates each release target in M5. The Android core check alone is not a
+mobile-support claim.
 |===
 
 RFD 6's renderer-independent annotation model was already in core before this
@@ -157,5 +158,6 @@ host.
 
 The extraction does not prove generated-binding compilation in a checked-in
 host, Flutter scene fidelity, native host packaging, physical-device lifecycle,
-or the Phase 0 performance and accessibility budgets. Those are Phase 2 gates
-rather than hidden Phase 1 claims.
+or the Phase 0 performance and accessibility budgets. Feasibility-critical
+parts are Phase 2 gates, and complete per-release-target validation is a Phase 5
+gate, rather than either being hidden Phase 1 claims.
