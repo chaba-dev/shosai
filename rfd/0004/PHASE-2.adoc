@@ -162,8 +162,8 @@ contrast, hit-region, element-detection, text-clipping, trait, and dynamic-text
 audits return no findings. Captures before and after foregrounding the same
 process through Settings show the responsive host intact without clipping,
 corruption, overlap, or safe-area intrusion, and post-resume traversal still
-exposes every element. The inspection focus overlay returns to the header rather
-than proving preservation of the user's exact VoiceOver focus.
+exposes every element. The inspection API does not prove preservation of the
+user's exact VoiceOver focus.
 
 These checks do not replace the required manual run. TalkBack explore-by-touch,
 real touch target confirmation, focus after an actual background/resume cycle,
