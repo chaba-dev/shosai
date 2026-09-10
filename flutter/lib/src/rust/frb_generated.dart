@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1544787974;
+  int get rustContentHash => -588008765;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -162,6 +162,11 @@ abstract class RustLibApi extends BaseApi {
     required BigInt page,
     required double scale,
     required BigInt cancellationId,
+  });
+
+  FlutterSelectionSurface crateApiFlutterBridgeRoundTripVisibleScene({
+    required FlutterBridge that,
+    required FlutterSelectionSurface scene,
   });
 
   Future<FlutterSelectionSurface> crateApiFlutterBridgeSelectionSurface({
@@ -794,6 +799,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  FlutterSelectionSurface crateApiFlutterBridgeRoundTripVisibleScene({
+    required FlutterBridge that,
+    required FlutterSelectionSurface scene,
+  }) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_box_autoadd_flutter_selection_surface(scene);
+          return wire.wire__crate__api__FlutterBridge_round_trip_visible_scene(
+            arg0,
+            arg1,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_flutter_selection_surface,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiFlutterBridgeRoundTripVisibleSceneConstMeta,
+        argValues: [that, scene],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeRoundTripVisibleSceneConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_round_trip_visible_scene",
+        argNames: ["that", "scene"],
+      );
+
+  @override
   Future<FlutterSelectionSurface> crateApiFlutterBridgeSelectionSurface({
     required FlutterBridge that,
     required FlutterDocumentHandle document,
@@ -1082,6 +1122,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_flutter_selection_handle(raw);
+  }
+
+  @protected
+  FlutterSelectionSurface dco_decode_box_autoadd_flutter_selection_surface(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_flutter_selection_surface(raw);
   }
 
   @protected
@@ -1603,6 +1651,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_flutter_selection_handle(deserializer));
+  }
+
+  @protected
+  FlutterSelectionSurface sse_decode_box_autoadd_flutter_selection_surface(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_flutter_selection_surface(deserializer));
   }
 
   @protected
@@ -2343,6 +2399,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_flutter_selection_surface(
+    FlutterSelectionSurface self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_flutter_selection_surface(self, serializer);
+  }
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putFloat32(self);
@@ -2912,6 +2977,15 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     page: page,
     scale: scale,
     cancellationId: cancellationId,
+  );
+
+  /// Diagnostic round trip for measuring generated-code DTO transfer and
+  /// Dart materialization independently of document layout.
+  FlutterSelectionSurface roundTripVisibleScene({
+    required FlutterSelectionSurface scene,
+  }) => RustLib.instance.api.crateApiFlutterBridgeRoundTripVisibleScene(
+    that: this,
+    scene: scene,
   );
 
   Future<FlutterSelectionSurface> selectionSurface({

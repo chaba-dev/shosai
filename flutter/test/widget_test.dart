@@ -5108,6 +5108,11 @@ final class _ControlledBridge implements FlutterBridge {
   bool get isDisposed => disposeCount != 0;
 
   @override
+  FlutterSelectionSurface roundTripVisibleScene({
+    required FlutterSelectionSurface scene,
+  }) => scene;
+
+  @override
   BigInt createCancellation() {
     _alive();
     if (failCancellationCreation) {
@@ -5512,6 +5517,11 @@ class _FakeBridge implements FlutterBridge {
   bool get isDisposed => disposeCount != 0;
 
   @override
+  FlutterSelectionSurface roundTripVisibleScene({
+    required FlutterSelectionSurface scene,
+  }) => scene;
+
+  @override
   Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({
     required String sourceVersionId,
     required FlutterDocumentHandle target,
@@ -5726,6 +5736,11 @@ final class _SequentialBridge implements FlutterBridge {
 
   @override
   bool get isDisposed => disposeCount != 0;
+
+  @override
+  FlutterSelectionSurface roundTripVisibleScene({
+    required FlutterSelectionSurface scene,
+  }) => scene;
 
   @override
   Future<FlutterAnnotationAssociationOutcome> associateAnnotationVersion({

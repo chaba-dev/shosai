@@ -76,6 +76,12 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt cancellationId,
   });
 
+  /// Diagnostic round trip for measuring generated-code DTO transfer and
+  /// Dart materialization independently of document layout.
+  FlutterSelectionSurface roundTripVisibleScene({
+    required FlutterSelectionSurface scene,
+  });
+
   Future<FlutterSelectionSurface> selectionSurface({
     required FlutterDocumentHandle document,
     required BigInt unit,

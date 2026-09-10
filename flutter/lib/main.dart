@@ -64,11 +64,11 @@ export 'package:shosai_flutter/reader_controller.dart'
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await RustLib.init(externalLibrary: _nativeLibrary());
+  await RustLib.init(externalLibrary: nativeLibrary());
   runApp(const ShosaiApp());
 }
 
-ExternalLibrary? _nativeLibrary() {
+ExternalLibrary? nativeLibrary() {
   final executableDirectory = File(Platform.resolvedExecutable).parent.path;
   if (Platform.isLinux) {
     return ExternalLibrary.open(

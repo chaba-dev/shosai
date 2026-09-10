@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-macos-debug flutter-macos-smoke flutter-release check-rfds changelog next-version
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-release measure-flutter-m2 check-rfds changelog next-version
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -30,7 +30,7 @@ fmt-rust:
 
 ## Format Dart source files
 fmt-flutter:
-	cd flutter && dart format lib test
+	cd flutter && dart format integration_test lib test
 
 ## Check Rust formatting without changing files
 check-fmt-rust:
@@ -38,7 +38,7 @@ check-fmt-rust:
 
 ## Check Dart formatting without changing files
 check-fmt-flutter:
-	cd flutter && dart format --output=none --set-exit-if-changed lib test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test
 
 ## Run all Rust, script, bridge, and Flutter tests
 test:
@@ -79,7 +79,7 @@ flutter-codegen:
 
 ## Validate generated bindings and the Flutter host
 check-flutter: check-flutter-codegen
-	cd flutter && dart format --output=none --set-exit-if-changed lib test
+	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test
 	cd flutter && flutter analyze
 	$(MAKE) test-flutter
 
@@ -90,6 +90,10 @@ flutter-dev: flutter-codegen
 ## Build the Linux Flutter host in debug mode
 flutter-linux-debug:
 	cd flutter && flutter build linux --debug
+
+## Build the Android arm64 Flutter host in profile mode
+flutter-android-profile:
+	cd flutter && flutter build apk --profile --target-platform android-arm64
 
 ## Build the macOS Flutter host in debug mode
 flutter-macos-debug:
@@ -119,6 +123,12 @@ flutter-macos-smoke: flutter-macos-debug
 ## Build the Linux Flutter host in release mode
 flutter-release: flutter-codegen
 	cd flutter && flutter build linux --release
+
+## Run the RFD 4 M2 profile measurements (DEVICE must be a Flutter device ID)
+measure-flutter-m2:
+	@test -n "$(DEVICE)" || { echo "DEVICE is required" >&2; exit 2; }
+	@python3 scripts/m2-measurements.py --device "$(DEVICE)" \
+		--output "$(or $(OUTPUT),target/m2-measurements/$(DEVICE).json)"
 
 ## Validate RFD sources and the checker regression fixtures
 check-rfds:

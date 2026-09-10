@@ -600,6 +600,16 @@ impl FlutterBridge {
             .map_err(Into::into)
     }
 
+    /// Diagnostic round trip for measuring generated-code DTO transfer and
+    /// Dart materialization independently of document layout.
+    #[flutter_rust_bridge::frb(sync)]
+    pub fn round_trip_visible_scene(
+        &self,
+        scene: FlutterSelectionSurface,
+    ) -> FlutterSelectionSurface {
+        scene
+    }
+
     #[allow(clippy::too_many_arguments)] // FRB exposes these as named Dart arguments.
     pub async fn create_annotation(
         &self,
