@@ -194,7 +194,7 @@ rather than inferred away.
 
 * M3 — Migrate the application vertically
 :PROPERTIES:
-:STATUS: TODO
+:STATUS: IN-PROGRESS
 :END:
 
 - [ ] Build the responsive library, import/open, recent activity, empty/loading,
