@@ -60,7 +60,9 @@
 
         androidSdk = (pkgs.androidenv.composeAndroidPackages {
           platformVersions = [ "36" ];
-          buildToolsVersions = [ "36.0.0" ];
+          buildToolsVersions = [ "35.0.0" "36.0.0" ];
+          includeCmake = true;
+          cmakeVersions = [ "3.22.1" ];
           includeNDK = true;
           ndkVersion = "28.2.13676358";
         }).androidsdk;
