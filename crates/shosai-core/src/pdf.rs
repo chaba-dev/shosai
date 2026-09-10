@@ -339,6 +339,7 @@ mod tests {
     use super::bundled_pdfium_path_for;
     use std::cell::Cell;
     use std::fs::File;
+    #[cfg(not(target_os = "ios"))]
     use std::path::Path;
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     use std::path::PathBuf;
