@@ -669,6 +669,10 @@ class _DocumentView extends StatelessWidget {
         ),
       );
     }
+    final screenReaderSelectionAvailable =
+        !model.relayoutBusy &&
+        surface.graphemeBoundaries.length >= 2 &&
+        surface.graphemeBoundaries.first != surface.graphemeBoundaries.last;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
@@ -830,10 +834,14 @@ class _DocumentView extends StatelessWidget {
                                 key: const ValueKey('reader-content-semantics'),
                                 readOnly: true,
                                 label: 'Document text: ${surface.text}',
-                                onTap: () => dispatch(
-                                  const ReaderSelectionAllRequested(),
-                                ),
-                                onTapHint: 'select document text',
+                                hint: screenReaderSelectionAvailable
+                                    ? 'Selects this text and shows selection actions.'
+                                    : null,
+                                onTap: screenReaderSelectionAvailable
+                                    ? () => dispatch(
+                                        const ReaderSelectionAllRequested(),
+                                      )
+                                    : null,
                                 child: DecoratedBox(
                                   key: const ValueKey('reader-focus-indicator'),
                                   position: DecorationPosition.foreground,
