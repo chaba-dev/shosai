@@ -4231,6 +4231,13 @@ void main() {
       await tester.pump();
 
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
       final painter =
           tester
                   .widget<CustomPaint>(
@@ -4364,16 +4371,20 @@ void main() {
 
       controller.dispatch(const ReaderSelectionAllRequested());
       expect(scheduled, hasLength(1));
+      final staleFocus = scheduled.single;
       controller.dispatch(const ReaderSelectionCancelled());
-      scheduled.single();
-      controller.dispatch(
-        const ReaderSelectionKeyboardExtended(
-          ReaderSelectionMovement.nextGrapheme,
-        ),
-      );
+      controller.dispatch(const ReaderSelectionAllRequested());
+      expect(scheduled, hasLength(2));
+
+      staleFocus();
+      expect(focusTargets, [ReaderFocusTarget.surface]);
+      scheduled.last();
 
       expect(controller.model.selectionPhase, ReaderSelectionPhase.selected);
-      expect(focusTargets, [ReaderFocusTarget.surface]);
+      expect(focusTargets, [
+        ReaderFocusTarget.surface,
+        ReaderFocusTarget.actions,
+      ]);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -4393,11 +4404,19 @@ void main() {
 
     controller.dispatch(const ReaderSelectionAllRequested());
     expect(scheduled, hasLength(1));
+    final staleFocus = scheduled.single;
     controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
-    scheduled.single();
     await bridge.waitForOp(2);
+    controller.dispatch(const ReaderSelectionAllRequested());
+    expect(scheduled, hasLength(2));
 
+    staleFocus();
     expect(focusTargets, isNot(contains(ReaderFocusTarget.actions)));
+    scheduled.last();
+    expect(
+      focusTargets.where((target) => target == ReaderFocusTarget.actions),
+      hasLength(1),
+    );
     controller.dispose();
     await bridge.disposed.future;
   });
