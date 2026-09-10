@@ -23,7 +23,10 @@ measurement record at
 link:evidence/m2-android-pixel-5a.json[m2-android-pixel-5a.json]
 |Passes the same measured gates. The packaged native slice opens PDF and EPUB,
 transfers their visible surfaces and rasters, and creates, reopens, updates, and
-deletes an annotation in each format through SQLite.
+deletes an annotation in each format through SQLite. With TalkBack enabled, the
+user activates the document's selection semantics action and confirms that
+TalkBack announces and navigates Copy, all five highlight colors, Add note, and
+Cancel on the physical device.
 
 |iOS
 |iPad Air 5th generation on iOS 26.6 and iPhone 15 Pro Max on iOS 26.6.2 are
@@ -145,6 +148,13 @@ inaccessible locators; memory pressure; and renderer recovery. The physical
 Pixel profile run verifies that the packaged PDF and EPUB bridge path and local
 selection interaction execute on Android hardware. Its captured phone rendering
 shows an aligned selected range and action surface without page-raster damage.
+The final physical TalkBack run focuses the loaded PDF, announces the selection
+action's purpose, activates it without a pointer drag, and exposes a selected-text
+status plus individually announced, navigable Copy, Yellow, Green, Blue, Pink,
+Purple, Add note, and Cancel controls. Android accessibility inspection confirms
+that every control has an enabled tap action; each control measures 48 dp in its
+shortest dimension. This proves screen-reader selection discovery and action
+navigation, but not successful activation of every resulting operation.
 The final iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same
 initial reader UI without a blank screen, native-library error, clipping,
 corruption, or safe-area overlap. Because application startup awaits bridge
@@ -167,9 +177,10 @@ corruption, overlap, or safe-area intrusion, and post-resume traversal still
 exposes every element. The inspection API does not prove preservation of the
 user's exact VoiceOver focus.
 
-These checks do not replace the required manual run. TalkBack explore-by-touch,
-real touch target confirmation, focus after an actual background/resume cycle,
-and platform contrast/reduced-motion checks remain open on Android.
+These checks do not replace the rest of the required manual run. Broader TalkBack
+explore-by-touch, successful screen-reader activation of Copy/highlight/note,
+focus after an actual background/resume cycle, and platform
+contrast/reduced-motion checks remain open on Android.
 Gesture-driven VoiceOver traversal and rotor order, physical touch and document
 selection/actions, orientation, large-text interaction, and exact user-focus
 recovery remain open on Apple hardware. The signed iPhone host's
