@@ -4348,6 +4348,256 @@ void main() {
     }
   });
 
+  testWidgets('cancelled screen-reader focus cannot steal a later selection', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+
+      final content = tester.getSemantics(
+        find.byKey(const ValueKey('reader-content-semantics')),
+      );
+      content.owner!.performAction(content.id, ui.SemanticsAction.tap);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      expect(
+        tester
+            .widget<Focus>(find.byKey(const ValueKey('reader-selection-focus')))
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      semantics.dispose();
+    }
+  });
+
+  testWidgets('replaced screen-reader focus cannot steal a later selection', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+
+      final content = tester.getSemantics(
+        find.byKey(const ValueKey('reader-content-semantics')),
+      );
+      content.owner!.performAction(content.id, ui.SemanticsAction.tap);
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Open document'),
+          )
+          .onPressed!();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reader-selection-surface')));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      expect(
+        tester
+            .widget<Focus>(find.byKey(const ValueKey('reader-selection-focus')))
+            .focusNode!
+            .hasFocus,
+        isTrue,
+      );
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      semantics.dispose();
+    }
+  });
+
+  testWidgets(
+    'queued relayout hides screen-reader selection during annotation writes',
+    (tester) async {
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final semantics = tester.ensureSemantics();
+      final update = Completer<bool>();
+      final bridge = _ControlledBridge(
+        format: FlutterBookFormat.epub,
+        initialAnnotations: [_annotation('one')],
+        immediateLists: true,
+      )..updateCompleter = update;
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ReaderScreen(
+              bridge: bridge,
+              decoder: (pixels, {required width, required height}) =>
+                  _testImage(),
+            ),
+          ),
+        );
+        await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+        await tester.tap(find.text('Open document'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Change color'));
+        await tester.pump();
+
+        tester.view.devicePixelRatio = tester.view.devicePixelRatio == 2
+            ? 3
+            : 2;
+        await tester.pump();
+        await tester.pump();
+
+        final data = tester
+            .getSemantics(
+              find.byKey(const ValueKey('reader-content-semantics')),
+            )
+            .getSemanticsData();
+        expect(data.hasAction(ui.SemanticsAction.tap), isFalse);
+        expect(data.hint, isEmpty);
+      } finally {
+        if (!update.isCompleted) update.complete(true);
+        await tester.pumpWidget(const SizedBox());
+        await bridge.disposed.future;
+        semantics.dispose();
+      }
+    },
+  );
+
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets(
+      '$platform exposes and routes all semantic selection controls',
+      (tester) async {
+        MethodCall? clipboardCall;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async {
+            if (call.method == 'Clipboard.setData') clipboardCall = call;
+            return null;
+          },
+        );
+        final semantics = tester.ensureSemantics();
+        final bridge = _ControlledBridge(
+          format: FlutterBookFormat.epub,
+          immediateLists: true,
+        );
+        final surface = Completer<FlutterSelectionSurface>()
+          ..complete(
+            _surface(
+              BigInt.from(platform.index + 100),
+              raster: true,
+              text: 'Selectable fixture text',
+            ),
+          );
+        bridge.selectionCompleters.add(surface);
+        debugDefaultTargetPlatformOverride = platform;
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: ReaderScreen(
+                bridge: bridge,
+                decoder: (pixels, {required width, required height}) =>
+                    _testImage(),
+              ),
+            ),
+          );
+          await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+          await tester.tap(find.text('Open document'));
+          await tester.pumpAndSettle();
+
+          SemanticsNode selectAll() {
+            final content = tester.getSemantics(
+              find.byKey(const ValueKey('reader-content-semantics')),
+            );
+            content.owner!.performAction(content.id, ui.SemanticsAction.tap);
+            return content;
+          }
+
+          selectAll();
+          await tester.pump();
+          for (final label in [
+            'Copy',
+            'Yellow',
+            'Green',
+            'Blue',
+            'Pink',
+            'Purple',
+            'Add note',
+            'Cancel',
+          ]) {
+            final node = tester.getSemantics(find.text(label));
+            expect(node.getSemanticsData().label, label);
+            expect(
+              node.getSemanticsData().hasAction(ui.SemanticsAction.tap),
+              isTrue,
+            );
+          }
+
+          final copy = tester.getSemantics(find.text('Copy'));
+          copy.owner!.performAction(copy.id, ui.SemanticsAction.tap);
+          await tester.pump();
+          expect(clipboardCall?.arguments, {'text': 'Selectable fixture text'});
+
+          final addNote = tester.getSemantics(find.text('Add note'));
+          addNote.owner!.performAction(addNote.id, ui.SemanticsAction.tap);
+          await tester.pumpAndSettle();
+          expect(find.byType(AlertDialog), findsOneWidget);
+          Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+          await tester.pumpAndSettle();
+
+          final yellow = tester.getSemantics(find.text('Yellow'));
+          yellow.owner!.performAction(yellow.id, ui.SemanticsAction.tap);
+          await tester.pumpAndSettle();
+          expect(bridge.createCalls, 1);
+
+          selectAll();
+          await tester.pump();
+          final cancel = tester.getSemantics(find.text('Cancel'));
+          cancel.owner!.performAction(cancel.id, ui.SemanticsAction.tap);
+          await tester.pump();
+          expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          await bridge.disposed.future;
+          debugDefaultTargetPlatformOverride = null;
+          semantics.dispose();
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          );
+        }
+      },
+    );
+  }
+
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
     testWidgets(
       '$platform retains cleared selection status during replacement',
