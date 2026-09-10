@@ -29,10 +29,12 @@ deletes an annotation in each format through SQLite.
 |iPad Air 5th generation on iOS 26.6 and iPhone 15 Pro Max on iOS 26.6.2 are
 paired, trusted, developer-enabled, and visible to Flutter. An iOS 26.5
 simulator runtime is installed.
-|Repository host/native integration is being validated separately. Physical
-installation remains blocked until the local Xcode account has a development
-certificate and provisioning profile. Simulator evidence cannot satisfy the
-physical VoiceOver or lifecycle gates.
+|The checked-in iOS host builds and launches on iPhone 17 Pro and iPad Air
+simulators with the Rust bridge and PDFium framework loaded. Unsigned arm64
+profile and release device builds succeed and are compatible with both physical
+devices. Installation remains blocked only by the local absence of an Apple
+Development identity and provisioning profile. Simulator evidence cannot
+satisfy the physical VoiceOver or lifecycle gates.
 |===
 
 Android packages `libshosai_flutter_bridge.so` and the pinned
@@ -40,6 +42,15 @@ chromium/7999 PDFium arm64 artifact in the APK. PDFium is resolved by soname in
 Android's package namespace rather than by interpreting the Android runtime
 executable as a desktop installation path. Both downloaded PDFium archives and
 the Rust bridge build are produced by the checked-in host build scripts.
+
+iOS builds the bridge as a static library for arm64 devices and arm64/x86_64
+simulators, then wraps and force-loads it with pinned PDFium 8046b in the
+`shosai_flutter_bridge` CocoaPods framework. The reproducible wrapper verifies
+the official Flutter 3.41.5 and PDFium archive checksums, uses writable SDK
+artifacts, and removes inherited Nix SDK, compiler, deployment-target, and linker
+settings before invoking Xcode. `make flutter-ios-simulator-debug`,
+`flutter-ios-device-profile`, and `flutter-ios-device-release` all pass on the
+macOS builder; the latter two deliberately produce unsigned artifacts.
 
 == Measurement protocol
 
@@ -52,46 +63,52 @@ make measure-flutter-m2 DEVICE=<flutter-device-id> OUTPUT=<evidence.json>
 The profile harness performs five warmups and 50 measured samples. A synchronous
 full-scene diagnostic round trip isolates generated bridge transfer and Dart DTO
 materialization from Rust document extraction and layout. Selection timing uses
-Flutter's build interval because the RFD boundary ends when the overlay is
-submitted; raster work is reported by Flutter but is not added to that
-pipelined boundary. Static page content is behind a repaint boundary and the
-dynamic painter draws only annotation and selection overlays.
+a directly pumped benchmark frame from synthetic pointer dispatch through UI
+isolate overlay submission, so synchronous event handling is included while GPU
+raster completion is excluded. A separate normal-frame pass records Flutter's
+build and raster intervals for diagnosis. Static page content is behind a
+repaint boundary and the dynamic painter draws only annotation and selection
+overlays.
 
-Resource evidence discards five complete open/render/release warmup cycles and
-records RSS after 20 further cycles. The retained-growth decision compares the
-median of the first and final five-sample windows with a 1 MiB tolerance for
-allocator and page-accounting noise. Raw samples and the ordinary least-squares
-slope remain in each JSON record. The logical resource checks additionally
-assert that document, raster, selection, and cancellation handles release
-successfully.
+Native resource-cycle evidence discards five complete open/render/transfer/
+release warmup cycles and records RSS after 20 further cycles. The
+retained-growth decision compares the median of the first and final five-sample
+windows with a 1 MiB tolerance for allocator and page-accounting noise. Raw
+samples and the ordinary least-squares slope remain in each JSON record. The
+logical resource checks additionally assert that document, raster, selection,
+and cancellation handles release successfully. Separate rendered-reader flows
+decode both PDF and EPUB; the EPUB flow selects, persists to the production
+application-support database path, disposes, recreates the bridge, and reopens
+the saved annotation. The repeated RSS value remains a native-cycle metric, not
+a claim about repeated Flutter image decoding.
 
 [cols="2,1,1",options="header"]
 |===
 |Measured gate |Linux Framework 16 |Physical Pixel 5a
 
 |Warm bridge round-trip p95 <= 1 ms
-|0.002 ms
-|0.058 ms
+|0.003 ms
+|0.008 ms
 
 |Visible-scene DTO round-trip p95 <= 4 ms
-|0.148 ms
-|0.605 ms
+|0.110 ms
+|0.514 ms
 
 |Pointer update to overlay submission p95 / max <= 8 / 16.7 ms
-|1.301 / 1.857 ms
-|3.468 / 4.051 ms
+|3.619 / 3.790 ms
+|5.409 / 7.265 ms
 
 |Peak cycle RSS <= 512 MiB desktop / 384 MiB mobile
-|195.9 MiB
-|198.5 MiB
+|196.4 MiB
+|192.3 MiB
 
 |Final-window median RSS growth <= 1 MiB
-|+0.37 MiB
-|+0.64 MiB
+|+0.82 MiB
+|+0.35 MiB
 
 |Uncached PDF raster p50 / p95 / max (reported, no acceptance ceiling)
-|0.569 / 1.317 / 30.701 ms
-|7.892 / 22.390 / 23.209 ms
+|0.970 / 2.043 / 37.663 ms
+|8.044 / 24.883 / 25.367 ms
 |===
 
 The Android profile APK is 64 MiB and the Linux profile bundle is 60 MiB. These
@@ -110,6 +127,11 @@ inaccessible locators; memory pressure; and renderer recovery. The physical
 Pixel profile run verifies that the packaged PDF and EPUB bridge path and local
 selection interaction execute on Android hardware. Its captured phone rendering
 shows an aligned selected range and action surface without page-raster damage.
+The iOS 26.5 iPhone 17 Pro and iPad Air simulator launches show the same initial
+reader UI without a blank screen, native-library error, clipping, corruption, or
+safe-area overlap. Because application startup awaits bridge initialization,
+these launches exercise the packaged iOS framework load. They do not exercise a
+document or replace physical-device evidence.
 
 These checks do not replace the required manual run. TalkBack explore-by-touch,
 real touch target confirmation, focus after an actual background/resume cycle,
