@@ -4197,6 +4197,67 @@ void main() {
     }
   });
 
+  testWidgets('screen reader can select document text through semantics', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.tap(find.text('Open document'));
+      await tester.pumpAndSettle();
+
+      final content = tester.getSemantics(
+        find.byKey(const ValueKey('reader-content-semantics')),
+      );
+      final data = content.getSemanticsData();
+      expect(data.hasAction(ui.SemanticsAction.tap), isTrue);
+      expect(data.hint, 'Select document text');
+
+      tester.binding.pipelineOwner.semanticsOwner!.performAction(
+        content.id,
+        ui.SemanticsAction.tap,
+      );
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      final painter =
+          tester
+                  .widget<CustomPaint>(
+                    find.byWidgetPredicate(
+                      (widget) =>
+                          widget is CustomPaint && widget.painter is PagePainter,
+                    ),
+                  )
+                  .painter!
+              as PagePainter;
+      expect(painter.anchor, 1);
+      expect(painter.focus, 8);
+      expect(
+        tester
+            .getSemantics(
+              find.byKey(const ValueKey('reader-selection-status')),
+            )
+            .getSemanticsData()
+            .label,
+        'Selected text: electab',
+      );
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+      semantics.dispose();
+    }
+  });
+
   for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
     testWidgets(
       '$platform retains cleared selection status during replacement',
