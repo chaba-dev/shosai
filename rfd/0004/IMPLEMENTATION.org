@@ -147,6 +147,13 @@ coordinates.
     physical desktop and mobile target.
 - [ ] Measure the M0 budgets on Linux, macOS, Windows, and physical Android/iOS
   hardware available for the first release decision.
+  - [X] Measure and pass the packaged bridge, visible-scene DTO,
+    selection-submission, slice RSS, and PDF-raster protocol on Linux and a
+    physical Android device.
+  - [ ] Measure startup, installed release size, representative large-document
+    RSS, navigation/relayout budgets, and the Iced comparison on release-decision
+    hardware; independently record macOS, Windows, and physical iOS where they
+    are claimed.
 
 The completed interaction slice keeps widgets on the Elm boundary documented in
 [[file:../../docs/flutter-architecture.md][the Flutter architecture contract]].
@@ -158,6 +165,9 @@ completion races, annotation reopen/update/delete, geometry bounds, compact
 large-text action layout, responsive composition, visible focus, non-color
 selection state, cross-platform announcement policy, lifecycle draining,
 resource recovery, process restoration, and unavailable-locator retry.
+Packaged Linux and physical Pixel evidence, measurement definitions, Apple
+readiness, and remaining non-claims are recorded in
+[[file:PHASE-2.adoc][the Phase 2 evidence record]].
 Changed-fingerprint recovery uses explicit version association rather than path
 equality: quote-backed text anchors recover against the associated version,
 while geometry-only PDF anchors become orphaned instead of being silently

@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1544787974;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -588008765;
 
 // Section: executor
 
@@ -707,6 +707,46 @@ fn wire__crate__api__FlutterBridge_render_page_impl(
                     .await,
                 )
             }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_round_trip_visible_scene_impl(
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    scene: impl CstDecode<crate::api::FlutterSelectionSurface>,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::DcoCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_round_trip_visible_scene",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_scene = scene.cst_decode();
+            transform_result_dco::<_, _, ()>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok =
+                    Result::<_, ()>::Ok(crate::api::FlutterBridge::round_trip_visible_scene(
+                        &*api_that_guard,
+                        api_scene,
+                    ))?;
+                Ok(output_ok)
+            })())
         },
     )
 }
@@ -2693,6 +2733,13 @@ mod io {
             CstDecode::<crate::api::FlutterSelectionHandle>::cst_decode(*wrap).into()
         }
     }
+    impl CstDecode<crate::api::FlutterSelectionSurface> for *mut wire_cst_flutter_selection_surface {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterSelectionSurface {
+            let wrap = unsafe { flutter_rust_bridge::for_generated::box_from_leak_ptr(self) };
+            CstDecode::<crate::api::FlutterSelectionSurface>::cst_decode(*wrap).into()
+        }
+    }
     impl CstDecode<crate::api::FlutterAnnotation> for wire_cst_flutter_annotation {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterAnnotation {
@@ -3382,6 +3429,14 @@ mod io {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_round_trip_visible_scene(
+        that: usize,
+        scene: *mut wire_cst_flutter_selection_surface,
+    ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartDco {
+        wire__crate__api__FlutterBridge_round_trip_visible_scene_impl(that, scene)
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_selection_surface(
         port_: i64,
         that: usize,
@@ -3508,6 +3563,14 @@ mod io {
     -> *mut wire_cst_flutter_selection_handle {
         flutter_rust_bridge::for_generated::new_leak_box_ptr(
             wire_cst_flutter_selection_handle::new_with_null_ptr(),
+        )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_cst_new_box_autoadd_flutter_selection_surface()
+    -> *mut wire_cst_flutter_selection_surface {
+        flutter_rust_bridge::for_generated::new_leak_box_ptr(
+            wire_cst_flutter_selection_surface::new_with_null_ptr(),
         )
     }
 

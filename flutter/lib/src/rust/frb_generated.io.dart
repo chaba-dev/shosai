@@ -75,6 +75,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterSelectionSurface dco_decode_box_autoadd_flutter_selection_surface(
+    dynamic raw,
+  );
+
+  @protected
   double dco_decode_f_32(dynamic raw);
 
   @protected
@@ -278,6 +283,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FlutterSelectionHandle sse_decode_box_autoadd_flutter_selection_handle(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterSelectionSurface sse_decode_box_autoadd_flutter_selection_surface(
     SseDeserializer deserializer,
   );
 
@@ -541,6 +551,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<wire_cst_flutter_selection_surface>
+  cst_encode_box_autoadd_flutter_selection_surface(
+    FlutterSelectionSurface raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_flutter_selection_surface();
+    cst_api_fill_to_wire_flutter_selection_surface(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
   ffi.Pointer<wire_cst_list_flutter_annotation>
   cst_encode_list_flutter_annotation(List<FlutterAnnotation> raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
@@ -747,6 +768,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ffi.Pointer<wire_cst_flutter_selection_handle> wireObj,
   ) {
     cst_api_fill_to_wire_flutter_selection_handle(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_flutter_selection_surface(
+    FlutterSelectionSurface apiObj,
+    ffi.Pointer<wire_cst_flutter_selection_surface> wireObj,
+  ) {
+    cst_api_fill_to_wire_flutter_selection_surface(apiObj, wireObj.ref);
   }
 
   @protected
@@ -1071,6 +1100,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_flutter_selection_handle(
     FlutterSelectionHandle self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_flutter_selection_surface(
+    FlutterSelectionSurface self,
     SseSerializer serializer,
   );
 
@@ -1797,6 +1832,36 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  WireSyncRust2DartDco wire__crate__api__FlutterBridge_round_trip_visible_scene(
+    int that,
+    ffi.Pointer<wire_cst_flutter_selection_surface> scene,
+  ) {
+    return _wire__crate__api__FlutterBridge_round_trip_visible_scene(
+      that,
+      scene,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_round_trip_visible_scenePtr =
+      _lookup<
+        ffi.NativeFunction<
+          WireSyncRust2DartDco Function(
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_selection_surface>,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_round_trip_visible_scene',
+      );
+  late final _wire__crate__api__FlutterBridge_round_trip_visible_scene =
+      _wire__crate__api__FlutterBridge_round_trip_visible_scenePtr
+          .asFunction<
+            WireSyncRust2DartDco Function(
+              int,
+              ffi.Pointer<wire_cst_flutter_selection_surface>,
+            )
+          >();
+
   void wire__crate__api__FlutterBridge_selection_surface(
     int port_,
     int that,
@@ -2103,6 +2168,23 @@ class RustLibWire implements BaseWire {
             ffi.Pointer<wire_cst_flutter_selection_handle> Function()
           >();
 
+  ffi.Pointer<wire_cst_flutter_selection_surface>
+  cst_new_box_autoadd_flutter_selection_surface() {
+    return _cst_new_box_autoadd_flutter_selection_surface();
+  }
+
+  late final _cst_new_box_autoadd_flutter_selection_surfacePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_flutter_selection_surface> Function()
+        >
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_flutter_selection_surface');
+  late final _cst_new_box_autoadd_flutter_selection_surface =
+      _cst_new_box_autoadd_flutter_selection_surfacePtr
+          .asFunction<
+            ffi.Pointer<wire_cst_flutter_selection_surface> Function()
+          >();
+
   ffi.Pointer<wire_cst_list_flutter_annotation> cst_new_list_flutter_annotation(
     int len,
   ) {
@@ -2306,14 +2388,6 @@ final class wire_cst_flutter_selection_handle extends ffi.Struct {
   external int id;
 }
 
-final class wire_cst_flutter_annotation_text_range extends ffi.Struct {
-  @ffi.UintPtr()
-  external int start;
-
-  @ffi.UintPtr()
-  external int end;
-}
-
 final class wire_cst_flutter_rendered_buffer extends ffi.Struct {
   external wire_cst_flutter_buffer_handle handle;
 
@@ -2339,6 +2413,107 @@ final class wire_cst_flutter_selection_rect extends ffi.Struct {
 
   @ffi.Float()
   external double bottom;
+}
+
+final class wire_cst_flutter_selection_endpoint extends ffi.Struct {
+  @ffi.UintPtr()
+  external int offset;
+
+  @ffi.UintPtr()
+  external int range_start;
+
+  @ffi.UintPtr()
+  external int range_end;
+
+  external wire_cst_flutter_selection_rect rect;
+}
+
+final class wire_cst_list_flutter_selection_endpoint extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_selection_endpoint> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_list_prim_u_32_strict extends ffi.Struct {
+  external ffi.Pointer<ffi.Uint32> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_flutter_selection_caret extends ffi.Struct {
+  @ffi.UintPtr()
+  external int offset;
+
+  @ffi.Float()
+  external double x;
+
+  @ffi.Float()
+  external double along_line;
+
+  @ffi.Bool()
+  external bool vertical;
+
+  @ffi.Float()
+  external double top;
+
+  @ffi.Float()
+  external double bottom;
+}
+
+final class wire_cst_list_flutter_selection_caret extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_selection_caret> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_flutter_selection_visual_line extends ffi.Struct {
+  external ffi.Pointer<wire_cst_list_flutter_selection_caret> carets;
+}
+
+final class wire_cst_list_flutter_selection_visual_line extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_selection_visual_line> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_flutter_selection_surface extends ffi.Struct {
+  external wire_cst_flutter_selection_handle handle;
+
+  @ffi.Float()
+  external double width;
+
+  @ffi.Float()
+  external double height;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> text;
+
+  @ffi.Bool()
+  external bool copy_eligible;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> resource_path;
+
+  external ffi.Pointer<wire_cst_flutter_rendered_buffer> raster;
+
+  external ffi.Pointer<wire_cst_list_flutter_selection_endpoint> endpoints;
+
+  external ffi.Pointer<wire_cst_list_prim_u_32_strict> grapheme_boundaries;
+
+  external ffi.Pointer<wire_cst_list_prim_u_32_strict> word_boundaries;
+
+  external ffi.Pointer<wire_cst_list_flutter_selection_visual_line>
+  visual_lines;
+}
+
+final class wire_cst_flutter_annotation_text_range extends ffi.Struct {
+  @ffi.UintPtr()
+  external int start;
+
+  @ffi.UintPtr()
+  external int end;
 }
 
 final class wire_cst_list_flutter_selection_rect extends ffi.Struct {
@@ -2403,71 +2578,6 @@ final class wire_cst_list_flutter_annotation_association_source
   external int len;
 }
 
-final class wire_cst_flutter_selection_caret extends ffi.Struct {
-  @ffi.UintPtr()
-  external int offset;
-
-  @ffi.Float()
-  external double x;
-
-  @ffi.Float()
-  external double along_line;
-
-  @ffi.Bool()
-  external bool vertical;
-
-  @ffi.Float()
-  external double top;
-
-  @ffi.Float()
-  external double bottom;
-}
-
-final class wire_cst_list_flutter_selection_caret extends ffi.Struct {
-  external ffi.Pointer<wire_cst_flutter_selection_caret> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_flutter_selection_endpoint extends ffi.Struct {
-  @ffi.UintPtr()
-  external int offset;
-
-  @ffi.UintPtr()
-  external int range_start;
-
-  @ffi.UintPtr()
-  external int range_end;
-
-  external wire_cst_flutter_selection_rect rect;
-}
-
-final class wire_cst_list_flutter_selection_endpoint extends ffi.Struct {
-  external ffi.Pointer<wire_cst_flutter_selection_endpoint> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_flutter_selection_visual_line extends ffi.Struct {
-  external ffi.Pointer<wire_cst_list_flutter_selection_caret> carets;
-}
-
-final class wire_cst_list_flutter_selection_visual_line extends ffi.Struct {
-  external ffi.Pointer<wire_cst_flutter_selection_visual_line> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
-final class wire_cst_list_prim_u_32_strict extends ffi.Struct {
-  external ffi.Pointer<ffi.Uint32> ptr;
-
-  @ffi.Int32()
-  external int len;
-}
-
 final class wire_cst_flutter_annotation_association_source_page
     extends ffi.Struct {
   external ffi.Pointer<wire_cst_list_flutter_annotation_association_source>
@@ -2495,32 +2605,4 @@ final class wire_cst_flutter_document_summary extends ffi.Struct {
 
   @ffi.UintPtr()
   external int logical_unit_count;
-}
-
-final class wire_cst_flutter_selection_surface extends ffi.Struct {
-  external wire_cst_flutter_selection_handle handle;
-
-  @ffi.Float()
-  external double width;
-
-  @ffi.Float()
-  external double height;
-
-  external ffi.Pointer<wire_cst_list_prim_u_8_strict> text;
-
-  @ffi.Bool()
-  external bool copy_eligible;
-
-  external ffi.Pointer<wire_cst_list_prim_u_8_strict> resource_path;
-
-  external ffi.Pointer<wire_cst_flutter_rendered_buffer> raster;
-
-  external ffi.Pointer<wire_cst_list_flutter_selection_endpoint> endpoints;
-
-  external ffi.Pointer<wire_cst_list_prim_u_32_strict> grapheme_boundaries;
-
-  external ffi.Pointer<wire_cst_list_prim_u_32_strict> word_boundaries;
-
-  external ffi.Pointer<wire_cst_list_flutter_selection_visual_line>
-  visual_lines;
 }
