@@ -5476,6 +5476,9 @@ final class _ControlledBridge implements FlutterBridge {
   final openRequests = <FlutterOpenRequest>[];
   final associatedSourceIds = <String>[];
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
   Future<void> waitForOp(int count) async {
     while (finishedOperations < count) {
       await Future<void>.delayed(Duration.zero);
@@ -5881,6 +5884,9 @@ class _FakeBridge implements FlutterBridge {
   Completer<FlutterSelectionSurface>? selectionCompleter;
   FlutterBookFormat? completedFormat;
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
   void completeOpen(FlutterBookFormat format) {
     completedFormat = format;
     openCompleter.complete(
@@ -6105,6 +6111,9 @@ final class _SequentialBridge implements FlutterBridge {
   var _nextBuffer = BigInt.one;
   var disposeCount = 0;
   FlutterBookFormat? currentFormat;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   Future<void> waitForFinishedOperations(int count) async {
     while (releasedCancellations.length < count) {

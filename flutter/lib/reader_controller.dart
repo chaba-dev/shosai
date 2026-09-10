@@ -93,6 +93,7 @@ final class ReaderModel {
   ReaderModel({
     this.openPath,
     this.document,
+    this.unit = 0,
     this.pageImage,
     FlutterSelectionSurface? selectionSurface,
     this.selectionPhase = ReaderSelectionPhase.idle,
@@ -104,11 +105,17 @@ final class ReaderModel {
     this.keyboardActionInvocation = false,
     List<ReaderSelection> savedSelections = const [],
     List<FlutterAnnotation> annotations = const [],
+    List<FlutterSearchMatch> searchResults = const [],
+    List<FlutterBookmark> bookmarks = const [],
     Set<String> annotationOperations = const {},
     this.selectionError,
     this.selectionActionError,
     this.annotationError,
     this.annotationsReady = false,
+    this.searchBusy = false,
+    this.bookmarkBusy = false,
+    this.toolError,
+    this.toolsVisible = false,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
     this.relayoutPending = false,
@@ -121,10 +128,13 @@ final class ReaderModel {
            : _freezeSurface(selectionSurface),
        savedSelections = List.unmodifiable(savedSelections),
        annotations = List.unmodifiable(annotations.map(_freezeAnnotation)),
+       searchResults = List.unmodifiable(searchResults),
+       bookmarks = List.unmodifiable(bookmarks),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
   final FlutterDocumentSummary? document;
+  final int unit;
   final ui.Image? pageImage;
   final FlutterSelectionSurface? selectionSurface;
   final ReaderSelectionPhase selectionPhase;
@@ -136,11 +146,17 @@ final class ReaderModel {
   final bool keyboardActionInvocation;
   final List<ReaderSelection> savedSelections;
   final List<FlutterAnnotation> annotations;
+  final List<FlutterSearchMatch> searchResults;
+  final List<FlutterBookmark> bookmarks;
   final Set<String> annotationOperations;
   final String? selectionError;
   final String? selectionActionError;
   final String? annotationError;
   final bool annotationsReady;
+  final bool searchBusy;
+  final bool bookmarkBusy;
+  final String? toolError;
+  final bool toolsVisible;
   final ReaderLayout layout;
   final bool relayoutBusy;
   final bool relayoutPending;
@@ -182,6 +198,7 @@ final class ReaderModel {
   ReaderModel copyWith({
     Object? openPath = _unchanged,
     Object? document = _unchanged,
+    int? unit,
     Object? pageImage = _unchanged,
     Object? selectionSurface = _unchanged,
     ReaderSelectionPhase? selectionPhase,
@@ -193,11 +210,17 @@ final class ReaderModel {
     bool? keyboardActionInvocation,
     List<ReaderSelection>? savedSelections,
     List<FlutterAnnotation>? annotations,
+    List<FlutterSearchMatch>? searchResults,
+    List<FlutterBookmark>? bookmarks,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
     Object? selectionActionError = _unchanged,
     Object? annotationError = _unchanged,
     bool? annotationsReady,
+    bool? searchBusy,
+    bool? bookmarkBusy,
+    Object? toolError = _unchanged,
+    bool? toolsVisible,
     ReaderLayout? layout,
     bool? relayoutBusy,
     bool? relayoutPending,
@@ -213,6 +236,7 @@ final class ReaderModel {
       document: identical(document, _unchanged)
           ? this.document
           : document as FlutterDocumentSummary?,
+      unit: unit ?? this.unit,
       pageImage: identical(pageImage, _unchanged)
           ? this.pageImage
           : pageImage as ui.Image?,
@@ -239,6 +263,8 @@ final class ReaderModel {
       annotations: annotations == null
           ? this.annotations
           : List.unmodifiable(annotations),
+      searchResults: searchResults ?? this.searchResults,
+      bookmarks: bookmarks ?? this.bookmarks,
       annotationOperations: annotationOperations == null
           ? this.annotationOperations
           : Set.unmodifiable(annotationOperations),
@@ -252,6 +278,12 @@ final class ReaderModel {
           ? this.annotationError
           : annotationError as String?,
       annotationsReady: annotationsReady ?? this.annotationsReady,
+      searchBusy: searchBusy ?? this.searchBusy,
+      bookmarkBusy: bookmarkBusy ?? this.bookmarkBusy,
+      toolError: identical(toolError, _unchanged)
+          ? this.toolError
+          : toolError as String?,
+      toolsVisible: toolsVisible ?? this.toolsVisible,
       layout: layout ?? this.layout,
       relayoutBusy: relayoutBusy ?? this.relayoutBusy,
       relayoutPending: relayoutPending ?? this.relayoutPending,
@@ -297,15 +329,40 @@ sealed class ReaderMessage {
 }
 
 final class ReaderOpenRequested extends ReaderMessage {
-  const ReaderOpenRequested(this.path);
+  const ReaderOpenRequested(this.path, {this.bookId});
 
   final String path;
+  final int? bookId;
 }
 
 final class ReaderLayoutChanged extends ReaderMessage {
   const ReaderLayoutChanged(this.layout);
 
   final ReaderLayout layout;
+}
+
+final class ReaderUnitRequested extends ReaderMessage {
+  const ReaderUnitRequested(this.unit);
+
+  final int unit;
+}
+
+final class ReaderSearchRequested extends ReaderMessage {
+  const ReaderSearchRequested(this.query);
+  final String query;
+}
+
+final class ReaderBookmarkToggled extends ReaderMessage {
+  const ReaderBookmarkToggled();
+}
+
+final class ReaderBookmarkNavigated extends ReaderMessage {
+  const ReaderBookmarkNavigated(this.unit);
+  final int unit;
+}
+
+final class ReaderToolsToggled extends ReaderMessage {
+  const ReaderToolsToggled();
 }
 
 final class ReaderSuspended extends ReaderMessage {
@@ -568,10 +625,14 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   const _ReaderDocumentOpened({
     required this.generation,
     required this.document,
+    required this.unit,
+    required this.bookmarks,
   });
 
   final int generation;
   final FlutterDocumentSummary document;
+  final int unit;
+  final List<FlutterBookmark> bookmarks;
 }
 
 final class _ReaderImageDecoded extends ReaderMessage {
@@ -612,6 +673,7 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
     required this.generation,
     required this.revision,
     required this.cancellation,
+    required this.unit,
     required this.layout,
     required this.surface,
     required this.pageImage,
@@ -621,8 +683,9 @@ final class _ReaderRelayoutCompleted extends ReaderMessage {
   final int generation;
   final int revision;
   final BigInt cancellation;
+  final int unit;
   final ReaderLayout layout;
-  final FlutterSelectionSurface surface;
+  final FlutterSelectionSurface? surface;
   final ui.Image pageImage;
   final List<FlutterAnnotation> annotations;
 }
@@ -776,6 +839,8 @@ final class ReaderController implements Listenable {
   int _selectionRevision = 0;
   int _nextOperationId = 0;
   int _noteRevision = 0;
+  int _toolRevision = 0;
+  final Set<BigInt> _toolCancellations = {};
   _ReaderNoteTarget? _activeNoteEditor;
   int? _activeNoteEditorRevision;
   bool _associationPickerActive = false;
@@ -838,6 +903,16 @@ final class ReaderController implements Listenable {
         _openRequested(message);
       case ReaderLayoutChanged():
         _layoutChanged(message.layout);
+      case ReaderUnitRequested():
+        _unitRequested(message.unit);
+      case ReaderSearchRequested():
+        _searchRequested(message.query);
+      case ReaderBookmarkToggled():
+        _bookmarkToggled();
+      case ReaderBookmarkNavigated():
+        _unitRequested(message.unit);
+      case ReaderToolsToggled():
+        _emit(_model.copyWith(toolsVisible: !_model.toolsVisible));
       case ReaderSuspended():
         _suspendRequested();
       case ReaderResumed():
@@ -1075,6 +1150,9 @@ final class ReaderController implements Listenable {
     for (final cancellation in _relayoutCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    for (final cancellation in _toolCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
     _layoutRevision += 1;
     final openLayout = _requestedLayout;
     _failedLayout = null;
@@ -1112,6 +1190,7 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         openPath: path,
         document: null,
+        unit: 0,
         pageImage: null,
         error: null,
         selectionSurface: null,
@@ -1123,12 +1202,18 @@ final class ReaderController implements Listenable {
         selectionPreferredX: null,
         savedSelections: const [],
         annotations: const [],
+        searchResults: const [],
+        bookmarks: const [],
         annotationOperations: const {},
         selectionError: null,
         selectionActionError: null,
         keyboardActionInvocation: false,
         annotationError: null,
         annotationsReady: false,
+        searchBusy: false,
+        bookmarkBusy: false,
+        toolError: null,
+        toolsVisible: false,
         relayoutBusy: false,
         relayoutPending: false,
         contentState: ReaderContentState.loading,
@@ -1137,24 +1222,47 @@ final class ReaderController implements Listenable {
         layout: openLayout,
       ),
     );
-    unawaited(_openEffect(path, generation, cancellation, openLayout));
+    unawaited(
+      _openEffect(path, message.bookId, generation, cancellation, openLayout),
+    );
   }
 
   Future<void> _openEffect(
     String path,
+    int? bookId,
     int generation,
     BigInt cancellation,
     ReaderLayout layout,
   ) async {
     FlutterDocumentSummary? opened;
     try {
-      opened = await _bridge.openDocument(
-        request: FlutterOpenRequest(localId: path, pathKey: path),
-        cancellationId: cancellation,
-      );
+      opened = bookId == null
+          ? await _bridge.openDocument(
+              request: FlutterOpenRequest(localId: path, pathKey: path),
+              cancellationId: cancellation,
+            )
+          : await _bridge.openLibraryBook(
+              bookId: bookId,
+              cancellationId: cancellation,
+            );
       final document = opened;
+      final restored = bookId == null
+          ? null
+          : await _bridge.loadReadingState(bookId: bookId);
+      final unit = (restored?.unit.toInt() ?? 0).clamp(
+        0,
+        document.logicalUnitCount.toInt() - 1,
+      );
+      final bookmarks = bookId == null
+          ? const <FlutterBookmark>[]
+          : await _bridge.listBookmarks(bookId: bookId);
       dispatch(
-        _ReaderDocumentOpened(generation: generation, document: document),
+        _ReaderDocumentOpened(
+          generation: generation,
+          document: document,
+          unit: unit,
+          bookmarks: bookmarks,
+        ),
       );
       opened = null;
       if (!_isCurrent(generation)) return;
@@ -1164,7 +1272,7 @@ final class ReaderController implements Listenable {
         try {
           final surface = await _bridge.selectionSurface(
             document: document.handle,
-            unit: BigInt.zero,
+            unit: BigInt.from(unit),
             scale: layout.scale,
             width: layout.width,
             fontSize: layout.fontSize,
@@ -1251,7 +1359,7 @@ final class ReaderController implements Listenable {
       if (document.format != FlutterBookFormat.epub) {
         final rendered = await _bridge.renderPage(
           document: document.handle,
-          page: BigInt.zero,
+          page: BigInt.from(unit),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -1313,7 +1421,13 @@ final class ReaderController implements Listenable {
       _bridge.releaseDocument(handle: message.document.handle);
       return;
     }
-    _emit(_model.copyWith(document: message.document));
+    _emit(
+      _model.copyWith(
+        document: message.document,
+        unit: message.unit,
+        bookmarks: message.bookmarks,
+      ),
+    );
   }
 
   void _layoutChanged(ReaderLayout layout) {
@@ -1379,6 +1493,7 @@ final class ReaderController implements Listenable {
 
   void _startRelayout(FlutterDocumentSummary document, ReaderLayout layout) {
     final generation = _model.generation;
+    final unit = _model.unit;
     _requestedLayout = layout;
     late final BigInt cancellation;
     try {
@@ -1411,8 +1526,113 @@ final class ReaderController implements Listenable {
       ),
     );
     unawaited(
-      _relayoutEffect(document, generation, revision, cancellation, layout),
+      _relayoutEffect(
+        document,
+        generation,
+        revision,
+        cancellation,
+        unit,
+        layout,
+      ),
     );
+  }
+
+  void _unitRequested(int unit) {
+    final document = _model.document;
+    if (document == null ||
+        unit < 0 ||
+        unit >= document.logicalUnitCount.toInt() ||
+        unit == _model.unit ||
+        _model.busy ||
+        _model.relayoutBusy ||
+        _model.annotationOperations.isNotEmpty ||
+        _closing ||
+        _suspended) {
+      return;
+    }
+    _emit(_model.copyWith(unit: unit));
+    _startRelayout(document, _model.layout);
+  }
+
+  void _searchRequested(String query) {
+    final document = _model.document;
+    if (document == null ||
+        document.format == FlutterBookFormat.cbz ||
+        _closing) {
+      return;
+    }
+    final revision = ++_toolRevision;
+    if (query.trim().isEmpty) {
+      _emit(_model.copyWith(searchResults: const [], searchBusy: false));
+      return;
+    }
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(toolError: error.toString()));
+      return;
+    }
+    for (final active in _toolCancellations) {
+      _bridge.cancel(id: active);
+    }
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    final generation = _model.generation;
+    _emit(_model.copyWith(searchBusy: true, toolError: null));
+    unawaited(() async {
+      try {
+        final results = await _bridge.searchDocument(
+          document: document.handle,
+          query: query.trim(),
+          cancellationId: cancellation,
+        );
+        if (_isCurrent(generation) && revision == _toolRevision) {
+          _emit(_model.copyWith(searchResults: results, searchBusy: false));
+        }
+      } catch (error) {
+        if (_isCurrent(generation) && revision == _toolRevision) {
+          _emit(
+            _model.copyWith(searchBusy: false, toolError: error.toString()),
+          );
+        }
+      } finally {
+        _toolCancellations.remove(cancellation);
+        _bridge.releaseCancellation(id: cancellation);
+        _activeBridgeOperations -= 1;
+        _disposeBridgeIfIdle();
+      }
+    }());
+  }
+
+  void _bookmarkToggled() {
+    final bookId = _model.document?.bookId;
+    if (bookId == null || _model.bookmarkBusy || _closing) return;
+    final revision = ++_toolRevision;
+    final generation = _model.generation;
+    _activeBridgeOperations += 1;
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    unawaited(() async {
+      try {
+        await _bridge.toggleBookmark(
+          bookId: bookId,
+          unit: BigInt.from(_model.unit),
+        );
+        final bookmarks = await _bridge.listBookmarks(bookId: bookId);
+        if (_isCurrent(generation) && revision == _toolRevision) {
+          _emit(_model.copyWith(bookmarks: bookmarks, bookmarkBusy: false));
+        }
+      } catch (error) {
+        if (_isCurrent(generation) && revision == _toolRevision) {
+          _emit(
+            _model.copyWith(bookmarkBusy: false, toolError: error.toString()),
+          );
+        }
+      } finally {
+        _activeBridgeOperations -= 1;
+        _disposeBridgeIfIdle();
+      }
+    }());
   }
 
   Future<void> _relayoutEffect(
@@ -1420,25 +1640,29 @@ final class ReaderController implements Listenable {
     int generation,
     int revision,
     BigInt cancellation,
+    int unit,
     ReaderLayout layout,
   ) async {
     FlutterSelectionSurface? ownedSurface;
     FlutterBufferHandle? ownedRaster;
     ui.Image? ownedImage;
     try {
-      final surface = await _bridge.selectionSurface(
-        document: document.handle,
-        unit: BigInt.zero,
-        scale: layout.scale,
-        width: layout.width,
-        fontSize: layout.fontSize,
-        cancellationId: cancellation,
-      );
-      ownedSurface = surface;
-      ownedRaster = surface.raster?.handle;
-      if (!_isCurrentLayout(generation, revision)) return;
+      FlutterSelectionSurface? surface;
+      if (document.format != FlutterBookFormat.cbz) {
+        surface = await _bridge.selectionSurface(
+          document: document.handle,
+          unit: BigInt.from(unit),
+          scale: layout.scale,
+          width: layout.width,
+          fontSize: layout.fontSize,
+          cancellationId: cancellation,
+        );
+        ownedSurface = surface;
+        ownedRaster = surface.raster?.handle;
+        if (!_isCurrentLayout(generation, revision)) return;
+      }
       if (document.format == FlutterBookFormat.epub) {
-        final raster = surface.raster;
+        final raster = surface!.raster;
         if (raster == null) {
           throw StateError('EPUB selection surface is missing its raster');
         }
@@ -1457,7 +1681,7 @@ final class ReaderController implements Listenable {
       } else {
         final rendered = await _bridge.renderPage(
           document: document.handle,
-          page: BigInt.zero,
+          page: BigInt.from(unit),
           scale: layout.scale,
           cancellationId: cancellation,
         );
@@ -1474,17 +1698,20 @@ final class ReaderController implements Listenable {
         }
       }
       if (!_isCurrentLayout(generation, revision)) return;
-      final annotations = await _bridge.listAnnotations(
-        document: document.handle,
-        scale: layout.scale,
-        cancellationId: cancellation,
-      );
+      final annotations = document.format == FlutterBookFormat.cbz
+          ? const <FlutterAnnotation>[]
+          : await _bridge.listAnnotations(
+              document: document.handle,
+              scale: layout.scale,
+              cancellationId: cancellation,
+            );
       if (!_isCurrentLayout(generation, revision)) return;
       dispatch(
         _ReaderRelayoutCompleted(
           generation: generation,
           revision: revision,
           cancellation: cancellation,
+          unit: unit,
           layout: layout,
           surface: surface,
           pageImage: ownedImage,
@@ -1516,7 +1743,7 @@ final class ReaderController implements Listenable {
     if (!_isCurrentLayout(message.generation, message.revision) ||
         !_relayoutCancellations.contains(message.cancellation)) {
       message.pageImage.dispose();
-      _releaseSurface(message.surface);
+      if (message.surface case final surface?) _releaseSurface(surface);
       return;
     }
     final oldImage = _model.pageImage;
@@ -1524,9 +1751,11 @@ final class ReaderController implements Listenable {
     _emit(
       _model.copyWith(
         pageImage: message.pageImage,
-        selectionSurface: _freezeSurface(message.surface),
+        selectionSurface: message.surface == null
+            ? null
+            : _freezeSurface(message.surface!),
         annotations: message.annotations,
-        savedSelections: _savedSelections(message.annotations),
+        savedSelections: _savedSelections(message.annotations, message.unit),
         annotationsReady: true,
         annotationError: _model.annotationsReady
             ? _model.annotationError
@@ -1541,6 +1770,20 @@ final class ReaderController implements Listenable {
     );
     oldImage?.dispose();
     if (oldSurface != null) _releaseSurface(oldSurface);
+    final bookId = _model.document?.bookId;
+    if (bookId != null) {
+      unawaited(
+        _bridge
+            .saveReadingState(
+              bookId: bookId,
+              value: FlutterReadingState(
+                unit: BigInt.from(message.unit),
+                zoom: message.layout.scale,
+              ),
+            )
+            .catchError((_) {}),
+      );
+    }
   }
 
   bool _isCurrentLayout(int generation, int revision) =>
@@ -1942,7 +2185,7 @@ final class ReaderController implements Listenable {
       try {
         final created = await _bridge.createAnnotation(
           document: document.handle,
-          unit: BigInt.zero,
+          unit: BigInt.from(_model.unit),
           start: BigInt.from(selection.start),
           end: BigInt.from(selection.end),
           displayScale: _model.layout.scale,
@@ -1988,7 +2231,7 @@ final class ReaderController implements Listenable {
       _model.copyWith(
         annotations: List.unmodifiable(annotations),
         annotationsReady: annotationsReady,
-        savedSelections: _savedSelections(annotations),
+        savedSelections: _savedSelections(annotations, _model.unit),
       ),
     );
   }
@@ -2294,7 +2537,7 @@ final class ReaderController implements Listenable {
 
   void _navigateAnnotation(String id) {
     final item = _model.annotations.where((item) => item.id == id).firstOrNull;
-    if (item != null && item.unit == BigInt.zero) {
+    if (item != null && item.unit.toInt() == _model.unit) {
       _cancelSelectionCreates();
       _selectionRevision += 1;
       final range = item.textRange;
@@ -2741,10 +2984,14 @@ final class ReaderController implements Listenable {
     for (final cancellation in _relayoutCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    for (final cancellation in _toolCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
     _layoutRevision += 1;
     _annotationRevision += 1;
     _selectionRevision += 1;
     _noteRevision += 1;
+    _toolRevision += 1;
     _emit(
       _model.copyWith(
         busy: true,
@@ -2899,6 +3146,10 @@ final class ReaderController implements Listenable {
     for (final cancellation in _relayoutCancellations) {
       _bridge.cancel(id: cancellation);
     }
+    for (final cancellation in _toolCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
+    _toolRevision += 1;
     _model = _model.copyWith(busy: false, generation: _model.generation + 1);
     _disposeBridgeIfIdle();
   }
@@ -3180,19 +3431,21 @@ int? _navigableLine(List<FlutterSelectionVisualLine> lines, bool forward) {
   );
 }
 
-List<ReaderSelection> _savedSelections(List<FlutterAnnotation> annotations) =>
-    List.unmodifiable(
-      annotations
-          .where((item) => item.unit == BigInt.zero && item.textRange != null)
-          .map((item) {
-            final range = item.textRange!;
-            return ReaderSelection(
-              range.start.toInt(),
-              range.end.toInt(),
-              item.color,
-            );
-          }),
-    );
+List<ReaderSelection> _savedSelections(
+  List<FlutterAnnotation> annotations,
+  int unit,
+) => List.unmodifiable(
+  annotations
+      .where((item) => item.unit.toInt() == unit && item.textRange != null)
+      .map((item) {
+        final range = item.textRange!;
+        return ReaderSelection(
+          range.start.toInt(),
+          range.end.toInt(),
+          item.color,
+        );
+      }),
+);
 
 FlutterSelectionSurface _freezeSurface(FlutterSelectionSurface surface) {
   if (_frozenSurfaces[surface] ?? false) return surface;
