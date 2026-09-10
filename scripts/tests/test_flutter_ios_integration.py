@@ -17,7 +17,8 @@ class FlutterIosIntegrationTest(unittest.TestCase):
     def test_rust_builder_maps_device_and_simulator_architectures(self):
         script = (ROOT / "flutter/rust_builder/ios/build.sh").read_text()
 
-        self.assertIn("ios-pdfium/8046b/release", script)
+        self.assertIn("ios-pdfium/8046b", script)
+        self.assertIn('pdfium_root="$pdfium_cache_root/release"', script)
         self.assertIn("iphoneos)", script)
         self.assertIn("rust_target=aarch64-apple-ios", script)
         self.assertIn("rust_target=aarch64-apple-ios-sim", script)
@@ -43,6 +44,18 @@ class FlutterIosIntegrationTest(unittest.TestCase):
         self.assertIn("cfg(target_os = \"ios\")", manifest)
         self.assertIn('"static"', manifest)
         self.assertIn("Pdfium::bind_to_statically_linked_library()", source)
+        self.assertIn(
+            '#[cfg(not(target_os = "ios"))]\nfn bundled_pdfium_path_for',
+            source,
+        )
+
+    def test_pdfium_override_has_one_cache_root_meaning(self):
+        fetch = (ROOT / "scripts/fetch-ios-pdfium.sh").read_text()
+        build = (ROOT / "flutter/rust_builder/ios/build.sh").read_text()
+
+        self.assertIn("SHOSAI_IOS_PDFIUM_ROOT", fetch)
+        self.assertIn("pdfium_cache_root=${SHOSAI_IOS_PDFIUM_ROOT", build)
+        self.assertIn('pdfium_root="$pdfium_cache_root/release"', build)
 
 
 if __name__ == "__main__":

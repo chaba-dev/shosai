@@ -303,6 +303,7 @@ fn bundled_pdfium_path(executable: &Path) -> Option<PathBuf> {
     bundled_pdfium_path_for(executable, std::env::consts::OS)
 }
 
+#[cfg(not(target_os = "ios"))]
 fn bundled_pdfium_path_for(executable: &Path, target_os: &str) -> Option<PathBuf> {
     if target_os == "android" {
         return None;

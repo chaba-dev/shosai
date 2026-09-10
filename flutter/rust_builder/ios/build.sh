@@ -3,7 +3,8 @@ set -eu
 
 plugin_root=$(cd "$PODS_TARGET_SRCROOT/.." && pwd -P)
 workspace_root=$(cd "$plugin_root/../.." && pwd -P)
-pdfium_root=${SHOSAI_IOS_PDFIUM_ROOT:-"$workspace_root/target/ios-pdfium/8046b/release"}
+pdfium_cache_root=${SHOSAI_IOS_PDFIUM_ROOT:-"$workspace_root/target/ios-pdfium/8046b"}
+pdfium_root="$pdfium_cache_root/release"
 
 case "$PLATFORM_NAME" in
   iphoneos)
