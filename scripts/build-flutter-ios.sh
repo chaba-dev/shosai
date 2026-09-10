@@ -5,6 +5,10 @@ if [[ "$(uname -s)" != Darwin ]]; then
   echo "error: the Flutter iOS host must be built on macOS" >&2
   exit 1
 fi
+if [[ "$(uname -m)" != arm64 ]]; then
+  echo "error: the Flutter iOS host currently requires Apple Silicon" >&2
+  exit 1
+fi
 
 usage() {
   echo "usage: $0 <simulator|device> <debug|profile|release>" >&2

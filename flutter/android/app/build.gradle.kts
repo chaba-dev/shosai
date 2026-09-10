@@ -44,6 +44,9 @@ android {
     sourceSets.getByName("main").jniLibs.srcDir(
         rootProject.file("../../target/flutter-android-native"),
     )
+    sourceSets.getByName("main").assets.srcDir(
+        rootProject.file("../../target/flutter-android-assets"),
+    )
 }
 
 val buildShosaiNative by tasks.registering(Exec::class) {
@@ -56,7 +59,10 @@ val buildShosaiNative by tasks.registering(Exec::class) {
 }
 
 tasks.configureEach {
-    if (name.startsWith("merge") && name.endsWith("NativeLibs")) {
+    if (
+        name.startsWith("merge") &&
+        (name.endsWith("NativeLibs") || name.endsWith("Assets"))
+    ) {
         dependsOn(buildShosaiNative)
     }
 }

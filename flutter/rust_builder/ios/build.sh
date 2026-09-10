@@ -8,16 +8,9 @@ pdfium_root="$pdfium_cache_root/release"
 
 case "$PLATFORM_NAME" in
   iphoneos)
-    rust_target=aarch64-apple-ios
-    rust_arch=arm64
     pdfium_library="$pdfium_root/pdfium.xcframework/ios-arm64/libpdfium.a"
     ;;
   iphonesimulator)
-    case " $ARCHS " in
-      *" arm64 "*) rust_target=aarch64-apple-ios-sim; rust_arch=arm64 ;;
-      *" x86_64 "*) rust_target=x86_64-apple-ios; rust_arch=x86_64 ;;
-      *) echo "error: unsupported iOS simulator architectures: $ARCHS" >&2; exit 1 ;;
-    esac
     pdfium_library="$pdfium_root/pdfium.xcframework/ios-arm64_x86_64-simulator/libpdfium.a"
     ;;
   *) echo "error: unsupported Apple platform: $PLATFORM_NAME" >&2; exit 1 ;;
@@ -39,14 +32,7 @@ case "$CONFIGURATION" in
     ;;
 esac
 
-pdfium_link_dir="$TARGET_TEMP_DIR/pdfium/$rust_target"
-mkdir -p "$pdfium_link_dir" "$BUILT_PRODUCTS_DIR"
-/usr/bin/lipo "$pdfium_library" -thin "$rust_arch" \
-  -output "$pdfium_link_dir/libpdfium.a"
-
-export PDFIUM_STATIC_LIB_PATH="$pdfium_link_dir"
 pdfium_cache_key=$(basename "$(dirname "$pdfium_root")")
-export CARGO_TARGET_DIR="$TARGET_TEMP_DIR/cargo-target-$pdfium_cache_key"
 export CARGO_TARGET_AARCH64_APPLE_IOS_LINKER=/usr/bin/clang
 export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER=/usr/bin/clang
 export CARGO_TARGET_X86_64_APPLE_IOS_LINKER=/usr/bin/clang
@@ -64,12 +50,39 @@ unset OBJCOPY OBJDUMP READELF CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
 unset NIX_CFLAGS_COMPILE NIX_CFLAGS_COMPILE_FOR_BUILD
 unset NIX_LDFLAGS NIX_LDFLAGS_FOR_BUILD
 
-set -- rustc --manifest-path "$workspace_root/Cargo.toml" \
-  --package shosai-flutter-bridge --target "$rust_target" \
-  --lib --crate-type staticlib
-if [ -n "$profile_flag" ]; then
-  set -- "$@" "$profile_flag"
+built_archives="$TARGET_TEMP_DIR/shosai-static-libraries"
+rm -rf "$built_archives"
+mkdir -p "$built_archives" "$BUILT_PRODUCTS_DIR"
+for rust_arch in $ARCHS; do
+  case "$PLATFORM_NAME:$rust_arch" in
+    iphoneos:arm64) rust_target=aarch64-apple-ios ;;
+    iphonesimulator:arm64) rust_target=aarch64-apple-ios-sim ;;
+    iphonesimulator:x86_64) rust_target=x86_64-apple-ios ;;
+    *) echo "error: unsupported iOS architecture: $PLATFORM_NAME $rust_arch" >&2; exit 1 ;;
+  esac
+
+  pdfium_link_dir="$TARGET_TEMP_DIR/pdfium/$rust_target"
+  mkdir -p "$pdfium_link_dir"
+  /usr/bin/lipo "$pdfium_library" -thin "$rust_arch" \
+    -output "$pdfium_link_dir/libpdfium.a"
+  export PDFIUM_STATIC_LIB_PATH="$pdfium_link_dir"
+  export CARGO_TARGET_DIR="$TARGET_TEMP_DIR/cargo-target-$pdfium_cache_key-$rust_arch"
+
+  set -- rustc --manifest-path "$workspace_root/Cargo.toml" \
+    --package shosai-flutter-bridge --target "$rust_target" \
+    --lib --crate-type staticlib
+  if [ -n "$profile_flag" ]; then
+    set -- "$@" "$profile_flag"
+  fi
+  cargo "$@"
+  cp "$CARGO_TARGET_DIR/$rust_target/$profile/libshosai_flutter_bridge.a" \
+    "$built_archives/$rust_arch.a"
+done
+
+set -- "$built_archives"/*.a
+if [ "$#" -eq 1 ]; then
+  cp "$1" "$BUILT_PRODUCTS_DIR/libshosai_flutter_bridge.a"
+else
+  /usr/bin/lipo -create "$@" \
+    -output "$BUILT_PRODUCTS_DIR/libshosai_flutter_bridge.a"
 fi
-cargo "$@"
-cp "$CARGO_TARGET_DIR/$rust_target/$profile/libshosai_flutter_bridge.a" \
-  "$BUILT_PRODUCTS_DIR/libshosai_flutter_bridge.a"
