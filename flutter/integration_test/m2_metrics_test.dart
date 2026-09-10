@@ -199,22 +199,46 @@ void main() {
     final dragStart = endpointPosition(painter.surface.endpoints.first);
     final dragEnd = endpointPosition(painter.surface.endpoints.last);
     final gesture = await tester.startGesture(dragStart);
+    final previousFramePolicy = binding.framePolicy;
+    binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.benchmark;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    var frame = 0;
+    Future<void> pumpBenchmark() {
+      frame += 1;
+      return tester.pumpBenchmark(Duration(milliseconds: frame * 16));
+    }
+
     for (var index = 0; index < _warmups; index += 1) {
       final progress = (math.sin(index * math.pi / 12) + 1) / 2;
       await gesture.moveTo(Offset.lerp(dragStart, dragEnd, progress)!);
-      await tester.pump();
+      await pumpBenchmark();
     }
     final overlaySubmissionMs = <double>[];
-    await binding.watchPerformance(() async {
+    try {
       for (var index = 0; index < _samples; index += 1) {
         final progress = (math.sin(index * math.pi / 12) + 1) / 2;
         final stopwatch = Stopwatch()..start();
         await gesture.moveTo(Offset.lerp(dragStart, dragEnd, progress)!);
-        await tester.pump();
+        await pumpBenchmark();
         stopwatch.stop();
         overlaySubmissionMs.add(stopwatch.elapsedMicroseconds / 1000);
       }
       await gesture.up();
+      await pumpBenchmark();
+    } finally {
+      binding.framePolicy = previousFramePolicy;
+      await tester.pump();
+    }
+    await binding.watchPerformance(() async {
+      final performanceGesture = await tester.startGesture(dragStart);
+      for (var index = 0; index < _samples; index += 1) {
+        final progress = (math.sin(index * math.pi / 12) + 1) / 2;
+        await performanceGesture.moveTo(
+          Offset.lerp(dragStart, dragEnd, progress)!,
+        );
+        await tester.pump();
+      }
+      await performanceGesture.up();
       await tester.pump();
     }, reportKey: 'drag_frames');
     final selectedPainter =

@@ -59,7 +59,7 @@
         workspacePackage = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package;
 
         androidSdk = (pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "36" ];
+          platformVersions = [ "35" "36" ];
           buildToolsVersions = [ "35.0.0" "36.0.0" ];
           includeCmake = true;
           cmakeVersions = [ "3.22.1" ];
