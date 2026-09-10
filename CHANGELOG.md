@@ -57,6 +57,7 @@ All notable changes to this project will be documented in this file.
 - Bound phase one retention and persistence (#83)
 - *(core)* Enforce exact document admission (#84)
 - Finish phase one state and lifecycle reconciliation (#85)
+- *(accessibility)* Expose selection actions to screen readers (#94)
 
 ### 🚜 Refactor
 
