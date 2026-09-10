@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.11.1
+  path_provider: ^2.1.5
   shosai_flutter_bridge:
     path: rust_builder
 

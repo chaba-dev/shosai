@@ -159,8 +159,8 @@ void main() {
     expect(sliceBridge.releaseCancellation(id: sliceCancellation), isTrue);
     sliceBridge.dispose();
 
-    final uiBridge = FlutterBridge.withDatabasePath(
-      databasePath: '${directory.path}/reader.sqlite',
+    final uiBridge = await createApplicationBridge(
+      applicationSupportDirectory: () async => directory,
     );
     await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: uiBridge)));
     await tester.pumpAndSettle();
@@ -229,6 +229,12 @@ void main() {
       await binding.takeScreenshot('m2-reader-ios');
     }
     await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await _exerciseRenderedPersistence(
+      tester,
+      directory,
+      FlutterOpenRequest(localId: epubFixture, pathKey: epubFixture),
+    );
 
     final driverReport = binding.reportData;
     final report = <String, dynamic>{
@@ -253,6 +259,79 @@ void main() {
     binding.reportData = <String, dynamic>{...?driverReport, ...report};
     _printReport(jsonEncode(report));
   });
+}
+
+Future<void> _exerciseRenderedPersistence(
+  WidgetTester tester,
+  Directory applicationSupportDirectory,
+  FlutterOpenRequest request,
+) async {
+  Future<Directory> supportDirectory() async => applicationSupportDirectory;
+  final bridge = await createApplicationBridge(
+    applicationSupportDirectory: supportDirectory,
+  );
+  await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
+  await tester.pumpAndSettle();
+  tester.widget<TextField>(find.byType(TextField)).controller!.text =
+      request.pathKey;
+  await tester.tap(find.byType(FilledButton));
+  await tester.pump();
+  await _pumpUntilFound(
+    tester,
+    find.byKey(const ValueKey('reader-selection-surface')),
+  );
+  final surfaceFinder = find.byKey(const ValueKey('reader-selection-surface'));
+  final painterFinder = find.byWidgetPredicate(
+    (widget) => widget is CustomPaint && widget.painter is PagePainter,
+  );
+  final painter =
+      tester.widget<CustomPaint>(painterFinder).painter! as PagePainter;
+  expect(painter.image, isNotNull);
+  expect(painter.surface.endpoints, isNotEmpty);
+  final bounds = tester.getRect(surfaceFinder);
+  final sourceSize = Size(painter.surface.width, painter.surface.height);
+  final scale = math.min(
+    bounds.width / sourceSize.width,
+    bounds.height / sourceSize.height,
+  );
+  final pageOffset =
+      bounds.center -
+      Offset(sourceSize.width * scale, sourceSize.height * scale) / 2;
+  Offset position(FlutterSelectionEndpoint endpoint) =>
+      pageOffset +
+      Offset(
+            (endpoint.rect.left + endpoint.rect.right) / 2,
+            (endpoint.rect.top + endpoint.rect.bottom) / 2,
+          ) *
+          scale;
+  final gesture = await tester.startGesture(
+    position(painter.surface.endpoints.first),
+  );
+  await gesture.moveTo(position(painter.surface.endpoints.last));
+  await gesture.up();
+  await tester.pump();
+  await tester.tap(find.widgetWithText(FilledButton, 'Yellow'));
+  await _pumpUntilFound(tester, find.textContaining('Highlight 1'));
+  await tester.pumpWidget(const SizedBox());
+  await tester.pumpAndSettle();
+
+  final reopenedBridge = await createApplicationBridge(
+    applicationSupportDirectory: supportDirectory,
+  );
+  final cancellation = reopenedBridge.createCancellation();
+  final document = await reopenedBridge.openDocument(
+    request: request,
+    cancellationId: cancellation,
+  );
+  final annotations = await reopenedBridge.listAnnotations(
+    document: document.handle,
+    scale: 1,
+    cancellationId: cancellation,
+  );
+  expect(annotations, hasLength(1));
+  expect(reopenedBridge.releaseDocument(handle: document.handle), isTrue);
+  expect(reopenedBridge.releaseCancellation(id: cancellation), isTrue);
+  reopenedBridge.dispose();
 }
 
 Future<void> _exercisePackagedFormat(

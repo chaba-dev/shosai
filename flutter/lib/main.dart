@@ -9,6 +9,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
+import 'package:path_provider/path_provider.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -65,7 +66,17 @@ export 'package:shosai_flutter/reader_controller.dart'
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init(externalLibrary: nativeLibrary());
-  runApp(const ShosaiApp());
+  runApp(ShosaiApp(bridge: await createApplicationBridge()));
+}
+
+Future<FlutterBridge> createApplicationBridge({
+  Future<Directory> Function()? applicationSupportDirectory,
+}) async {
+  final directory =
+      await (applicationSupportDirectory ?? getApplicationSupportDirectory)();
+  return FlutterBridge.withDatabasePath(
+    databasePath: '${directory.path}/annotations.sqlite3',
+  );
 }
 
 ExternalLibrary? nativeLibrary() {
@@ -84,7 +95,9 @@ ExternalLibrary? nativeLibrary() {
 }
 
 class ShosaiApp extends StatelessWidget {
-  const ShosaiApp({super.key});
+  const ShosaiApp({super.key, this.bridge});
+
+  final FlutterBridge? bridge;
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +118,7 @@ class ShosaiApp extends StatelessWidget {
         useMaterial3: true,
       ),
       restorationScopeId: 'shosai',
-      home: const ReaderScreen(),
+      home: ReaderScreen(bridge: bridge),
     );
   }
 }
