@@ -12,17 +12,26 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::annotations::{
     ANNOTATION_SNAPSHOT_BASE_BYTES, Annotation, AnnotationAssociationConflict,
-    AnnotationAssociationOutcome, AnnotationAssociationSourceCancelled,
+    AnnotationAssociationInvalidRequest, AnnotationAssociationOutcome,
+    AnnotationAssociationSourceCancelled, AnnotationAssociationSourceNotFound,
     AnnotationAssociationSourceWorkLimit, AnnotationDocumentFormat, AnnotationDocumentVersionId,
-    AnnotationId, AnnotationResolution, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget,
-    DocumentFingerprint, EpubAnchor, HighlightColor, MAX_ANNOTATION_BODY_SCALARS,
-    MAX_ANNOTATION_SNAPSHOT_BYTES, MAX_TEXT_ANCHOR_RESOLUTION_WORK, NewAnnotation, PageRect,
-    PdfAnchor, QuoteSelector, TextAnchorResolutionError, TextAnchorResolver, TextScalarIndex,
+    AnnotationDocumentVersionLimit, AnnotationId, AnnotationReconciliationCancelled,
+    AnnotationReconciliationWorkLimit, AnnotationResolution, AnnotationSnapshotLimit,
+    AnnotationStore, AnnotationTarget, DocumentFingerprint, EpubAnchor, HighlightColor,
+    MAX_ANNOTATION_BODY_SCALARS, MAX_ANNOTATION_SNAPSHOT_BYTES, MAX_TEXT_ANCHOR_RESOLUTION_WORK,
+    NewAnnotation, PageRect, PdfAnchor, QuoteSelector, TextAnchorResolutionError,
+    TextAnchorResolver, TextScalarIndex,
 };
 #[cfg(test)]
-use crate::annotations::{AnnotationPersistenceTestGate, MAX_ANNOTATIONS_PER_SNAPSHOT};
+use crate::annotations::{
+    AnnotationPersistenceTestGate, MAX_ANNOTATION_DOCUMENT_VERSIONS, MAX_ANNOTATIONS_PER_SNAPSHOT,
+};
 
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentError, OpenDocumentPlan};
+use crate::bookmarks::{
+    Bookmark, BookmarkBookNotFound, BookmarkCountLimit, BookmarkExportLimit, BookmarkNotFound,
+    BookmarkStore,
+};
 use crate::document::{Document, RenderedPage};
 #[cfg(test)]
 use crate::epub::EpubLimits;
@@ -31,6 +40,13 @@ use crate::epub::{
     EpubTextDirection, EpubTextEndpoint, EpubTextRequest, EpubTextRun,
 };
 use crate::library::BookFormat;
+use crate::library::{
+    Book, BookPage, ImportCancellation, ImportCompletion, Library, LibraryQueryCancelled,
+    LibraryQueryWorkLimit, StorageKind,
+};
+use crate::reader::{ReaderPreferences, ReadingMode, ZoomMode};
+use crate::reading_state::{FileReadingState, ReadingStateBookNotFound, ReadingStateStore};
+use crate::search::{SearchCancellation, SearchError, SearchLimits, SearchMatch};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub const MAX_BRIDGE_BUFFER_BYTES: usize = 160 * 1024 * 1024;
@@ -94,6 +110,106 @@ pub struct DocumentSummary {
     pub title: Option<String>,
     pub logical_unit: LogicalUnit,
     pub logical_unit_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryBookDto {
+    pub book_id: i64,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: BookFormat,
+    pub path_key: String,
+    pub managed: bool,
+    pub progress: f64,
+    pub date_added: String,
+    pub last_read: Option<String>,
+}
+
+impl From<Book> for LibraryBookDto {
+    fn from(book: Book) -> Self {
+        Self {
+            book_id: book.id,
+            title: book.title,
+            author: book.author,
+            format: book.format,
+            path_key: book.file_path,
+            managed: book.storage_kind == StorageKind::Managed,
+            progress: book.progress,
+            date_added: book.date_added,
+            last_read: book.last_read,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LibraryPageDto {
+    pub books: Vec<LibraryBookDto>,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportItemDto {
+    pub path_key: String,
+    pub book: Option<LibraryBookDto>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BookmarkDto {
+    pub id: i64,
+    pub book_id: Option<i64>,
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub title: Option<String>,
+    pub note: Option<String>,
+    pub color: String,
+    pub created_at: String,
+}
+
+impl From<Bookmark> for BookmarkDto {
+    fn from(value: Bookmark) -> Self {
+        Self {
+            id: value.id,
+            book_id: value.book_id,
+            unit: value.page,
+            offset: value.location_offset,
+            title: value.title,
+            note: value.note,
+            color: value.color,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReadingStateDto {
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub zoom: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReaderSettingsDto {
+    pub continuous: bool,
+    pub epub_font_size: f32,
+    pub epub_line_spacing: f32,
+    /// Zero is fit-page, -1 is fit-width, and a positive value is manual scale.
+    pub pdf_zoom: f32,
+}
+
+impl From<ReaderPreferences> for ReaderSettingsDto {
+    fn from(value: ReaderPreferences) -> Self {
+        Self {
+            continuous: value.reading_mode == ReadingMode::Continuous,
+            epub_font_size: value.epub_font_size,
+            epub_line_spacing: value.epub_line_spacing,
+            pdf_zoom: match value.pdf_zoom {
+                ZoomMode::FitPage => 0.0,
+                ZoomMode::FitWidth => -1.0,
+                ZoomMode::Manual(v) => v,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -230,8 +346,8 @@ pub struct CreateAnnotationRequest {
 
 #[derive(Debug, Default)]
 struct CancellationInner {
-    cancelled: AtomicBool,
-    notify: Notify,
+    cancelled: Arc<AtomicBool>,
+    notify: Arc<Notify>,
     publication: Mutex<()>,
 }
 
@@ -257,7 +373,15 @@ impl Cancellation {
         self.0.cancelled.load(Ordering::Acquire)
     }
 
-    async fn cancelled(&self) {
+    fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.0.cancelled)
+    }
+
+    fn notifier(&self) -> Arc<Notify> {
+        Arc::clone(&self.0.notify)
+    }
+
+    pub(crate) async fn cancelled(&self) {
         loop {
             let notified = self.0.notify.notified();
             tokio::pin!(notified);
@@ -293,6 +417,8 @@ pub enum BridgeError {
     InvalidBufferHandle,
     #[error("document was not found")]
     DocumentNotFound,
+    #[error("{0} was not found")]
+    ResourceNotFound(String),
     #[error("document is inaccessible")]
     DocumentInaccessible,
     #[error("operation is unsupported for {0}")]
@@ -333,9 +459,10 @@ impl BridgeError {
     pub fn kind(&self) -> BridgeErrorKind {
         match self {
             Self::Cancelled => BridgeErrorKind::Cancelled,
-            Self::InvalidDocumentHandle | Self::InvalidBufferHandle | Self::DocumentNotFound => {
-                BridgeErrorKind::NotFound
-            }
+            Self::InvalidDocumentHandle
+            | Self::InvalidBufferHandle
+            | Self::DocumentNotFound
+            | Self::ResourceNotFound(_) => BridgeErrorKind::NotFound,
             Self::DocumentInaccessible => BridgeErrorKind::Inaccessible,
             Self::BufferLimit
             | Self::DocumentLimit
@@ -367,6 +494,7 @@ struct RetainedBuffer {
 #[derive(Debug)]
 struct RetainedDocument {
     document: OpenDocument,
+    book_id: Option<i64>,
     local_path: String,
     fingerprint: DocumentFingerprint,
     _bytes: OwnedSemaphorePermit,
@@ -470,12 +598,29 @@ pub struct Bridge {
     admission: Arc<BridgeAdmission>,
     annotation_store: Arc<tokio::sync::OnceCell<AnnotationStore>>,
     annotation_database: Option<Arc<PathBuf>>,
+    state_store: Arc<tokio::sync::OnceCell<ReadingStateStore>>,
     #[cfg(test)]
     selection_worker_barrier: Option<Arc<std::sync::Barrier>>,
     #[cfg(test)]
     selection_second_cancellation_barrier: Option<Arc<std::sync::Barrier>>,
     #[cfg(test)]
     annotation_resolution_worker_barrier: Option<Arc<std::sync::Barrier>>,
+    #[cfg(test)]
+    library_open_worker_barrier: Option<Arc<std::sync::Barrier>>,
+    #[cfg(test)]
+    library_query_progress_barrier: Option<Arc<std::sync::Barrier>>,
+    #[cfg(test)]
+    annotation_reconciliation_progress_barrier: Option<Arc<std::sync::Barrier>>,
+    #[cfg(test)]
+    annotation_reconciliation_work_limit: Option<usize>,
+    #[cfg(test)]
+    before_annotation_reconciliation: Option<Arc<TestPhaseGate>>,
+    #[cfg(test)]
+    after_annotation_reconciliation_commit: Option<Arc<TestPhaseGate>>,
+    #[cfg(test)]
+    product_read_cancellation_gate: Option<Arc<TestPhaseGate>>,
+    #[cfg(test)]
+    state_store_initialization_gate: Option<Arc<TestPhaseGate>>,
     #[cfg(test)]
     annotation_test_hooks: Option<Arc<AnnotationTestHooks>>,
 }
@@ -531,12 +676,29 @@ impl Bridge {
             admission,
             annotation_store: Arc::new(tokio::sync::OnceCell::new()),
             annotation_database,
+            state_store: Arc::new(tokio::sync::OnceCell::new()),
             #[cfg(test)]
             selection_worker_barrier: None,
             #[cfg(test)]
             selection_second_cancellation_barrier: None,
             #[cfg(test)]
             annotation_resolution_worker_barrier: None,
+            #[cfg(test)]
+            library_open_worker_barrier: None,
+            #[cfg(test)]
+            library_query_progress_barrier: None,
+            #[cfg(test)]
+            annotation_reconciliation_progress_barrier: None,
+            #[cfg(test)]
+            annotation_reconciliation_work_limit: None,
+            #[cfg(test)]
+            before_annotation_reconciliation: None,
+            #[cfg(test)]
+            after_annotation_reconciliation_commit: None,
+            #[cfg(test)]
+            product_read_cancellation_gate: None,
+            #[cfg(test)]
+            state_store_initialization_gate: None,
             #[cfg(test)]
             annotation_test_hooks: None,
         }
@@ -570,6 +732,9 @@ impl Bridge {
         let path = crate::path_key::try_path_from_key(&request.path_key).map_err(|_| {
             BridgeError::InvalidRequest("path_key uses an invalid reserved encoding".to_owned())
         })?;
+        let local_path = crate::path_key::canonical_path_key(
+            &path.canonicalize().unwrap_or_else(|_| path.clone()),
+        );
         let mut locator = DeviceFileLocator::new(request.local_id, path);
         if let Some(format) = request.format_hint {
             locator = locator.with_format_hint(format);
@@ -660,7 +825,8 @@ impl Bridge {
                 handle,
                 Arc::new(RetainedDocument {
                     document,
-                    local_path: request.path_key,
+                    book_id: request.book_id,
+                    local_path,
                     fingerprint: DocumentFingerprint::new(
                         "sha256-hex",
                         1,
@@ -672,6 +838,910 @@ impl Bridge {
                 }),
             );
         Ok(summary)
+    }
+
+    async fn state_store(&self) -> Result<&ReadingStateStore, BridgeError> {
+        self.state_store
+            .get_or_try_init(|| async {
+                #[cfg(test)]
+                if let Some(gate) = &self.state_store_initialization_gate {
+                    gate.pause().await;
+                }
+                match self.annotation_database.as_deref() {
+                    Some(path) => ReadingStateStore::open_at_async_deferred_backfill(path).await,
+                    None => ReadingStateStore::open_async_deferred_backfill().await,
+                }
+                .map_err(|error| BridgeError::Storage(error.to_string()))
+            })
+            .await
+    }
+
+    async fn library(&self) -> Result<Library, BridgeError> {
+        let state = self.state_store().await?;
+        let library = Library::new(state.pool().clone(), state.managed_books_dir());
+        #[cfg(test)]
+        if let Some(barrier) = &self.library_query_progress_barrier {
+            library.set_query_progress_barrier(Arc::clone(barrier));
+        }
+        Ok(library)
+    }
+
+    pub async fn library_page(
+        &self,
+        query: Option<String>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<LibraryPageDto, BridgeError> {
+        if query
+            .as_ref()
+            .is_some_and(|query| query.len() > crate::library::MAX_LIBRARY_QUERY_BYTES)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "library query exceeds its byte limit".into(),
+            ));
+        }
+        let BookPage { books, has_more } = self
+            .library()
+            .await?
+            .metadata_page(query.as_deref(), format, limit, offset)
+            .await
+            .map_err(storage_error)?;
+        Ok(LibraryPageDto {
+            books: books.into_iter().map(Into::into).collect(),
+            has_more,
+        })
+    }
+
+    pub async fn library_page_cancellable(
+        &self,
+        query: Option<String>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+        cancellation: Cancellation,
+    ) -> Result<LibraryPageDto, BridgeError> {
+        if query
+            .as_ref()
+            .is_some_and(|query| query.len() > crate::library::MAX_LIBRARY_QUERY_BYTES)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "library query exceeds its byte limit".into(),
+            ));
+        }
+        check_cancelled(&cancellation)?;
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let cancelled = cancellation.flag();
+        let cancellation_notifier = cancellation.notifier();
+        let bridge = self.clone();
+        let initialization_cancellation = cancellation.clone();
+        let query_cancelled = Arc::clone(&cancelled);
+        let query_notifier = Arc::clone(&cancellation_notifier);
+        let query_future = tokio::spawn(async move {
+            let library = bridge.library().await;
+            let result = if initialization_cancellation.is_cancelled() {
+                Err(BridgeError::Cancelled)
+            } else {
+                match library {
+                    Ok(library) => library
+                        .metadata_page_cancellable(
+                            query.as_deref(),
+                            format,
+                            limit,
+                            offset,
+                            query_cancelled,
+                            query_notifier,
+                        )
+                        .await
+                        .map_err(|error| {
+                            if error.is::<LibraryQueryCancelled>() {
+                                BridgeError::Cancelled
+                            } else if error.is::<LibraryQueryWorkLimit>() {
+                                BridgeError::BufferLimit
+                            } else {
+                                storage_error(error)
+                            }
+                        }),
+                    Err(error) => Err(error),
+                }
+            };
+            (result, request_slot)
+        });
+        tokio::pin!(query_future);
+        let result = tokio::select! {
+            result = &mut query_future => result,
+            () = cancellation.cancelled() => {
+                cancelled.store(true, Ordering::Release);
+                cancellation_notifier.notify_one();
+                #[cfg(test)]
+                if let Some(gate) = &self.product_read_cancellation_gate {
+                    gate.pause().await;
+                }
+                query_future.await
+            }
+        };
+        let (result, _request_slot) = result.map_err(|_| BridgeError::Worker)?;
+        check_cancelled(&cancellation)?;
+        let BookPage { books, has_more } = result?;
+        Ok(LibraryPageDto {
+            books: books.into_iter().map(Into::into).collect(),
+            has_more,
+        })
+    }
+
+    pub async fn import_paths(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+        check_cancelled(&cancellation)?;
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let bridge = self.clone();
+        let operation = tokio::spawn(async move {
+            let result = bridge
+                .import_paths_admitted(path_keys, managed, cancellation)
+                .await;
+            (result, request_slot)
+        });
+        let (result, _request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
+        result
+    }
+
+    async fn import_paths_admitted(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+        if path_keys.len() > 256 {
+            return Err(BridgeError::InvalidRequest(
+                "at most 256 selected paths may be imported".into(),
+            ));
+        }
+        // Validate the complete request before the first filesystem or database effect.
+        let paths = path_keys
+            .iter()
+            .map(|path_key| {
+                if path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
+                    return Err(BridgeError::InvalidRequest(
+                        "import path key is too long".into(),
+                    ));
+                }
+                crate::path_key::try_path_from_key(path_key)
+                    .map_err(|_| BridgeError::InvalidRequest("invalid import path key".into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let library = self.library().await?;
+        let mut items = Vec::with_capacity(path_keys.len());
+        for (path_key, path) in path_keys.into_iter().zip(paths) {
+            // Once an item has committed, preserve and return that definitive outcome instead of
+            // replacing the whole batch with an ambiguous cancellation error.
+            if cancellation.is_cancelled() {
+                if items.is_empty() {
+                    return Err(BridgeError::Cancelled);
+                }
+                break;
+            }
+            let import_cancellation = ImportCancellation::default();
+            let operation_cancellation = import_cancellation.clone();
+            let failure_path = path.clone();
+            let importing = async {
+                let mut discovery = library
+                    .discover_files_cancellable(vec![path], operation_cancellation.clone())
+                    .await;
+                if operation_cancellation.is_cancelled() {
+                    return ImportCompletion::Cancelled;
+                }
+                if let Some(failure) = discovery.failures.pop() {
+                    return ImportCompletion::Completed(Err(failure));
+                }
+                let Some(candidate) = discovery.candidates.pop() else {
+                    return ImportCompletion::Completed(Err(crate::library::ImportFailure::new(
+                        failure_path,
+                        "selected path did not produce an import candidate",
+                    )));
+                };
+                if managed {
+                    library
+                        .import_discovered_file_cancellable(candidate, operation_cancellation)
+                        .await
+                } else {
+                    library
+                        .link_discovered_file_cancellable(candidate, operation_cancellation)
+                        .await
+                }
+            };
+            tokio::pin!(importing);
+            let completion = tokio::select! {
+                completion = &mut importing => completion,
+                () = cancellation.cancelled() => {
+                    import_cancellation.cancel();
+                    importing.await
+                }
+            };
+            let result: anyhow::Result<Book> = match completion {
+                ImportCompletion::Cancelled => {
+                    if items.is_empty() {
+                        return Err(BridgeError::Cancelled);
+                    }
+                    break;
+                }
+                ImportCompletion::Completed(Ok(imported)) => {
+                    match library.get(imported.book_id()).await {
+                        Ok(Some(book)) => Ok(book),
+                        Ok(None) => Err(anyhow::anyhow!("book not found after import")),
+                        Err(error) => Err(error),
+                    }
+                }
+                ImportCompletion::Completed(Err(failure)) => {
+                    Err(anyhow::anyhow!(failure.error().to_owned()))
+                }
+            };
+            items.push(match result {
+                Ok(book) => ImportItemDto {
+                    path_key,
+                    book: Some(book.into()),
+                    error: None,
+                },
+                Err(error) => ImportItemDto {
+                    path_key,
+                    book: None,
+                    error: Some(error.to_string()),
+                },
+            });
+        }
+        Ok(items)
+    }
+
+    pub async fn open_library_book(
+        &self,
+        book_id: i64,
+        cancellation: Cancellation,
+    ) -> Result<DocumentSummary, BridgeError> {
+        let book = self
+            .library()
+            .await?
+            .get(book_id)
+            .await
+            .map_err(storage_error)?
+            .ok_or(BridgeError::DocumentNotFound)?;
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let document_slot =
+            acquire_permits(Arc::clone(&self.admission.document_slots), 1, &cancellation).await?;
+        let planning_slot =
+            acquire_permits(Arc::clone(&self.admission.planning_slots), 1, &cancellation).await?;
+        let path = crate::path_from_key(&book.file_path);
+        let mut locator = DeviceFileLocator::new(format!("library:{book_id}"), path.clone());
+        locator = locator.with_format_hint(book.format);
+        let planning_cancellation = cancellation.clone();
+        let (plan, guards) = tokio::task::spawn_blocking(move || {
+            let plan = guarded(|| {
+                OpenDocumentPlan::prepare_cancellable(&locator, &planning_cancellation)
+                    .map_err(map_open_error)
+            });
+            (plan, (request_slot, document_slot, planning_slot))
+        })
+        .await
+        .map_err(|_| BridgeError::Worker)?;
+        let (request_slot, document_slot, planning_slot) = guards;
+        check_cancelled(&cancellation)?;
+        let plan = plan?;
+        drop(planning_slot);
+        let maximum_retained_bytes = plan
+            .retained_admission_byte_len()
+            .filter(|bytes| *bytes <= MAX_BRIDGE_RETAINED_DOCUMENT_BYTES)
+            .ok_or(BridgeError::DocumentLimit)?;
+        let bytes = acquire_permits(
+            Arc::clone(&self.admission.document_bytes),
+            u32::try_from(maximum_retained_bytes).map_err(|_| BridgeError::DocumentLimit)?,
+            &cancellation,
+        )
+        .await?;
+        let open_slot =
+            acquire_permits(Arc::clone(&self.admission.open_slots), 1, &cancellation).await?;
+        let library = self.library().await?;
+        let opening_cancellation = cancellation.clone();
+        #[cfg(test)]
+        let worker_barrier = self.library_open_worker_barrier.clone();
+        let opening = tokio::spawn(async move {
+            library
+                .open_book_document_plan_with_guards(
+                    book_id,
+                    &path,
+                    plan,
+                    opening_cancellation,
+                    (request_slot, document_slot, bytes, open_slot),
+                    #[cfg(test)]
+                    worker_barrier,
+                )
+                .await
+        });
+        let opened = opening.await.map_err(|_| BridgeError::Worker)?;
+        check_cancelled(&cancellation)?;
+        let ((document, hash), (mut request_slot, document_slot, mut bytes, open_slot)) =
+            opened.map_err(library_open_error)?;
+        let retained = document
+            .retained_byte_len()
+            .ok_or(BridgeError::DocumentLimit)?;
+        if retained > maximum_retained_bytes {
+            return Err(BridgeError::DocumentLimit);
+        }
+        drop(bytes.split(maximum_retained_bytes - retained));
+        drop(open_slot);
+        let handle = self.document_handle();
+        let format = document.format();
+        let summary = DocumentSummary {
+            handle,
+            book_id: Some(book_id),
+            format,
+            title: document.title(),
+            logical_unit: if format == BookFormat::Epub {
+                LogicalUnit::Chapter
+            } else {
+                LogicalUnit::Page
+            },
+            logical_unit_count: document.page_count(),
+        };
+        let fingerprint =
+            DocumentFingerprint::new("sha256-hex", 1, hash.into_bytes()).map_err(storage_error)?;
+        let mut reconciliation_accepted = false;
+        if let Ok(annotation_format) = annotation_document_format(&document) {
+            let cancelled = cancellation.flag();
+            let cancellation_notifier = cancellation.notifier();
+            let bridge = self.clone();
+            let initialization_cancellation = cancellation.clone();
+            let commit_cancellation = cancellation.clone();
+            let local_path = book.file_path.clone();
+            let reconciliation_fingerprint = fingerprint.clone();
+            let reconciliation_cancelled = Arc::clone(&cancelled);
+            let reconciliation_notifier = Arc::clone(&cancellation_notifier);
+            #[cfg(test)]
+            let progress_barrier = self.annotation_reconciliation_progress_barrier.clone();
+            #[cfg(test)]
+            let work_limit = self.annotation_reconciliation_work_limit;
+            let reconciliation = tokio::spawn(async move {
+                #[cfg(test)]
+                if let Some(gate) = &bridge.before_annotation_reconciliation {
+                    gate.pause().await;
+                }
+                let store = bridge.annotation_store().await;
+                let result = if initialization_cancellation.is_cancelled() {
+                    Err(BridgeError::Cancelled)
+                } else {
+                    match store {
+                        Ok(store) => store
+                            .reconcile_opened_book_cancellable_async(
+                                book_id,
+                                &local_path,
+                                annotation_format,
+                                &reconciliation_fingerprint,
+                                reconciliation_cancelled,
+                                reconciliation_notifier,
+                                #[cfg(test)]
+                                progress_barrier,
+                                #[cfg(test)]
+                                work_limit,
+                                move || {
+                                    let _publication = commit_cancellation
+                                        .0
+                                        .publication
+                                        .lock()
+                                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                                    !commit_cancellation.is_cancelled()
+                                },
+                            )
+                            .await
+                            .map_err(annotation_storage_error),
+                        Err(error) => Err(error),
+                    }
+                };
+                #[cfg(test)]
+                if result.is_ok()
+                    && let Some(gate) = &bridge.after_annotation_reconciliation_commit
+                {
+                    gate.pause().await;
+                }
+                (result, request_slot)
+            });
+            tokio::pin!(reconciliation);
+            let result = tokio::select! {
+                result = &mut reconciliation => result,
+                () = cancellation.cancelled() => {
+                    cancelled.store(true, Ordering::Release);
+                    cancellation_notifier.notify_one();
+                    #[cfg(test)]
+                    if let Some(gate) = &self.product_read_cancellation_gate {
+                        gate.pause().await;
+                    }
+                    reconciliation.await
+                }
+            };
+            let (result, returned_request_slot) = result.map_err(|_| BridgeError::Worker)?;
+            request_slot = returned_request_slot;
+            reconciliation_accepted = result.is_ok();
+            result?;
+        }
+        let _publication = cancellation
+            .0
+            .publication
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !reconciliation_accepted {
+            check_cancelled(&cancellation)?;
+        }
+        self.registry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .documents
+            .insert(
+                handle,
+                Arc::new(RetainedDocument {
+                    document,
+                    book_id: Some(book_id),
+                    local_path: book.file_path,
+                    fingerprint,
+                    _bytes: bytes,
+                    _slot: document_slot,
+                }),
+            );
+        drop(request_slot);
+        Ok(summary)
+    }
+
+    pub async fn search_document(
+        &self,
+        handle: DocumentHandle,
+        query: String,
+        cancellation: Cancellation,
+    ) -> Result<Vec<SearchMatch>, BridgeError> {
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let retained = self.document(handle)?;
+        let document = retained.document.clone();
+        let format = document.format();
+        if format == BookFormat::Cbz {
+            return Err(BridgeError::UnsupportedOperation(BookFormat::Cbz));
+        }
+        let limits = SearchLimits::default();
+        let workspace = limits
+            .maximum_workspace_bytes()
+            .ok_or(BridgeError::BufferLimit)?;
+        if workspace > self.admission.buffer_capacity {
+            return Err(BridgeError::BufferLimit);
+        }
+        let worker_slot =
+            acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
+        let workspace = acquire_permits(
+            Arc::clone(&self.admission.buffer_bytes),
+            u32::try_from(workspace).map_err(|_| BridgeError::BufferLimit)?,
+            &cancellation,
+        )
+        .await?;
+        let search_cancel = SearchCancellation::new();
+        let worker_cancel = search_cancel.clone();
+        let mut worker = tokio::task::spawn_blocking(move || {
+            let _guards = (request_slot, workspace, worker_slot, retained);
+            match &document {
+                OpenDocument::Pdf(pdf) => {
+                    crate::search::search_pdf_with(pdf, &query, limits, &worker_cancel)
+                }
+                OpenDocument::Epub(epub) => {
+                    crate::search::search_epub_with(epub, &query, limits, &worker_cancel)
+                }
+                OpenDocument::Cbz(_) => {
+                    Err(SearchError::Document("CBZ has no searchable text".into()))
+                }
+            }
+        });
+        tokio::select! {
+            result = &mut worker => result.map_err(|_| BridgeError::Worker)?.map_err(|error| match error {
+                SearchError::Cancelled => BridgeError::Cancelled,
+                SearchError::QueryLimit { .. } | SearchError::InvalidLimit { .. } => BridgeError::InvalidRequest(error.to_string()),
+                SearchError::ResultLimit { .. } | SearchError::TextLimit { .. } | SearchError::MatchLimit { .. } => BridgeError::OpenLimit { format, detail: error.to_string() },
+                _ => BridgeError::Render(error.to_string()),
+            }),
+            () = cancellation.cancelled() => {
+                search_cancel.cancel();
+                let _ = worker.await.map_err(|_| BridgeError::Worker)?;
+                Err(BridgeError::Cancelled)
+            }
+        }
+    }
+
+    pub async fn list_bookmarks(&self, book_id: i64) -> Result<Vec<BookmarkDto>, BridgeError> {
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .list_for_book_async(book_id)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(bookmark_storage_error)
+    }
+
+    pub async fn list_bookmarks_cancellable(
+        &self,
+        book_id: i64,
+        cancellation: Cancellation,
+    ) -> Result<Vec<BookmarkDto>, BridgeError> {
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        check_cancelled(&cancellation)?;
+        let bridge = self.clone();
+        let operation_cancellation = cancellation.clone();
+        let operation = tokio::spawn(async move {
+            let result = bridge.list_bookmarks(book_id).await;
+            let result = if operation_cancellation.is_cancelled() {
+                Err(BridgeError::Cancelled)
+            } else {
+                result
+            };
+            (result, request_slot)
+        });
+        tokio::pin!(operation);
+        let (result, _request_slot) = tokio::select! {
+            result = &mut operation => result.map_err(|_| BridgeError::Worker)?,
+            () = cancellation.cancelled() => {
+                #[cfg(test)]
+                if let Some(gate) = &self.product_read_cancellation_gate {
+                    gate.pause().await;
+                }
+                let (_, request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
+                (Err(BridgeError::Cancelled), request_slot)
+            },
+        };
+        check_cancelled(&cancellation)?;
+        result
+    }
+
+    pub async fn toggle_bookmark(
+        &self,
+        book_id: i64,
+        unit: usize,
+        offset: Option<usize>,
+        title: Option<String>,
+    ) -> Result<Option<BookmarkDto>, BridgeError> {
+        if unit > i64::MAX as usize
+            || offset.is_some_and(|value| value > i64::MAX as usize)
+            || title
+                .as_ref()
+                .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_TITLE_BYTES)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "bookmark title exceeds its byte limit".into(),
+            ));
+        }
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .toggle_for_book_at_async(
+                book_id,
+                std::path::Path::new(""),
+                unit,
+                offset,
+                title.as_deref(),
+            )
+            .await
+            .map(|v| v.map(Into::into))
+            .map_err(bookmark_storage_error)
+    }
+
+    pub async fn update_bookmark(
+        &self,
+        id: i64,
+        title: Option<String>,
+        note: Option<String>,
+    ) -> Result<(), BridgeError> {
+        if title
+            .as_ref()
+            .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_TITLE_BYTES)
+            || note
+                .as_ref()
+                .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_NOTE_BYTES)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "bookmark fields exceed their byte limits".into(),
+            ));
+        }
+        let store = self.state_store().await?;
+        let bookmarks = BookmarkStore::new(store.pool().clone());
+        bookmarks
+            .update_fields_async(id, title.as_deref(), note.as_deref())
+            .await
+            .map_err(bookmark_storage_error)
+    }
+
+    pub async fn delete_bookmark(&self, id: i64) -> Result<(), BridgeError> {
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .remove_async(id)
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn export_bookmarks(&self, book_id: i64) -> Result<String, BridgeError> {
+        let state = self.state_store().await?;
+        let book = self
+            .library()
+            .await?
+            .get(book_id)
+            .await
+            .map_err(storage_error)?
+            .ok_or(BridgeError::DocumentNotFound)?;
+        let hash = book
+            .content_hash
+            .ok_or_else(|| BridgeError::Storage("book has no content fingerprint".into()))?;
+        BookmarkStore::new(state.pool().clone())
+            .export_markdown_async(&crate::path_from_key(&book.file_path), &hash)
+            .await
+            .map_err(bookmark_storage_error)
+    }
+
+    pub async fn load_reading_state(
+        &self,
+        book_id: i64,
+    ) -> Result<Option<ReadingStateDto>, BridgeError> {
+        self.state_store()
+            .await?
+            .get_for_book_async(book_id)
+            .await
+            .map(|v| {
+                v.map(|s| ReadingStateDto {
+                    unit: s.page,
+                    offset: s.location_offset,
+                    zoom: s.zoom,
+                })
+            })
+            .map_err(storage_error)
+    }
+
+    pub async fn load_reading_state_cancellable(
+        &self,
+        book_id: i64,
+        cancellation: Cancellation,
+    ) -> Result<Option<ReadingStateDto>, BridgeError> {
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        check_cancelled(&cancellation)?;
+        let bridge = self.clone();
+        let operation_cancellation = cancellation.clone();
+        let operation = tokio::spawn(async move {
+            let result = bridge.load_reading_state(book_id).await;
+            let result = if operation_cancellation.is_cancelled() {
+                Err(BridgeError::Cancelled)
+            } else {
+                result
+            };
+            (result, request_slot)
+        });
+        tokio::pin!(operation);
+        let (result, _request_slot) = tokio::select! {
+            result = &mut operation => result.map_err(|_| BridgeError::Worker)?,
+            () = cancellation.cancelled() => {
+                #[cfg(test)]
+                if let Some(gate) = &self.product_read_cancellation_gate {
+                    gate.pause().await;
+                }
+                let (_, request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
+                (Err(BridgeError::Cancelled), request_slot)
+            },
+        };
+        check_cancelled(&cancellation)?;
+        result
+    }
+
+    pub async fn save_reading_state(
+        &self,
+        book_id: i64,
+        value: ReadingStateDto,
+    ) -> Result<(), BridgeError> {
+        let unit_count = self
+            .registry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .documents
+            .values()
+            .find(|document| document.book_id == Some(book_id))
+            .map(|document| document.document.page_count());
+        self.save_reading_state_inner(book_id, value, unit_count)
+            .await
+    }
+
+    pub async fn save_reading_state_with_unit_count(
+        &self,
+        book_id: i64,
+        value: ReadingStateDto,
+        unit_count: usize,
+    ) -> Result<(), BridgeError> {
+        if unit_count == 0 {
+            return Err(BridgeError::InvalidRequest(
+                "unit count must be positive".into(),
+            ));
+        }
+        self.save_reading_state_inner(book_id, value, Some(unit_count))
+            .await
+    }
+
+    async fn save_reading_state_inner(
+        &self,
+        book_id: i64,
+        value: ReadingStateDto,
+        unit_count: Option<usize>,
+    ) -> Result<(), BridgeError> {
+        if !value.zoom.is_finite()
+            || value.zoom <= 0.0
+            || value.unit > i64::MAX as usize
+            || value
+                .offset
+                .is_some_and(|offset| offset > i64::MAX as usize)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "zoom must be finite and positive".into(),
+            ));
+        }
+        let state = FileReadingState {
+            page: value.unit,
+            location_offset: value.offset,
+            zoom: value.zoom,
+        };
+        let store = self.state_store().await?;
+        if let Some(unit_count) = unit_count {
+            store
+                .set_for_book_with_progress_async(
+                    book_id,
+                    &state,
+                    reading_progress(value.unit, unit_count),
+                )
+                .await
+                .map_err(reading_state_storage_error)?;
+        } else {
+            store
+                .set_for_book_async(book_id, &state)
+                .await
+                .map_err(reading_state_storage_error)?;
+        }
+        Ok(())
+    }
+
+    pub async fn load_reader_settings(&self) -> Result<ReaderSettingsDto, BridgeError> {
+        let store = self.state_store().await?;
+        let mut p = ReaderPreferences {
+            reading_mode: ReadingMode::from_stored(
+                store
+                    .get_pref_async("reader.mode")
+                    .await
+                    .map_err(storage_error)?
+                    .as_deref(),
+            ),
+            ..ReaderPreferences::default()
+        };
+        if let Some(v) = store
+            .get_pref_async("reader.epub_font_size")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse().ok())
+        {
+            p.epub_font_size = v;
+        }
+        if let Some(v) = store
+            .get_pref_async("reader.epub_line_spacing")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse().ok())
+        {
+            p.epub_line_spacing = v;
+        }
+        if let Some(v) = store
+            .get_pref_async("reader.pdf_zoom")
+            .await
+            .map_err(storage_error)?
+            .and_then(|v| v.parse::<f32>().ok())
+        {
+            p.pdf_zoom = if v == 0.0 {
+                ZoomMode::FitPage
+            } else if v == -1.0 {
+                ZoomMode::FitWidth
+            } else {
+                ZoomMode::Manual(v)
+            };
+        }
+        Ok(p.into())
+    }
+
+    pub async fn load_reader_settings_cancellable(
+        &self,
+        cancellation: Cancellation,
+    ) -> Result<ReaderSettingsDto, BridgeError> {
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        check_cancelled(&cancellation)?;
+        let bridge = self.clone();
+        let operation_cancellation = cancellation.clone();
+        let operation = tokio::spawn(async move {
+            let result = bridge.load_reader_settings().await;
+            let result = if operation_cancellation.is_cancelled() {
+                Err(BridgeError::Cancelled)
+            } else {
+                result
+            };
+            (result, request_slot)
+        });
+        tokio::pin!(operation);
+        let (result, _request_slot) = tokio::select! {
+            result = &mut operation => result.map_err(|_| BridgeError::Worker)?,
+            () = cancellation.cancelled() => {
+                #[cfg(test)]
+                if let Some(gate) = &self.product_read_cancellation_gate {
+                    gate.pause().await;
+                }
+                let (_, request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
+                (Err(BridgeError::Cancelled), request_slot)
+            },
+        };
+        check_cancelled(&cancellation)?;
+        result
+    }
+
+    pub async fn save_reader_settings(&self, value: ReaderSettingsDto) -> Result<(), BridgeError> {
+        if !(8.0..=72.0).contains(&value.epub_font_size)
+            || !(1.0..=3.0).contains(&value.epub_line_spacing)
+            || !value.pdf_zoom.is_finite()
+            || (value.pdf_zoom != 0.0
+                && value.pdf_zoom != -1.0
+                && !(0.25..=8.0).contains(&value.pdf_zoom))
+        {
+            return Err(BridgeError::InvalidRequest(
+                "reader settings are outside supported bounds".into(),
+            ));
+        }
+        self.state_store()
+            .await?
+            .set_prefs_async(&[
+                (
+                    "reader.mode",
+                    if value.continuous {
+                        "continuous"
+                    } else {
+                        "paginated"
+                    }
+                    .to_owned(),
+                ),
+                ("reader.epub_font_size", value.epub_font_size.to_string()),
+                (
+                    "reader.epub_line_spacing",
+                    value.epub_line_spacing.to_string(),
+                ),
+                ("reader.pdf_zoom", value.pdf_zoom.to_string()),
+            ])
+            .await
+            .map_err(storage_error)
+    }
+
+    pub async fn remove_library_book(&self, book_id: i64) -> Result<bool, BridgeError> {
+        let library = self.library().await?;
+        if library.get(book_id).await.map_err(storage_error)?.is_none() {
+            return Ok(false);
+        }
+        library
+            .remove(book_id)
+            .await
+            .map_err(library_mutation_error)?;
+        Ok(true)
     }
 
     async fn annotation_store(&self) -> Result<&AnnotationStore, BridgeError> {
@@ -844,7 +1914,7 @@ impl Bridge {
         };
         let annotation = NewAnnotation {
             id: AnnotationId::new(),
-            book_id: None,
+            book_id: retained.book_id,
             local_path: Some(retained.local_path.clone()),
             fingerprint: retained.fingerprint.clone(),
             quote,
@@ -929,6 +1999,15 @@ impl Bridge {
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
         )?;
+        let render_slot =
+            acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
+        let snapshot_bytes = acquire_permits(
+            Arc::clone(&self.admission.probe_bytes),
+            u32::try_from(MAX_ANNOTATION_SNAPSHOT_BYTES)
+                .expect("annotation snapshot limit fits in u32"),
+            &cancellation,
+        )
+        .await?;
         let retained = self.document(document)?;
         let format = annotation_document_format(&retained.document)?;
         let store = tokio::select! {
@@ -948,14 +2027,12 @@ impl Bridge {
             () = cancellation.cancelled() => return Err(BridgeError::Cancelled),
         };
         let items = bounded_annotation_snapshot(listed)?;
-        let render_slot =
-            acquire_permits(Arc::clone(&self.admission.render_slots), 1, &cancellation).await?;
         self.resolve_annotation_dtos(
             retained,
             items,
             scale,
             cancellation,
-            vec![request_slot, render_slot],
+            vec![request_slot, snapshot_bytes, render_slot],
             true,
         )
         .await
@@ -1067,11 +2144,12 @@ impl Bridge {
             check_cancelled(&cancellation)?;
         }
         store
-            .associate_document_version_async(
+            .associate_document_version_for_book_async(
                 &source,
                 format,
                 &target.local_path,
                 &target.fingerprint,
+                target.book_id,
             )
             .await
             .map_err(annotation_storage_error)
@@ -1158,18 +2236,32 @@ impl Bridge {
         let format = annotation_document_format(&retained.document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
-        self.annotation_store()
-            .await?
-            .update_for_local_document_async(
-                &id,
-                &retained.local_path,
-                format,
-                &retained.fingerprint,
-                color,
-                body.as_deref(),
-            )
-            .await
-            .map_err(annotation_storage_error)
+        let store = self.annotation_store().await?;
+        if let Some(book_id) = retained.book_id {
+            store
+                .update_for_book_document_async(
+                    &id,
+                    book_id,
+                    &retained.local_path,
+                    format,
+                    &retained.fingerprint,
+                    color,
+                    body.as_deref(),
+                )
+                .await
+        } else {
+            store
+                .update_for_local_document_async(
+                    &id,
+                    &retained.local_path,
+                    format,
+                    &retained.fingerprint,
+                    color,
+                    body.as_deref(),
+                )
+                .await
+        }
+        .map_err(annotation_storage_error)
     }
 
     pub async fn delete_annotation(
@@ -1185,16 +2277,28 @@ impl Bridge {
         let format = annotation_document_format(&retained.document)?;
         let id = AnnotationId::from_str(id)
             .map_err(|_| BridgeError::InvalidRequest("invalid annotation ID".into()))?;
-        self.annotation_store()
-            .await?
-            .delete_for_local_document_async(
-                &id,
-                &retained.local_path,
-                format,
-                &retained.fingerprint,
-            )
-            .await
-            .map_err(storage_error)
+        let store = self.annotation_store().await?;
+        if let Some(book_id) = retained.book_id {
+            store
+                .delete_for_book_document_async(
+                    &id,
+                    book_id,
+                    &retained.local_path,
+                    format,
+                    &retained.fingerprint,
+                )
+                .await
+        } else {
+            store
+                .delete_for_local_document_async(
+                    &id,
+                    &retained.local_path,
+                    format,
+                    &retained.fingerprint,
+                )
+                .await
+        }
+        .map_err(storage_error)
     }
 
     pub async fn render_page(
@@ -2226,15 +3330,72 @@ fn storage_error(error: impl std::fmt::Display) -> BridgeError {
     BridgeError::Storage(error.to_string())
 }
 
-fn annotation_storage_error(error: anyhow::Error) -> BridgeError {
-    if error.is::<AnnotationAssociationSourceCancelled>() {
-        BridgeError::Cancelled
-    } else if error.is::<AnnotationAssociationSourceWorkLimit>() {
-        BridgeError::BufferLimit
-    } else if error.is::<AnnotationSnapshotLimit>() {
+fn library_mutation_error(error: anyhow::Error) -> BridgeError {
+    if error.is::<AnnotationSnapshotLimit>() || error.is::<AnnotationDocumentVersionLimit>() {
         BridgeError::AnnotationLimit
+    } else if error.is::<BookmarkCountLimit>() || error.is::<AnnotationReconciliationWorkLimit>() {
+        BridgeError::BufferLimit
     } else if error.is::<AnnotationAssociationConflict>() {
         BridgeError::InvalidRequest(error.to_string())
+    } else {
+        storage_error(error)
+    }
+}
+
+fn bookmark_storage_error(error: anyhow::Error) -> BridgeError {
+    if error.is::<BookmarkCountLimit>() || error.is::<BookmarkExportLimit>() {
+        BridgeError::BufferLimit
+    } else if error.is::<BookmarkNotFound>() || error.is::<BookmarkBookNotFound>() {
+        BridgeError::ResourceNotFound("bookmark".into())
+    } else {
+        storage_error(error)
+    }
+}
+
+fn reading_state_storage_error(error: anyhow::Error) -> BridgeError {
+    if error.is::<ReadingStateBookNotFound>() {
+        BridgeError::ResourceNotFound("library book".into())
+    } else {
+        storage_error(error)
+    }
+}
+
+fn library_open_error(error: anyhow::Error) -> BridgeError {
+    if let Some(open) = error.downcast_ref::<OpenDocumentError>() {
+        map_open_error(open.clone())
+    } else if error.downcast_ref::<sqlx::Error>().is_some() {
+        storage_error(error)
+    } else {
+        BridgeError::DocumentInaccessible
+    }
+}
+
+fn reading_progress(unit: usize, unit_count: usize) -> f64 {
+    if unit_count <= 1 {
+        1.0
+    } else {
+        unit.min(unit_count - 1) as f64 / (unit_count - 1) as f64
+    }
+}
+
+fn annotation_storage_error(error: anyhow::Error) -> BridgeError {
+    if error.is::<AnnotationAssociationSourceCancelled>()
+        || error.is::<AnnotationReconciliationCancelled>()
+    {
+        BridgeError::Cancelled
+    } else if error.is::<AnnotationAssociationSourceWorkLimit>()
+        || error.is::<AnnotationReconciliationWorkLimit>()
+    {
+        BridgeError::BufferLimit
+    } else if error.is::<AnnotationSnapshotLimit>() || error.is::<AnnotationDocumentVersionLimit>()
+    {
+        BridgeError::AnnotationLimit
+    } else if error.is::<AnnotationAssociationConflict>()
+        || error.is::<AnnotationAssociationInvalidRequest>()
+    {
+        BridgeError::InvalidRequest(error.to_string())
+    } else if error.is::<AnnotationAssociationSourceNotFound>() {
+        BridgeError::ResourceNotFound("annotation association source".into())
     } else {
         storage_error(error)
     }
@@ -3287,6 +4448,48 @@ mod tests {
             MAX_BRIDGE_REQUESTS
         );
         assert_eq!(admission.render_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn annotation_listing_waits_for_render_before_reserving_probe_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.probe_bytes = Arc::new(Semaphore::new(MAX_ANNOTATION_SNAPSHOT_BYTES));
+        let admission = Arc::new(admission);
+        let bridge = Arc::new(Bridge::with_admission_database(
+            Arc::clone(&admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        ));
+        let document = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let held_render_slot = Arc::clone(&admission.render_slots)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let listing = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move {
+                bridge
+                    .list_annotations(document.handle, 1.0, Cancellation::new())
+                    .await
+            }
+        });
+        while admission.request_slots.available_permits() == MAX_BRIDGE_REQUESTS {
+            tokio::task::yield_now().await;
+        }
+
+        assert_eq!(
+            admission.probe_bytes.available_permits(),
+            MAX_ANNOTATION_SNAPSHOT_BYTES
+        );
+        drop(held_render_slot);
+        assert!(listing.await.unwrap().unwrap().is_empty());
+        assert_eq!(
+            admission.probe_bytes.available_permits(),
+            MAX_ANNOTATION_SNAPSHOT_BYTES
+        );
     }
 
     #[tokio::test]
@@ -4379,6 +5582,148 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn associated_collection_creation_preserves_its_existing_book_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("annotations.sqlite"));
+        let first_path = directory.path().join("first.pdf");
+        let second_path = directory.path().join("second.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &first_path,
+        )
+        .unwrap();
+        std::fs::write(
+            &second_path,
+            selectable_pdf_with_media_box(600, 800, "second"),
+        )
+        .unwrap();
+        let imported = bridge
+            .import_paths(
+                vec![crate::path_key(&first_path), crate::path_key(&second_path)],
+                true,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let first_book = imported[0].book.as_ref().unwrap().book_id;
+        let first_managed_path = imported[0].book.as_ref().unwrap().path_key.clone();
+        let second_book = imported[1].book.as_ref().unwrap().book_id;
+        let first = bridge
+            .open_library_book(first_book, Cancellation::new())
+            .await
+            .unwrap();
+        bridge
+            .create_annotation(annotation_request(first.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let second = bridge
+            .open_library_book(second_book, Cancellation::new())
+            .await
+            .unwrap();
+        let source = bridge
+            .list_annotation_association_sources(second.handle, None, 10, Cancellation::new())
+            .await
+            .unwrap()
+            .sources
+            .into_iter()
+            .find(|source| source.local_path == crate::path_key::canonical_path_key(&first_path))
+            .unwrap();
+        bridge
+            .associate_annotation_version(&source.version_id, second.handle, Cancellation::new())
+            .await
+            .unwrap();
+        let second_untracked = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "second-untracked".into(),
+                    path_key: crate::path_key(&second_path),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        bridge
+            .create_annotation(
+                annotation_request(second_untracked.handle),
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            bridge
+                .create_annotation(annotation_request(first.handle), Cancellation::new())
+                .await,
+            Err(BridgeError::InvalidRequest(_))
+        ));
+        let pool = bridge.state_store().await.unwrap().pool();
+        let legacy_id = "00000000-0000-4000-8000-000000000001";
+        sqlx::query(
+            "INSERT INTO annotations (
+               id, book_id, local_path, format, anchor_version,
+               fingerprint_algorithm, fingerprint_version, fingerprint,
+               original_quote, normalization_profile, normalized_exact,
+               normalized_prefix, normalized_suffix, color, body, source_system,
+               source_id, epub_spine_occurrence, epub_resource_path,
+               epub_scalar_start, epub_scalar_end, pdf_page, pdf_char_start,
+               pdf_char_end, created_at, modified_at, deleted_at,
+               annotation_document_id)
+             SELECT ?, ?, ?, format, anchor_version, fingerprint_algorithm,
+                    fingerprint_version, fingerprint, original_quote,
+                    normalization_profile, normalized_exact, normalized_prefix,
+                    normalized_suffix, color, body, source_system, source_id,
+                    epub_spine_occurrence, epub_resource_path, epub_scalar_start,
+                    epub_scalar_end, pdf_page, pdf_char_start, pdf_char_end,
+                    created_at, modified_at, deleted_at, NULL
+             FROM annotations WHERE book_id = ? LIMIT 1",
+        )
+        .bind(legacy_id)
+        .bind(first_book)
+        .bind(&first_managed_path)
+        .bind(second_book)
+        .execute(pool)
+        .await
+        .unwrap();
+        assert!(matches!(
+            bridge.remove_library_book(first_book).await,
+            Err(BridgeError::InvalidRequest(_))
+        ));
+        assert!(std::path::Path::new(&first_managed_path).exists());
+        sqlx::query("DELETE FROM annotations WHERE id = ?")
+            .bind(legacy_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        assert!(bridge.remove_library_book(first_book).await.unwrap());
+        assert!(!std::path::Path::new(&first_managed_path).exists());
+
+        let reopened = bridge
+            .open_library_book(second_book, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .list_annotations(reopened.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        let other_owners: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM annotations WHERE book_id IS NULL OR book_id != ?",
+        )
+        .bind(second_book)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(other_owners, 0);
+    }
+
+    #[tokio::test]
     async fn cancellation_before_association_acceptance_prevents_persistence() {
         let persistence = Arc::new(AnnotationPersistenceTestGate::new());
         let (_directory, mut bridge, target, source_id) =
@@ -4978,6 +6323,206 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn library_byte_admission_precedes_verified_open_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut configured = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        configured.open_slots = Arc::new(Semaphore::new(1));
+        configured.document_bytes = Arc::new(Semaphore::new(0));
+        let admission = Arc::new(configured);
+        let bridge = Bridge::with_admission_database(
+            Arc::clone(&admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let cancellation = Cancellation::new();
+        let open = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while admission.document_slots.available_permits() == MAX_BRIDGE_DOCUMENTS {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("library open must reach document byte admission");
+        assert_eq!(admission.open_slots.available_permits(), 1);
+
+        cancellation.cancel();
+        assert_eq!(open.await.unwrap(), Err(BridgeError::Cancelled));
+        assert!(bridge.registry.lock().unwrap().documents.is_empty());
+        assert_eq!(admission.open_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn verified_open_cancels_while_waiting_to_recheck_library_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut configured = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        configured.open_slots = Arc::new(Semaphore::new(1));
+        let admission = Arc::new(configured);
+        let bridge = Bridge::with_admission_database(
+            Arc::clone(&admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let held_open_slot = Arc::clone(&admission.open_slots)
+            .acquire_owned()
+            .await
+            .unwrap();
+        let cancellation = Cancellation::new();
+        let opening = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while admission.document_bytes.available_permits() == MAX_BRIDGE_RETAINED_DOCUMENT_BYTES
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("library open must reach open-worker admission");
+        let mut connections = Vec::new();
+        for _ in 0..pool.options().get_max_connections() {
+            connections.push(pool.acquire().await.unwrap());
+        }
+        drop(held_open_slot);
+        tokio::task::yield_now().await;
+
+        cancellation.cancel();
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), opening)
+            .await
+            .expect("verified metadata recheck cancellation must be prompt")
+            .unwrap();
+        assert_eq!(result, Err(BridgeError::Cancelled));
+        assert_eq!(admission.open_slots.available_permits(), 1);
+        assert_eq!(
+            admission.document_slots.available_permits(),
+            MAX_BRIDGE_DOCUMENTS
+        );
+        drop(connections);
+    }
+
+    #[tokio::test]
+    async fn dropped_library_open_retains_admission_until_worker_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let admission = Arc::new(BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1));
+        let open_slots = admission.open_slots.available_permits();
+        let mut bridge = Bridge::with_admission_database(
+            Arc::clone(&admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let worker_barrier = Arc::new(std::sync::Barrier::new(2));
+        bridge.library_open_worker_barrier = Some(Arc::clone(&worker_barrier));
+        let bridge = Arc::new(bridge);
+        let (drop_tx, drop_rx) = tokio::sync::oneshot::channel();
+        let (dropped_tx, dropped_rx) = std::sync::mpsc::sync_channel(1);
+        let operation_bridge = Arc::clone(&bridge);
+        let operation = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    tokio::select! {
+                        _ = operation_bridge.open_library_book(book_id, Cancellation::new()) => {
+                            panic!("library open must remain blocked")
+                        }
+                        _ = drop_rx => {}
+                    }
+                    dropped_tx.send(()).unwrap();
+                });
+        });
+
+        worker_barrier.wait();
+        drop_tx.send(()).unwrap();
+        dropped_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("the outer library open future must be dropped");
+        assert_eq!(admission.open_slots.available_permits(), open_slots - 1);
+        assert_eq!(
+            admission.document_slots.available_permits(),
+            MAX_BRIDGE_DOCUMENTS - 1
+        );
+        worker_barrier.wait();
+        operation.join().unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while admission.open_slots.available_permits() != open_slots {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("worker guards must release after the blocking open exits");
+        assert_eq!(
+            admission.document_slots.available_permits(),
+            MAX_BRIDGE_DOCUMENTS
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_during_verified_library_open_keeps_cancelled_category() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let worker_barrier = Arc::new(std::sync::Barrier::new(2));
+        bridge.library_open_worker_barrier = Some(Arc::clone(&worker_barrier));
+        let cancellation = Cancellation::new();
+        let open = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+
+        let entered = Arc::clone(&worker_barrier);
+        tokio::task::spawn_blocking(move || entered.wait())
+            .await
+            .unwrap();
+        cancellation.cancel();
+        tokio::task::spawn_blocking(move || worker_barrier.wait())
+            .await
+            .unwrap();
+
+        assert_eq!(open.await.unwrap(), Err(BridgeError::Cancelled));
+    }
+
+    #[tokio::test]
     async fn cancellation_prevents_opening_and_allocating_handles() {
         let bridge = Bridge::new();
         let cancellation = Cancellation::new();
@@ -5321,6 +6866,1908 @@ mod tests {
                 )
                 .await,
             Err(BridgeError::BufferLimit)
+        );
+    }
+
+    #[tokio::test]
+    async fn product_bridge_library_state_settings_and_removal_round_trip() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        let page = bridge
+            .library_page(Some("sample".into()), Some(BookFormat::Pdf), 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(page.books[0].book_id, book_id);
+        bridge
+            .save_reading_state(
+                book_id,
+                ReadingStateDto {
+                    unit: 1,
+                    offset: None,
+                    zoom: 1.5,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .load_reading_state(book_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .unit,
+            1
+        );
+        let settings = ReaderSettingsDto {
+            continuous: true,
+            epub_font_size: 18.0,
+            epub_line_spacing: 1.8,
+            pdf_zoom: -1.0,
+        };
+        bridge.save_reader_settings(settings).await.unwrap();
+        assert_eq!(bridge.load_reader_settings().await.unwrap(), settings);
+        assert!(bridge.remove_library_book(book_id).await.unwrap());
+        assert!(!bridge.remove_library_book(book_id).await.unwrap());
+        assert!(
+            source.exists(),
+            "referenced imports must not delete user files"
+        );
+    }
+
+    #[tokio::test]
+    async fn library_open_rejects_bytes_changed_after_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &source,
+        )
+        .unwrap();
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        std::fs::write(&source, selectable_pdf_with_media_box(800, 600, "changed")).unwrap();
+
+        let untracked = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "changed-valid-pdf".into(),
+                    path_key: crate::path_key(&source),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .expect("replacement bytes must still be a valid PDF");
+        assert!(bridge.release_document(untracked.handle));
+
+        assert_eq!(
+            bridge.open_library_book(book_id, Cancellation::new()).await,
+            Err(BridgeError::DocumentInaccessible)
+        );
+        assert!(
+            bridge
+                .registry
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .documents
+                .is_empty(),
+            "unverified bytes must never receive the stable library identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_participates_in_request_admission() {
+        let bridge = Bridge::new();
+        let document = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let request_slots = Arc::clone(&bridge.admission.request_slots);
+        let available = u32::try_from(request_slots.available_permits()).unwrap();
+        let _held = request_slots.acquire_many_owned(available).await.unwrap();
+
+        assert_eq!(
+            bridge
+                .search_document(document.handle, "test".into(), Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        );
+    }
+
+    #[tokio::test]
+    async fn search_acquires_worker_before_waiting_for_workspace() {
+        let mut configured = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        configured.render_slots = Arc::new(Semaphore::new(1));
+        configured.buffer_bytes = Arc::new(Semaphore::new(0));
+        let admission = Arc::new(configured);
+        let bridge = Bridge::with_admission(Arc::clone(&admission));
+        let document = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let cancellation = Cancellation::new();
+        let search = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                bridge
+                    .search_document(document.handle, "test".into(), cancellation)
+                    .await
+            }
+        });
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while admission.render_slots.available_permits() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("search must hold the worker while waiting for workspace");
+        cancellation.cancel();
+
+        assert_eq!(search.await.unwrap(), Err(BridgeError::Cancelled));
+        assert_eq!(admission.render_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn library_annotations_are_owned_by_stable_book_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let document = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+
+        let created = bridge
+            .create_annotation(annotation_request(document.handle), Cancellation::new())
+            .await
+            .unwrap();
+
+        assert!(
+            bridge
+                .update_annotation(
+                    document.handle,
+                    &created.id,
+                    HighlightColor::Blue,
+                    Some("edited".into()),
+                )
+                .await
+                .unwrap()
+        );
+        let listed = bridge
+            .list_annotations(document.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed[0].body.as_deref(), Some("edited"));
+
+        let stored = bridge
+            .annotation_store()
+            .await
+            .unwrap()
+            .list_for_book_async(book_id)
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].book_id, Some(book_id));
+        assert!(
+            bridge
+                .delete_annotation(document.handle, &created.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            bridge
+                .list_annotations(document.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn annotations_created_before_import_remain_owned_after_library_open() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let local = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let annotation = bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        assert!(bridge.release_document(local.handle));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], true, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let library = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+
+        let listed = bridge
+            .list_annotations(library.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, annotation.id);
+        assert!(
+            bridge
+                .delete_annotation(library.handle, &annotation.id)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn library_open_backfills_legacy_book_annotation_documents() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let document = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+        let created = bridge
+            .create_annotation(annotation_request(document.handle), Cancellation::new())
+            .await
+            .unwrap();
+        assert!(bridge.release_document(document.handle));
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        sqlx::query("UPDATE annotations SET annotation_document_id = NULL WHERE id = ?")
+            .bind(&created.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let reopened = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+        let listed = bridge
+            .list_annotations(reopened.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+        let document_id: Option<String> =
+            sqlx::query_scalar("SELECT annotation_document_id FROM annotations WHERE id = ?")
+                .bind(&created.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(document_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn library_open_backfill_owns_the_write_transaction_before_reading() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let mut writer = pool.acquire().await.unwrap();
+        sqlx::query("PRAGMA busy_timeout = 0")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let gate = Arc::new(AnnotationPersistenceTestGate::new());
+        bridge.annotation_test_hooks = Some(Arc::new(AnnotationTestHooks {
+            persistence: Some(Arc::clone(&gate)),
+            ..AnnotationTestHooks::default()
+        }));
+        let opening = tokio::spawn({
+            let bridge = bridge.clone();
+            async move { bridge.open_library_book(book_id, Cancellation::new()).await }
+        });
+        gate.wait_until_entered().await;
+        let competing = sqlx::query("BEGIN IMMEDIATE").execute(&mut *writer).await;
+        if competing.is_ok() {
+            sqlx::query("ROLLBACK").execute(&mut *writer).await.unwrap();
+        }
+        gate.release();
+
+        let opening = opening.await.unwrap();
+        assert!(matches!(competing, Err(sqlx::Error::Database(_))));
+        assert!(opening.is_ok());
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        sqlx::query("ROLLBACK").execute(&mut *writer).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn relative_dot_path_annotations_survive_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let request_path = std::path::Path::new("tests/fixtures/../fixtures/sample.pdf");
+        let local = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "relative-dot".into(),
+                    path_key: crate::path_key(request_path),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let annotation = bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let raw_path = crate::path_key(request_path);
+        sqlx::query("UPDATE annotations SET local_path = ? WHERE id = ?")
+            .bind(&raw_path)
+            .bind(&annotation.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE annotation_document_versions SET local_path = ?
+             WHERE document_id = (
+               SELECT annotation_document_id FROM annotations WHERE id = ?
+             )",
+        )
+        .bind(&raw_path)
+        .bind(&annotation.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let library = bridge
+            .open_library_book(
+                imported[0].book.as_ref().unwrap().book_id,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let listed = bridge
+            .list_annotations(library.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, annotation.id);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_path_annotations_survive_import() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &source,
+        )
+        .unwrap();
+        let alias = directory.path().join("alias.pdf");
+        symlink(&source, &alias).unwrap();
+        let local = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "symlink".into(),
+                    path_key: crate::path_key(&alias),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let annotation = bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let library = bridge
+            .open_library_book(
+                imported[0].book.as_ref().unwrap().book_id,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let listed = bridge
+            .list_annotations(library.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, annotation.id);
+    }
+
+    #[tokio::test]
+    async fn import_merges_all_unowned_raw_and_canonical_annotation_aliases() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let raw_path = "tests/fixtures/../fixtures/sample.pdf";
+        let local = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "canonical".into(),
+                    path_key: crate::path_key(source),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let first = bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let retained = bridge.document(local.handle).unwrap();
+        let second = NewAnnotation {
+            id: AnnotationId::new(),
+            book_id: None,
+            local_path: Some(raw_path.into()),
+            fingerprint: retained.fingerprint.clone(),
+            quote: None,
+            target: AnnotationTarget::Pdf(
+                PdfAnchor::new(0, None, vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()]).unwrap(),
+            ),
+            color: HighlightColor::Blue,
+            body: None,
+            provenance: None,
+        };
+        let second = bridge
+            .annotation_store()
+            .await
+            .unwrap()
+            .create_async(&second)
+            .await
+            .unwrap();
+        let imported = bridge
+            .import_paths(vec![raw_path.into()], false, Cancellation::new())
+            .await
+            .unwrap();
+        let library = bridge
+            .open_library_book(
+                imported[0].book.as_ref().unwrap().book_id,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+
+        let listed = bridge
+            .list_annotations(library.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|item| item.id == first.id));
+        assert!(listed.iter().any(|item| item.id == second.id.to_string()));
+    }
+
+    #[tokio::test]
+    async fn identical_referenced_books_do_not_steal_annotation_ownership() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let first_path = directory.path().join("first.pdf");
+        let second_path = directory.path().join("second.pdf");
+        let fixture = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        std::fs::copy(fixture, &first_path).unwrap();
+        std::fs::copy(fixture, &second_path).unwrap();
+        let imported = bridge
+            .import_paths(
+                vec![crate::path_key(&first_path)],
+                false,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let first_book_id = imported[0].book.as_ref().unwrap().book_id;
+        let first_book = bridge
+            .library()
+            .await
+            .unwrap()
+            .get(first_book_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let second_book: i64 = sqlx::query_scalar(
+            "INSERT INTO books (
+               title, format, file_path, storage_kind, content_hash, file_size
+             ) VALUES ('Second', 'pdf', ?, 'referenced', ?, ?) RETURNING id",
+        )
+        .bind(crate::path_key::canonical_path_key(&second_path))
+        .bind(first_book.content_hash.as_deref().unwrap())
+        .bind(
+            first_book
+                .file_size
+                .map(|size| i64::try_from(size).unwrap()),
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let first_document = bridge
+            .open_library_book(first_book.id, Cancellation::new())
+            .await
+            .unwrap();
+        let annotation = bridge
+            .create_annotation(
+                annotation_request(first_document.handle),
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let second_document = bridge
+            .open_library_book(second_book, Cancellation::new())
+            .await
+            .unwrap();
+        assert!(
+            bridge
+                .list_annotations(second_document.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let first_reopened = bridge
+            .open_library_book(first_book.id, Cancellation::new())
+            .await
+            .unwrap();
+        let listed = bridge
+            .list_annotations(first_reopened.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, annotation.id);
+    }
+
+    #[tokio::test]
+    async fn claimed_untracked_alias_cannot_be_reclaimed_by_another_book() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let first_path = directory.path().join("first.pdf");
+        let second_path = directory.path().join("second.pdf");
+        let fixture = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        std::fs::copy(fixture, &first_path).unwrap();
+        std::fs::copy(fixture, &second_path).unwrap();
+        let untracked = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "second-untracked".into(),
+                    path_key: crate::path_key(&second_path),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let annotation = bridge
+            .create_annotation(annotation_request(untracked.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let imported = bridge
+            .import_paths(
+                vec![crate::path_key(&first_path)],
+                false,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let first_book = imported[0].book.as_ref().unwrap().book_id;
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let hash: String = sqlx::query_scalar("SELECT content_hash FROM books WHERE id = ?")
+            .bind(first_book)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let second_book: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, storage_kind, content_hash)
+             VALUES ('Second', 'pdf', ?, 'referenced', ?) RETURNING id",
+        )
+        .bind(crate::path_key::canonical_path_key(&second_path))
+        .bind(&hash)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            bridge
+                .open_library_book(second_book, Cancellation::new())
+                .await,
+            Err(BridgeError::InvalidRequest(_))
+        ));
+        let owner: Option<i64> = sqlx::query_scalar("SELECT book_id FROM annotations WHERE id = ?")
+            .bind(&annotation.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(owner, Some(first_book));
+        let first = bridge
+            .open_library_book(first_book, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .list_annotations(first.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()[0]
+                .id,
+            annotation.id
+        );
+    }
+
+    #[tokio::test]
+    async fn managed_import_counts_changed_fingerprint_versions_before_merging() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &source,
+        )
+        .unwrap();
+        let local = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "version-limit".into(),
+                    path_key: crate::path_key(&source),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let retained = bridge.document(local.handle).unwrap();
+        let store = bridge.annotation_store().await.unwrap();
+        let source_version = store
+            .list_association_sources_async(
+                AnnotationDocumentFormat::Pdf,
+                "/different.pdf",
+                &DocumentFingerprint::new("sha256", 1, vec![0; 32]).unwrap(),
+                None,
+                1,
+            )
+            .await
+            .unwrap()
+            .sources
+            .into_iter()
+            .next()
+            .unwrap()
+            .version_id;
+        for index in 1..MAX_ANNOTATION_DOCUMENT_VERSIONS {
+            store
+                .associate_document_version_async(
+                    &source_version,
+                    AnnotationDocumentFormat::Pdf,
+                    &format!("/changed/{index}.pdf"),
+                    &DocumentFingerprint::new(
+                        "sha256",
+                        1,
+                        u64::try_from(index).unwrap().to_le_bytes().to_vec(),
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+        }
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&source)], true, Cancellation::new())
+            .await
+            .unwrap();
+
+        assert!(imported[0].book.is_none());
+        assert!(
+            imported[0]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("version limit")
+        );
+        let pool = bridge.state_store().await.unwrap().pool();
+        let version_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM annotation_document_versions")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let book_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            version_count,
+            i64::try_from(MAX_ANNOTATION_DOCUMENT_VERSIONS).unwrap()
+        );
+        assert_eq!(book_count, 0);
+        assert_eq!(retained.book_id, None);
+    }
+
+    #[tokio::test]
+    async fn retained_local_handle_creates_library_owned_annotation_after_import() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let local = bridge
+            .open_document(pdf_request(), Cancellation::new())
+            .await
+            .unwrap();
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], true, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        let annotation = bridge
+            .create_annotation(annotation_request(local.handle), Cancellation::new())
+            .await
+            .unwrap();
+        let stored = bridge
+            .annotation_store()
+            .await
+            .unwrap()
+            .get_async(&AnnotationId::from_str(&annotation.id).unwrap(), false)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.book_id, Some(book_id));
+
+        let library = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+        let listed = bridge
+            .list_annotations(library.handle, 1.0, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, annotation.id);
+    }
+
+    #[tokio::test]
+    async fn invalid_bookmark_update_is_atomic() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let bookmark = bridge
+            .toggle_bookmark(book_id, 0, None, Some("before".into()))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            bridge
+                .update_bookmark(
+                    bookmark.id,
+                    Some("after".into()),
+                    Some("x".repeat(crate::bookmarks::MAX_BOOKMARK_NOTE_BYTES + 1)),
+                )
+                .await
+                .is_err()
+        );
+        let stored = bridge.list_bookmarks(book_id).await.unwrap();
+        assert_eq!(stored[0].title.as_deref(), Some("before"));
+        assert_eq!(stored[0].note, None);
+    }
+
+    #[test]
+    fn progress_uses_document_boundaries() {
+        assert_eq!(reading_progress(0, 1), 1.0);
+        assert_eq!(reading_progress(0, 3), 0.0);
+        assert_eq!(reading_progress(1, 3), 0.5);
+        assert_eq!(reading_progress(2, 3), 1.0);
+        assert_eq!(reading_progress(usize::MAX, 3), 1.0);
+    }
+
+    #[tokio::test]
+    async fn explicit_unit_count_updates_progress_without_a_retained_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        bridge
+            .save_reading_state_with_unit_count(
+                book_id,
+                ReadingStateDto {
+                    unit: 1,
+                    offset: None,
+                    zoom: 1.0,
+                },
+                3,
+            )
+            .await
+            .unwrap();
+
+        let page = bridge.library_page(None, None, 10, 0).await.unwrap();
+        assert_eq!(page.books[0].progress, 0.5);
+    }
+
+    #[tokio::test]
+    async fn reading_state_rolls_back_when_progress_update_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+        let state_store = bridge.state_store().await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_test_progress BEFORE UPDATE OF progress ON books
+             BEGIN SELECT RAISE(ABORT, 'injected progress failure'); END",
+        )
+        .execute(state_store.pool())
+        .await
+        .unwrap();
+
+        assert!(
+            bridge
+                .save_reading_state(
+                    book_id,
+                    ReadingStateDto {
+                        unit: 0,
+                        offset: Some(3),
+                        zoom: 1.0,
+                    },
+                )
+                .await
+                .is_err()
+        );
+        assert!(bridge.load_reading_state(book_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn product_reads_honor_cancellation_and_validation_categories() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let cancelled = Cancellation::new();
+        cancelled.cancel();
+
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 10, 0, cancelled.clone())
+                .await,
+            Err(BridgeError::Cancelled)
+        ));
+        assert!(matches!(
+            bridge
+                .list_bookmarks_cancellable(1, cancelled.clone())
+                .await,
+            Err(BridgeError::Cancelled)
+        ));
+        assert_eq!(
+            bridge
+                .load_reading_state_cancellable(1, cancelled.clone())
+                .await,
+            Err(BridgeError::Cancelled)
+        );
+        assert_eq!(
+            bridge.load_reader_settings_cancellable(cancelled).await,
+            Err(BridgeError::Cancelled)
+        );
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(Some("x".repeat(4097)), None, 10, 0, Cancellation::new(),)
+                .await,
+            Err(BridgeError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            bridge.update_bookmark(-1, None, None).await,
+            Err(BridgeError::ResourceNotFound(_))
+        ));
+        assert!(matches!(
+            bridge.list_bookmarks(-1).await,
+            Err(BridgeError::ResourceNotFound(_))
+        ));
+        assert!(matches!(
+            bridge.toggle_bookmark(-1, 0, None, None).await,
+            Err(BridgeError::ResourceNotFound(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_library_page_does_not_initialize_storage() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("fresh").join("state.sqlite");
+        let bridge = Bridge::with_database_path(database.clone());
+        let cancellation = Cancellation::new();
+        cancellation.cancel();
+
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, cancellation)
+                .await,
+            Err(BridgeError::Cancelled)
+        ));
+        assert!(!database.exists());
+    }
+
+    #[tokio::test]
+    async fn active_library_cancellation_retains_request_admission_until_sqlite_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let mut transaction = bridge
+            .state_store()
+            .await
+            .unwrap()
+            .pool()
+            .begin()
+            .await
+            .unwrap();
+        for index in 0..2_000 {
+            sqlx::query(
+                "INSERT INTO books (title, format, file_path, storage_kind)
+                 VALUES (?, 'pdf', ?, 'referenced')",
+            )
+            .bind(format!("Book {index}"))
+            .bind(format!("/books/{index}.pdf"))
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        transaction.commit().await.unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let cancellation_gate = Arc::new(TestPhaseGate::default());
+        bridge.library_query_progress_barrier = Some(Arc::clone(&barrier));
+        bridge.product_read_cancellation_gate = Some(Arc::clone(&cancellation_gate));
+        let cancellation = Cancellation::new();
+        let query = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                bridge
+                    .library_page_cancellable(Some("Book".into()), None, 500, 0, cancellation)
+                    .await
+            }
+        });
+        tokio::task::spawn_blocking({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        })
+        .await
+        .unwrap();
+
+        cancellation.cancel();
+        cancellation_gate.wait_until_entered().await;
+        let competing = bridge
+            .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+            .await;
+        cancellation_gate.release();
+        tokio::task::yield_now().await;
+        let competing_while_sqlite_exits = bridge
+            .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+            .await;
+        tokio::task::spawn_blocking(move || barrier.wait())
+            .await
+            .unwrap();
+        assert!(matches!(competing, Err(BridgeError::RequestLimit)));
+        assert!(matches!(
+            competing_while_sqlite_exits,
+            Err(BridgeError::RequestLimit)
+        ));
+        assert!(matches!(query.await.unwrap(), Err(BridgeError::Cancelled)));
+        assert!(bridge.library_page(None, None, 1, 0).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn dropped_library_page_retains_request_admission_until_sqlite_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let mut transaction = pool.begin().await.unwrap();
+        for index in 0..2_000 {
+            sqlx::query(
+                "INSERT INTO books (title, format, file_path, storage_kind)
+                 VALUES (?, 'pdf', ?, 'referenced')",
+            )
+            .bind(format!("Book {index}"))
+            .bind(format!("/books/{index}.pdf"))
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        transaction.commit().await.unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        bridge.library_query_progress_barrier = Some(Arc::clone(&barrier));
+        let bridge = Arc::new(bridge);
+        let query = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move {
+                bridge
+                    .library_page_cancellable(
+                        Some("Book".into()),
+                        None,
+                        500,
+                        0,
+                        Cancellation::new(),
+                    )
+                    .await
+            }
+        });
+        tokio::task::spawn_blocking({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        })
+        .await
+        .unwrap();
+
+        query.abort();
+        assert!(query.await.unwrap_err().is_cancelled());
+        assert_eq!(bridge.admission.request_slots.available_permits(), 0);
+        tokio::task::spawn_blocking(move || barrier.wait())
+            .await
+            .unwrap();
+        while bridge.admission.request_slots.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(bridge.admission.request_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn dropped_cold_library_page_retains_admission_through_blocked_initialization() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("state.sqlite");
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge =
+            Bridge::with_admission_database(Arc::new(admission), Some(Arc::new(database)));
+        let initialization_gate = Arc::new(TestPhaseGate::default());
+        bridge.state_store_initialization_gate = Some(Arc::clone(&initialization_gate));
+        let bridge = Arc::new(bridge);
+        let query = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move {
+                bridge
+                    .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                    .await
+            }
+        });
+        initialization_gate.wait_until_entered().await;
+
+        query.abort();
+        assert!(query.await.unwrap_err().is_cancelled());
+        assert_eq!(bridge.admission.request_slots.available_permits(), 0);
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+
+        initialization_gate.release();
+        while bridge.admission.request_slots.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(bridge.admission.request_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_cold_library_initialization_returns_typed_cancellation_on_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let invalid_parent = directory.path().join("not-a-directory");
+        std::fs::write(&invalid_parent, b"file").unwrap();
+        let mut bridge = Bridge::with_database_path(invalid_parent.join("state.sqlite"));
+        let initialization_gate = Arc::new(TestPhaseGate::default());
+        bridge.state_store_initialization_gate = Some(Arc::clone(&initialization_gate));
+        let cancellation = Cancellation::new();
+        let query = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                bridge
+                    .library_page_cancellable(None, None, 1, 0, cancellation)
+                    .await
+            }
+        });
+        initialization_gate.wait_until_entered().await;
+
+        initialization_gate.release();
+        cancellation.cancel();
+
+        assert!(matches!(query.await.unwrap(), Err(BridgeError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn dropped_open_retains_admission_through_cold_annotation_initialization() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let initialization_gate = Arc::new(TestPhaseGate::default());
+        bridge.annotation_test_hooks = Some(Arc::new(AnnotationTestHooks {
+            initialization: Some(Arc::clone(&initialization_gate)),
+            ..AnnotationTestHooks::default()
+        }));
+        let bridge = Arc::new(bridge);
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move { bridge.open_library_book(book_id, Cancellation::new()).await }
+        });
+        initialization_gate.wait_until_entered().await;
+
+        opening.abort();
+        assert!(opening.await.unwrap_err().is_cancelled());
+        assert_eq!(bridge.admission.request_slots.available_permits(), 0);
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+
+        initialization_gate.release();
+        while bridge.admission.request_slots.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(bridge.admission.request_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn library_page_cancels_while_waiting_for_a_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let bridge = Arc::new(Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        ));
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let mut connections = Vec::new();
+        for _ in 0..pool.options().get_max_connections() {
+            connections.push(pool.acquire().await.unwrap());
+        }
+        let cancellation = Cancellation::new();
+        let query = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            let cancellation = cancellation.clone();
+            async move {
+                bridge
+                    .library_page_cancellable(None, None, 1, 0, cancellation)
+                    .await
+            }
+        });
+        while bridge.admission.request_slots.available_permits() != 0 {
+            tokio::task::yield_now().await;
+        }
+        cancellation.cancel();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), query)
+            .await
+            .expect("library pool acquisition cancellation must be prompt")
+            .unwrap();
+        assert!(matches!(result, Err(BridgeError::Cancelled)));
+        drop(connections);
+    }
+
+    #[tokio::test]
+    async fn active_open_reconciliation_cancellation_rolls_back_and_retains_admission() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let book_path = directory.path().join("book.pdf");
+        let alias_path = directory.path().join("alias.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &book_path,
+        )
+        .unwrap();
+        std::fs::copy(&book_path, &alias_path).unwrap();
+        let imported = bridge
+            .import_paths(
+                vec![crate::path_key(&book_path)],
+                false,
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let alias = bridge
+            .open_document(
+                OpenRequest {
+                    book_id: None,
+                    local_id: "alias".into(),
+                    path_key: crate::path_key(&alias_path),
+                    format_hint: Some(BookFormat::Pdf),
+                },
+                Cancellation::new(),
+            )
+            .await
+            .unwrap();
+        bridge
+            .create_annotation(annotation_request(alias.handle), Cancellation::new())
+            .await
+            .unwrap();
+        bridge.release_document(alias.handle);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let cancellation_gate = Arc::new(TestPhaseGate::default());
+        bridge.annotation_reconciliation_progress_barrier = Some(Arc::clone(&barrier));
+        bridge.product_read_cancellation_gate = Some(Arc::clone(&cancellation_gate));
+        let cancellation = Cancellation::new();
+        let mut bridge = Arc::new(bridge);
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+        tokio::task::spawn_blocking({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        })
+        .await
+        .unwrap();
+
+        cancellation.cancel();
+        cancellation_gate.wait_until_entered().await;
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+        cancellation_gate.release();
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+        tokio::task::spawn_blocking(move || barrier.wait())
+            .await
+            .unwrap();
+        assert!(matches!(
+            opening.await.unwrap(),
+            Err(BridgeError::Cancelled)
+        ));
+        let unowned: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM annotations WHERE book_id IS NULL")
+                .fetch_one(bridge.state_store().await.unwrap().pool())
+                .await
+                .unwrap();
+        assert_eq!(unowned, 1);
+
+        Arc::get_mut(&mut bridge)
+            .unwrap()
+            .annotation_reconciliation_progress_barrier = None;
+        let reopened = bridge
+            .open_library_book(book_id, Cancellation::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            bridge
+                .list_annotations(reopened.handle, 1.0, Cancellation::new())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_reconciliation_commit_returns_the_opened_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let committed = Arc::new(TestPhaseGate::default());
+        bridge.after_annotation_reconciliation_commit = Some(Arc::clone(&committed));
+        let bridge = Arc::new(bridge);
+        let cancellation = Cancellation::new();
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+        committed.wait_until_entered().await;
+
+        cancellation.cancel();
+        committed.release();
+
+        let document = opening.await.unwrap().unwrap();
+        assert_eq!(document.book_id, Some(book_id));
+        assert!(bridge.release_document(document.handle));
+    }
+
+    #[tokio::test]
+    async fn dropped_open_keeps_reconciliation_admitted_until_connection_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        bridge.annotation_reconciliation_progress_barrier = Some(Arc::clone(&barrier));
+        let bridge = Arc::new(bridge);
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move { bridge.open_library_book(book_id, Cancellation::new()).await }
+        });
+        tokio::task::spawn_blocking({
+            let barrier = Arc::clone(&barrier);
+            move || barrier.wait()
+        })
+        .await
+        .unwrap();
+
+        opening.abort();
+        assert!(opening.await.unwrap_err().is_cancelled());
+        assert_eq!(bridge.admission.request_slots.available_permits(), 0);
+        tokio::task::spawn_blocking(move || barrier.wait())
+            .await
+            .unwrap();
+        while bridge.admission.request_slots.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(bridge.admission.request_slots.available_permits(), 1);
+        assert!(bridge.library_page(None, None, 1, 0).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn open_reconciliation_reports_a_typed_sqlite_work_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        bridge.annotation_reconciliation_work_limit = Some(1);
+
+        assert!(matches!(
+            bridge.open_library_book(book_id, Cancellation::new()).await,
+            Err(BridgeError::BufferLimit)
+        ));
+        bridge.annotation_reconciliation_work_limit = None;
+        assert!(
+            bridge
+                .open_library_book(book_id, Cancellation::new())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_tombstone_rewrite_limit_rejects_before_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book = imported[0].book.as_ref().unwrap();
+        let pool = bridge.state_store().await.unwrap().pool();
+        let content_hash: String =
+            sqlx::query_scalar("SELECT content_hash FROM books WHERE id = ?")
+                .bind(book.book_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        for index in 0..4_097 {
+            sqlx::query(
+                "INSERT INTO annotations (
+                   id, book_id, local_path, format, anchor_version,
+                   fingerprint_algorithm, fingerprint_version, fingerprint,
+                   color, pdf_page, created_at, modified_at, deleted_at,
+                   annotation_document_id)
+                 VALUES (?, ?, ?, 'pdf', 1, 'sha256-hex', 1, ?,
+                         'yellow', 0, '2026-01-01T00:00:00Z',
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)",
+            )
+            .bind(format!("00000000-0000-4000-8000-{index:012}"))
+            .bind(book.book_id)
+            .bind(&book.path_key)
+            .bind(content_hash.as_bytes())
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        transaction.commit().await.unwrap();
+
+        assert!(matches!(
+            bridge
+                .open_library_book(book.book_id, Cancellation::new())
+                .await,
+            Err(BridgeError::BufferLimit)
+        ));
+        let rewritten: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM annotations WHERE annotation_document_id IS NOT NULL",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(rewritten, 0);
+    }
+
+    #[tokio::test]
+    async fn open_reconciliation_cancels_while_waiting_for_a_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let pool = bridge.annotation_store().await.unwrap().test_pool().clone();
+        let mut connections = Vec::new();
+        for _ in 0..pool.options().get_max_connections() {
+            connections.push(pool.acquire().await.unwrap());
+        }
+        let gate = Arc::new(TestPhaseGate::default());
+        bridge.before_annotation_reconciliation = Some(Arc::clone(&gate));
+        let bridge = Arc::new(bridge);
+        let cancellation = Cancellation::new();
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+        gate.wait_until_entered().await;
+        gate.release();
+        tokio::task::yield_now().await;
+        cancellation.cancel();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), opening)
+            .await
+            .expect("connection acquisition cancellation must be prompt")
+            .unwrap();
+        assert!(matches!(result, Err(BridgeError::Cancelled)));
+        drop(connections);
+    }
+
+    #[tokio::test]
+    async fn open_reconciliation_cancels_while_waiting_for_the_writer_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("book.pdf");
+        std::fs::copy(
+            std::path::Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/sample.pdf"
+            )),
+            &path,
+        )
+        .unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(&path)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+        let pool = bridge.annotation_store().await.unwrap().test_pool().clone();
+        let writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let gate = Arc::new(TestPhaseGate::default());
+        bridge.before_annotation_reconciliation = Some(Arc::clone(&gate));
+        let bridge = Arc::new(bridge);
+        let cancellation = Cancellation::new();
+        let opening = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            let cancellation = cancellation.clone();
+            async move { bridge.open_library_book(book_id, cancellation).await }
+        });
+        gate.wait_until_entered().await;
+        gate.release();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        cancellation.cancel();
+
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), opening)
+            .await
+            .expect("writer-lock cancellation must be prompt")
+            .unwrap();
+        assert!(matches!(result, Err(BridgeError::Cancelled)));
+        writer.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn active_bookmark_cancellation_retains_request_admission_until_sqlite_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let mut bridge = Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        );
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, storage_kind, content_hash)
+             VALUES ('Book', 'pdf', '/books/book.pdf', 'referenced', ?) RETURNING id",
+        )
+        .bind("a".repeat(64))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let cancellation_gate = Arc::new(TestPhaseGate::default());
+        bridge.product_read_cancellation_gate = Some(Arc::clone(&cancellation_gate));
+        let cancellation = Cancellation::new();
+        let operation = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            async move {
+                bridge
+                    .list_bookmarks_cancellable(book_id, cancellation)
+                    .await
+            }
+        });
+        while bridge.admission.request_slots.available_permits() != 0 {
+            tokio::task::yield_now().await;
+        }
+
+        cancellation.cancel();
+        cancellation_gate.wait_until_entered().await;
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+        cancellation_gate.release();
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+        writer.commit().await.unwrap();
+        assert!(matches!(
+            operation.await.unwrap(),
+            Err(BridgeError::Cancelled)
+        ));
+        assert!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_bookmark_read_retains_request_admission_until_sqlite_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut admission = BridgeAdmission::new(MAX_BRIDGE_RETAINED_BUFFER_BYTES, 1);
+        admission.request_slots = Arc::new(Semaphore::new(1));
+        let bridge = Arc::new(Bridge::with_admission_database(
+            Arc::new(admission),
+            Some(Arc::new(directory.path().join("state.sqlite"))),
+        ));
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (title, format, file_path, storage_kind, content_hash)
+             VALUES ('Book', 'pdf', '/books/book.pdf', 'referenced', ?) RETURNING id",
+        )
+        .bind("a".repeat(64))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let writer = pool.begin_with("BEGIN IMMEDIATE").await.unwrap();
+        let operation = tokio::spawn({
+            let bridge = Arc::clone(&bridge);
+            async move {
+                bridge
+                    .list_bookmarks_cancellable(book_id, Cancellation::new())
+                    .await
+            }
+        });
+        while bridge.admission.request_slots.available_permits() != 0 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        operation.abort();
+        assert!(operation.await.unwrap_err().is_cancelled());
+        assert!(matches!(
+            bridge
+                .library_page_cancellable(None, None, 1, 0, Cancellation::new())
+                .await,
+            Err(BridgeError::RequestLimit)
+        ));
+        writer.commit().await.unwrap();
+        while bridge.admission.request_slots.available_permits() == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(bridge.admission.request_slots.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn persistence_categories_do_not_depend_on_error_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let store = bridge.state_store().await.unwrap();
+        sqlx::query("INSERT INTO preferences (key, value) VALUES ('reader.mode', ?)")
+            .bind("invalid".repeat(crate::reading_state::MAX_PREFERENCE_VALUE_BYTES))
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            bridge.load_reader_settings().await,
+            Err(BridgeError::Storage(_))
+        ));
+        assert!(matches!(
+            bridge
+                .save_reading_state_with_unit_count(
+                    404,
+                    ReadingStateDto {
+                        unit: 0,
+                        offset: None,
+                        zoom: 1.0,
+                    },
+                    1,
+                )
+                .await,
+            Err(BridgeError::ResourceNotFound(_))
+        ));
+        assert_eq!(
+            bookmark_storage_error(BookmarkExportLimit.into()),
+            BridgeError::BufferLimit
+        );
+        assert_eq!(
+            library_mutation_error(AnnotationSnapshotLimit.into()),
+            BridgeError::AnnotationLimit
+        );
+        assert!(matches!(
+            annotation_storage_error(
+                AnnotationAssociationInvalidRequest("different format".into()).into()
+            ),
+            BridgeError::InvalidRequest(_)
+        ));
+        assert!(matches!(
+            annotation_storage_error(AnnotationAssociationSourceNotFound.into()),
+            BridgeError::ResourceNotFound(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn managed_removal_preserves_bookmark_union_limit_category() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let library = bridge.library().await.unwrap();
+        std::fs::create_dir_all(library.managed_dir()).unwrap();
+        let managed_path = library.managed_dir().join("book.pdf");
+        let source_path = directory.path().join("source.pdf");
+        std::fs::write(&managed_path, b"managed").unwrap();
+        std::fs::write(&source_path, b"source").unwrap();
+        let pool = bridge.state_store().await.unwrap().pool().clone();
+        let hash = "a".repeat(64);
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (
+               title, format, file_path, storage_kind, original_path, content_hash
+             ) VALUES ('Book', 'pdf', ?, 'managed', ?, ?) RETURNING id",
+        )
+        .bind(crate::path_key::canonical_path_key(&managed_path))
+        .bind(crate::path_key::canonical_path_key(&source_path))
+        .bind(&hash)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        for page in 0..=crate::bookmarks::MAX_BOOKMARKS_PER_BOOK {
+            sqlx::query(
+                "INSERT INTO bookmarks (
+                   file_path, content_hash, page, color, created_at
+                 ) VALUES (?, ?, ?, 'yellow', datetime('now'))",
+            )
+            .bind(crate::path_key::canonical_path_key(&source_path))
+            .bind(&hash)
+            .bind(i64::try_from(page).unwrap())
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        transaction.commit().await.unwrap();
+
+        let error = bridge.remove_library_book(book_id).await.unwrap_err();
+        assert_eq!(error.kind(), BridgeErrorKind::LimitExceeded);
+        assert!(matches!(error, BridgeError::BufferLimit));
+    }
+
+    #[tokio::test]
+    async fn cbz_search_reports_unsupported_instead_of_render_failure() {
+        let bridge = Bridge::new();
+        let document = bridge
+            .open_document(cbz_request(), Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            bridge
+                .search_document(document.handle, "text".into(), Cancellation::new())
+                .await,
+            Err(BridgeError::UnsupportedOperation(BookFormat::Cbz))
         );
     }
 }

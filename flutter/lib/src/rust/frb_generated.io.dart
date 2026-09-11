@@ -54,6 +54,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FlutterBookFormat dco_decode_box_autoadd_flutter_book_format(dynamic raw);
 
   @protected
+  FlutterBookmark dco_decode_box_autoadd_flutter_bookmark(dynamic raw);
+
+  @protected
   FlutterBufferHandle dco_decode_box_autoadd_flutter_buffer_handle(dynamic raw);
 
   @protected
@@ -62,7 +65,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterLibraryBook dco_decode_box_autoadd_flutter_library_book(dynamic raw);
+
+  @protected
   FlutterOpenRequest dco_decode_box_autoadd_flutter_open_request(dynamic raw);
+
+  @protected
+  FlutterReaderSettings dco_decode_box_autoadd_flutter_reader_settings(
+    dynamic raw,
+  );
+
+  @protected
+  FlutterReadingState dco_decode_box_autoadd_flutter_reading_state(dynamic raw);
 
   @protected
   FlutterRenderedBuffer dco_decode_box_autoadd_flutter_rendered_buffer(
@@ -80,7 +94,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_usize(dynamic raw);
+
+  @protected
   double dco_decode_f_32(dynamic raw);
+
+  @protected
+  double dco_decode_f_64(dynamic raw);
 
   @protected
   FlutterAnnotation dco_decode_flutter_annotation(dynamic raw);
@@ -111,6 +134,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FlutterBookFormat dco_decode_flutter_book_format(dynamic raw);
 
   @protected
+  FlutterBookmark dco_decode_flutter_bookmark(dynamic raw);
+
+  @protected
   FlutterBridgeError dco_decode_flutter_bridge_error(dynamic raw);
 
   @protected
@@ -129,10 +155,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FlutterHighlightColor dco_decode_flutter_highlight_color(dynamic raw);
 
   @protected
+  FlutterImportItem dco_decode_flutter_import_item(dynamic raw);
+
+  @protected
+  FlutterLibraryBook dco_decode_flutter_library_book(dynamic raw);
+
+  @protected
+  FlutterLibraryPage dco_decode_flutter_library_page(dynamic raw);
+
+  @protected
   FlutterOpenRequest dco_decode_flutter_open_request(dynamic raw);
 
   @protected
+  FlutterReaderSettings dco_decode_flutter_reader_settings(dynamic raw);
+
+  @protected
+  FlutterReadingState dco_decode_flutter_reading_state(dynamic raw);
+
+  @protected
   FlutterRenderedBuffer dco_decode_flutter_rendered_buffer(dynamic raw);
+
+  @protected
+  FlutterSearchMatch dco_decode_flutter_search_match(dynamic raw);
 
   @protected
   FlutterSelectionCaret dco_decode_flutter_selection_caret(dynamic raw);
@@ -158,11 +202,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
+  List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
   List<FlutterAnnotation> dco_decode_list_flutter_annotation(dynamic raw);
 
   @protected
   List<FlutterAnnotationAssociationSource>
   dco_decode_list_flutter_annotation_association_source(dynamic raw);
+
+  @protected
+  List<FlutterBookmark> dco_decode_list_flutter_bookmark(dynamic raw);
+
+  @protected
+  List<FlutterImportItem> dco_decode_list_flutter_import_item(dynamic raw);
+
+  @protected
+  List<FlutterLibraryBook> dco_decode_list_flutter_library_book(dynamic raw);
+
+  @protected
+  List<FlutterSearchMatch> dco_decode_list_flutter_search_match(dynamic raw);
 
   @protected
   List<FlutterSelectionCaret> dco_decode_list_flutter_selection_caret(
@@ -202,9 +264,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterBookmark? dco_decode_opt_box_autoadd_flutter_bookmark(dynamic raw);
+
+  @protected
+  FlutterLibraryBook? dco_decode_opt_box_autoadd_flutter_library_book(
+    dynamic raw,
+  );
+
+  @protected
+  FlutterReadingState? dco_decode_opt_box_autoadd_flutter_reading_state(
+    dynamic raw,
+  );
+
+  @protected
   FlutterRenderedBuffer? dco_decode_opt_box_autoadd_flutter_rendered_buffer(
     dynamic raw,
   );
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_usize(dynamic raw);
 
   @protected
   List<FlutterSelectionRect>? dco_decode_opt_list_flutter_selection_rect(
@@ -262,6 +343,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterBookmark sse_decode_box_autoadd_flutter_bookmark(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FlutterBufferHandle sse_decode_box_autoadd_flutter_buffer_handle(
     SseDeserializer deserializer,
   );
@@ -272,7 +358,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterLibraryBook sse_decode_box_autoadd_flutter_library_book(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FlutterOpenRequest sse_decode_box_autoadd_flutter_open_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterReaderSettings sse_decode_box_autoadd_flutter_reader_settings(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterReadingState sse_decode_box_autoadd_flutter_reading_state(
     SseDeserializer deserializer,
   );
 
@@ -292,7 +393,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_usize(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_32(SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
   FlutterAnnotation sse_decode_flutter_annotation(SseDeserializer deserializer);
@@ -331,6 +441,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterBookmark sse_decode_flutter_bookmark(SseDeserializer deserializer);
+
+  @protected
   FlutterBridgeError sse_decode_flutter_bridge_error(
     SseDeserializer deserializer,
   );
@@ -361,12 +474,42 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterImportItem sse_decode_flutter_import_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterLibraryBook sse_decode_flutter_library_book(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterLibraryPage sse_decode_flutter_library_page(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FlutterOpenRequest sse_decode_flutter_open_request(
     SseDeserializer deserializer,
   );
 
   @protected
+  FlutterReaderSettings sse_decode_flutter_reader_settings(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterReadingState sse_decode_flutter_reading_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FlutterRenderedBuffer sse_decode_flutter_rendered_buffer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterSearchMatch sse_decode_flutter_search_match(
     SseDeserializer deserializer,
   );
 
@@ -404,6 +547,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
+  List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
   List<FlutterAnnotation> sse_decode_list_flutter_annotation(
     SseDeserializer deserializer,
   );
@@ -411,6 +560,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<FlutterAnnotationAssociationSource>
   sse_decode_list_flutter_annotation_association_source(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FlutterBookmark> sse_decode_list_flutter_bookmark(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FlutterImportItem> sse_decode_list_flutter_import_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FlutterLibraryBook> sse_decode_list_flutter_library_book(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FlutterSearchMatch> sse_decode_list_flutter_search_match(
     SseDeserializer deserializer,
   );
 
@@ -454,9 +623,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FlutterBookmark? sse_decode_opt_box_autoadd_flutter_bookmark(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterLibraryBook? sse_decode_opt_box_autoadd_flutter_library_book(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterReadingState? sse_decode_opt_box_autoadd_flutter_reading_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FlutterRenderedBuffer? sse_decode_opt_box_autoadd_flutter_rendered_buffer(
     SseDeserializer deserializer,
   );
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_usize(SseDeserializer deserializer);
 
   @protected
   List<FlutterSelectionRect>? sse_decode_opt_list_flutter_selection_rect(
@@ -506,6 +696,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<wire_cst_flutter_bookmark>
+  cst_encode_box_autoadd_flutter_bookmark(FlutterBookmark raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_flutter_bookmark();
+    cst_api_fill_to_wire_flutter_bookmark(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
   ffi.Pointer<wire_cst_flutter_buffer_handle>
   cst_encode_box_autoadd_flutter_buffer_handle(FlutterBufferHandle raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
@@ -524,11 +723,38 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<wire_cst_flutter_library_book>
+  cst_encode_box_autoadd_flutter_library_book(FlutterLibraryBook raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_flutter_library_book();
+    cst_api_fill_to_wire_flutter_library_book(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
   ffi.Pointer<wire_cst_flutter_open_request>
   cst_encode_box_autoadd_flutter_open_request(FlutterOpenRequest raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     final ptr = wire.cst_new_box_autoadd_flutter_open_request();
     cst_api_fill_to_wire_flutter_open_request(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_flutter_reader_settings>
+  cst_encode_box_autoadd_flutter_reader_settings(FlutterReaderSettings raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_flutter_reader_settings();
+    cst_api_fill_to_wire_flutter_reader_settings(raw, ptr.ref);
+    return ptr;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_flutter_reading_state>
+  cst_encode_box_autoadd_flutter_reading_state(FlutterReadingState raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ptr = wire.cst_new_box_autoadd_flutter_reading_state();
+    cst_api_fill_to_wire_flutter_reading_state(raw, ptr.ref);
     return ptr;
   }
 
@@ -562,6 +788,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<ffi.Int64> cst_encode_box_autoadd_i_64(PlatformInt64 raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return wire.cst_new_box_autoadd_i_64(cst_encode_i_64(raw));
+  }
+
+  @protected
+  ffi.Pointer<ffi.UintPtr> cst_encode_box_autoadd_usize(BigInt raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return wire.cst_new_box_autoadd_usize(cst_encode_usize(raw));
+  }
+
+  @protected
+  int cst_encode_i_64(PlatformInt64 raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw.toInt();
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_String> cst_encode_list_String(List<String> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_String(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      ans.ref.ptr[i] = cst_encode_String(raw[i]);
+    }
+    return ans;
+  }
+
+  @protected
   ffi.Pointer<wire_cst_list_flutter_annotation>
   cst_encode_list_flutter_annotation(List<FlutterAnnotation> raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
@@ -586,6 +840,51 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
         raw[i],
         ans.ref.ptr[i],
       );
+    }
+    return ans;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_flutter_bookmark> cst_encode_list_flutter_bookmark(
+    List<FlutterBookmark> raw,
+  ) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_flutter_bookmark(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      cst_api_fill_to_wire_flutter_bookmark(raw[i], ans.ref.ptr[i]);
+    }
+    return ans;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_flutter_import_item>
+  cst_encode_list_flutter_import_item(List<FlutterImportItem> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_flutter_import_item(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      cst_api_fill_to_wire_flutter_import_item(raw[i], ans.ref.ptr[i]);
+    }
+    return ans;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_flutter_library_book>
+  cst_encode_list_flutter_library_book(List<FlutterLibraryBook> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_flutter_library_book(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      cst_api_fill_to_wire_flutter_library_book(raw[i], ans.ref.ptr[i]);
+    }
+    return ans;
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_list_flutter_search_match>
+  cst_encode_list_flutter_search_match(List<FlutterSearchMatch> raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    final ans = wire.cst_new_list_flutter_search_match(raw.length);
+    for (var i = 0; i < raw.length; ++i) {
+      cst_api_fill_to_wire_flutter_search_match(raw[i], ans.ref.ptr[i]);
     }
     return ans;
   }
@@ -691,6 +990,33 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<wire_cst_flutter_bookmark>
+  cst_encode_opt_box_autoadd_flutter_bookmark(FlutterBookmark? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null
+        ? ffi.nullptr
+        : cst_encode_box_autoadd_flutter_bookmark(raw);
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_flutter_library_book>
+  cst_encode_opt_box_autoadd_flutter_library_book(FlutterLibraryBook? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null
+        ? ffi.nullptr
+        : cst_encode_box_autoadd_flutter_library_book(raw);
+  }
+
+  @protected
+  ffi.Pointer<wire_cst_flutter_reading_state>
+  cst_encode_opt_box_autoadd_flutter_reading_state(FlutterReadingState? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null
+        ? ffi.nullptr
+        : cst_encode_box_autoadd_flutter_reading_state(raw);
+  }
+
+  @protected
   ffi.Pointer<wire_cst_flutter_rendered_buffer>
   cst_encode_opt_box_autoadd_flutter_rendered_buffer(
     FlutterRenderedBuffer? raw,
@@ -699,6 +1025,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     return raw == null
         ? ffi.nullptr
         : cst_encode_box_autoadd_flutter_rendered_buffer(raw);
+  }
+
+  @protected
+  ffi.Pointer<ffi.Int64> cst_encode_opt_box_autoadd_i_64(PlatformInt64? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null ? ffi.nullptr : cst_encode_box_autoadd_i_64(raw);
+  }
+
+  @protected
+  ffi.Pointer<ffi.UintPtr> cst_encode_opt_box_autoadd_usize(BigInt? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null ? ffi.nullptr : cst_encode_box_autoadd_usize(raw);
   }
 
   @protected
@@ -731,6 +1069,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_box_autoadd_flutter_bookmark(
+    FlutterBookmark apiObj,
+    ffi.Pointer<wire_cst_flutter_bookmark> wireObj,
+  ) {
+    cst_api_fill_to_wire_flutter_bookmark(apiObj, wireObj.ref);
+  }
+
+  @protected
   void cst_api_fill_to_wire_box_autoadd_flutter_buffer_handle(
     FlutterBufferHandle apiObj,
     ffi.Pointer<wire_cst_flutter_buffer_handle> wireObj,
@@ -747,11 +1093,35 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_box_autoadd_flutter_library_book(
+    FlutterLibraryBook apiObj,
+    ffi.Pointer<wire_cst_flutter_library_book> wireObj,
+  ) {
+    cst_api_fill_to_wire_flutter_library_book(apiObj, wireObj.ref);
+  }
+
+  @protected
   void cst_api_fill_to_wire_box_autoadd_flutter_open_request(
     FlutterOpenRequest apiObj,
     ffi.Pointer<wire_cst_flutter_open_request> wireObj,
   ) {
     cst_api_fill_to_wire_flutter_open_request(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_flutter_reader_settings(
+    FlutterReaderSettings apiObj,
+    ffi.Pointer<wire_cst_flutter_reader_settings> wireObj,
+  ) {
+    cst_api_fill_to_wire_flutter_reader_settings(apiObj, wireObj.ref);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_box_autoadd_flutter_reading_state(
+    FlutterReadingState apiObj,
+    ffi.Pointer<wire_cst_flutter_reading_state> wireObj,
+  ) {
+    cst_api_fill_to_wire_flutter_reading_state(apiObj, wireObj.ref);
   }
 
   @protected
@@ -838,6 +1208,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_flutter_bookmark(
+    FlutterBookmark apiObj,
+    wire_cst_flutter_bookmark wireObj,
+  ) {
+    wireObj.id = cst_encode_i_64(apiObj.id);
+    wireObj.book_id = cst_encode_opt_box_autoadd_i_64(apiObj.bookId);
+    wireObj.unit = cst_encode_usize(apiObj.unit);
+    wireObj.offset = cst_encode_opt_box_autoadd_usize(apiObj.offset);
+    wireObj.title = cst_encode_opt_String(apiObj.title);
+    wireObj.note = cst_encode_opt_String(apiObj.note);
+    wireObj.color = cst_encode_String(apiObj.color);
+    wireObj.created_at = cst_encode_String(apiObj.createdAt);
+  }
+
+  @protected
   void cst_api_fill_to_wire_flutter_bridge_error(
     FlutterBridgeError apiObj,
     wire_cst_flutter_bridge_error wireObj,
@@ -870,9 +1255,45 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wire_cst_flutter_document_summary wireObj,
   ) {
     cst_api_fill_to_wire_flutter_document_handle(apiObj.handle, wireObj.handle);
+    wireObj.book_id = cst_encode_opt_box_autoadd_i_64(apiObj.bookId);
     wireObj.format = cst_encode_flutter_book_format(apiObj.format);
     wireObj.title = cst_encode_opt_String(apiObj.title);
     wireObj.logical_unit_count = cst_encode_usize(apiObj.logicalUnitCount);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_flutter_import_item(
+    FlutterImportItem apiObj,
+    wire_cst_flutter_import_item wireObj,
+  ) {
+    wireObj.path_key = cst_encode_String(apiObj.pathKey);
+    wireObj.book = cst_encode_opt_box_autoadd_flutter_library_book(apiObj.book);
+    wireObj.error = cst_encode_opt_String(apiObj.error);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_flutter_library_book(
+    FlutterLibraryBook apiObj,
+    wire_cst_flutter_library_book wireObj,
+  ) {
+    wireObj.book_id = cst_encode_i_64(apiObj.bookId);
+    wireObj.title = cst_encode_String(apiObj.title);
+    wireObj.author = cst_encode_opt_String(apiObj.author);
+    wireObj.format = cst_encode_flutter_book_format(apiObj.format);
+    wireObj.path_key = cst_encode_String(apiObj.pathKey);
+    wireObj.managed = cst_encode_bool(apiObj.managed);
+    wireObj.progress = cst_encode_f_64(apiObj.progress);
+    wireObj.date_added = cst_encode_String(apiObj.dateAdded);
+    wireObj.last_read = cst_encode_opt_String(apiObj.lastRead);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_flutter_library_page(
+    FlutterLibraryPage apiObj,
+    wire_cst_flutter_library_page wireObj,
+  ) {
+    wireObj.books = cst_encode_list_flutter_library_book(apiObj.books);
+    wireObj.has_more = cst_encode_bool(apiObj.hasMore);
   }
 
   @protected
@@ -888,6 +1309,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_flutter_reader_settings(
+    FlutterReaderSettings apiObj,
+    wire_cst_flutter_reader_settings wireObj,
+  ) {
+    wireObj.continuous = cst_encode_bool(apiObj.continuous);
+    wireObj.epub_font_size = cst_encode_f_32(apiObj.epubFontSize);
+    wireObj.epub_line_spacing = cst_encode_f_32(apiObj.epubLineSpacing);
+    wireObj.pdf_zoom = cst_encode_f_32(apiObj.pdfZoom);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_flutter_reading_state(
+    FlutterReadingState apiObj,
+    wire_cst_flutter_reading_state wireObj,
+  ) {
+    wireObj.unit = cst_encode_usize(apiObj.unit);
+    wireObj.offset = cst_encode_opt_box_autoadd_usize(apiObj.offset);
+    wireObj.zoom = cst_encode_f_32(apiObj.zoom);
+  }
+
+  @protected
   void cst_api_fill_to_wire_flutter_rendered_buffer(
     FlutterRenderedBuffer apiObj,
     wire_cst_flutter_rendered_buffer wireObj,
@@ -896,6 +1338,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wireObj.width = cst_encode_u_32(apiObj.width);
     wireObj.height = cst_encode_u_32(apiObj.height);
     wireObj.byte_len = cst_encode_usize(apiObj.byteLen);
+  }
+
+  @protected
+  void cst_api_fill_to_wire_flutter_search_match(
+    FlutterSearchMatch apiObj,
+    wire_cst_flutter_search_match wireObj,
+  ) {
+    wireObj.unit = cst_encode_usize(apiObj.unit);
+    wireObj.offset = cst_encode_usize(apiObj.offset);
+    wireObj.length = cst_encode_usize(apiObj.length);
+    wireObj.context = cst_encode_String(apiObj.context);
   }
 
   @protected
@@ -1006,6 +1459,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double cst_encode_f_32(double raw);
 
   @protected
+  double cst_encode_f_64(double raw);
+
+  @protected
   int cst_encode_flutter_annotation_association_outcome(
     FlutterAnnotationAssociationOutcome raw,
   );
@@ -1074,6 +1530,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_flutter_bookmark(
+    FlutterBookmark self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_flutter_buffer_handle(
     FlutterBufferHandle self,
     SseSerializer serializer,
@@ -1086,8 +1548,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_flutter_library_book(
+    FlutterLibraryBook self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_flutter_open_request(
     FlutterOpenRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_flutter_reader_settings(
+    FlutterReaderSettings self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_flutter_reading_state(
+    FlutterReadingState self,
     SseSerializer serializer,
   );
 
@@ -1110,7 +1590,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_usize(BigInt self, SseSerializer serializer);
+
+  @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_flutter_annotation(
@@ -1155,6 +1647,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_flutter_bookmark(
+    FlutterBookmark self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_flutter_bridge_error(
     FlutterBridgeError self,
     SseSerializer serializer,
@@ -1191,14 +1689,50 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_flutter_import_item(
+    FlutterImportItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_library_book(
+    FlutterLibraryBook self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_library_page(
+    FlutterLibraryPage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_flutter_open_request(
     FlutterOpenRequest self,
     SseSerializer serializer,
   );
 
   @protected
+  void sse_encode_flutter_reader_settings(
+    FlutterReaderSettings self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_reading_state(
+    FlutterReadingState self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_flutter_rendered_buffer(
     FlutterRenderedBuffer self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_search_match(
+    FlutterSearchMatch self,
     SseSerializer serializer,
   );
 
@@ -1242,6 +1776,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_flutter_annotation(
     List<FlutterAnnotation> self,
     SseSerializer serializer,
@@ -1250,6 +1790,30 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_flutter_annotation_association_source(
     List<FlutterAnnotationAssociationSource> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_flutter_bookmark(
+    List<FlutterBookmark> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_flutter_import_item(
+    List<FlutterImportItem> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_flutter_library_book(
+    List<FlutterLibraryBook> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_flutter_search_match(
+    List<FlutterSearchMatch> self,
     SseSerializer serializer,
   );
 
@@ -1305,10 +1869,37 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_flutter_bookmark(
+    FlutterBookmark? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_flutter_library_book(
+    FlutterLibraryBook? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_flutter_reading_state(
+    FlutterReadingState? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_flutter_rendered_buffer(
     FlutterRenderedBuffer? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_usize(BigInt? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_list_flutter_selection_rect(
@@ -1554,6 +2145,134 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__api__FlutterBridge_delete_bookmark(
+    int port_,
+    int that,
+    int id,
+  ) {
+    return _wire__crate__api__FlutterBridge_delete_bookmark(port_, that, id);
+  }
+
+  late final _wire__crate__api__FlutterBridge_delete_bookmarkPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64)>
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_delete_bookmark',
+      );
+  late final _wire__crate__api__FlutterBridge_delete_bookmark =
+      _wire__crate__api__FlutterBridge_delete_bookmarkPtr
+          .asFunction<void Function(int, int, int)>();
+
+  void wire__crate__api__FlutterBridge_export_bookmarks(
+    int port_,
+    int that,
+    int book_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_export_bookmarks(
+      port_,
+      that,
+      book_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_export_bookmarksPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64)>
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_export_bookmarks',
+      );
+  late final _wire__crate__api__FlutterBridge_export_bookmarks =
+      _wire__crate__api__FlutterBridge_export_bookmarksPtr
+          .asFunction<void Function(int, int, int)>();
+
+  void wire__crate__api__FlutterBridge_import_paths(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_list_String> path_keys,
+    bool managed,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_import_paths(
+      port_,
+      that,
+      path_keys,
+      managed,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_import_pathsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_list_String>,
+            ffi.Bool,
+            ffi.Uint64,
+          )
+        >
+      >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_import_paths');
+  late final _wire__crate__api__FlutterBridge_import_paths =
+      _wire__crate__api__FlutterBridge_import_pathsPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_list_String>,
+              bool,
+              int,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_library_page(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> query,
+    ffi.Pointer<ffi.Int32> format,
+    int limit,
+    int offset,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_library_page(
+      port_,
+      that,
+      query,
+      format,
+      limit,
+      offset,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_library_pagePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<ffi.Int32>,
+            ffi.Uint32,
+            ffi.Uint32,
+            ffi.Uint64,
+          )
+        >
+      >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_library_page');
+  late final _wire__crate__api__FlutterBridge_library_page =
+      _wire__crate__api__FlutterBridge_library_pagePtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<ffi.Int32>,
+              int,
+              int,
+              int,
+            )
+          >();
+
   void wire__crate__api__FlutterBridge_list_annotation_association_sources(
     int port_,
     int that,
@@ -1642,6 +2361,80 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__api__FlutterBridge_list_bookmarks(
+    int port_,
+    int that,
+    int book_id,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_list_bookmarks(
+      port_,
+      that,
+      book_id,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_list_bookmarksPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
+      >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_bookmarks');
+  late final _wire__crate__api__FlutterBridge_list_bookmarks =
+      _wire__crate__api__FlutterBridge_list_bookmarksPtr
+          .asFunction<void Function(int, int, int, int)>();
+
+  void wire__crate__api__FlutterBridge_load_reader_settings(
+    int port_,
+    int that,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_load_reader_settings(
+      port_,
+      that,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_load_reader_settingsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Uint64)
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reader_settings',
+      );
+  late final _wire__crate__api__FlutterBridge_load_reader_settings =
+      _wire__crate__api__FlutterBridge_load_reader_settingsPtr
+          .asFunction<void Function(int, int, int)>();
+
+  void wire__crate__api__FlutterBridge_load_reading_state(
+    int port_,
+    int that,
+    int book_id,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_load_reading_state(
+      port_,
+      that,
+      book_id,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_load_reading_statePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reading_state',
+      );
+  late final _wire__crate__api__FlutterBridge_load_reading_state =
+      _wire__crate__api__FlutterBridge_load_reading_statePtr
+          .asFunction<void Function(int, int, int, int)>();
+
   WireSyncRust2DartDco wire__crate__api__FlutterBridge_new() {
     return _wire__crate__api__FlutterBridge_new();
   }
@@ -1689,6 +2482,32 @@ class RustLibWire implements BaseWire {
               int,
             )
           >();
+
+  void wire__crate__api__FlutterBridge_open_library_book(
+    int port_,
+    int that,
+    int book_id,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_open_library_book(
+      port_,
+      that,
+      book_id,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_open_library_bookPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_open_library_book',
+      );
+  late final _wire__crate__api__FlutterBridge_open_library_book =
+      _wire__crate__api__FlutterBridge_open_library_bookPtr
+          .asFunction<void Function(int, int, int, int)>();
 
   WireSyncRust2DartDco wire__crate__api__FlutterBridge_release_buffer(
     int that,
@@ -1788,6 +2607,28 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__api__FlutterBridge_remove_library_book(
+    int port_,
+    int that,
+    int book_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_remove_library_book(
+      port_,
+      that,
+      book_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_remove_library_bookPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64)>
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_remove_library_book',
+      );
+  late final _wire__crate__api__FlutterBridge_remove_library_book =
+      _wire__crate__api__FlutterBridge_remove_library_bookPtr
+          .asFunction<void Function(int, int, int)>();
+
   void wire__crate__api__FlutterBridge_render_page(
     int port_,
     int that,
@@ -1859,6 +2700,124 @@ class RustLibWire implements BaseWire {
             WireSyncRust2DartDco Function(
               int,
               ffi.Pointer<wire_cst_flutter_selection_surface>,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_save_reader_settings(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_flutter_reader_settings> value,
+  ) {
+    return _wire__crate__api__FlutterBridge_save_reader_settings(
+      port_,
+      that,
+      value,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_save_reader_settingsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_reader_settings>,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_save_reader_settings',
+      );
+  late final _wire__crate__api__FlutterBridge_save_reader_settings =
+      _wire__crate__api__FlutterBridge_save_reader_settingsPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_flutter_reader_settings>,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_save_reading_state(
+    int port_,
+    int that,
+    int book_id,
+    ffi.Pointer<wire_cst_flutter_reading_state> value,
+    int unit_count,
+  ) {
+    return _wire__crate__api__FlutterBridge_save_reading_state(
+      port_,
+      that,
+      book_id,
+      value,
+      unit_count,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_save_reading_statePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Int64,
+            ffi.Pointer<wire_cst_flutter_reading_state>,
+            ffi.Uint64,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_save_reading_state',
+      );
+  late final _wire__crate__api__FlutterBridge_save_reading_state =
+      _wire__crate__api__FlutterBridge_save_reading_statePtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              int,
+              ffi.Pointer<wire_cst_flutter_reading_state>,
+              int,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_search_document(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_flutter_document_handle> document,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> query,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_search_document(
+      port_,
+      that,
+      document,
+      query,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_search_documentPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_flutter_document_handle>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Uint64,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_search_document',
+      );
+  late final _wire__crate__api__FlutterBridge_search_document =
+      _wire__crate__api__FlutterBridge_search_documentPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_flutter_document_handle>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              int,
             )
           >();
 
@@ -1941,6 +2900,52 @@ class RustLibWire implements BaseWire {
             )
           >();
 
+  void wire__crate__api__FlutterBridge_toggle_bookmark(
+    int port_,
+    int that,
+    int book_id,
+    int unit,
+    ffi.Pointer<ffi.UintPtr> offset,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> title,
+  ) {
+    return _wire__crate__api__FlutterBridge_toggle_bookmark(
+      port_,
+      that,
+      book_id,
+      unit,
+      offset,
+      title,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_toggle_bookmarkPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<ffi.UintPtr>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_toggle_bookmark',
+      );
+  late final _wire__crate__api__FlutterBridge_toggle_bookmark =
+      _wire__crate__api__FlutterBridge_toggle_bookmarkPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              int,
+              int,
+              ffi.Pointer<ffi.UintPtr>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
   void wire__crate__api__FlutterBridge_update_annotation(
     int port_,
     int that,
@@ -1983,6 +2988,48 @@ class RustLibWire implements BaseWire {
               ffi.Pointer<wire_cst_flutter_document_handle>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_update_bookmark(
+    int port_,
+    int that,
+    int id,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> title,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> note,
+  ) {
+    return _wire__crate__api__FlutterBridge_update_bookmark(
+      port_,
+      that,
+      id,
+      title,
+      note,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_update_bookmarkPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_update_bookmark',
+      );
+  late final _wire__crate__api__FlutterBridge_update_bookmark =
+      _wire__crate__api__FlutterBridge_update_bookmarkPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
             )
           >();
@@ -2087,6 +3134,19 @@ class RustLibWire implements BaseWire {
       _cst_new_box_autoadd_flutter_book_formatPtr
           .asFunction<ffi.Pointer<ffi.Int32> Function(int)>();
 
+  ffi.Pointer<wire_cst_flutter_bookmark>
+  cst_new_box_autoadd_flutter_bookmark() {
+    return _cst_new_box_autoadd_flutter_bookmark();
+  }
+
+  late final _cst_new_box_autoadd_flutter_bookmarkPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Pointer<wire_cst_flutter_bookmark> Function()>
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_flutter_bookmark');
+  late final _cst_new_box_autoadd_flutter_bookmark =
+      _cst_new_box_autoadd_flutter_bookmarkPtr
+          .asFunction<ffi.Pointer<wire_cst_flutter_bookmark> Function()>();
+
   ffi.Pointer<wire_cst_flutter_buffer_handle>
   cst_new_box_autoadd_flutter_buffer_handle() {
     return _cst_new_box_autoadd_flutter_buffer_handle();
@@ -2119,6 +3179,21 @@ class RustLibWire implements BaseWire {
             ffi.Pointer<wire_cst_flutter_document_handle> Function()
           >();
 
+  ffi.Pointer<wire_cst_flutter_library_book>
+  cst_new_box_autoadd_flutter_library_book() {
+    return _cst_new_box_autoadd_flutter_library_book();
+  }
+
+  late final _cst_new_box_autoadd_flutter_library_bookPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_flutter_library_book> Function()
+        >
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_flutter_library_book');
+  late final _cst_new_box_autoadd_flutter_library_book =
+      _cst_new_box_autoadd_flutter_library_bookPtr
+          .asFunction<ffi.Pointer<wire_cst_flutter_library_book> Function()>();
+
   ffi.Pointer<wire_cst_flutter_open_request>
   cst_new_box_autoadd_flutter_open_request() {
     return _cst_new_box_autoadd_flutter_open_request();
@@ -2133,6 +3208,38 @@ class RustLibWire implements BaseWire {
   late final _cst_new_box_autoadd_flutter_open_request =
       _cst_new_box_autoadd_flutter_open_requestPtr
           .asFunction<ffi.Pointer<wire_cst_flutter_open_request> Function()>();
+
+  ffi.Pointer<wire_cst_flutter_reader_settings>
+  cst_new_box_autoadd_flutter_reader_settings() {
+    return _cst_new_box_autoadd_flutter_reader_settings();
+  }
+
+  late final _cst_new_box_autoadd_flutter_reader_settingsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_flutter_reader_settings> Function()
+        >
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_flutter_reader_settings');
+  late final _cst_new_box_autoadd_flutter_reader_settings =
+      _cst_new_box_autoadd_flutter_reader_settingsPtr
+          .asFunction<
+            ffi.Pointer<wire_cst_flutter_reader_settings> Function()
+          >();
+
+  ffi.Pointer<wire_cst_flutter_reading_state>
+  cst_new_box_autoadd_flutter_reading_state() {
+    return _cst_new_box_autoadd_flutter_reading_state();
+  }
+
+  late final _cst_new_box_autoadd_flutter_reading_statePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_flutter_reading_state> Function()
+        >
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_flutter_reading_state');
+  late final _cst_new_box_autoadd_flutter_reading_state =
+      _cst_new_box_autoadd_flutter_reading_statePtr
+          .asFunction<ffi.Pointer<wire_cst_flutter_reading_state> Function()>();
 
   ffi.Pointer<wire_cst_flutter_rendered_buffer>
   cst_new_box_autoadd_flutter_rendered_buffer() {
@@ -2185,6 +3292,41 @@ class RustLibWire implements BaseWire {
             ffi.Pointer<wire_cst_flutter_selection_surface> Function()
           >();
 
+  ffi.Pointer<ffi.Int64> cst_new_box_autoadd_i_64(int value) {
+    return _cst_new_box_autoadd_i_64(value);
+  }
+
+  late final _cst_new_box_autoadd_i_64Ptr =
+      _lookup<ffi.NativeFunction<ffi.Pointer<ffi.Int64> Function(ffi.Int64)>>(
+        'frbgen_shosai_flutter_cst_new_box_autoadd_i_64',
+      );
+  late final _cst_new_box_autoadd_i_64 = _cst_new_box_autoadd_i_64Ptr
+      .asFunction<ffi.Pointer<ffi.Int64> Function(int)>();
+
+  ffi.Pointer<ffi.UintPtr> cst_new_box_autoadd_usize(int value) {
+    return _cst_new_box_autoadd_usize(value);
+  }
+
+  late final _cst_new_box_autoadd_usizePtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Pointer<ffi.UintPtr> Function(ffi.UintPtr)>
+      >('frbgen_shosai_flutter_cst_new_box_autoadd_usize');
+  late final _cst_new_box_autoadd_usize = _cst_new_box_autoadd_usizePtr
+      .asFunction<ffi.Pointer<ffi.UintPtr> Function(int)>();
+
+  ffi.Pointer<wire_cst_list_String> cst_new_list_String(int len) {
+    return _cst_new_list_String(len);
+  }
+
+  late final _cst_new_list_StringPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_String> Function(ffi.Int32)
+        >
+      >('frbgen_shosai_flutter_cst_new_list_String');
+  late final _cst_new_list_String = _cst_new_list_StringPtr
+      .asFunction<ffi.Pointer<wire_cst_list_String> Function(int)>();
+
   ffi.Pointer<wire_cst_list_flutter_annotation> cst_new_list_flutter_annotation(
     int len,
   ) {
@@ -2222,6 +3364,72 @@ class RustLibWire implements BaseWire {
           .asFunction<
             ffi.Pointer<wire_cst_list_flutter_annotation_association_source>
             Function(int)
+          >();
+
+  ffi.Pointer<wire_cst_list_flutter_bookmark> cst_new_list_flutter_bookmark(
+    int len,
+  ) {
+    return _cst_new_list_flutter_bookmark(len);
+  }
+
+  late final _cst_new_list_flutter_bookmarkPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_flutter_bookmark> Function(ffi.Int32)
+        >
+      >('frbgen_shosai_flutter_cst_new_list_flutter_bookmark');
+  late final _cst_new_list_flutter_bookmark = _cst_new_list_flutter_bookmarkPtr
+      .asFunction<ffi.Pointer<wire_cst_list_flutter_bookmark> Function(int)>();
+
+  ffi.Pointer<wire_cst_list_flutter_import_item>
+  cst_new_list_flutter_import_item(int len) {
+    return _cst_new_list_flutter_import_item(len);
+  }
+
+  late final _cst_new_list_flutter_import_itemPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_flutter_import_item> Function(ffi.Int32)
+        >
+      >('frbgen_shosai_flutter_cst_new_list_flutter_import_item');
+  late final _cst_new_list_flutter_import_item =
+      _cst_new_list_flutter_import_itemPtr
+          .asFunction<
+            ffi.Pointer<wire_cst_list_flutter_import_item> Function(int)
+          >();
+
+  ffi.Pointer<wire_cst_list_flutter_library_book>
+  cst_new_list_flutter_library_book(int len) {
+    return _cst_new_list_flutter_library_book(len);
+  }
+
+  late final _cst_new_list_flutter_library_bookPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_flutter_library_book> Function(ffi.Int32)
+        >
+      >('frbgen_shosai_flutter_cst_new_list_flutter_library_book');
+  late final _cst_new_list_flutter_library_book =
+      _cst_new_list_flutter_library_bookPtr
+          .asFunction<
+            ffi.Pointer<wire_cst_list_flutter_library_book> Function(int)
+          >();
+
+  ffi.Pointer<wire_cst_list_flutter_search_match>
+  cst_new_list_flutter_search_match(int len) {
+    return _cst_new_list_flutter_search_match(len);
+  }
+
+  late final _cst_new_list_flutter_search_matchPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Pointer<wire_cst_list_flutter_search_match> Function(ffi.Int32)
+        >
+      >('frbgen_shosai_flutter_cst_new_list_flutter_search_match');
+  late final _cst_new_list_flutter_search_match =
+      _cst_new_list_flutter_search_matchPtr
+          .asFunction<
+            ffi.Pointer<wire_cst_list_flutter_search_match> Function(int)
           >();
 
   ffi.Pointer<wire_cst_list_flutter_selection_caret>
@@ -2362,6 +3570,13 @@ final class wire_cst_flutter_document_handle extends ffi.Struct {
 
   @ffi.Uint64()
   external int id;
+}
+
+final class wire_cst_list_String extends ffi.Struct {
+  external ffi.Pointer<ffi.Pointer<wire_cst_list_prim_u_8_strict>> ptr;
+
+  @ffi.Int32()
+  external int len;
 }
 
 final class wire_cst_flutter_open_request extends ffi.Struct {
@@ -2508,12 +3723,80 @@ final class wire_cst_flutter_selection_surface extends ffi.Struct {
   visual_lines;
 }
 
+final class wire_cst_flutter_reader_settings extends ffi.Struct {
+  @ffi.Bool()
+  external bool continuous;
+
+  @ffi.Float()
+  external double epub_font_size;
+
+  @ffi.Float()
+  external double epub_line_spacing;
+
+  @ffi.Float()
+  external double pdf_zoom;
+}
+
+final class wire_cst_flutter_reading_state extends ffi.Struct {
+  @ffi.UintPtr()
+  external int unit;
+
+  external ffi.Pointer<ffi.UintPtr> offset;
+
+  @ffi.Float()
+  external double zoom;
+}
+
 final class wire_cst_flutter_annotation_text_range extends ffi.Struct {
   @ffi.UintPtr()
   external int start;
 
   @ffi.UintPtr()
   external int end;
+}
+
+final class wire_cst_flutter_bookmark extends ffi.Struct {
+  @ffi.Int64()
+  external int id;
+
+  external ffi.Pointer<ffi.Int64> book_id;
+
+  @ffi.UintPtr()
+  external int unit;
+
+  external ffi.Pointer<ffi.UintPtr> offset;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> title;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> note;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> color;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> created_at;
+}
+
+final class wire_cst_flutter_library_book extends ffi.Struct {
+  @ffi.Int64()
+  external int book_id;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> title;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> author;
+
+  @ffi.Int32()
+  external int format;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> path_key;
+
+  @ffi.Bool()
+  external bool managed;
+
+  @ffi.Double()
+  external double progress;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> date_added;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> last_read;
 }
 
 final class wire_cst_list_flutter_selection_rect extends ffi.Struct {
@@ -2578,6 +3861,55 @@ final class wire_cst_list_flutter_annotation_association_source
   external int len;
 }
 
+final class wire_cst_list_flutter_bookmark extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_bookmark> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_flutter_import_item extends ffi.Struct {
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> path_key;
+
+  external ffi.Pointer<wire_cst_flutter_library_book> book;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> error;
+}
+
+final class wire_cst_list_flutter_import_item extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_import_item> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_list_flutter_library_book extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_library_book> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
+final class wire_cst_flutter_search_match extends ffi.Struct {
+  @ffi.UintPtr()
+  external int unit;
+
+  @ffi.UintPtr()
+  external int offset;
+
+  @ffi.UintPtr()
+  external int length;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> context;
+}
+
+final class wire_cst_list_flutter_search_match extends ffi.Struct {
+  external ffi.Pointer<wire_cst_flutter_search_match> ptr;
+
+  @ffi.Int32()
+  external int len;
+}
+
 final class wire_cst_flutter_annotation_association_source_page
     extends ffi.Struct {
   external ffi.Pointer<wire_cst_list_flutter_annotation_association_source>
@@ -2598,6 +3930,8 @@ final class wire_cst_flutter_bridge_error extends ffi.Struct {
 final class wire_cst_flutter_document_summary extends ffi.Struct {
   external wire_cst_flutter_document_handle handle;
 
+  external ffi.Pointer<ffi.Int64> book_id;
+
   @ffi.Int32()
   external int format;
 
@@ -2605,4 +3939,11 @@ final class wire_cst_flutter_document_summary extends ffi.Struct {
 
   @ffi.UintPtr()
   external int logical_unit_count;
+}
+
+final class wire_cst_flutter_library_page extends ffi.Struct {
+  external ffi.Pointer<wire_cst_list_flutter_library_book> books;
+
+  @ffi.Bool()
+  external bool has_more;
 }

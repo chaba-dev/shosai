@@ -11,6 +11,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
 import 'package:shosai_flutter/reader_controller.dart';
+import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
@@ -36,6 +37,7 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderFocusTarget,
         ReaderLayout,
         ReaderLayoutChanged,
+        ReaderViewportChanged,
         ReaderMemoryPressureReceived,
         ReaderMessage,
         ReaderModel,
@@ -62,12 +64,24 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderContentState,
         ReaderSelectionStarted,
         ReaderSuspended,
+        ReaderUnitRequested,
+        ReaderSearchRequested,
+        ReaderBookmarkToggled,
+        ReaderBookmarkNavigated,
+        ReaderToolsToggled,
         premultiplyRgba;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init(externalLibrary: nativeLibrary());
-  runApp(ShosaiApp(bridge: await createApplicationBridge()));
+  final directory = await getApplicationSupportDirectory();
+  final databasePath = '${directory.path}/shosai.sqlite3';
+  runApp(
+    ShosaiApp(
+      productBridgeFactory: () =>
+          FlutterBridge.withDatabasePath(databasePath: databasePath),
+    ),
+  );
 }
 
 Future<FlutterBridge> createApplicationBridge({
@@ -102,9 +116,10 @@ ExternalLibrary? nativeLibrary() {
 }
 
 class ShosaiApp extends StatelessWidget {
-  const ShosaiApp({super.key, this.bridge});
+  const ShosaiApp({super.key, this.bridge, this.productBridgeFactory});
 
   final FlutterBridge? bridge;
+  final FlutterBridge Function()? productBridgeFactory;
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +131,8 @@ class ShosaiApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
+        fontFamily: 'Inter',
+        fontFamilyFallback: const ['Noto Sans JP'],
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -123,9 +140,24 @@ class ShosaiApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
+        fontFamily: 'Inter',
+        fontFamilyFallback: const ['Noto Sans JP'],
       ),
       restorationScopeId: 'shosai',
-      home: ReaderScreen(bridge: bridge),
+      home: productBridgeFactory == null
+          ? ReaderScreen(bridge: bridge)
+          : ProductShell(
+              bridgeFactory: productBridgeFactory!,
+              readerBuilder:
+                  (bridge, book, settings, path, bookId, locatorChanged) =>
+                      ReaderScreen(
+                        bridge: bridge,
+                        initialPath: path,
+                        initialBookId: bookId,
+                        initialSettings: settings,
+                        onLocatorChanged: locatorChanged,
+                      ),
+            ),
     );
   }
 }
@@ -136,11 +168,19 @@ class ReaderScreen extends StatefulWidget {
     this.bridge,
     this.bridgeFactory,
     this.decoder = _decodeRgba,
+    this.initialPath,
+    this.initialBookId,
+    this.initialSettings,
+    this.onLocatorChanged,
   }) : assert(bridge == null || bridgeFactory == null);
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? bridgeFactory;
   final PageDecoder decoder;
+  final String? initialPath;
+  final int? initialBookId;
+  final FlutterReaderSettings? initialSettings;
+  final void Function(String path, int? bookId)? onLocatorChanged;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -151,6 +191,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   final RestorableTextEditingController _path =
       RestorableTextEditingController();
   final RestorableStringN _openDocumentPath = RestorableStringN(null);
+  final RestorableIntN _openDocumentBookId = RestorableIntN(null);
   final GlobalKey _pathFieldKey = GlobalKey(debugLabel: 'document path');
   final GlobalKey _contentKey = GlobalKey(debugLabel: 'reader content');
   final FocusNode _openFocus = FocusNode(debugLabel: 'open document');
@@ -159,35 +200,49 @@ class _ReaderScreenState extends State<ReaderScreen>
   DialogRoute<String>? _noteDialogRoute;
   DialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
+  bool _controllerInitialized = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _controller = ReaderController(
-      bridge: widget.bridge ?? widget.bridgeFactory?.call() ?? FlutterBridge(),
-      decoder: (pixels, {required width, required height}) =>
-          widget.decoder(pixels, width: width, height: height),
-      noteEditor: _editNote,
-      noteEditorCanceller: _cancelNoteEditor,
-      annotationAssociationPicker: _pickAnnotationAssociation,
-      annotationAssociationPickerCanceller: _cancelAnnotationAssociationPicker,
-      focusAdapter: (target) => switch (target) {
-        ReaderFocusTarget.surface => _readerFocus.requestFocus(),
-        ReaderFocusTarget.actions => _actionFocus.requestFocus(),
-      },
-      frameScheduler: (callback) =>
-          WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
-      selectionCopier: (text) => Clipboard.setData(ClipboardData(text: text)),
-      selectionAnnouncer:
-          usesExplicitSelectionAnnouncements(defaultTargetPlatform)
-          ? (description) => SemanticsService.sendAnnouncement(
-              View.of(context),
-              description,
-              Directionality.of(context),
-            )
-          : null,
-    )..addListener(_modelChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    if (!_controllerInitialized) {
+      _controllerInitialized = true;
+      _controller = ReaderController(
+        bridge:
+            widget.bridge ?? widget.bridgeFactory?.call() ?? FlutterBridge(),
+        decoder: (pixels, {required width, required height}) =>
+            widget.decoder(pixels, width: width, height: height),
+        initialScale: (widget.initialSettings?.pdfZoom ?? 0) > 0
+            ? widget.initialSettings!.pdfZoom
+            : View.of(context).devicePixelRatio,
+        noteEditor: _editNote,
+        noteEditorCanceller: _cancelNoteEditor,
+        annotationAssociationPicker: _pickAnnotationAssociation,
+        annotationAssociationPickerCanceller:
+            _cancelAnnotationAssociationPicker,
+        focusAdapter: (target) => switch (target) {
+          ReaderFocusTarget.surface => _readerFocus.requestFocus(),
+          ReaderFocusTarget.actions => _actionFocus.requestFocus(),
+        },
+        frameScheduler: (callback) =>
+            WidgetsBinding.instance.addPostFrameCallback((_) => callback()),
+        selectionCopier: (text) => Clipboard.setData(ClipboardData(text: text)),
+        selectionAnnouncer:
+            usesExplicitSelectionAnnouncements(defaultTargetPlatform)
+            ? (description) => SemanticsService.sendAnnouncement(
+                View.of(context),
+                description,
+                Directionality.of(context),
+              )
+            : null,
+      )..addListener(_modelChanged);
+    }
+    super.didChangeDependencies();
   }
 
   @override
@@ -197,8 +252,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
     registerForRestoration(_path, 'document_path');
     registerForRestoration(_openDocumentPath, 'open_document_path');
+    registerForRestoration(_openDocumentBookId, 'open_document_book_id');
     if (_openDocumentPath.value case final path?) {
-      _controller.dispatch(ReaderOpenRequested(path));
+      _controller.dispatch(
+        ReaderOpenRequested(path, bookId: _openDocumentBookId.value),
+      );
+    } else if (widget.initialPath case final path?) {
+      _path.value.text = path;
+      _controller.dispatch(
+        ReaderOpenRequested(path, bookId: widget.initialBookId),
+      );
     }
   }
 
@@ -257,8 +320,17 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   void _modelChanged() {
     final openPath = _controller.model.openPath;
-    if (openPath != null && _openDocumentPath.value != openPath) {
-      _openDocumentPath.value = openPath;
+    if (openPath != null) {
+      // Persist the accepted locator as one pair. In particular, clear a
+      // previous library identity while an untracked replacement is opening
+      // and leave it cleared if that replacement fails.
+      final bookId = _controller.model.openBookId;
+      if (_openDocumentPath.value != openPath ||
+          _openDocumentBookId.value != bookId) {
+        _openDocumentPath.value = openPath;
+        _openDocumentBookId.value = bookId;
+        widget.onLocatorChanged?.call(openPath, bookId);
+      }
     }
     setState(() {});
   }
@@ -289,6 +361,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _controller.dispose();
     _path.dispose();
     _openDocumentPath.dispose();
+    _openDocumentBookId.dispose();
     _openFocus.dispose();
     _readerFocus.dispose();
     _actionFocus.dispose();
@@ -311,31 +384,37 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(compact ? 'Shōsai' : 'Shōsai Flutter feasibility slice'),
-        actions:
-            model.document != null &&
-                model.document!.format != FlutterBookFormat.cbz
+        actions: model.document != null
             ? [
                 IconButton(
-                  tooltip: model.annotationsReady
-                      ? 'Associate highlights from an earlier version…'
-                      : 'Retry loading highlights',
-                  onPressed: associationEnabled
-                      ? () => _controller.dispatch(
-                          model.annotationsReady
-                              ? const ReaderAnnotationAssociationRequested()
-                              : const ReaderAnnotationReloadRequested(),
-                        )
-                      : null,
-                  icon: Icon(
-                    model.annotationsReady ? Icons.link : Icons.refresh,
-                  ),
+                  tooltip: 'Search and bookmarks',
+                  onPressed: () =>
+                      _controller.dispatch(const ReaderToolsToggled()),
+                  icon: const Icon(Icons.manage_search),
                 ),
+                if (model.document!.format != FlutterBookFormat.cbz)
+                  IconButton(
+                    tooltip: model.annotationsReady
+                        ? 'Associate highlights from an earlier version…'
+                        : 'Retry loading highlights',
+                    onPressed: associationEnabled
+                        ? () => _controller.dispatch(
+                            model.annotationsReady
+                                ? const ReaderAnnotationAssociationRequested()
+                                : const ReaderAnnotationReloadRequested(),
+                          )
+                        : null,
+                    icon: Icon(
+                      model.annotationsReady ? Icons.link : Icons.refresh,
+                    ),
+                  ),
               ]
             : null,
       ),
       body: SafeArea(
         child: _ResponsiveReaderBody(
           model: model,
+          settings: widget.initialSettings,
           path: _path.value,
           pathFieldKey: _pathFieldKey,
           contentKey: _contentKey,
@@ -355,6 +434,7 @@ enum _ReaderComposition { compact, medium, expanded }
 class _ResponsiveReaderBody extends StatelessWidget {
   const _ResponsiveReaderBody({
     required this.model,
+    required this.settings,
     required this.path,
     required this.pathFieldKey,
     required this.contentKey,
@@ -366,6 +446,7 @@ class _ResponsiveReaderBody extends StatelessWidget {
   });
 
   final ReaderModel model;
+  final FlutterReaderSettings? settings;
   final TextEditingController path;
   final GlobalKey pathFieldKey;
   final GlobalKey contentKey;
@@ -394,6 +475,7 @@ class _ResponsiveReaderBody extends StatelessWidget {
       final content = _ReaderContentPane(
         key: contentKey,
         model: model,
+        settings: settings,
         dispatch: dispatch,
         readerFocus: readerFocus,
         actionFocus: actionFocus,
@@ -529,12 +611,14 @@ class _ReaderContentPane extends StatelessWidget {
   const _ReaderContentPane({
     super.key,
     required this.model,
+    required this.settings,
     required this.dispatch,
     required this.readerFocus,
     required this.actionFocus,
   });
 
   final ReaderModel model;
+  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final FocusNode readerFocus;
   final FocusNode actionFocus;
@@ -545,6 +629,7 @@ class _ReaderContentPane extends StatelessWidget {
       Expanded(
         child: _ReaderLayoutReporter(
           model: model,
+          settings: settings,
           dispatch: dispatch,
           child: model.document == null
               ? const WelcomePanel()
@@ -572,11 +657,13 @@ class _ReaderContentPane extends StatelessWidget {
 class _ReaderLayoutReporter extends StatefulWidget {
   const _ReaderLayoutReporter({
     required this.model,
+    required this.settings,
     required this.dispatch,
     required this.child,
   });
 
   final ReaderModel model;
+  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final Widget child;
 
@@ -596,9 +683,15 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
           ? math.max(1.0, constraints.maxWidth).roundToDouble()
           : widget.model.layout.width;
       final layout = ReaderLayout(
-        scale: MediaQuery.devicePixelRatioOf(context),
+        scale: widget.model.document != null
+            ? widget.model.layout.scale
+            : (widget.settings?.pdfZoom ?? 0) > 0
+            ? widget.settings!.pdfZoom
+            : MediaQuery.devicePixelRatioOf(context),
         width: availableWidth,
-        fontSize: MediaQuery.textScalerOf(context).scale(18),
+        fontSize: MediaQuery.textScalerOf(
+          context,
+        ).scale(widget.settings?.epubFontSize ?? 18),
       );
       if (layout != _observedLayout) {
         _observedLayout = layout;
@@ -611,7 +704,7 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
           final pending = _pendingLayout;
           _pendingLayout = null;
           if (mounted && pending != null) {
-            widget.dispatch(ReaderLayoutChanged(pending));
+            widget.dispatch(ReaderViewportChanged(pending));
           }
         });
       }
@@ -664,10 +757,40 @@ class _DocumentView extends StatelessWidget {
       return const Center(child: CircularProgressIndicator());
     }
     if (surface == null) {
-      return Semantics(
-        label: '$title, page 1 of ${document.logicalUnitCount}.',
-        child: Center(
-          child: RawImage(image: page, fit: BoxFit.contain),
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+              dispatch(ReaderUnitRequested(model.unit - 1)),
+          const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+              dispatch(ReaderUnitRequested(model.unit + 1)),
+        },
+        child: Focus(
+          focusNode: readerFocus,
+          autofocus: true,
+          child: Column(
+            children: [
+              Expanded(
+                child: Semantics(
+                  key: const ValueKey('reader-document-semantics'),
+                  label:
+                      '$title, page ${model.unit + 1} of ${document.logicalUnitCount}.',
+                  child: Center(
+                    child: RawImage(image: page, fit: BoxFit.contain),
+                  ),
+                ),
+              ),
+              _ReaderUnitNavigation(
+                document: document,
+                model: model,
+                dispatch: dispatch,
+              ),
+              _ReaderTools(
+                document: document,
+                model: model,
+                dispatch: dispatch,
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -685,6 +808,10 @@ class _DocumentView extends StatelessWidget {
             dispatch(const ReaderSelectionCopyRequested()),
         const SingleActivator(LogicalKeyboardKey.keyC, meta: true): () =>
             dispatch(const ReaderSelectionCopyRequested()),
+        const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+            dispatch(ReaderUnitRequested(model.unit - 1)),
+        const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+            dispatch(ReaderUnitRequested(model.unit + 1)),
       },
       child: Column(
         children: [
@@ -694,8 +821,8 @@ class _DocumentView extends StatelessWidget {
               container: true,
               explicitChildNodes: true,
               label: document.format == FlutterBookFormat.epub
-                  ? '$title, EPUB chapter 1 of ${document.logicalUnitCount}. Selectable text.'
-                  : '$title, page 1 of ${document.logicalUnitCount}. Selectable text.',
+                  ? '$title, EPUB chapter ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.'
+                  : '$title, page ${model.unit + 1} of ${document.logicalUnitCount}. Selectable text.',
               child: TapRegion(
                 onTapOutside: (event) => dispatch(
                   ReaderSelectionPointerPressedOutside(event.pointer),
@@ -961,8 +1088,174 @@ class _DocumentView extends StatelessWidget {
                     .toList(),
               ),
             ),
+          _ReaderUnitNavigation(
+            document: document,
+            model: model,
+            dispatch: dispatch,
+          ),
+          _ReaderTools(document: document, model: model, dispatch: dispatch),
         ],
       ),
+    );
+  }
+}
+
+class _ReaderUnitNavigation extends StatelessWidget {
+  const _ReaderUnitNavigation({
+    required this.document,
+    required this.model,
+    required this.dispatch,
+  });
+
+  final FlutterDocumentSummary document;
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    if (document.logicalUnitCount <= BigInt.one) return const SizedBox.shrink();
+    return Semantics(
+      container: true,
+      label:
+          '${document.format == FlutterBookFormat.epub ? 'Chapter' : 'Page'} ${model.unit + 1} of ${document.logicalUnitCount}',
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            tooltip: 'Previous',
+            onPressed: model.unit > 0 && !model.relayoutBusy
+                ? () => dispatch(ReaderUnitRequested(model.unit - 1))
+                : null,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Text('${model.unit + 1} / ${document.logicalUnitCount}'),
+          IconButton(
+            tooltip: 'Next',
+            onPressed:
+                model.unit + 1 < document.logicalUnitCount.toInt() &&
+                    !model.relayoutBusy
+                ? () => dispatch(ReaderUnitRequested(model.unit + 1))
+                : null,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReaderTools extends StatelessWidget {
+  const _ReaderTools({
+    required this.document,
+    required this.model,
+    required this.dispatch,
+  });
+
+  final FlutterDocumentSummary document;
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!model.toolsVisible) return const SizedBox.shrink();
+    final locationBookmarked = model.bookmarks.any(
+      (bookmark) =>
+          bookmark.unit.toInt() == model.unit &&
+          bookmark.offset?.toInt() == model.readingOffset,
+    );
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (document.format != FlutterBookFormat.cbz)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: TextField(
+              decoration: InputDecoration(
+                isDense: true,
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search this document',
+                suffixIcon: model.searchBusy
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
+              ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: (query) => dispatch(ReaderSearchRequested(query)),
+            ),
+          ),
+        if (model.searchResults.isNotEmpty)
+          SizedBox(
+            height: 52,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: model.searchResults.length,
+              itemBuilder: (context, index) {
+                final result = model.searchResults[index];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ActionChip(
+                    label: Text(
+                      result.context,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onPressed: () => dispatch(
+                      ReaderUnitRequested(
+                        result.unit.toInt(),
+                        offset: result.offset.toInt(),
+                        length: result.length.toInt(),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        if (document.bookId != null)
+          SizedBox(
+            height: 48,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: model.bookmarks.length + 1,
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  return IconButton(
+                    tooltip: locationBookmarked
+                        ? 'Remove bookmark'
+                        : 'Bookmark this location',
+                    onPressed: model.bookmarkBusy
+                        ? null
+                        : () => dispatch(const ReaderBookmarkToggled()),
+                    icon: Icon(
+                      locationBookmarked
+                          ? Icons.bookmark
+                          : Icons.bookmark_border,
+                    ),
+                  );
+                }
+                final bookmark = model.bookmarks[index - 1];
+                return TextButton(
+                  onPressed: () => dispatch(
+                    ReaderBookmarkNavigated(
+                      bookmark.unit.toInt(),
+                      offset: bookmark.offset?.toInt(),
+                    ),
+                  ),
+                  child: Text('${bookmark.unit.toInt() + 1}'),
+                );
+              },
+            ),
+          ),
+        if (model.toolError case final error?)
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              error,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -1424,7 +1717,10 @@ class _SelectableSurface extends StatelessWidget {
                   anchor: model.anchor,
                   focus: model.focus,
                   savedSelections: model.savedSelections,
-                  annotations: model.annotations,
+                  annotations: model.annotations
+                      .where((item) => item.unit.toInt() == model.unit)
+                      .toList(growable: false),
+                  currentUnit: model.unit,
                   paintContent: false,
                 ),
               ),
@@ -1447,6 +1743,7 @@ class PagePainter extends CustomPainter {
     required this.focus,
     required this.savedSelections,
     required this.annotations,
+    this.currentUnit = 0,
     this.paintContent = true,
   });
 
@@ -1459,6 +1756,7 @@ class PagePainter extends CustomPainter {
   final int? focus;
   final List<ReaderSelection> savedSelections;
   final List<FlutterAnnotation> annotations;
+  final int currentUnit;
   final bool paintContent;
 
   @override
@@ -1496,7 +1794,8 @@ class PagePainter extends CustomPainter {
       );
     }
     for (final annotation in annotations) {
-      if (annotation.unit != BigInt.zero || annotation.textRange != null) {
+      if (annotation.unit.toInt() != currentUnit ||
+          annotation.textRange != null) {
         continue;
       }
       _paintRectangles(
@@ -1568,6 +1867,7 @@ class PagePainter extends CustomPainter {
       oldDelegate.paintContent != paintContent ||
       oldDelegate.anchor != anchor ||
       oldDelegate.focus != focus ||
+      oldDelegate.currentUnit != currentUnit ||
       oldDelegate.savedSelections != savedSelections ||
       oldDelegate.annotations != annotations;
 }

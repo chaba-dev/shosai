@@ -36,6 +36,20 @@ impl Default for SearchLimits {
     }
 }
 
+impl SearchLimits {
+    /// Conservative peak allocation for indexing one bounded text unit.
+    ///
+    /// Search simultaneously retains extracted UTF-8, a `Vec<char>`, folded
+    /// UTF-8, and an `(u32, u32)` boundary per source scalar. The factor also
+    /// covers geometric growth in those collections.
+    pub fn maximum_workspace_bytes(self) -> Option<usize> {
+        self.max_indexed_text_bytes
+            .checked_mul(20)?
+            .checked_add(self.max_result_bytes)
+            .and_then(|bytes| bytes.checked_add(self.max_query_bytes))
+    }
+}
+
 /// Cooperative cancellation shared with a background search worker.
 #[derive(Debug, Clone, Default)]
 pub struct SearchCancellation(Arc<AtomicBool>);
@@ -438,9 +452,12 @@ impl<'a> Search<'a> {
             return Ok(());
         }
 
-        let original: Vec<char> = text.chars().collect();
-        let mut text_folded = String::new();
-        let mut original_boundaries = vec![(0_u32, 0_u32)];
+        let scalar_count = text.chars().count();
+        let mut original = Vec::with_capacity(scalar_count);
+        original.extend(text.chars());
+        let mut text_folded = String::with_capacity(text.len());
+        let mut original_boundaries = Vec::with_capacity(scalar_count.saturating_add(1));
+        original_boundaries.push((0_u32, 0_u32));
         for (original_index, character) in original.iter().copied().enumerate() {
             self.check_cancelled()?;
             let folded_start = text_folded.len();
@@ -768,6 +785,23 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn workspace_covers_maximum_ascii_index_capacities() {
+        let limits = SearchLimits::default();
+        let ascii_scalars = limits.max_indexed_text_bytes;
+        let required = limits
+            .max_indexed_text_bytes
+            .checked_add(ascii_scalars * std::mem::size_of::<char>())
+            .and_then(|bytes| bytes.checked_add(limits.max_indexed_text_bytes))
+            .and_then(|bytes| {
+                bytes.checked_add((ascii_scalars + 1) * std::mem::size_of::<(u32, u32)>())
+            })
+            .and_then(|bytes| bytes.checked_add(limits.max_result_bytes))
+            .unwrap();
+
+        assert!(limits.maximum_workspace_bytes().unwrap() >= required);
     }
 
     #[test]

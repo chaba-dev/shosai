@@ -6,10 +6,12 @@ use shosai_core::annotations::AnnotationAssociationOutcome;
 use shosai_core::annotations::{AnnotationResolution, HighlightColor};
 use shosai_core::bridge::{
     AnnotationAssociationSourceDto, AnnotationAssociationSourcePageDto, AnnotationTextRange,
-    Bridge, BridgeAnnotation, BridgeError, BufferHandle, Cancellation, CreateAnnotationRequest,
-    DocumentHandle, OpenRequest, RenderRequest, SelectionHandle, SelectionSurface,
+    BookmarkDto, Bridge, BridgeAnnotation, BridgeError, BufferHandle, Cancellation,
+    CreateAnnotationRequest, DocumentHandle, ImportItemDto, LibraryBookDto, OpenRequest,
+    ReaderSettingsDto, ReadingStateDto, RenderRequest, SelectionHandle, SelectionSurface,
 };
 use shosai_core::library::BookFormat;
+use shosai_core::search::SearchMatch;
 use thiserror::Error;
 
 const MAX_CANCELLATIONS: usize = 64;
@@ -209,6 +211,147 @@ pub struct FlutterOpenRequest {
     pub format_hint: Option<FlutterBookFormat>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FlutterLibraryBook {
+    pub book_id: i64,
+    pub title: String,
+    pub author: Option<String>,
+    pub format: FlutterBookFormat,
+    pub path_key: String,
+    pub managed: bool,
+    pub progress: f64,
+    pub date_added: String,
+    pub last_read: Option<String>,
+}
+impl From<LibraryBookDto> for FlutterLibraryBook {
+    fn from(v: LibraryBookDto) -> Self {
+        Self {
+            book_id: v.book_id,
+            title: v.title,
+            author: v.author,
+            format: v.format.into(),
+            path_key: v.path_key,
+            managed: v.managed,
+            progress: v.progress,
+            date_added: v.date_added,
+            last_read: v.last_read,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct FlutterLibraryPage {
+    pub books: Vec<FlutterLibraryBook>,
+    pub has_more: bool,
+}
+#[derive(Debug, Clone)]
+pub struct FlutterImportItem {
+    pub path_key: String,
+    pub book: Option<FlutterLibraryBook>,
+    pub error: Option<String>,
+}
+impl From<ImportItemDto> for FlutterImportItem {
+    fn from(v: ImportItemDto) -> Self {
+        Self {
+            path_key: v.path_key,
+            book: v.book.map(Into::into),
+            error: v.error,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct FlutterSearchMatch {
+    pub unit: usize,
+    pub offset: usize,
+    pub length: usize,
+    pub context: String,
+}
+impl From<SearchMatch> for FlutterSearchMatch {
+    fn from(v: SearchMatch) -> Self {
+        Self {
+            unit: v.page,
+            offset: v.offset,
+            length: v.length,
+            context: v.context,
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct FlutterBookmark {
+    pub id: i64,
+    pub book_id: Option<i64>,
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub title: Option<String>,
+    pub note: Option<String>,
+    pub color: String,
+    pub created_at: String,
+}
+impl From<BookmarkDto> for FlutterBookmark {
+    fn from(v: BookmarkDto) -> Self {
+        Self {
+            id: v.id,
+            book_id: v.book_id,
+            unit: v.unit,
+            offset: v.offset,
+            title: v.title,
+            note: v.note,
+            color: v.color,
+            created_at: v.created_at,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlutterReadingState {
+    pub unit: usize,
+    pub offset: Option<usize>,
+    pub zoom: f32,
+}
+impl From<ReadingStateDto> for FlutterReadingState {
+    fn from(v: ReadingStateDto) -> Self {
+        Self {
+            unit: v.unit,
+            offset: v.offset,
+            zoom: v.zoom,
+        }
+    }
+}
+impl From<FlutterReadingState> for ReadingStateDto {
+    fn from(v: FlutterReadingState) -> Self {
+        Self {
+            unit: v.unit,
+            offset: v.offset,
+            zoom: v.zoom,
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlutterReaderSettings {
+    pub continuous: bool,
+    pub epub_font_size: f32,
+    pub epub_line_spacing: f32,
+    pub pdf_zoom: f32,
+}
+impl From<ReaderSettingsDto> for FlutterReaderSettings {
+    fn from(v: ReaderSettingsDto) -> Self {
+        Self {
+            continuous: v.continuous,
+            epub_font_size: v.epub_font_size,
+            epub_line_spacing: v.epub_line_spacing,
+            pdf_zoom: v.pdf_zoom,
+        }
+    }
+}
+impl From<FlutterReaderSettings> for ReaderSettingsDto {
+    fn from(v: FlutterReaderSettings) -> Self {
+        Self {
+            continuous: v.continuous,
+            epub_font_size: v.epub_font_size,
+            epub_line_spacing: v.epub_line_spacing,
+            pdf_zoom: v.pdf_zoom,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlutterDocumentHandle {
     pub registry: u64,
@@ -284,6 +427,7 @@ impl From<FlutterSelectionHandle> for SelectionHandle {
 #[derive(Debug, Clone)]
 pub struct FlutterDocumentSummary {
     pub handle: FlutterDocumentHandle,
+    pub book_id: Option<i64>,
     pub format: FlutterBookFormat,
     pub title: Option<String>,
     pub logical_unit_count: usize,
@@ -550,10 +694,175 @@ impl FlutterBridge {
             .await?;
         Ok(FlutterDocumentSummary {
             handle: summary.handle.into(),
+            book_id: summary.book_id,
             format: summary.format.into(),
             title: summary.title,
             logical_unit_count: summary.logical_unit_count,
         })
+    }
+
+    pub async fn library_page(
+        &self,
+        query: Option<String>,
+        format: Option<FlutterBookFormat>,
+        limit: u32,
+        offset: u32,
+        cancellation_id: u64,
+    ) -> Result<FlutterLibraryPage, FlutterBridgeError> {
+        self.bridge
+            .library_page_cancellable(
+                query,
+                format.map(Into::into),
+                limit,
+                offset,
+                self.cancellation(cancellation_id)?,
+            )
+            .await
+            .map(|v| FlutterLibraryPage {
+                books: v.books.into_iter().map(Into::into).collect(),
+                has_more: v.has_more,
+            })
+            .map_err(Into::into)
+    }
+
+    pub async fn import_paths(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation_id: u64,
+    ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
+        self.bridge
+            .import_paths(path_keys, managed, self.cancellation(cancellation_id)?)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(Into::into)
+    }
+
+    pub async fn open_library_book(
+        &self,
+        book_id: i64,
+        cancellation_id: u64,
+    ) -> Result<FlutterDocumentSummary, FlutterBridgeError> {
+        let v = self
+            .bridge
+            .open_library_book(book_id, self.cancellation(cancellation_id)?)
+            .await?;
+        Ok(FlutterDocumentSummary {
+            handle: v.handle.into(),
+            book_id: v.book_id,
+            format: v.format.into(),
+            title: v.title,
+            logical_unit_count: v.logical_unit_count,
+        })
+    }
+
+    pub async fn search_document(
+        &self,
+        document: FlutterDocumentHandle,
+        query: String,
+        cancellation_id: u64,
+    ) -> Result<Vec<FlutterSearchMatch>, FlutterBridgeError> {
+        self.bridge
+            .search_document(document.into(), query, self.cancellation(cancellation_id)?)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(Into::into)
+    }
+
+    pub async fn list_bookmarks(
+        &self,
+        book_id: i64,
+        cancellation_id: u64,
+    ) -> Result<Vec<FlutterBookmark>, FlutterBridgeError> {
+        self.bridge
+            .list_bookmarks_cancellable(book_id, self.cancellation(cancellation_id)?)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(Into::into)
+    }
+    pub async fn toggle_bookmark(
+        &self,
+        book_id: i64,
+        unit: usize,
+        offset: Option<usize>,
+        title: Option<String>,
+    ) -> Result<Option<FlutterBookmark>, FlutterBridgeError> {
+        self.bridge
+            .toggle_bookmark(book_id, unit, offset, title)
+            .await
+            .map(|v| v.map(Into::into))
+            .map_err(Into::into)
+    }
+    pub async fn update_bookmark(
+        &self,
+        id: i64,
+        title: Option<String>,
+        note: Option<String>,
+    ) -> Result<(), FlutterBridgeError> {
+        self.bridge
+            .update_bookmark(id, title, note)
+            .await
+            .map_err(Into::into)
+    }
+    pub async fn delete_bookmark(&self, id: i64) -> Result<(), FlutterBridgeError> {
+        self.bridge.delete_bookmark(id).await.map_err(Into::into)
+    }
+    pub async fn export_bookmarks(&self, book_id: i64) -> Result<String, FlutterBridgeError> {
+        self.bridge
+            .export_bookmarks(book_id)
+            .await
+            .map_err(Into::into)
+    }
+    pub async fn load_reading_state(
+        &self,
+        book_id: i64,
+        cancellation_id: u64,
+    ) -> Result<Option<FlutterReadingState>, FlutterBridgeError> {
+        self.bridge
+            .load_reading_state_cancellable(book_id, self.cancellation(cancellation_id)?)
+            .await
+            .map(|v| v.map(Into::into))
+            .map_err(Into::into)
+    }
+    pub async fn save_reading_state(
+        &self,
+        book_id: i64,
+        value: FlutterReadingState,
+        unit_count: u64,
+    ) -> Result<(), FlutterBridgeError> {
+        let unit_count = usize::try_from(unit_count).map_err(|_| FlutterBridgeError {
+            kind: FlutterBridgeErrorKind::InvalidRequest,
+            message: "unit count exceeds this platform's range".into(),
+        })?;
+        self.bridge
+            .save_reading_state_with_unit_count(book_id, value.into(), unit_count)
+            .await
+            .map_err(Into::into)
+    }
+    pub async fn load_reader_settings(
+        &self,
+        cancellation_id: u64,
+    ) -> Result<FlutterReaderSettings, FlutterBridgeError> {
+        self.bridge
+            .load_reader_settings_cancellable(self.cancellation(cancellation_id)?)
+            .await
+            .map(Into::into)
+            .map_err(Into::into)
+    }
+    pub async fn save_reader_settings(
+        &self,
+        value: FlutterReaderSettings,
+    ) -> Result<(), FlutterBridgeError> {
+        self.bridge
+            .save_reader_settings(value.into())
+            .await
+            .map_err(Into::into)
+    }
+    pub async fn remove_library_book(&self, book_id: i64) -> Result<bool, FlutterBridgeError> {
+        self.bridge
+            .remove_library_book(book_id)
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn render_page(
