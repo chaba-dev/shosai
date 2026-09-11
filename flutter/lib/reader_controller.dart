@@ -382,7 +382,7 @@ enum ReaderContentState { loading, ready, failed }
 
 enum ReaderFocusTarget { surface, actions }
 
-enum _ReaderNoteTarget { selection, annotation }
+enum _ReaderNoteTarget { selection, annotation, bookmark }
 
 enum ReaderSelectionMovement {
   previousGrapheme,
@@ -501,6 +501,36 @@ final class _ReaderBookmarksFailed extends ReaderMessage {
 final class _ReaderBookmarkFinished extends ReaderMessage {
   const _ReaderBookmarkFinished(this.cancellation);
   final BigInt cancellation;
+}
+
+final class _ReaderBookmarkNoteEdited extends ReaderMessage {
+  const _ReaderBookmarkNoteEdited({
+    required this.generation,
+    required this.revision,
+    required this.bookId,
+    required this.unit,
+    required this.offset,
+    required this.bookmarkId,
+    required this.note,
+  });
+  final int generation;
+  final int revision;
+  final int bookId;
+  final int unit;
+  final int? offset;
+  final int? bookmarkId;
+  final String? note;
+}
+
+final class _ReaderBookmarkNoteEditFailed extends ReaderMessage {
+  const _ReaderBookmarkNoteEditFailed(
+    this.generation,
+    this.revision,
+    this.error,
+  );
+  final int generation;
+  final int revision;
+  final String error;
 }
 
 final class _ReaderReadingStateSaveFailed extends ReaderMessage {
@@ -976,6 +1006,7 @@ final class ReaderController implements Listenable {
     double initialScale = 1,
     double initialLineSpacing = 1.5,
     NoteEditor? noteEditor,
+    NoteEditor? bookmarkNoteEditor,
     NoteEditorCanceller? noteEditorCanceller,
     AnnotationAssociationPicker? annotationAssociationPicker,
     AnnotationAssociationPickerCanceller? annotationAssociationPickerCanceller,
@@ -986,6 +1017,8 @@ final class ReaderController implements Listenable {
   }) : _bridge = bridge,
        _decoder = decoder,
        _noteEditor = noteEditor ?? ((_) async => null),
+       _bookmarkNoteEditor =
+           bookmarkNoteEditor ?? noteEditor ?? ((_) async => null),
        _noteEditorCanceller = noteEditorCanceller ?? (() {}),
        _annotationAssociationPicker =
            annotationAssociationPicker ??
@@ -1004,6 +1037,7 @@ final class ReaderController implements Listenable {
   final FlutterBridge _bridge;
   final PageDecoder _decoder;
   final NoteEditor _noteEditor;
+  final NoteEditor _bookmarkNoteEditor;
   final NoteEditorCanceller _noteEditorCanceller;
   final AnnotationAssociationPicker _annotationAssociationPicker;
   final AnnotationAssociationPickerCanceller
@@ -1172,6 +1206,13 @@ final class ReaderController implements Listenable {
         _activeBridgeOperations -= 1;
         _recoverIfIdle();
         _disposeBridgeIfIdle();
+      case _ReaderBookmarkNoteEdited():
+        _bookmarkNoteEdited(message);
+      case _ReaderBookmarkNoteEditFailed():
+        if (_isCurrent(message.generation) &&
+            message.revision == _bookmarkRevision) {
+          _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
+        }
       case _ReaderReadingStateSaveFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _readingStateSaveRevision &&
@@ -2018,79 +2059,92 @@ final class ReaderController implements Listenable {
     }
     final revision = ++_bookmarkRevision;
     final generation = _model.generation;
-    late final BigInt cancellation;
-    try {
-      cancellation = _bridge.createCancellation();
-    } catch (error) {
-      _emit(_model.copyWith(toolError: error.toString()));
-      return;
-    }
-    _toolCancellations.add(cancellation);
-    _activeBridgeOperations += 1;
+    final unit = _model.unit;
+    final offset = _model.readingOffset;
+    final existing = _model.bookmarks
+        .where(
+          (bookmark) =>
+              bookmark.unit.toInt() == unit &&
+              bookmark.offset?.toInt() == offset,
+        )
+        .firstOrNull;
     _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
-    unawaited(() async {
-      try {
-        await _bridge.toggleBookmark(
-          bookId: bookId,
-          unit: BigInt.from(_model.unit),
-          offset: _model.readingOffset == null
-              ? null
-              : BigInt.from(_model.readingOffset!),
-        );
-        final bookmarks = await _bridge.listBookmarks(
-          bookId: bookId,
-          cancellationId: cancellation,
-        );
-        dispatch(_ReaderBookmarksCompleted(generation, revision, bookmarks));
-      } catch (error) {
-        dispatch(
-          _ReaderBookmarksFailed(generation, revision, error.toString()),
-        );
-      } finally {
-        dispatch(_ReaderBookmarkFinished(cancellation));
-      }
-    }());
+    _startBookmarkMutation(
+      generation: generation,
+      revision: revision,
+      bookId: bookId,
+      mutation: () => existing == null
+          ? _bridge.toggleBookmark(
+              bookId: bookId,
+              unit: BigInt.from(unit),
+              offset: offset == null ? null : BigInt.from(offset),
+            )
+          : _bridge.deleteBookmark(id: existing.id),
+    );
   }
 
   void _bookmarkNoteRequested(FlutterBookmark? bookmark) {
     if (_model.bookmarkBusy || _closing || _suspended || _recovering) return;
     final generation = _model.generation;
     final revision = ++_bookmarkRevision;
+    final bookId = _model.document?.bookId;
+    final unit = _model.unit;
+    final offset = _model.readingOffset;
+    if (bookId == null) return;
     _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    _activeNoteEditor = _ReaderNoteTarget.bookmark;
+    _activeNoteEditorRevision = revision;
     unawaited(() async {
       try {
-        final note = await _noteEditor(bookmark?.note);
-        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
-        if (note == null) {
-          _emit(_model.copyWith(bookmarkBusy: false));
-          return;
-        }
-        final bookId = _model.document?.bookId;
-        if (bookId == null) return;
-        if (bookmark == null) {
-          final created = await _bridge.toggleBookmark(
+        final note = await _bookmarkNoteEditor(bookmark?.note);
+        dispatch(
+          _ReaderBookmarkNoteEdited(
+            generation: generation,
+            revision: revision,
             bookId: bookId,
-            unit: BigInt.from(_model.unit),
-            offset: _model.readingOffset == null
-                ? null
-                : BigInt.from(_model.readingOffset!),
-          );
-          if (created != null) {
-            await _bridge.updateBookmark(id: created.id, note: note);
-          }
-        } else {
-          await _bridge.updateBookmark(id: bookmark.id, note: note);
-        }
-        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
-        _reloadBookmarks(generation, revision, bookId);
+            unit: unit,
+            offset: offset,
+            bookmarkId: bookmark?.id,
+            note: note,
+          ),
+        );
       } catch (error) {
-        if (_isCurrent(generation) && revision == _bookmarkRevision) {
-          _emit(
-            _model.copyWith(bookmarkBusy: false, toolError: error.toString()),
-          );
-        }
+        dispatch(
+          _ReaderBookmarkNoteEditFailed(generation, revision, error.toString()),
+        );
+      } finally {
+        dispatch(_ReaderNoteEditorFinished(revision));
       }
     }());
+  }
+
+  void _bookmarkNoteEdited(_ReaderBookmarkNoteEdited message) {
+    if (!_isCurrent(message.generation) ||
+        message.revision != _bookmarkRevision) {
+      return;
+    }
+    if (message.note == null) {
+      _emit(_model.copyWith(bookmarkBusy: false));
+      return;
+    }
+    _startBookmarkMutation(
+      generation: message.generation,
+      revision: message.revision,
+      bookId: message.bookId,
+      mutation: () => message.bookmarkId == null
+          ? _bridge.toggleBookmark(
+              bookId: message.bookId,
+              unit: BigInt.from(message.unit),
+              offset: message.offset == null
+                  ? null
+                  : BigInt.from(message.offset!),
+              note: message.note,
+            )
+          : _bridge.updateBookmarkNote(
+              id: message.bookmarkId!,
+              note: message.note,
+            ),
+    );
   }
 
   void _bookmarkDeleted(int id) {
@@ -2099,22 +2153,20 @@ final class ReaderController implements Listenable {
     final generation = _model.generation;
     final revision = ++_bookmarkRevision;
     _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
-    unawaited(() async {
-      try {
-        await _bridge.deleteBookmark(id: id);
-        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
-        _reloadBookmarks(generation, revision, bookId);
-      } catch (error) {
-        if (_isCurrent(generation) && revision == _bookmarkRevision) {
-          _emit(
-            _model.copyWith(bookmarkBusy: false, toolError: error.toString()),
-          );
-        }
-      }
-    }());
+    _startBookmarkMutation(
+      generation: generation,
+      revision: revision,
+      bookId: bookId,
+      mutation: () => _bridge.deleteBookmark(id: id),
+    );
   }
 
-  void _reloadBookmarks(int generation, int revision, int bookId) {
+  void _startBookmarkMutation({
+    required int generation,
+    required int revision,
+    required int bookId,
+    required Future<Object?> Function() mutation,
+  }) {
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -2126,6 +2178,7 @@ final class ReaderController implements Listenable {
     _activeBridgeOperations += 1;
     unawaited(() async {
       try {
+        await mutation();
         final items = await _bridge.listBookmarks(
           bookId: bookId,
           cancellationId: cancellation,
@@ -3564,6 +3617,9 @@ final class ReaderController implements Listenable {
     if (_suspended || _closing) return;
     _suspended = true;
     if (_model.document == null && !_model.busy) return;
+    final bookmarkNotice = _activeNoteEditor == _ReaderNoteTarget.bookmark
+        ? 'The bookmark note was not saved because the app was suspended. Try again.'
+        : _model.toolError;
     switch (_activeNoteEditor) {
       case _ReaderNoteTarget.selection:
         _recoverySelectionNotice =
@@ -3571,6 +3627,7 @@ final class ReaderController implements Listenable {
       case _ReaderNoteTarget.annotation:
         _recoveryAnnotationNotice =
             'The note was not saved because the app was suspended. Try again.';
+      case _ReaderNoteTarget.bookmark:
       case null:
         break;
     }
@@ -3602,6 +3659,9 @@ final class ReaderController implements Listenable {
         busy: true,
         relayoutBusy: false,
         relayoutPending: false,
+        searchBusy: false,
+        bookmarkBusy: false,
+        toolError: bookmarkNotice,
         annotationOperations: const {},
         selectionPhase: ReaderSelectionPhase.idle,
         anchor: null,

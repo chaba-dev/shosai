@@ -1231,7 +1231,7 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
         .unwrap();
     let bookmarks = BookmarkStore::new(store.pool().clone());
     bookmarks
-        .toggle_for_book_at_async(book.id, &old_path, 2, Some(7), None)
+        .toggle_for_book_at_async(book.id, &old_path, 2, Some(7), None, None)
         .await
         .unwrap();
     let destination = dir.path().join("external").join("Shosai");
@@ -1260,7 +1260,7 @@ async fn relocating_managed_books_preserves_identity_state_and_bookmarks() {
         .remove(0);
     assert_eq!(PathBuf::from(bookmark.file_path), changes[0].new_path);
     let bookmark = bookmarks
-        .toggle_for_book_at_async(book.id, &old_path, 4, Some(9), None)
+        .toggle_for_book_at_async(book.id, &old_path, 4, Some(9), None, None)
         .await
         .unwrap()
         .expect("bookmark should be added using the stable book identity");
@@ -1438,7 +1438,7 @@ async fn relink_preserves_stable_identity_reading_state_and_bookmarks() {
         .unwrap();
     let bookmarks = BookmarkStore::new(store.pool().clone());
     bookmarks
-        .toggle_for_book_at_async(book.id, &original, 2, Some(7), None)
+        .toggle_for_book_at_async(book.id, &original, 2, Some(7), None, None)
         .await
         .unwrap();
     std::fs::rename(&original, &replacement).unwrap();
@@ -1567,7 +1567,7 @@ async fn relink_merges_state_and_bookmark_aliases_at_the_replacement_path() {
 
     let bookmarks = BookmarkStore::new(store.pool().clone());
     bookmarks
-        .toggle_for_book_at_async(book.id, &original, 3, Some(7), None)
+        .toggle_for_book_at_async(book.id, &original, 3, Some(7), None, None)
         .await
         .unwrap();
     bookmarks
@@ -1840,7 +1840,7 @@ async fn removing_a_managed_book_deletes_its_private_copy() {
         .unwrap();
     let bookmarks = BookmarkStore::new(store.pool().clone());
     bookmarks
-        .toggle_for_book_at_async(book.id, &managed_path, 2, Some(7), None)
+        .toggle_for_book_at_async(book.id, &managed_path, 2, Some(7), None, None)
         .await
         .unwrap();
 

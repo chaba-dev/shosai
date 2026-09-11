@@ -1586,15 +1586,19 @@ impl Bridge {
         unit: usize,
         offset: Option<usize>,
         title: Option<String>,
+        note: Option<String>,
     ) -> Result<Option<BookmarkDto>, BridgeError> {
         if unit > i64::MAX as usize
             || offset.is_some_and(|value| value > i64::MAX as usize)
             || title
                 .as_ref()
                 .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_TITLE_BYTES)
+            || note
+                .as_ref()
+                .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_NOTE_BYTES)
         {
             return Err(BridgeError::InvalidRequest(
-                "bookmark title exceeds its byte limit".into(),
+                "bookmark fields exceed their byte limits".into(),
             ));
         }
         let store = self.state_store().await?;
@@ -1605,6 +1609,7 @@ impl Bridge {
                 unit,
                 offset,
                 title.as_deref(),
+                note.as_deref(),
             )
             .await
             .map(|v| v.map(Into::into))
@@ -1632,6 +1637,26 @@ impl Bridge {
         let bookmarks = BookmarkStore::new(store.pool().clone());
         bookmarks
             .update_fields_async(id, title.as_deref(), note.as_deref())
+            .await
+            .map_err(bookmark_storage_error)
+    }
+
+    pub async fn update_bookmark_note(
+        &self,
+        id: i64,
+        note: Option<String>,
+    ) -> Result<(), BridgeError> {
+        if note
+            .as_ref()
+            .is_some_and(|value| value.len() > crate::bookmarks::MAX_BOOKMARK_NOTE_BYTES)
+        {
+            return Err(BridgeError::InvalidRequest(
+                "bookmark note exceeds its byte limit".into(),
+            ));
+        }
+        let store = self.state_store().await?;
+        BookmarkStore::new(store.pool().clone())
+            .update_note_async(id, note.as_deref())
             .await
             .map_err(bookmark_storage_error)
     }
@@ -8075,7 +8100,7 @@ mod tests {
             .unwrap();
         let book_id = imported[0].book.as_ref().unwrap().book_id;
         let bookmark = bridge
-            .toggle_bookmark(book_id, 0, None, Some("before".into()))
+            .toggle_bookmark(book_id, 0, None, Some("before".into()), None)
             .await
             .unwrap()
             .unwrap();
@@ -8093,6 +8118,42 @@ mod tests {
         let stored = bridge.list_bookmarks(book_id).await.unwrap();
         assert_eq!(stored[0].title.as_deref(), Some("before"));
         assert_eq!(stored[0].note, None);
+
+        bridge
+            .update_bookmark_note(bookmark.id, Some("note".into()))
+            .await
+            .unwrap();
+        let stored = bridge.list_bookmarks(book_id).await.unwrap();
+        assert_eq!(stored[0].title.as_deref(), Some("before"));
+        assert_eq!(stored[0].note.as_deref(), Some("note"));
+    }
+
+    #[tokio::test]
+    async fn bookmark_note_is_created_atomically() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        let bookmark = bridge
+            .toggle_bookmark(book_id, 3, Some(17), None, Some("draft".into()))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(bookmark.unit, 3);
+        assert_eq!(bookmark.offset, Some(17));
+        assert_eq!(bookmark.note.as_deref(), Some("draft"));
+        let stored = bridge.list_bookmarks(book_id).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].note.as_deref(), Some("draft"));
     }
 
     #[test]
@@ -8221,7 +8282,7 @@ mod tests {
             Err(BridgeError::ResourceNotFound(_))
         ));
         assert!(matches!(
-            bridge.toggle_bookmark(-1, 0, None, None).await,
+            bridge.toggle_bookmark(-1, 0, None, None, None).await,
             Err(BridgeError::ResourceNotFound(_))
         ));
     }

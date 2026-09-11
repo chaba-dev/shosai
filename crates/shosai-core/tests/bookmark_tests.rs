@@ -528,7 +528,7 @@ async fn stable_book_toggle_reports_a_missing_book() {
     let (store, _dir) = temp_store().await;
 
     let error = store
-        .toggle_for_book_at_async(404, &PathBuf::from("/stale.epub"), 0, None, None)
+        .toggle_for_book_at_async(404, &PathBuf::from("/stale.epub"), 0, None, None, None)
         .await
         .unwrap_err();
 
@@ -584,6 +584,7 @@ async fn stable_book_toggle_reconciles_path_only_bookmarks_before_counting() {
             MAX_BOOKMARKS_PER_BOOK,
             None,
             None,
+            None,
         )
         .await
         .unwrap_err();
@@ -624,7 +625,7 @@ async fn stable_book_toggle_claims_path_only_aliases() {
         .unwrap();
 
     store
-        .toggle_for_book_at_async(book_id, &path, 2, None, None)
+        .toggle_for_book_at_async(book_id, &path, 2, None, None, None)
         .await
         .unwrap();
 
@@ -663,7 +664,7 @@ async fn stable_book_toggle_ignores_path_aliases_for_other_content() {
 
     assert!(
         store
-            .toggle_for_book_at_async(book_id, &path, 2, None, None)
+            .toggle_for_book_at_async(book_id, &path, 2, None, None, None)
             .await
             .unwrap()
             .is_some()
@@ -726,13 +727,13 @@ async fn concurrent_stable_book_toggles_are_linearizable() {
         let path = path.clone();
         async move {
             first
-                .toggle_for_book_at_async(book_id, &path, 1, None, None)
+                .toggle_for_book_at_async(book_id, &path, 1, None, None, None)
                 .await
         }
     });
     let second_toggle = tokio::spawn(async move {
         second
-            .toggle_for_book_at_async(book_id, &path, 1, None, None)
+            .toggle_for_book_at_async(book_id, &path, 1, None, None, None)
             .await
     });
 

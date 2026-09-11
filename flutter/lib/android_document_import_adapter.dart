@@ -103,6 +103,7 @@ final class AndroidDocumentImportAdapter {
   }) : _channel = channel;
 
   final AndroidDocumentImportChannel _channel;
+  final Set<String> _pendingReleases = {};
 
   Future<DocumentImportCapabilities> capabilities() async {
     final value = _map(await _channel.invoke('capabilities'));
@@ -141,6 +142,7 @@ final class AndroidDocumentImportAdapter {
     required String operationId,
   }) async {
     try {
+      await retryPendingReleases();
       final value = _map(
         await _channel.invoke('acquire', {
           'token': document.token,
@@ -162,8 +164,21 @@ final class AndroidDocumentImportAdapter {
   Future<void> cancel(String operationId) =>
       _channel.invoke('cancel', {'operationId': operationId});
 
-  Future<void> release(String releaseToken) =>
-      _channel.invoke('release', {'releaseToken': releaseToken});
+  Future<void> release(String releaseToken) async {
+    _pendingReleases.add(releaseToken);
+    await _channel.invoke('release', {'releaseToken': releaseToken});
+    _pendingReleases.remove(releaseToken);
+  }
+
+  Future<void> retryPendingReleases() async {
+    for (final token in _pendingReleases.toList(growable: false)) {
+      try {
+        await release(token);
+      } catch (_) {
+        // Keep ownership so a later operation can retry cleanup.
+      }
+    }
+  }
 
   static Map<Object?, Object?> _map(Object? value) =>
       value as Map<Object?, Object?>;

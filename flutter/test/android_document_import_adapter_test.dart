@@ -87,4 +87,19 @@ void main() {
     expect(channel.calls.last.$1, 'cancel');
     expect(channel.calls.last.$2, containsPair('operationId', 'op'));
   });
+
+  test('failed release ownership is retained and retried', () async {
+    final channel = FakeChannel()
+      ..replies['release'] = PlatformException(code: 'read_failed');
+    final adapter = AndroidDocumentImportAdapter(channel: channel);
+
+    await expectLater(
+      adapter.release('release-1'),
+      throwsA(isA<PlatformException>()),
+    );
+    channel.replies['release'] = null;
+    await adapter.retryPendingReleases();
+
+    expect(channel.calls.where((call) => call.$1 == 'release').length, 2);
+  });
 }

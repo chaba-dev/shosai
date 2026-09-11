@@ -833,9 +833,10 @@ impl FlutterBridge {
         unit: usize,
         offset: Option<usize>,
         title: Option<String>,
+        note: Option<String>,
     ) -> Result<Option<FlutterBookmark>, FlutterBridgeError> {
         self.bridge
-            .toggle_bookmark(book_id, unit, offset, title)
+            .toggle_bookmark(book_id, unit, offset, title, note)
             .await
             .map(|v| v.map(Into::into))
             .map_err(Into::into)
@@ -848,6 +849,16 @@ impl FlutterBridge {
     ) -> Result<(), FlutterBridgeError> {
         self.bridge
             .update_bookmark(id, title, note)
+            .await
+            .map_err(Into::into)
+    }
+    pub async fn update_bookmark_note(
+        &self,
+        id: i64,
+        note: Option<String>,
+    ) -> Result<(), FlutterBridgeError> {
+        self.bridge
+            .update_bookmark_note(id, note)
             .await
             .map_err(Into::into)
     }
