@@ -2454,6 +2454,63 @@ void main() {
     await bridge.disposed.future;
   });
 
+  testWidgets('PDF fit modes and reader modes select distinct presentations', (
+    tester,
+  ) async {
+    Future<void> verify({
+      required double zoom,
+      required bool continuous,
+      required String fitKey,
+      required String modeKey,
+    }) async {
+      final bridge = _ControlledBridge(
+        format: FlutterBookFormat.pdf,
+        immediateLists: true,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            initialPath: '/books/book.pdf',
+            initialSettings: FlutterReaderSettings(
+              continuous: continuous,
+              theme: 'light',
+              epubFontSize: 18,
+              epubLineSpacing: 1.5,
+              pdfZoom: zoom,
+            ),
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(ValueKey(fitKey)), findsOneWidget);
+      expect(find.byKey(ValueKey(modeKey)), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    }
+
+    await verify(
+      zoom: 0,
+      continuous: false,
+      fitKey: 'reader-fit-contain',
+      modeKey: 'reader-paginated-presentation',
+    );
+    await verify(
+      zoom: -1,
+      continuous: false,
+      fitKey: 'reader-fit-fitWidth',
+      modeKey: 'reader-paginated-presentation',
+    );
+    await verify(
+      zoom: 0,
+      continuous: true,
+      fitKey: 'reader-fit-contain',
+      modeKey: 'reader-continuous-presentation',
+    );
+  });
+
   testWidgets('reader applies the persisted dark theme', (tester) async {
     final bridge = _ControlledBridge(immediateLists: true);
     await tester.pumpWidget(
@@ -2474,6 +2531,33 @@ void main() {
 
     final scaffoldContext = tester.element(find.byType(Scaffold));
     expect(Theme.of(scaffoldContext).brightness, Brightness.dark);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('persisted EPUB line spacing reaches native layout', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(immediateLists: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.epub',
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'light',
+            epubFontSize: 18,
+            epubLineSpacing: 2.25,
+            pdfZoom: 0,
+          ),
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(bridge.selectionLayouts.first.lineSpacing, 2.25);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -5593,6 +5677,71 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('bookmarks support note creation, editing, and deletion', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final edits = Queue<String?>.from(['first note', 'edited note']);
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      noteEditor: (_) async => edits.removeFirst(),
+    );
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+    final bookmark = _bookmark(11, note: 'first note');
+    bridge.bookmarkToggleCompleters.add(
+      Completer<FlutterBookmark?>()..complete(bookmark),
+    );
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete([bookmark]),
+    );
+
+    controller.dispatch(const ReaderBookmarkNoteRequested());
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+    expect(bridge.updatedBookmarkNotes, [(11, 'first note')]);
+
+    final edited = _bookmark(11, note: 'edited note');
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete([edited]),
+    );
+    controller.dispatch(ReaderBookmarkNoteRequested(bookmark));
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+    expect(bridge.updatedBookmarkNotes.last, (11, 'edited note'));
+
+    bridge.bookmarkListCompleters.add(
+      Completer<List<FlutterBookmark>>()..complete(const []),
+    );
+    controller.dispatch(const ReaderBookmarkDeleted(11));
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+    expect(bridge.deletedBookmarkIds, [11]);
+    expect(controller.model.bookmarks, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test(
+    'stale bookmark note dialog cannot mutate a replacement document',
+    () async {
+      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final editor = Completer<String?>();
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        noteEditor: (_) => editor.future,
+      );
+      await _openControlled(controller, bridge, '/tmp/one.epub');
+      controller.dispatch(const ReaderBookmarkNoteRequested());
+      controller.dispatch(
+        const ReaderOpenRequested('/tmp/two.epub', bookId: 7),
+      );
+      editor.complete('must not leak');
+      await bridge.waitForOp(2);
+
+      expect(bridge.updatedBookmarkNotes, isEmpty);
+      expect(bridge.toggledBookmarkOffsets, isEmpty);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
   test(
     'tool completion resumes recovery with stable library identity',
     () async {
@@ -5930,6 +6079,15 @@ FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
   color: FlutterHighlightColor.yellow,
 );
 
+FlutterBookmark _bookmark(int id, {String? note}) => FlutterBookmark(
+  id: id,
+  bookId: 7,
+  unit: BigInt.zero,
+  note: note,
+  color: 'yellow',
+  createdAt: '2026-09-11T00:00:00Z',
+);
+
 FlutterAnnotationAssociationSource _associationSource([String suffix = '']) =>
     FlutterAnnotationAssociationSource(
       versionId: 'source-version${suffix.isEmpty ? '' : '-$suffix'}',
@@ -6091,6 +6249,8 @@ final class _ControlledBridge implements FlutterBridge {
   final savedReadingStates = <FlutterReadingState>[];
   final savedReadingStateUnitCounts = <BigInt>[];
   final toggledBookmarkOffsets = <BigInt?>[];
+  final updatedBookmarkNotes = <(int, String?)>[];
+  final deletedBookmarkIds = <int>[];
   final searchCompleters = Queue<Completer<List<FlutterSearchMatch>>>();
   final bookmarkListCompleters = Queue<Completer<List<FlutterBookmark>>>();
   final bookmarkToggleCompleters = Queue<Completer<FlutterBookmark?>>();
@@ -6213,6 +6373,20 @@ final class _ControlledBridge implements FlutterBridge {
   }
 
   @override
+  Future<void> updateBookmark({
+    required int id,
+    String? title,
+    String? note,
+  }) async {
+    updatedBookmarkNotes.add((id, note));
+  }
+
+  @override
+  Future<void> deleteBookmark({required int id}) async {
+    deletedBookmarkIds.add(id);
+  }
+
+  @override
   Future<void> saveReadingState({
     required int bookId,
     required FlutterReadingState value,
@@ -6232,12 +6406,18 @@ final class _ControlledBridge implements FlutterBridge {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   }) async {
     selectionCalls += 1;
     selectionUnits.add(unit.toInt());
     selectionLayouts.add(
-      ReaderLayout(scale: scale, width: width, fontSize: fontSize),
+      ReaderLayout(
+        scale: scale,
+        width: width,
+        fontSize: fontSize,
+        lineSpacing: lineSpacing,
+      ),
     );
     if (selectionFailure) throw StateError('selection failed');
     if (selectionCompleters.isNotEmpty) {
@@ -6762,10 +6942,16 @@ class _FakeBridge implements FlutterBridge {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   }) async {
     selectionLayouts.add(
-      ReaderLayout(scale: scale, width: width, fontSize: fontSize),
+      ReaderLayout(
+        scale: scale,
+        width: width,
+        fontSize: fontSize,
+        lineSpacing: lineSpacing,
+      ),
     );
     if (selectionCompleter case final pending?) return pending.future;
     return FlutterSelectionSurface(
@@ -6966,6 +7152,7 @@ final class _SequentialBridge implements FlutterBridge {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   }) async {
     return FlutterSelectionSurface(

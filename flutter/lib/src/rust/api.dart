@@ -152,6 +152,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   });
 

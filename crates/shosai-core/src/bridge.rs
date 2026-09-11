@@ -2018,6 +2018,7 @@ impl Bridge {
                 extraction_scale,
                 680.0,
                 18.0,
+                1.5,
                 false,
                 &cancellation,
                 request_slot,
@@ -2615,6 +2616,29 @@ impl Bridge {
         font_size: f32,
         cancellation: Cancellation,
     ) -> Result<SelectionSurface, BridgeError> {
+        self.selection_surface_with_line_spacing(
+            document,
+            unit,
+            scale,
+            width,
+            font_size,
+            1.5,
+            cancellation,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn selection_surface_with_line_spacing(
+        &self,
+        document: DocumentHandle,
+        unit: usize,
+        scale: f32,
+        width: f32,
+        font_size: f32,
+        line_spacing: f32,
+        cancellation: Cancellation,
+    ) -> Result<SelectionSurface, BridgeError> {
         check_cancelled(&cancellation)?;
         if !scale.is_finite()
             || scale <= 0.0
@@ -2622,6 +2646,8 @@ impl Bridge {
             || width <= 0.0
             || !font_size.is_finite()
             || font_size <= 0.0
+            || !line_spacing.is_finite()
+            || !(1.0..=3.0).contains(&line_spacing)
         {
             return Err(BridgeError::InvalidRequest(
                 "selection layout values must be finite and positive".to_owned(),
@@ -2640,6 +2666,7 @@ impl Bridge {
                 scale,
                 width,
                 font_size,
+                line_spacing,
                 true,
                 &cancellation,
                 request_slot,
@@ -2677,6 +2704,7 @@ impl Bridge {
         scale: f32,
         width: f32,
         font_size: f32,
+        line_spacing: f32,
         retain_raster: bool,
         cancellation: &Cancellation,
         request_slot: OwnedSemaphorePermit,
@@ -2730,6 +2758,7 @@ impl Bridge {
                     scale,
                     width,
                     font_size,
+                    line_spacing,
                     retain_raster,
                     &|| {
                         #[cfg(test)]
@@ -3094,12 +3123,14 @@ fn render(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn selection_surface(
     document: &OpenDocument,
     unit: usize,
     scale: f32,
     width: f32,
     font_size: f32,
+    line_spacing: f32,
     rasterize: bool,
     is_cancelled: &dyn Fn() -> bool,
 ) -> Result<SelectionExtraction, BridgeError> {
@@ -3194,7 +3225,7 @@ fn selection_surface(
                     link: None,
                 }],
                 max_width: width,
-                line_height: font_size * 1.5,
+                line_height: font_size * line_spacing,
                 scale,
                 align: EpubTextAlign::Left,
                 direction: EpubTextDirection::LeftToRight,
@@ -5312,7 +5343,16 @@ mod tests {
             .await
             .unwrap();
         let retained = bridge.document(document.handle).unwrap();
-        match selection_surface(&retained.document, 0, 1.0, 680.0, 1024.0, true, &|| false) {
+        match selection_surface(
+            &retained.document,
+            0,
+            1.0,
+            680.0,
+            1024.0,
+            1.5,
+            true,
+            &|| false,
+        ) {
             Err(BridgeError::BufferLimit) => {}
             Err(BridgeError::Render(message))
                 if message.contains("16777216-pixel per-call ceiling") => {}
@@ -5325,8 +5365,16 @@ mod tests {
                 extraction.surface.visual_lines.len(),
             ),
         }
-        let measurement =
-            selection_surface(&retained.document, 0, 1.0, 680.0, 1024.0, false, &|| false);
+        let measurement = selection_surface(
+            &retained.document,
+            0,
+            1.0,
+            680.0,
+            1024.0,
+            1.5,
+            false,
+            &|| false,
+        );
         if let Err(error) = measurement {
             panic!("measurement failed: {error:?}");
         }
@@ -6328,7 +6376,7 @@ mod tests {
         ));
 
         let extraction =
-            selection_surface(&document, 0, 2.0, 680.0, 18.0, true, &|| false).unwrap();
+            selection_surface(&document, 0, 2.0, 680.0, 18.0, 1.5, true, &|| false).unwrap();
 
         assert_eq!(extraction.raster_width, 1);
         assert!(extraction.raster_height > 0);

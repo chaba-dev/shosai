@@ -67,6 +67,8 @@ export 'package:shosai_flutter/reader_controller.dart'
         ReaderUnitRequested,
         ReaderSearchRequested,
         ReaderBookmarkToggled,
+        ReaderBookmarkNoteRequested,
+        ReaderBookmarkDeleted,
         ReaderBookmarkNavigated,
         ReaderToolsToggled,
         premultiplyRgba;
@@ -220,6 +222,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         initialScale: (widget.initialSettings?.pdfZoom ?? 0) > 0
             ? widget.initialSettings!.pdfZoom
             : View.of(context).devicePixelRatio,
+        initialLineSpacing: widget.initialSettings?.epubLineSpacing ?? 1.5,
         noteEditor: _editNote,
         noteEditorCanceller: _cancelNoteEditor,
         annotationAssociationPicker: _pickAnnotationAssociation,
@@ -668,6 +671,7 @@ class _ReaderContentPane extends StatelessWidget {
                   document: model.document!,
                   image: model.pageImage,
                   model: model,
+                  settings: settings,
                   dispatch: dispatch,
                   readerFocus: readerFocus,
                   actionFocus: actionFocus,
@@ -723,6 +727,7 @@ class _ReaderLayoutReporterState extends State<_ReaderLayoutReporter> {
         fontSize: MediaQuery.textScalerOf(
           context,
         ).scale(widget.settings?.epubFontSize ?? 18),
+        lineSpacing: widget.settings?.epubLineSpacing ?? 1.5,
       );
       if (layout != _observedLayout) {
         _observedLayout = layout;
@@ -763,6 +768,7 @@ class _DocumentView extends StatelessWidget {
     required this.document,
     required this.image,
     required this.model,
+    required this.settings,
     required this.dispatch,
     required this.readerFocus,
     required this.actionFocus,
@@ -771,6 +777,7 @@ class _DocumentView extends StatelessWidget {
   final FlutterDocumentSummary document;
   final ui.Image? image;
   final ReaderModel model;
+  final FlutterReaderSettings? settings;
   final void Function(ReaderMessage) dispatch;
   final FocusNode readerFocus;
   final FocusNode actionFocus;
@@ -1020,12 +1027,41 @@ class _DocumentView extends StatelessWidget {
                                   child: child,
                                 ),
                               ),
-                              child: _SelectableSurface(
-                                surface: surface,
-                                image: page,
-                                model: model,
-                                dispatch: dispatch,
-                              ),
+                              child: settings?.continuous == true
+                                  ? SingleChildScrollView(
+                                      key: const ValueKey(
+                                        'reader-continuous-presentation',
+                                      ),
+                                      child: SizedBox(
+                                        height: math.max(
+                                          constraints.maxHeight,
+                                          surface.height,
+                                        ),
+                                        child: _SelectableSurface(
+                                          surface: surface,
+                                          image: page,
+                                          model: model,
+                                          fit: _readerFit(
+                                            document.format,
+                                            settings,
+                                          ),
+                                          dispatch: dispatch,
+                                        ),
+                                      ),
+                                    )
+                                  : _SelectableSurface(
+                                      key: const ValueKey(
+                                        'reader-paginated-presentation',
+                                      ),
+                                      surface: surface,
+                                      image: page,
+                                      model: model,
+                                      fit: _readerFit(
+                                        document.format,
+                                        settings,
+                                      ),
+                                      dispatch: dispatch,
+                                    ),
                             ),
                           ),
                         ),
@@ -1131,6 +1167,14 @@ class _DocumentView extends StatelessWidget {
   }
 }
 
+BoxFit _readerFit(FlutterBookFormat format, FlutterReaderSettings? settings) {
+  if (format == FlutterBookFormat.epub) return BoxFit.contain;
+  final zoom = settings?.pdfZoom ?? 0;
+  if (zoom == -1) return BoxFit.fitWidth;
+  if (zoom > 0) return BoxFit.none;
+  return BoxFit.contain;
+}
+
 class _ReaderUnitNavigation extends StatelessWidget {
   const _ReaderUnitNavigation({
     required this.document,
@@ -1189,11 +1233,14 @@ class _ReaderTools extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!model.toolsVisible) return const SizedBox.shrink();
-    final locationBookmarked = model.bookmarks.any(
-      (bookmark) =>
-          bookmark.unit.toInt() == model.unit &&
-          bookmark.offset?.toInt() == model.readingOffset,
-    );
+    final currentBookmark = model.bookmarks
+        .where(
+          (bookmark) =>
+              bookmark.unit.toInt() == model.unit &&
+              bookmark.offset?.toInt() == model.readingOffset,
+        )
+        .firstOrNull;
+    final locationBookmarked = currentBookmark != null;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1251,29 +1298,63 @@ class _ReaderTools extends StatelessWidget {
               itemCount: model.bookmarks.length + 1,
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return IconButton(
-                    tooltip: locationBookmarked
-                        ? 'Remove bookmark'
-                        : 'Bookmark this location',
-                    onPressed: model.bookmarkBusy
-                        ? null
-                        : () => dispatch(const ReaderBookmarkToggled()),
-                    icon: Icon(
-                      locationBookmarked
-                          ? Icons.bookmark
-                          : Icons.bookmark_border,
-                    ),
+                  return Row(
+                    children: [
+                      IconButton(
+                        tooltip: locationBookmarked
+                            ? 'Remove bookmark'
+                            : 'Bookmark this location',
+                        onPressed: model.bookmarkBusy
+                            ? null
+                            : () => dispatch(const ReaderBookmarkToggled()),
+                        icon: Icon(
+                          locationBookmarked
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Bookmark with note',
+                        onPressed: model.bookmarkBusy
+                            ? null
+                            : () => dispatch(
+                                ReaderBookmarkNoteRequested(currentBookmark),
+                              ),
+                        icon: const Icon(Icons.bookmark_add_outlined),
+                      ),
+                    ],
                   );
                 }
                 final bookmark = model.bookmarks[index - 1];
-                return TextButton(
-                  onPressed: () => dispatch(
-                    ReaderBookmarkNavigated(
-                      bookmark.unit.toInt(),
-                      offset: bookmark.offset?.toInt(),
+                return Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => dispatch(
+                        ReaderBookmarkNavigated(
+                          bookmark.unit.toInt(),
+                          offset: bookmark.offset?.toInt(),
+                        ),
+                      ),
+                      child: Text(
+                        bookmark.note?.isNotEmpty == true
+                            ? '${bookmark.unit.toInt() + 1}: ${bookmark.note}'
+                            : '${bookmark.unit.toInt() + 1}',
+                      ),
                     ),
-                  ),
-                  child: Text('${bookmark.unit.toInt() + 1}'),
+                    PopupMenuButton<String>(
+                      tooltip: 'Bookmark actions',
+                      enabled: !model.bookmarkBusy,
+                      onSelected: (action) => dispatch(
+                        action == 'edit'
+                            ? ReaderBookmarkNoteRequested(bookmark)
+                            : ReaderBookmarkDeleted(bookmark.id),
+                      ),
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(value: 'edit', child: Text('Edit note')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete')),
+                      ],
+                    ),
+                  ],
                 );
               },
             ),
@@ -1605,15 +1686,18 @@ String _colorName(FlutterHighlightColor color) => switch (color) {
 
 class _SelectableSurface extends StatelessWidget {
   const _SelectableSurface({
+    super.key,
     required this.surface,
     required this.image,
     required this.model,
+    required this.fit,
     required this.dispatch,
   });
 
   final FlutterSelectionSurface surface;
   final ui.Image? image;
   final ReaderModel model;
+  final BoxFit fit;
   final void Function(ReaderMessage) dispatch;
 
   @override
@@ -1621,7 +1705,7 @@ class _SelectableSurface extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final fitted = applyBoxFit(
-          BoxFit.contain,
+          fit,
           Size(surface.width, surface.height),
           constraints.biggest,
         ).destination;
@@ -1718,18 +1802,22 @@ class _SelectableSurface extends StatelessWidget {
             children: [
               RepaintBoundary(
                 key: const ValueKey('reader-page-paint'),
-                child: CustomPaint(
-                  painter: _PageContentPainter(
-                    image: image,
-                    surface: surface,
-                    backgroundColor: pageColors(
-                      Theme.of(context).colorScheme,
-                    ).background,
-                    foregroundColor: pageColors(
-                      Theme.of(context).colorScheme,
-                    ).foreground,
-                    recolorImage:
-                        model.document?.format == FlutterBookFormat.epub,
+                child: KeyedSubtree(
+                  key: ValueKey('reader-fit-${fit.name}'),
+                  child: CustomPaint(
+                    painter: _PageContentPainter(
+                      image: image,
+                      surface: surface,
+                      backgroundColor: pageColors(
+                        Theme.of(context).colorScheme,
+                      ).background,
+                      foregroundColor: pageColors(
+                        Theme.of(context).colorScheme,
+                      ).foreground,
+                      recolorImage:
+                          model.document?.format == FlutterBookFormat.epub,
+                      fit: fit,
+                    ),
                   ),
                 ),
               ),
@@ -1745,6 +1833,7 @@ class _SelectableSurface extends StatelessWidget {
                   ).foreground,
                   recolorImage:
                       model.document?.format == FlutterBookFormat.epub,
+                  fit: fit,
                   anchor: model.anchor,
                   focus: model.focus,
                   savedSelections: model.savedSelections,
@@ -1770,6 +1859,7 @@ class PagePainter extends CustomPainter {
     required this.backgroundColor,
     required this.foregroundColor,
     required this.recolorImage,
+    this.fit = BoxFit.contain,
     required this.anchor,
     required this.focus,
     required this.savedSelections,
@@ -1783,6 +1873,7 @@ class PagePainter extends CustomPainter {
   final Color backgroundColor;
   final Color foregroundColor;
   final bool recolorImage;
+  final BoxFit fit;
   final int? anchor;
   final int? focus;
   final List<ReaderSelection> savedSelections;
@@ -1793,11 +1884,8 @@ class PagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final scale = (size.width / source.width).clamp(
-      0.0,
-      size.height / source.height,
-    );
-    final destinationSize = Size(source.width * scale, source.height * scale);
+    final destinationSize = applyBoxFit(fit, source.size, size).destination;
+    final scale = destinationSize.width / source.width;
     final destination = Alignment.center.inscribe(
       destinationSize,
       Offset.zero & size,
@@ -1898,6 +1986,7 @@ class PagePainter extends CustomPainter {
       oldDelegate.paintContent != paintContent ||
       oldDelegate.anchor != anchor ||
       oldDelegate.focus != focus ||
+      oldDelegate.fit != fit ||
       oldDelegate.currentUnit != currentUnit ||
       oldDelegate.savedSelections != savedSelections ||
       oldDelegate.annotations != annotations;
@@ -1910,6 +1999,7 @@ class _PageContentPainter extends CustomPainter {
     required this.backgroundColor,
     required this.foregroundColor,
     required this.recolorImage,
+    required this.fit,
   });
 
   final ui.Image? image;
@@ -1917,18 +2007,14 @@ class _PageContentPainter extends CustomPainter {
   final Color backgroundColor;
   final Color foregroundColor;
   final bool recolorImage;
+  final BoxFit fit;
 
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final scale = (size.width / source.width).clamp(
-      0.0,
-      size.height / source.height,
-    );
-    final destination = Alignment.center.inscribe(
-      Size(source.width * scale, source.height * scale),
-      Offset.zero & size,
-    );
+    final fitted = applyBoxFit(fit, source.size, size).destination;
+    final scale = fitted.width / source.width;
+    final destination = Alignment.center.inscribe(fitted, Offset.zero & size);
     canvas.save();
     canvas.translate(destination.left, destination.top);
     canvas.scale(scale);
@@ -1949,7 +2035,8 @@ class _PageContentPainter extends CustomPainter {
       oldDelegate.surface != surface ||
       oldDelegate.backgroundColor != backgroundColor ||
       oldDelegate.foregroundColor != foregroundColor ||
-      oldDelegate.recolorImage != recolorImage;
+      oldDelegate.recolorImage != recolorImage ||
+      oldDelegate.fit != fit;
 }
 
 void _paintPageContent(
