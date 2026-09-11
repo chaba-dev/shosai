@@ -262,6 +262,7 @@ abstract class RustLibApi extends BaseApi {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   });
 
@@ -1501,6 +1502,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   }) {
     return handler.executeNormal(
@@ -1515,7 +1517,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           var arg3 = cst_encode_f_32(scale);
           var arg4 = cst_encode_f_32(width);
           var arg5 = cst_encode_f_32(fontSize);
-          var arg6 = cst_encode_u_64(cancellationId);
+          var arg6 = cst_encode_f_32(lineSpacing);
+          var arg7 = cst_encode_u_64(cancellationId);
           return wire.wire__crate__api__FlutterBridge_selection_surface(
             port_,
             arg0,
@@ -1525,6 +1528,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             arg4,
             arg5,
             arg6,
+            arg7,
           );
         },
         codec: DcoCodec(
@@ -1539,6 +1543,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           scale,
           width,
           fontSize,
+          lineSpacing,
           cancellationId,
         ],
         apiImpl: this,
@@ -1556,6 +1561,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "scale",
           "width",
           "fontSize",
+          "lineSpacing",
           "cancellationId",
         ],
       );
@@ -4763,6 +4769,7 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     required double scale,
     required double width,
     required double fontSize,
+    required double lineSpacing,
     required BigInt cancellationId,
   }) => RustLib.instance.api.crateApiFlutterBridgeSelectionSurface(
     that: this,
@@ -4771,6 +4778,7 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     scale: scale,
     width: width,
     fontSize: fontSize,
+    lineSpacing: lineSpacing,
     cancellationId: cancellationId,
   );
 

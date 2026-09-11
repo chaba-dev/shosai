@@ -2941,6 +2941,7 @@ class RustLibWire implements BaseWire {
     double scale,
     double width,
     double font_size,
+    double line_spacing,
     int cancellation_id,
   ) {
     return _wire__crate__api__FlutterBridge_selection_surface(
@@ -2951,6 +2952,7 @@ class RustLibWire implements BaseWire {
       scale,
       width,
       font_size,
+      line_spacing,
       cancellation_id,
     );
   }
@@ -2963,6 +2965,7 @@ class RustLibWire implements BaseWire {
             ffi.UintPtr,
             ffi.Pointer<wire_cst_flutter_document_handle>,
             ffi.UintPtr,
+            ffi.Float,
             ffi.Float,
             ffi.Float,
             ffi.Float,
@@ -2980,6 +2983,7 @@ class RustLibWire implements BaseWire {
               int,
               ffi.Pointer<wire_cst_flutter_document_handle>,
               int,
+              double,
               double,
               double,
               double,
