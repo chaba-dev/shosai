@@ -163,6 +163,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt unit,
     BigInt? offset,
     String? title,
+    String? note,
   });
 
   Future<bool> updateAnnotation({
@@ -177,6 +178,8 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     String? title,
     String? note,
   });
+
+  Future<void> updateBookmarkNote({required PlatformInt64 id, String? note});
 
   /// Construct a bridge with a host-provided SQLite database path.
   static FlutterBridge withDatabasePath({required String databasePath}) =>

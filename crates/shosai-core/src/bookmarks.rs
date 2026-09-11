@@ -345,8 +345,10 @@ impl BookmarkStore {
         page: usize,
         location_offset: Option<usize>,
         title: Option<&str>,
+        note: Option<&str>,
     ) -> Result<Option<Bookmark>> {
         validate_optional_bytes(title, MAX_BOOKMARK_TITLE_BYTES, "bookmark title")?;
+        validate_optional_bytes(note, MAX_BOOKMARK_NOTE_BYTES, "bookmark note")?;
         let page = i64::try_from(page).context("bookmark page exceeds database range")?;
         let location_offset = location_offset
             .map(i64::try_from)
@@ -422,7 +424,7 @@ impl BookmarkStore {
             let row = sqlx::query(
                 "INSERT INTO bookmarks
                     (file_path, content_hash, book_id, page, location_offset, title, note, color)
-                 VALUES (?, ?, ?, ?, ?, ?, NULL, 'yellow')
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'yellow')
                  RETURNING id, file_path, book_id, page, location_offset, title, note, color,
                            created_at, 1 AS fields_valid",
             )
@@ -432,6 +434,7 @@ impl BookmarkStore {
             .bind(page)
             .bind(location_offset)
             .bind(title)
+            .bind(note)
             .fetch_one(&mut *transaction)
             .await
             .context("failed to add bookmark for book")?;
@@ -852,7 +855,14 @@ impl BookmarkStore {
         title: Option<&str>,
     ) -> Result<Option<Bookmark>> {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(self.toggle_for_book_at_async(book_id, file_path, page, location_offset, title))
+        rt.block_on(self.toggle_for_book_at_async(
+            book_id,
+            file_path,
+            page,
+            location_offset,
+            title,
+            None,
+        ))
     }
 
     pub fn list_for_file(&self, file_path: &Path, content_hash: &str) -> Result<Vec<Bookmark>> {

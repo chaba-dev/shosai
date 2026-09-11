@@ -224,6 +224,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             : View.of(context).devicePixelRatio,
         initialLineSpacing: widget.initialSettings?.epubLineSpacing ?? 1.5,
         noteEditor: _editNote,
+        bookmarkNoteEditor: _editBookmarkNote,
         noteEditorCanceller: _cancelNoteEditor,
         annotationAssociationPicker: _pickAnnotationAssociation,
         annotationAssociationPickerCanceller:
@@ -268,14 +269,23 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
-  Future<String?> _editNote(String? initialValue) async {
+  Future<String?> _editNote(String? initialValue) =>
+      _showNoteEditor(initialValue, title: 'Highlight note');
+
+  Future<String?> _editBookmarkNote(String? initialValue) =>
+      _showNoteEditor(initialValue, title: 'Bookmark note');
+
+  Future<String?> _showNoteEditor(
+    String? initialValue, {
+    required String title,
+  }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
     final route = DialogRoute<String>(
       context: context,
       builder: (context) => Theme(
         data: readerTheme,
-        child: _NoteDialog(initialValue: initialValue),
+        child: _NoteDialog(initialValue: initialValue, title: title),
       ),
     );
     _noteDialogRoute = route;
@@ -452,14 +462,19 @@ ThemeData _readerTheme(BuildContext context, String? theme) {
   final seed = theme == 'sepia'
       ? const Color(0xff8a6338)
       : parent.colorScheme.primary;
-  return parent.copyWith(
+  final colorScheme = ColorScheme.fromSeed(
+    seedColor: seed,
     brightness: brightness,
-    colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: brightness),
+  );
+  return ThemeData(
+    brightness: brightness,
+    colorScheme: colorScheme,
+    useMaterial3: parent.useMaterial3,
+    fontFamily: parent.textTheme.bodyMedium?.fontFamily,
+    fontFamilyFallback: parent.textTheme.bodyMedium?.fontFamilyFallback,
     scaffoldBackgroundColor: theme == 'sepia'
         ? const Color(0xfffff4d6)
-        : brightness == Brightness.dark
-        ? const Color(0xff121212)
-        : parent.scaffoldBackgroundColor,
+        : colorScheme.surface,
   );
 }
 
@@ -1626,8 +1641,9 @@ class _SelectionActionsLayout extends SingleChildLayoutDelegate {
 }
 
 class _NoteDialog extends StatefulWidget {
-  const _NoteDialog({required this.initialValue});
+  const _NoteDialog({required this.initialValue, required this.title});
   final String? initialValue;
+  final String title;
   @override
   State<_NoteDialog> createState() => _NoteDialogState();
 }
@@ -1644,7 +1660,7 @@ class _NoteDialogState extends State<_NoteDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Highlight note'),
+    title: Text(widget.title),
     content: TextField(controller: controller, autofocus: true),
     actions: [
       TextButton(

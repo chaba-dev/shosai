@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 988530407;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1241964668;
 
 // Section: executor
 
@@ -1595,6 +1595,7 @@ fn wire__crate__api__FlutterBridge_toggle_bookmark_impl(
     unit: impl CstDecode<usize>,
     offset: impl CstDecode<Option<usize>>,
     title: impl CstDecode<Option<String>>,
+    note: impl CstDecode<Option<String>>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -1608,6 +1609,7 @@ fn wire__crate__api__FlutterBridge_toggle_bookmark_impl(
             let api_unit = unit.cst_decode();
             let api_offset = offset.cst_decode();
             let api_title = title.cst_decode();
+            let api_note = note.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -1634,6 +1636,7 @@ fn wire__crate__api__FlutterBridge_toggle_bookmark_impl(
                             api_unit,
                             api_offset,
                             api_title,
+                            api_note,
                         )
                         .await?;
                         Ok(output_ok)
@@ -1746,6 +1749,58 @@ fn wire__crate__api__FlutterBridge_update_bookmark_impl(
                             &*api_that_guard,
                             api_id,
                             api_title,
+                            api_note,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_update_bookmark_note_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    id: impl CstDecode<i64>,
+    note: impl CstDecode<Option<String>>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_update_bookmark_note",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_id = id.cst_decode();
+            let api_note = note.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::update_bookmark_note(
+                            &*api_that_guard,
+                            api_id,
                             api_note,
                         )
                         .await?;
@@ -5513,9 +5568,10 @@ mod io {
         unit: usize,
         offset: *mut usize,
         title: *mut wire_cst_list_prim_u_8_strict,
+        note: *mut wire_cst_list_prim_u_8_strict,
     ) {
         wire__crate__api__FlutterBridge_toggle_bookmark_impl(
-            port_, that, book_id, unit, offset, title,
+            port_, that, book_id, unit, offset, title, note,
         )
     }
 
@@ -5542,6 +5598,16 @@ mod io {
         note: *mut wire_cst_list_prim_u_8_strict,
     ) {
         wire__crate__api__FlutterBridge_update_bookmark_impl(port_, that, id, title, note)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_update_bookmark_note(
+        port_: i64,
+        that: usize,
+        id: i64,
+        note: *mut wire_cst_list_prim_u_8_strict,
+    ) {
+        wire__crate__api__FlutterBridge_update_bookmark_note_impl(port_, that, id, note)
     }
 
     #[unsafe(no_mangle)]
