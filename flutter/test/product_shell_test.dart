@@ -108,6 +108,42 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('Book 59'), findsNothing);
     expect(bridge.coverRequests, contains(7));
+
+    await tester.tap(find.byTooltip('Refresh library'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
+    expect(bridge.coverRequests.where((bookId) => bookId == 7), hasLength(1));
+  });
+
+  testWidgets('library retries failed covers and bounds concurrent loads', (
+    tester,
+  ) async {
+    final bridge = _LibraryBridge(
+      books: List.generate(10, (index) => _book(index, 'Book $index')),
+    );
+    final first = Completer<Uint8List?>();
+    final covers = [first, ...List.generate(9, (_) => Completer<Uint8List?>())];
+    bridge.coverCompleters.addAll(covers);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(bridge.coverRequests.length, lessThanOrEqualTo(4));
+    first.completeError(StateError('temporary failure'));
+    await tester.pump();
+    await tester.pump();
+    expect(bridge.coverRequests.length, greaterThan(4));
+    for (final pending in covers) {
+      if (!pending.isCompleted) pending.complete(null);
+    }
+    await tester.pumpAndSettle();
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -356,6 +392,7 @@ void main() {
     await _waitUntil(() => bridge.queries.length >= 3);
 
     expect(bridge.queries.sublist(1), everyElement('current'));
+    expect(controller.canCancel, isFalse);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -501,6 +538,43 @@ void main() {
     },
   );
 
+  test('custom import runner preserves partial cancellation outcome', () async {
+    final bridge = _ControlledLibraryBridge();
+    var runnerCalls = 0;
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => LibraryImportSelection(
+        paths: const ['First.pdf', 'Second.pdf'],
+        managed: true,
+        runner: (runnerBridge, cancellation) async {
+          runnerCalls += 1;
+          expect(runnerBridge, same(bridge));
+          return FlutterImportReport(
+            imported: BigInt.one,
+            failed: BigInt.zero,
+            cancelled: true,
+            items: [
+              FlutterImportItem(pathKey: 'First.pdf', book: _book(1, 'First')),
+            ],
+          );
+        },
+      ),
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.queries.isNotEmpty);
+
+    expect(runnerCalls, 1);
+    expect(bridge.importCalls, 0);
+    expect(controller.model.error, 'Import cancelled after 1 books.');
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test('active import can be cancelled from product progress', () async {
     final bridge = _ControlledLibraryBridge();
     bridge.importCompleter = Completer<List<FlutterImportItem>>();
@@ -566,13 +640,26 @@ void main() {
       final bridge = _ControlledLibraryBridge();
       final importing = Completer<List<FlutterImportItem>>();
       bridge.importCompleter = importing;
-      final controller = _libraryController(bridge);
+      var adapterCancellations = 0;
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => const LibraryImportSelection(
+          paths: ['/tmp/book.pdf'],
+          managed: true,
+        ),
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+        cancelImportAdapter: () => adapterCancellations += 1,
+      );
       controller.dispatch(const LibraryImportRequested());
       await _waitUntil(() => bridge.importCalls == 1);
 
       controller.dispose();
       expect(bridge.isDisposed, isFalse);
       expect(bridge.cancelled, [BigInt.one]);
+      expect(adapterCancellations, 1);
       importing.completeError(StateError('cancelled'));
       await bridge.disposed.future;
 
@@ -854,6 +941,7 @@ class _LibraryBridge implements FlutterBridge {
   final FlutterReaderSettings settings;
   final Map<int, Uint8List> covers;
   final List<int> coverRequests = [];
+  final Queue<Completer<Uint8List?>> coverCompleters = Queue();
   FlutterBookFormat? lastFormat;
   bool disposed = false;
   FlutterReaderSettings? savedSettings;
@@ -909,6 +997,9 @@ class _LibraryBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     coverRequests.add(bookId);
+    if (coverCompleters.isNotEmpty) {
+      return coverCompleters.removeFirst().future;
+    }
     return covers[bookId];
   }
 

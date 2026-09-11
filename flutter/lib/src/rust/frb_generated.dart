@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 988530407;
+  int get rustContentHash => 1241964668;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -277,6 +277,7 @@ abstract class RustLibApi extends BaseApi {
     required BigInt unit,
     BigInt? offset,
     String? title,
+    String? note,
   });
 
   Future<bool> crateApiFlutterBridgeUpdateAnnotation({
@@ -291,6 +292,12 @@ abstract class RustLibApi extends BaseApi {
     required FlutterBridge that,
     required PlatformInt64 id,
     String? title,
+    String? note,
+  });
+
+  Future<void> crateApiFlutterBridgeUpdateBookmarkNote({
+    required FlutterBridge that,
+    required PlatformInt64 id,
     String? note,
   });
 
@@ -1605,6 +1612,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required BigInt unit,
     BigInt? offset,
     String? title,
+    String? note,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1617,6 +1625,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           var arg2 = cst_encode_usize(unit);
           var arg3 = cst_encode_opt_box_autoadd_usize(offset);
           var arg4 = cst_encode_opt_String(title);
+          var arg5 = cst_encode_opt_String(note);
           return wire.wire__crate__api__FlutterBridge_toggle_bookmark(
             port_,
             arg0,
@@ -1624,6 +1633,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             arg2,
             arg3,
             arg4,
+            arg5,
           );
         },
         codec: DcoCodec(
@@ -1631,7 +1641,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeToggleBookmarkConstMeta,
-        argValues: [that, bookId, unit, offset, title],
+        argValues: [that, bookId, unit, offset, title, note],
         apiImpl: this,
       ),
     );
@@ -1640,7 +1650,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeToggleBookmarkConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_toggle_bookmark",
-        argNames: ["that", "bookId", "unit", "offset", "title"],
+        argNames: ["that", "bookId", "unit", "offset", "title", "note"],
       );
 
   @override
@@ -1728,6 +1738,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_update_bookmark",
         argNames: ["that", "id", "title", "note"],
+      );
+
+  @override
+  Future<void> crateApiFlutterBridgeUpdateBookmarkNote({
+    required FlutterBridge that,
+    required PlatformInt64 id,
+    String? note,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_i_64(id);
+          var arg2 = cst_encode_opt_String(note);
+          return wire.wire__crate__api__FlutterBridge_update_bookmark_note(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_unit,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeUpdateBookmarkNoteConstMeta,
+        argValues: [that, id, note],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeUpdateBookmarkNoteConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_update_bookmark_note",
+        argNames: ["that", "id", "note"],
       );
 
   @override
@@ -4792,12 +4841,14 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     required BigInt unit,
     BigInt? offset,
     String? title,
+    String? note,
   }) => RustLib.instance.api.crateApiFlutterBridgeToggleBookmark(
     that: this,
     bookId: bookId,
     unit: unit,
     offset: offset,
     title: title,
+    note: note,
   );
 
   Future<bool> updateAnnotation({
@@ -4823,4 +4874,11 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     title: title,
     note: note,
   );
+
+  Future<void> updateBookmarkNote({required PlatformInt64 id, String? note}) =>
+      RustLib.instance.api.crateApiFlutterBridgeUpdateBookmarkNote(
+        that: this,
+        id: id,
+        note: note,
+      );
 }

@@ -3023,6 +3023,7 @@ class RustLibWire implements BaseWire {
     int unit,
     ffi.Pointer<ffi.UintPtr> offset,
     ffi.Pointer<wire_cst_list_prim_u_8_strict> title,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> note,
   ) {
     return _wire__crate__api__FlutterBridge_toggle_bookmark(
       port_,
@@ -3031,6 +3032,7 @@ class RustLibWire implements BaseWire {
       unit,
       offset,
       title,
+      note,
     );
   }
 
@@ -3043,6 +3045,7 @@ class RustLibWire implements BaseWire {
             ffi.Int64,
             ffi.UintPtr,
             ffi.Pointer<ffi.UintPtr>,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
             ffi.Pointer<wire_cst_list_prim_u_8_strict>,
           )
         >
@@ -3058,6 +3061,7 @@ class RustLibWire implements BaseWire {
               int,
               int,
               ffi.Pointer<ffi.UintPtr>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
             )
           >();
@@ -3146,6 +3150,44 @@ class RustLibWire implements BaseWire {
               int,
               int,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            )
+          >();
+
+  void wire__crate__api__FlutterBridge_update_bookmark_note(
+    int port_,
+    int that,
+    int id,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> note,
+  ) {
+    return _wire__crate__api__FlutterBridge_update_bookmark_note(
+      port_,
+      that,
+      id,
+      note,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_update_bookmark_notePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Int64,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_update_bookmark_note',
+      );
+  late final _wire__crate__api__FlutterBridge_update_bookmark_note =
+      _wire__crate__api__FlutterBridge_update_bookmark_notePtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              int,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
             )
           >();

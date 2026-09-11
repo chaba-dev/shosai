@@ -4868,6 +4868,7 @@ fn continue_bookmark_mutations(state: &mut State, tab_id: u64) -> Task<Message> 
                                 page,
                                 location_offset,
                                 None,
+                                None,
                             )
                             .await
                     } else {
