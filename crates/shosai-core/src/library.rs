@@ -2089,6 +2089,23 @@ impl Library {
         Ok(BookPage { books, has_more })
     }
 
+    /// Fetch one already-bounded cover without loading cover blobs into metadata pages.
+    pub async fn cover(&self, book_id: i64) -> Result<Option<Vec<u8>>> {
+        sqlx::query_scalar(
+            "SELECT CASE
+                 WHEN cover_blob IS NULL OR
+                      (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288)
+                 THEN cover_blob
+             END
+             FROM books WHERE id = ?",
+        )
+        .bind(book_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("failed to load library cover")
+        .map(Option::flatten)
+    }
+
     pub async fn metadata_page_cancellable(
         &self,
         query: Option<&str>,
@@ -3556,6 +3573,14 @@ fn scan_import_candidates(
     progress: &ImportDiscoveryProgress,
     sender: &tokio::sync::mpsc::Sender<ScannedImport>,
 ) {
+    let allowed_roots = if recursive {
+        roots
+            .iter()
+            .map(|root| canonical_path(root))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let mut pending = roots
         .into_iter()
         .rev()
@@ -3604,6 +3629,9 @@ fn scan_import_candidates(
             }
         };
         let path = canonical_path(&original_path);
+        if recursive && !allowed_roots.iter().any(|root| path.starts_with(root)) {
+            continue;
+        }
         let metadata = match std::fs::metadata(&path) {
             Ok(metadata) => metadata,
             Err(error) => {

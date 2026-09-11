@@ -83,16 +83,13 @@ void main() {
   testWidgets('library lazily renders bounded covers and recent activity', (
     tester,
   ) async {
+    final cover = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
     final bridge = _LibraryBridge(
+      covers: {7: cover},
       books: [
-        _book(
-          7,
-          'Recently Read',
-          cover: base64Decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-          ),
-          lastRead: '2026-09-10T12:00:00Z',
-        ),
+        _book(7, 'Recently Read', lastRead: '2026-09-10T12:00:00Z'),
         ...List.generate(60, (index) => _book(index + 8, 'Book $index')),
       ],
     );
@@ -110,6 +107,7 @@ void main() {
     expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('Book 59'), findsNothing);
+    expect(bridge.coverRequests, contains(7));
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -229,6 +227,96 @@ void main() {
     expect(find.text('No books match these filters.'), findsOneWidget);
   });
 
+  testWidgets('reader settings expose and persist complete product controls', (
+    tester,
+  ) async {
+    final bridge = _LibraryBridge();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Reader settings'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Reader theme'), findsOneWidget);
+    expect(find.text('Continuous reading'), findsOneWidget);
+    expect(find.text('EPUB text size'), findsOneWidget);
+    expect(find.text('EPUB line spacing'), findsOneWidget);
+    expect(find.text('PDF zoom'), findsOneWidget);
+
+    await tester.tap(find.text('Light'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Dark').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Continuous reading'));
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(bridge.savedSettings?.theme, 'dark');
+    expect(bridge.savedSettings?.continuous, isTrue);
+  });
+
+  testWidgets('reader settings accept a persisted custom PDF zoom', (
+    tester,
+  ) async {
+    final bridge = _LibraryBridge(
+      settings: const FlutterReaderSettings(
+        continuous: false,
+        theme: 'light',
+        epubFontSize: 18,
+        epubLineSpacing: 1.6,
+        pdfZoom: 2.75,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Reader settings'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('275% (custom)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'reader settings remain scrollable on a compact scaled viewport',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final bridge = _LibraryBridge();
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: MaterialApp(
+            home: ProductShell(
+              bridgeFactory: () => bridge,
+              readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Reader settings'));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byType(SingleChildScrollView), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test('stale library loads cannot publish under a newer query', () async {
     final bridge = _ControlledLibraryBridge();
     final first = Completer<FlutterLibraryPage>();
@@ -271,6 +359,60 @@ void main() {
     controller.dispose();
     await bridge.disposed.future;
   });
+
+  test(
+    'partial import refreshes committed books while reporting failure',
+    () async {
+      final bridge = _ControlledLibraryBridge();
+      final importing = Completer<List<FlutterImportItem>>();
+      bridge.importCompleter = importing;
+      final controller = _libraryController(bridge);
+      controller.dispatch(const LibraryStarted());
+      await _waitUntil(() => !controller.model.busy);
+
+      controller.dispatch(const LibraryImportRequested());
+      await _waitUntil(() => bridge.importCalls == 1);
+      importing.complete([
+        FlutterImportItem(pathKey: '/tmp/good.pdf', book: _book(1, 'Good')),
+        const FlutterImportItem(pathKey: '/tmp/bad.pdf', error: 'unsupported'),
+      ]);
+      await _waitUntil(() => bridge.queries.length == 2);
+
+      expect(controller.model.error, 'This file type is not supported.');
+      expect(controller.model.failure, LibraryFailure.import);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
+    'cancelling a pending picker invalidates its eventual selection',
+    () async {
+      final bridge = _ControlledLibraryBridge();
+      final selection = Completer<LibraryImportSelection?>();
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () => selection.future,
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+      );
+      controller.dispatch(const LibraryImportRequested());
+      expect(controller.canCancel, isTrue);
+
+      controller.dispatch(const LibraryOperationCancelled());
+      selection.complete(
+        const LibraryImportSelection(paths: ['/tmp/late.pdf'], managed: true),
+      );
+      await _waitUntil(() => !controller.model.busy);
+
+      expect(bridge.importCalls, 0);
+      expect(controller.canCancel, isFalse);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
 
   test(
     'reviewed multi-file import preserves selection and storage choice',
@@ -321,6 +463,43 @@ void main() {
     controller.dispose();
     await bridge.disposed.future;
   });
+
+  test(
+    'cancelled folder import reports and refreshes committed books',
+    () async {
+      final bridge = _ControlledLibraryBridge();
+      bridge.directoryImportCompleter = Completer<FlutterImportReport>();
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => const LibraryImportSelection(
+          paths: ['/books/folder'],
+          managed: true,
+          directory: true,
+        ),
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+      );
+      controller.dispatch(const LibraryImportRequested());
+      await _waitUntil(() => bridge.importCalls == 1);
+
+      bridge.directoryImportCompleter!.complete(
+        FlutterImportReport(
+          imported: BigInt.from(2),
+          failed: BigInt.zero,
+          cancelled: true,
+          items: const [],
+        ),
+      );
+      await _waitUntil(() => bridge.queries.isNotEmpty);
+
+      expect(controller.model.error, 'Import cancelled after 2 books.');
+      expect(controller.model.failure, LibraryFailure.import);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
 
   test('active import can be cancelled from product progress', () async {
     final bridge = _ControlledLibraryBridge();
@@ -507,6 +686,7 @@ void main() {
             settings.complete(
               const FlutterReaderSettings(
                 continuous: false,
+                theme: 'light',
                 epubFontSize: 20,
                 epubLineSpacing: 1.6,
                 pdfZoom: 0,
@@ -660,11 +840,23 @@ class _LibraryBridge implements FlutterBridge {
         dateAdded: '2026-09-10',
       ),
     ],
+    this.settings = const FlutterReaderSettings(
+      continuous: false,
+      theme: 'light',
+      epubFontSize: 18,
+      epubLineSpacing: 1.6,
+      pdfZoom: 0,
+    ),
+    this.covers = const {},
   });
 
   final List<FlutterLibraryBook> books;
+  final FlutterReaderSettings settings;
+  final Map<int, Uint8List> covers;
+  final List<int> coverRequests = [];
   FlutterBookFormat? lastFormat;
   bool disposed = false;
+  FlutterReaderSettings? savedSettings;
   int removeCalls = 0;
   int pageCalls = 0;
   BigInt _nextCancellation = BigInt.one;
@@ -709,17 +901,28 @@ class _LibraryBridge implements FlutterBridge {
   @override
   Future<FlutterReaderSettings> loadReaderSettings({
     required BigInt cancellationId,
-  }) async => const FlutterReaderSettings(
-    continuous: false,
-    epubFontSize: 18,
-    epubLineSpacing: 1.6,
-    pdfZoom: 0,
-  );
+  }) async => settings;
+
+  @override
+  Future<Uint8List?> libraryCover({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async {
+    coverRequests.add(bookId);
+    return covers[bookId];
+  }
 
   @override
   Future<bool> removeLibraryBook({required int bookId}) async {
     removeCalls += 1;
     return true;
+  }
+
+  @override
+  Future<void> saveReaderSettings({
+    required FlutterReaderSettings value,
+  }) async {
+    savedSettings = value;
   }
 
   @override
@@ -765,6 +968,7 @@ class _ControlledLibraryBridge implements FlutterBridge {
   String? importedDirectory;
   final Completer<void> disposed = Completer<void>();
   Completer<List<FlutterImportItem>>? importCompleter;
+  Completer<FlutterImportReport>? directoryImportCompleter;
   int importCalls = 0;
   int removeCalls = 0;
   int settingsWrites = 0;
@@ -804,6 +1008,7 @@ class _ControlledLibraryBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async => const FlutterReaderSettings(
     continuous: false,
+    theme: 'light',
     epubFontSize: 18,
     epubLineSpacing: 1.6,
     pdfZoom: 0,
@@ -829,7 +1034,7 @@ class _ControlledLibraryBridge implements FlutterBridge {
   }
 
   @override
-  Future<List<FlutterImportItem>> importDirectory({
+  Future<FlutterImportReport> importDirectory({
     required String pathKey,
     required bool managed,
     required BigInt cancellationId,
@@ -837,7 +1042,15 @@ class _ControlledLibraryBridge implements FlutterBridge {
     importCalls += 1;
     importedDirectory = pathKey;
     importedManaged = managed;
-    return importCompleter?.future ?? Future.value(const []);
+    return directoryImportCompleter?.future ??
+        Future.value(
+          FlutterImportReport(
+            imported: BigInt.zero,
+            failed: BigInt.zero,
+            cancelled: false,
+            items: const [],
+          ),
+        );
   }
 
   @override
