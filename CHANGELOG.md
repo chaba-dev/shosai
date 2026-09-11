@@ -42,6 +42,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Start RFD 4 product migration (#95)
 - *(library)* Display recent books and add reviewed import workflows (#96)
 - *(settings)* Add reader modes, themes, and review hardening (#97)
+- *(android)* Add managed document provider import and reading modes (#98)
 
 ### 🐛 Bug Fixes
 
