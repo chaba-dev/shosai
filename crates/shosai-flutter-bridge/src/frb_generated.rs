@@ -475,6 +475,7 @@ fn wire__crate__api__FlutterBridge_library_page_impl(
     format: impl CstDecode<Option<crate::api::FlutterBookFormat>>,
     limit: impl CstDecode<u32>,
     offset: impl CstDecode<u32>,
+    cancellation_id: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -488,6 +489,7 @@ fn wire__crate__api__FlutterBridge_library_page_impl(
             let api_format = format.cst_decode();
             let api_limit = limit.cst_decode();
             let api_offset = offset.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -514,6 +516,7 @@ fn wire__crate__api__FlutterBridge_library_page_impl(
                             api_format,
                             api_limit,
                             api_offset,
+                            api_cancellation_id,
                         )
                         .await?;
                         Ok(output_ok)
@@ -644,6 +647,7 @@ fn wire__crate__api__FlutterBridge_list_bookmarks_impl(
         RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
     >,
     book_id: impl CstDecode<i64>,
+    cancellation_id: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -654,6 +658,7 @@ fn wire__crate__api__FlutterBridge_list_bookmarks_impl(
         move || {
             let api_that = that.cst_decode();
             let api_book_id = book_id.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -677,6 +682,7 @@ fn wire__crate__api__FlutterBridge_list_bookmarks_impl(
                         let output_ok = crate::api::FlutterBridge::list_bookmarks(
                             &*api_that_guard,
                             api_book_id,
+                            api_cancellation_id,
                         )
                         .await?;
                         Ok(output_ok)
@@ -692,6 +698,7 @@ fn wire__crate__api__FlutterBridge_load_reader_settings_impl(
     that: impl CstDecode<
         RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
     >,
+    cancellation_id: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -701,6 +708,7 @@ fn wire__crate__api__FlutterBridge_load_reader_settings_impl(
         },
         move || {
             let api_that = that.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -721,9 +729,11 @@ fn wire__crate__api__FlutterBridge_load_reader_settings_impl(
                             }
                         }
                         let api_that_guard = api_that_guard.unwrap();
-                        let output_ok =
-                            crate::api::FlutterBridge::load_reader_settings(&*api_that_guard)
-                                .await?;
+                        let output_ok = crate::api::FlutterBridge::load_reader_settings(
+                            &*api_that_guard,
+                            api_cancellation_id,
+                        )
+                        .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -738,6 +748,7 @@ fn wire__crate__api__FlutterBridge_load_reading_state_impl(
         RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
     >,
     book_id: impl CstDecode<i64>,
+    cancellation_id: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -748,6 +759,7 @@ fn wire__crate__api__FlutterBridge_load_reading_state_impl(
         move || {
             let api_that = that.cst_decode();
             let api_book_id = book_id.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -771,6 +783,7 @@ fn wire__crate__api__FlutterBridge_load_reading_state_impl(
                         let output_ok = crate::api::FlutterBridge::load_reading_state(
                             &*api_that_guard,
                             api_book_id,
+                            api_cancellation_id,
                         )
                         .await?;
                         Ok(output_ok)
@@ -1259,6 +1272,7 @@ fn wire__crate__api__FlutterBridge_save_reading_state_impl(
     >,
     book_id: impl CstDecode<i64>,
     value: impl CstDecode<crate::api::FlutterReadingState>,
+    unit_count: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
@@ -1270,6 +1284,7 @@ fn wire__crate__api__FlutterBridge_save_reading_state_impl(
             let api_that = that.cst_decode();
             let api_book_id = book_id.cst_decode();
             let api_value = value.cst_decode();
+            let api_unit_count = unit_count.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
                     (move || async move {
@@ -1294,6 +1309,7 @@ fn wire__crate__api__FlutterBridge_save_reading_state_impl(
                             &*api_that_guard,
                             api_book_id,
                             api_value,
+                            api_unit_count,
                         )
                         .await?;
                         Ok(output_ok)
@@ -4990,8 +5006,17 @@ mod io {
         format: *mut i32,
         limit: u32,
         offset: u32,
+        cancellation_id: u64,
     ) {
-        wire__crate__api__FlutterBridge_library_page_impl(port_, that, query, format, limit, offset)
+        wire__crate__api__FlutterBridge_library_page_impl(
+            port_,
+            that,
+            query,
+            format,
+            limit,
+            offset,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -5035,16 +5060,18 @@ mod io {
         port_: i64,
         that: usize,
         book_id: i64,
+        cancellation_id: u64,
     ) {
-        wire__crate__api__FlutterBridge_list_bookmarks_impl(port_, that, book_id)
+        wire__crate__api__FlutterBridge_list_bookmarks_impl(port_, that, book_id, cancellation_id)
     }
 
     #[unsafe(no_mangle)]
     pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reader_settings(
         port_: i64,
         that: usize,
+        cancellation_id: u64,
     ) {
-        wire__crate__api__FlutterBridge_load_reader_settings_impl(port_, that)
+        wire__crate__api__FlutterBridge_load_reader_settings_impl(port_, that, cancellation_id)
     }
 
     #[unsafe(no_mangle)]
@@ -5052,8 +5079,14 @@ mod io {
         port_: i64,
         that: usize,
         book_id: i64,
+        cancellation_id: u64,
     ) {
-        wire__crate__api__FlutterBridge_load_reading_state_impl(port_, that, book_id)
+        wire__crate__api__FlutterBridge_load_reading_state_impl(
+            port_,
+            that,
+            book_id,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -5170,8 +5203,11 @@ mod io {
         that: usize,
         book_id: i64,
         value: *mut wire_cst_flutter_reading_state,
+        unit_count: u64,
     ) {
-        wire__crate__api__FlutterBridge_save_reading_state_impl(port_, that, book_id, value)
+        wire__crate__api__FlutterBridge_save_reading_state_impl(
+            port_, that, book_id, value, unit_count,
+        )
     }
 
     #[unsafe(no_mangle)]

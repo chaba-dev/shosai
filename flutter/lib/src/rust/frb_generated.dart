@@ -135,6 +135,7 @@ abstract class RustLibApi extends BaseApi {
     FlutterBookFormat? format,
     required int limit,
     required int offset,
+    required BigInt cancellationId,
   });
 
   Future<FlutterAnnotationAssociationSourcePage>
@@ -156,15 +157,18 @@ abstract class RustLibApi extends BaseApi {
   Future<List<FlutterBookmark>> crateApiFlutterBridgeListBookmarks({
     required FlutterBridge that,
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   });
 
   Future<FlutterReaderSettings> crateApiFlutterBridgeLoadReaderSettings({
     required FlutterBridge that,
+    required BigInt cancellationId,
   });
 
   Future<FlutterReadingState?> crateApiFlutterBridgeLoadReadingState({
     required FlutterBridge that,
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   });
 
   FlutterBridge crateApiFlutterBridgeNew();
@@ -228,6 +232,7 @@ abstract class RustLibApi extends BaseApi {
     required FlutterBridge that,
     required PlatformInt64 bookId,
     required FlutterReadingState value,
+    required BigInt unitCount,
   });
 
   Future<List<FlutterSearchMatch>> crateApiFlutterBridgeSearchDocument({
@@ -664,6 +669,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     FlutterBookFormat? format,
     required int limit,
     required int offset,
+    required BigInt cancellationId,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -676,6 +682,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           var arg2 = cst_encode_opt_box_autoadd_flutter_book_format(format);
           var arg3 = cst_encode_u_32(limit);
           var arg4 = cst_encode_u_32(offset);
+          var arg5 = cst_encode_u_64(cancellationId);
           return wire.wire__crate__api__FlutterBridge_library_page(
             port_,
             arg0,
@@ -683,6 +690,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             arg2,
             arg3,
             arg4,
+            arg5,
           );
         },
         codec: DcoCodec(
@@ -690,7 +698,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeLibraryPageConstMeta,
-        argValues: [that, query, format, limit, offset],
+        argValues: [that, query, format, limit, offset, cancellationId],
         apiImpl: this,
       ),
     );
@@ -699,7 +707,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeLibraryPageConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_library_page",
-        argNames: ["that", "query", "format", "limit", "offset"],
+        argNames: [
+          "that",
+          "query",
+          "format",
+          "limit",
+          "offset",
+          "cancellationId",
+        ],
       );
 
   @override
@@ -798,6 +813,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<List<FlutterBookmark>> crateApiFlutterBridgeListBookmarks({
     required FlutterBridge that,
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -807,10 +823,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
                 that,
               );
           var arg1 = cst_encode_i_64(bookId);
+          var arg2 = cst_encode_u_64(cancellationId);
           return wire.wire__crate__api__FlutterBridge_list_bookmarks(
             port_,
             arg0,
             arg1,
+            arg2,
           );
         },
         codec: DcoCodec(
@@ -818,7 +836,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeListBookmarksConstMeta,
-        argValues: [that, bookId],
+        argValues: [that, bookId, cancellationId],
         apiImpl: this,
       ),
     );
@@ -827,12 +845,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeListBookmarksConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_list_bookmarks",
-        argNames: ["that", "bookId"],
+        argNames: ["that", "bookId", "cancellationId"],
       );
 
   @override
   Future<FlutterReaderSettings> crateApiFlutterBridgeLoadReaderSettings({
     required FlutterBridge that,
+    required BigInt cancellationId,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -841,9 +860,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
               cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
                 that,
               );
+          var arg1 = cst_encode_u_64(cancellationId);
           return wire.wire__crate__api__FlutterBridge_load_reader_settings(
             port_,
             arg0,
+            arg1,
           );
         },
         codec: DcoCodec(
@@ -851,7 +872,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeLoadReaderSettingsConstMeta,
-        argValues: [that],
+        argValues: [that, cancellationId],
         apiImpl: this,
       ),
     );
@@ -860,13 +881,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeLoadReaderSettingsConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_load_reader_settings",
-        argNames: ["that"],
+        argNames: ["that", "cancellationId"],
       );
 
   @override
   Future<FlutterReadingState?> crateApiFlutterBridgeLoadReadingState({
     required FlutterBridge that,
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -876,10 +898,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
                 that,
               );
           var arg1 = cst_encode_i_64(bookId);
+          var arg2 = cst_encode_u_64(cancellationId);
           return wire.wire__crate__api__FlutterBridge_load_reading_state(
             port_,
             arg0,
             arg1,
+            arg2,
           );
         },
         codec: DcoCodec(
@@ -887,7 +911,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeLoadReadingStateConstMeta,
-        argValues: [that, bookId],
+        argValues: [that, bookId, cancellationId],
         apiImpl: this,
       ),
     );
@@ -896,7 +920,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeLoadReadingStateConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_load_reading_state",
-        argNames: ["that", "bookId"],
+        argNames: ["that", "bookId", "cancellationId"],
       );
 
   @override
@@ -1296,6 +1320,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required FlutterBridge that,
     required PlatformInt64 bookId,
     required FlutterReadingState value,
+    required BigInt unitCount,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1306,11 +1331,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
               );
           var arg1 = cst_encode_i_64(bookId);
           var arg2 = cst_encode_box_autoadd_flutter_reading_state(value);
+          var arg3 = cst_encode_u_64(unitCount);
           return wire.wire__crate__api__FlutterBridge_save_reading_state(
             port_,
             arg0,
             arg1,
             arg2,
+            arg3,
           );
         },
         codec: DcoCodec(
@@ -1318,7 +1345,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeSaveReadingStateConstMeta,
-        argValues: [that, bookId, value],
+        argValues: [that, bookId, value, unitCount],
         apiImpl: this,
       ),
     );
@@ -1327,7 +1354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiFlutterBridgeSaveReadingStateConstMeta =>
       const TaskConstMeta(
         debugName: "FlutterBridge_save_reading_state",
-        argNames: ["that", "bookId", "value"],
+        argNames: ["that", "bookId", "value", "unitCount"],
       );
 
   @override
@@ -4383,12 +4410,14 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     FlutterBookFormat? format,
     required int limit,
     required int offset,
+    required BigInt cancellationId,
   }) => RustLib.instance.api.crateApiFlutterBridgeLibraryPage(
     that: this,
     query: query,
     format: format,
     limit: limit,
     offset: offset,
+    cancellationId: cancellationId,
   );
 
   Future<FlutterAnnotationAssociationSourcePage>
@@ -4419,19 +4448,27 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
 
   Future<List<FlutterBookmark>> listBookmarks({
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   }) => RustLib.instance.api.crateApiFlutterBridgeListBookmarks(
     that: this,
     bookId: bookId,
+    cancellationId: cancellationId,
   );
 
-  Future<FlutterReaderSettings> loadReaderSettings() =>
-      RustLib.instance.api.crateApiFlutterBridgeLoadReaderSettings(that: this);
+  Future<FlutterReaderSettings> loadReaderSettings({
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeLoadReaderSettings(
+    that: this,
+    cancellationId: cancellationId,
+  );
 
   Future<FlutterReadingState?> loadReadingState({
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   }) => RustLib.instance.api.crateApiFlutterBridgeLoadReadingState(
     that: this,
     bookId: bookId,
+    cancellationId: cancellationId,
   );
 
   Future<FlutterDocumentSummary> openDocument({
@@ -4506,10 +4543,12 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
   Future<void> saveReadingState({
     required PlatformInt64 bookId,
     required FlutterReadingState value,
+    required BigInt unitCount,
   }) => RustLib.instance.api.crateApiFlutterBridgeSaveReadingState(
     that: this,
     bookId: bookId,
     value: value,
+    unitCount: unitCount,
   );
 
   Future<List<FlutterSearchMatch>> searchDocument({

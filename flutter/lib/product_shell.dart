@@ -1,10 +1,26 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 typedef ProductReaderBuilder =
-    Widget Function(FlutterBridge bridge, FlutterLibraryBook book);
+    Widget Function(
+      FlutterBridge bridge,
+      FlutterLibraryBook book,
+      FlutterReaderSettings? settings,
+      String initialPath,
+      int? initialBookId,
+      void Function(String path, int? bookId) locatorChanged,
+    );
+typedef LibraryRemovalConfirmer =
+    Future<bool> Function(FlutterLibraryBook book);
+typedef LibraryImportPicker = Future<String?> Function();
+typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);
+typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
+typedef LibrarySettingsEditor =
+    Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 
 class ProductShell extends StatefulWidget {
   const ProductShell({
@@ -20,12 +36,59 @@ class ProductShell extends StatefulWidget {
   State<ProductShell> createState() => _ProductShellState();
 }
 
-class _ProductShellState extends State<ProductShell> {
+class _ProductShellState extends State<ProductShell> with RestorationMixin {
+  final RestorableStringN _activeBook = RestorableStringN(null);
+  final Set<Route<Object?>> _dialogRoutes = {};
+  NavigatorState? _navigator;
+  ({FlutterLibraryBook book, String path, int? bookId})? _pendingRestoredBook;
+  ({String path, int? bookId})? _restoredLocator;
+  bool _restoredOpenScheduled = false;
   late final LibraryController controller = LibraryController(
     bridge: widget.bridgeFactory(),
+    confirmRemoval: _confirmRemoval,
+    pickImport: _pickImport,
+    openBook: _openBook,
+    drainReaderSaves: ReaderController.drainBookReadingStateWrites,
+    editSettings: _editSettings,
   )..addListener(_changed);
 
-  void _changed() => setState(() {});
+  void _changed() {
+    setState(() {});
+    _scheduleRestoredOpen();
+  }
+
+  void _scheduleRestoredOpen() {
+    if (_pendingRestoredBook != null &&
+        controller.model.loaded &&
+        !controller.model.busy &&
+        !_restoredOpenScheduled) {
+      _restoredOpenScheduled = true;
+      scheduleMicrotask(() {
+        _restoredOpenScheduled = false;
+        if (!mounted || !controller.model.loaded || controller.model.busy) {
+          return;
+        }
+        final restored = _pendingRestoredBook;
+        _pendingRestoredBook = null;
+        if (restored != null) {
+          _restoredLocator = (path: restored.path, bookId: restored.bookId);
+          controller.dispatch(LibraryBookOpened(restored.book));
+        }
+      });
+    }
+  }
+
+  @override
+  String get restorationId => 'product-shell';
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_activeBook, 'active-book');
+    if (_activeBook.value case final encoded?) {
+      _pendingRestoredBook = _decodeActiveBook(encoded);
+      _scheduleRestoredOpen();
+    }
+  }
 
   @override
   void initState() {
@@ -34,28 +97,104 @@ class _ProductShellState extends State<ProductShell> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _navigator = Navigator.maybeOf(context);
+  }
+
+  @override
   void dispose() {
+    final navigator = _navigator;
+    if (navigator != null) {
+      for (final route in _dialogRoutes.toList()) {
+        navigator.removeRoute(route);
+      }
+    }
     controller.removeListener(_changed);
     controller.dispose();
+    _activeBook.dispose();
     super.dispose();
   }
 
   Future<void> _openBook(FlutterLibraryBook book) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => widget.readerBuilder(widget.bridgeFactory(), book),
-      ),
+    final restored = _restoredLocator;
+    _restoredLocator = null;
+    final initialPath = restored?.path ?? book.pathKey;
+    final initialBookId = restored == null ? book.bookId : restored.bookId;
+    _activeBook.value = _encodeBook(
+      book,
+      path: initialPath,
+      bookId: initialBookId,
     );
-    controller.dispatch(const LibraryRefreshed());
+    try {
+      final route = MaterialPageRoute<void>(
+        builder: (_) => widget.readerBuilder(
+          widget.bridgeFactory(),
+          book,
+          controller.model.settings,
+          initialPath,
+          initialBookId,
+          (path, bookId) {
+            if (mounted) {
+              _activeBook.value = _encodeBook(book, path: path, bookId: bookId);
+            }
+          },
+        ),
+      );
+      unawaited(Navigator.of(context).push<void>(route));
+      await route.completed;
+    } finally {
+      if (mounted) _activeBook.value = null;
+    }
   }
 
-  Future<void> _import() async {
-    final path = await _textDialog(
-      context,
-      title: 'Add a book',
-      label: 'Local PDF, EPUB, or CBZ path',
+  Future<String?> _pickImport() => _textDialog(
+    context,
+    showOwnedDialog: _showOwnedDialog,
+    title: 'Add a book',
+    label: 'Local PDF, EPUB, or CBZ path',
+  );
+
+  Future<FlutterReaderSettings?> _editSettings(FlutterReaderSettings initial) =>
+      _settingsDialog(context, initial, showOwnedDialog: _showOwnedDialog);
+
+  Future<T?> _showOwnedDialog<T>(WidgetBuilder builder) async {
+    if (!mounted) return null;
+    final navigator = Navigator.of(context);
+    final route = DialogRoute<T>(
+      context: context,
+      builder: builder,
+      barrierDismissible: true,
     );
-    if (path != null) controller.dispatch(LibraryImportRequested(path));
+    _dialogRoutes.add(route);
+    try {
+      return await navigator.push<T>(route);
+    } finally {
+      _dialogRoutes.remove(route);
+    }
+  }
+
+  Future<bool> _confirmRemoval(FlutterLibraryBook book) async {
+    if (!book.managed) return true;
+    return await _showOwnedDialog<bool>(
+          (context) => AlertDialog(
+            title: const Text('Delete managed copy?'),
+            content: Text(
+              '“${book.title}” will be removed from the library and its managed file will be deleted.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Remove and delete'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
@@ -76,13 +215,15 @@ class _ProductShellState extends State<ProductShell> {
             tooltip: 'Reader settings',
             onPressed: model.settings == null
                 ? null
-                : () => _showSettings(context, controller, model.settings!),
+                : () => controller.dispatch(const LibrarySettingsRequested()),
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: model.busy ? null : _import,
+        onPressed: model.busy
+            ? null
+            : () => controller.dispatch(const LibraryImportRequested()),
         icon: const Icon(Icons.add),
         label: const Text('Add books'),
       ),
@@ -98,21 +239,21 @@ class _ProductShellState extends State<ProductShell> {
                     controller.dispatch(LibraryQueryChanged(query)),
               ),
             ),
-            SizedBox(
-              height: 52,
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final filter in <FlutterBookFormat?>[
-                    null,
-                    FlutterBookFormat.pdf,
-                    FlutterBookFormat.epub,
-                    FlutterBookFormat.cbz,
-                  ])
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: ChoiceChip(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final filter in <FlutterBookFormat?>[
+                      null,
+                      FlutterBookFormat.pdf,
+                      FlutterBookFormat.epub,
+                      FlutterBookFormat.cbz,
+                    ])
+                      ChoiceChip(
                         label: Text(
                           filter == null ? 'All' : filter.name.toUpperCase(),
                         ),
@@ -120,18 +261,18 @@ class _ProductShellState extends State<ProductShell> {
                         onSelected: (_) =>
                             controller.dispatch(LibraryFormatChanged(filter)),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
             if (model.busy) const LinearProgressIndicator(),
-            if (model.error case final error?)
+            if (model.displayError case final error?)
               MaterialBanner(
                 content: Semantics(liveRegion: true, child: Text(error)),
                 actions: [
                   TextButton(
                     onPressed: () =>
-                        controller.dispatch(const LibraryRefreshed()),
+                        controller.dispatch(const LibraryRetryRequested()),
                     child: const Text('Retry'),
                   ),
                 ],
@@ -139,9 +280,12 @@ class _ProductShellState extends State<ProductShell> {
             Expanded(
               child: _LibraryCollection(
                 model: model,
-                openBook: _openBook,
+                openBook: (book) =>
+                    controller.dispatch(LibraryBookOpened(book)),
                 removeBook: (book) =>
-                    controller.dispatch(LibraryBookRemoved(book.bookId)),
+                    controller.dispatch(LibraryBookRemovalRequested(book)),
+                loadMore: () =>
+                    controller.dispatch(const LibraryMoreRequested()),
               ),
             ),
           ],
@@ -151,21 +295,71 @@ class _ProductShellState extends State<ProductShell> {
   }
 }
 
+String _encodeBook(
+  FlutterLibraryBook book, {
+  required String path,
+  required int? bookId,
+}) => jsonEncode({
+  'id': book.bookId,
+  'title': book.title,
+  'author': book.author,
+  'format': book.format.name,
+  'path': book.pathKey,
+  'managed': book.managed,
+  'progress': book.progress,
+  'added': book.dateAdded,
+  'read': book.lastRead,
+  'openPath': path,
+  'openBookId': bookId,
+});
+
+({FlutterLibraryBook book, String path, int? bookId})? _decodeActiveBook(
+  String encoded,
+) {
+  try {
+    final value = jsonDecode(encoded) as Map<String, Object?>;
+    final format = FlutterBookFormat.values.byName(value['format']! as String);
+    final book = FlutterLibraryBook(
+      bookId: value['id']! as int,
+      title: value['title']! as String,
+      author: value['author'] as String?,
+      format: format,
+      pathKey: value['path']! as String,
+      managed: value['managed']! as bool,
+      progress: (value['progress']! as num).toDouble(),
+      dateAdded: value['added']! as String,
+      lastRead: value['read'] as String?,
+    );
+    return (
+      book: book,
+      path: value['openPath'] as String? ?? book.pathKey,
+      bookId: value['openBookId'] as int?,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 class _LibraryCollection extends StatelessWidget {
   const _LibraryCollection({
     required this.model,
     required this.openBook,
     required this.removeBook,
+    required this.loadMore,
   });
 
   final LibraryModel model;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
+  final VoidCallback loadMore;
 
   @override
   Widget build(BuildContext context) {
     if (!model.loaded && model.busy) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (!model.loaded && model.loadError != null) {
+      return const Center(child: Text('The library could not be loaded.'));
     }
     if (model.books.isEmpty) {
       return Center(
@@ -182,6 +376,8 @@ class _LibraryCollection extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final needsExpandedCard = textScale > 1;
         final columns = constraints.maxWidth >= 1100
             ? 5
             : constraints.maxWidth >= 760
@@ -191,12 +387,29 @@ class _LibraryCollection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            childAspectRatio: columns == 1 ? 3.6 : 1.35,
+            childAspectRatio: 1.35,
+            mainAxisExtent: needsExpandedCard
+                ? (180 + (textScale - 1) * (columns == 1 ? 100 : 140)).clamp(
+                    180,
+                    columns == 1 ? 280 : 320,
+                  )
+                : (columns == 1 ? 180 : null),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
-          itemCount: model.books.length,
+          itemCount: model.books.length + (model.hasMore ? 1 : 0),
           itemBuilder: (context, index) {
+            if (index == model.books.length) {
+              return Card(
+                child: Center(
+                  child: TextButton.icon(
+                    onPressed: model.busy ? null : loadMore,
+                    icon: const Icon(Icons.expand_more),
+                    label: const Text('Load more books'),
+                  ),
+                ),
+              );
+            }
             final book = model.books[index];
             return Card(
               clipBehavior: Clip.antiAlias,
@@ -219,7 +432,12 @@ class _LibraryCollection extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
-                            if (book.author case final author?) Text(author),
+                            if (book.author case final author?)
+                              Text(
+                                author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             const SizedBox(height: 8),
                             LinearProgressIndicator(value: book.progress),
                             Text('${(book.progress * 100).round()}% read'),
@@ -262,14 +480,14 @@ IconData _formatIcon(FlutterBookFormat format) => switch (format) {
 
 Future<String?> _textDialog(
   BuildContext context, {
+  required Future<T?> Function<T>(WidgetBuilder builder) showOwnedDialog,
   required String title,
   required String label,
 }) async {
   final controller = TextEditingController();
   try {
-    return await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
+    return await showOwnedDialog<String>(
+      (context) => AlertDialog(
         title: Text(title),
         content: TextField(
           controller: controller,
@@ -294,15 +512,14 @@ Future<String?> _textDialog(
   }
 }
 
-Future<void> _showSettings(
+Future<FlutterReaderSettings?> _settingsDialog(
   BuildContext context,
-  LibraryController controller,
-  FlutterReaderSettings initial,
-) async {
+  FlutterReaderSettings initial, {
+  required Future<T?> Function<T>(WidgetBuilder builder) showOwnedDialog,
+}) async {
   var value = initial;
-  final result = await showDialog<FlutterReaderSettings>(
-    context: context,
-    builder: (context) => StatefulBuilder(
+  final result = await showOwnedDialog<FlutterReaderSettings>(
+    (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
         title: const Text('Reader settings'),
         content: SizedBox(
@@ -310,18 +527,6 @@ Future<void> _showSettings(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SwitchListTile(
-                title: const Text('Continuous reading'),
-                value: value.continuous,
-                onChanged: (enabled) => setState(
-                  () => value = FlutterReaderSettings(
-                    continuous: enabled,
-                    epubFontSize: value.epubFontSize,
-                    epubLineSpacing: value.epubLineSpacing,
-                    pdfZoom: value.pdfZoom,
-                  ),
-                ),
-              ),
               ListTile(
                 title: const Text('EPUB text size'),
                 subtitle: Slider(
@@ -356,7 +561,7 @@ Future<void> _showSettings(
       ),
     ),
   );
-  if (result != null) controller.dispatch(LibrarySettingsSaved(result));
+  return result;
 }
 
 final class LibraryModel {
@@ -368,7 +573,9 @@ final class LibraryModel {
     this.busy = false,
     this.loaded = false,
     this.error,
-    this.revision = 0,
+    this.loadError,
+    this.hasMore = false,
+    this.failure = LibraryFailure.none,
   });
 
   final List<FlutterLibraryBook> books;
@@ -378,7 +585,10 @@ final class LibraryModel {
   final bool busy;
   final bool loaded;
   final String? error;
-  final int revision;
+  final String? loadError;
+  String? get displayError => error ?? loadError;
+  final bool hasMore;
+  final LibraryFailure failure;
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
@@ -388,7 +598,9 @@ final class LibraryModel {
     bool? busy,
     bool? loaded,
     Object? error = _same,
-    int? revision,
+    Object? loadError = _same,
+    bool? hasMore,
+    LibraryFailure? failure,
   }) => LibraryModel(
     books: books ?? this.books,
     query: query ?? this.query,
@@ -401,9 +613,15 @@ final class LibraryModel {
     busy: busy ?? this.busy,
     loaded: loaded ?? this.loaded,
     error: identical(error, _same) ? this.error : error as String?,
-    revision: revision ?? this.revision,
+    loadError: identical(loadError, _same)
+        ? this.loadError
+        : loadError as String?,
+    hasMore: hasMore ?? this.hasMore,
+    failure: failure ?? this.failure,
   );
 }
+
+enum LibraryFailure { none, load, import, removal, settings }
 
 const _same = Object();
 
@@ -419,6 +637,14 @@ final class LibraryRefreshed extends LibraryMessage {
   const LibraryRefreshed();
 }
 
+final class LibraryMoreRequested extends LibraryMessage {
+  const LibraryMoreRequested();
+}
+
+final class LibraryRetryRequested extends LibraryMessage {
+  const LibraryRetryRequested();
+}
+
 final class LibraryQueryChanged extends LibraryMessage {
   const LibraryQueryChanged(this.query);
   final String query;
@@ -430,168 +656,395 @@ final class LibraryFormatChanged extends LibraryMessage {
 }
 
 final class LibraryImportRequested extends LibraryMessage {
-  const LibraryImportRequested(this.path);
-  final String path;
+  const LibraryImportRequested();
 }
 
-final class LibraryBookRemoved extends LibraryMessage {
-  const LibraryBookRemoved(this.bookId);
-  final int bookId;
+final class LibraryBookOpened extends LibraryMessage {
+  const LibraryBookOpened(this.book);
+  final FlutterLibraryBook book;
 }
 
-final class LibrarySettingsSaved extends LibraryMessage {
-  const LibrarySettingsSaved(this.settings);
-  final FlutterReaderSettings settings;
+final class LibraryBookRemovalRequested extends LibraryMessage {
+  const LibraryBookRemovalRequested(this.book);
+  final FlutterLibraryBook book;
+}
+
+final class LibrarySettingsRequested extends LibraryMessage {
+  const LibrarySettingsRequested();
 }
 
 final class _LibraryLoaded extends LibraryMessage {
-  const _LibraryLoaded(this.revision, this.page, this.settings);
+  const _LibraryLoaded(
+    this.revision,
+    this.page,
+    this.settings,
+    this.append,
+    this.cancellation,
+  );
   final int revision;
   final FlutterLibraryPage page;
   final FlutterReaderSettings? settings;
+  final bool append;
+  final BigInt cancellation;
 }
 
 final class _LibraryFailed extends LibraryMessage {
-  const _LibraryFailed(this.revision, this.error);
+  const _LibraryFailed(
+    this.revision,
+    this.error,
+    this.failure,
+    this.cancellation,
+  );
   final int revision;
   final String error;
+  final LibraryFailure failure;
+  final BigInt cancellation;
+}
+
+final class _LibraryDebounceElapsed extends LibraryMessage {
+  const _LibraryDebounceElapsed(this.revision);
+  final int revision;
+}
+
+final class _LibraryMutationCompleted extends LibraryMessage {
+  const _LibraryMutationCompleted({
+    required this.failure,
+    this.error,
+    this.settings,
+    this.cancellation,
+  });
+  final LibraryFailure failure;
+  final String? error;
+  final FlutterReaderSettings? settings;
+  final BigInt? cancellation;
+}
+
+final class _LibraryReaderClosed extends LibraryMessage {
+  const _LibraryReaderClosed(this.error);
+  final String? error;
+}
+
+final class _LibraryEffectFinished extends LibraryMessage {
+  const _LibraryEffectFinished();
 }
 
 class LibraryController implements Listenable {
-  LibraryController({required FlutterBridge bridge}) : _bridge = bridge;
+  LibraryController({
+    required FlutterBridge bridge,
+    required LibraryRemovalConfirmer confirmRemoval,
+    required LibraryImportPicker pickImport,
+    required LibraryBookOpener openBook,
+    required LibraryReaderSaveDrainer drainReaderSaves,
+    required LibrarySettingsEditor editSettings,
+  }) : _bridge = bridge,
+       _confirmRemoval = confirmRemoval,
+       _pickImport = pickImport,
+       _openBook = openBook,
+       _drainReaderSaves = drainReaderSaves,
+       _editSettings = editSettings;
 
   final FlutterBridge _bridge;
+  final LibraryRemovalConfirmer _confirmRemoval;
+  final LibraryImportPicker _pickImport;
+  final LibraryBookOpener _openBook;
+  final LibraryReaderSaveDrainer _drainReaderSaves;
+  final LibrarySettingsEditor _editSettings;
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
+  final Set<BigInt> _cancellations = {};
+  final Set<BigInt> _loadCancellations = {};
   Timer? _searchTimer;
-  bool _disposed = false;
+  int _loadRevision = 0;
+  int _queryRevision = 0;
+  int _activeEffects = 0;
+  int _adapterRevision = 0;
+  String? _displayedQuery;
+  FlutterBookFormat? _displayedFormat;
+  bool _closing = false;
+  bool _bridgeDisposed = false;
 
   LibraryModel get model => _model;
 
   void dispatch(LibraryMessage message) {
-    if (_disposed) return;
+    if (_closing &&
+        message is! _LibraryLoaded &&
+        message is! _LibraryFailed &&
+        message is! _LibraryMutationCompleted &&
+        message is! _LibraryReaderClosed &&
+        message is! _LibraryEffectFinished) {
+      return;
+    }
     switch (message) {
       case LibraryStarted() || LibraryRefreshed():
         _load();
+      case LibraryMoreRequested():
+        if (_model.hasMore &&
+            _displayedQuery == _model.query &&
+            _displayedFormat == _model.format) {
+          _load(append: true);
+        }
+      case LibraryRetryRequested():
+        switch (_model.failure) {
+          case LibraryFailure.load || LibraryFailure.none:
+            _load();
+          case LibraryFailure.import:
+            _import();
+          case LibraryFailure.removal:
+            _load();
+          case LibraryFailure.settings:
+            _settings();
+        }
       case LibraryQueryChanged():
-        _emit(_model.copyWith(query: message.query));
+        _emit(_model.copyWith(query: message.query, hasMore: false));
+        _loadRevision += 1;
         _searchTimer?.cancel();
-        _searchTimer = Timer(const Duration(milliseconds: 250), _load);
+        final revision = ++_queryRevision;
+        _searchTimer = Timer(
+          const Duration(milliseconds: 250),
+          () => dispatch(_LibraryDebounceElapsed(revision)),
+        );
       case LibraryFormatChanged():
-        _emit(_model.copyWith(format: message.format));
+        _emit(_model.copyWith(format: message.format, hasMore: false));
+        _loadRevision += 1;
         _load();
       case LibraryImportRequested():
-        _import(message.path);
-      case LibraryBookRemoved():
-        _remove(message.bookId);
-      case LibrarySettingsSaved():
-        _saveSettings(message.settings);
+        _import();
+      case LibraryBookOpened():
+        _open(message.book);
+      case LibraryBookRemovalRequested():
+        _requestRemoval(message.book);
+      case LibrarySettingsRequested():
+        _settings();
+      case _LibraryDebounceElapsed():
+        if (message.revision == _queryRevision) _load();
       case _LibraryLoaded():
-        if (message.revision == _model.revision) {
+        _releaseCancellation(message.cancellation);
+        if (message.revision == _loadRevision) {
+          if (!message.append) {
+            _displayedQuery = _model.query;
+            _displayedFormat = _model.format;
+          }
           _emit(
             _model.copyWith(
-              books: List.unmodifiable(message.page.books),
+              books: List.unmodifiable(
+                message.append
+                    ? [..._model.books, ...message.page.books]
+                    : message.page.books,
+              ),
               settings: message.settings ?? _model.settings,
-              busy: false,
               loaded: true,
-              error: null,
+              loadError: null,
+              hasMore: message.page.hasMore,
             ),
           );
         }
       case _LibraryFailed():
-        if (message.revision == _model.revision) {
-          _emit(
-            _model.copyWith(busy: false, loaded: true, error: message.error),
-          );
+        _releaseCancellation(message.cancellation);
+        if (message.revision == _loadRevision) {
+          _emit(_model.copyWith(loadError: message.error, hasMore: false));
         }
+      case _LibraryMutationCompleted():
+        if (message.cancellation case final cancellation?) {
+          _cancellations.remove(cancellation);
+          _bridge.releaseCancellation(id: cancellation);
+        }
+        if (_closing) break;
+        if (message.error case final error?) {
+          _emit(_model.copyWith(error: error, failure: message.failure));
+        } else {
+          _emit(
+            _model.copyWith(
+              settings: message.settings ?? _model.settings,
+              error: null,
+              failure: LibraryFailure.none,
+            ),
+          );
+          if (message.failure == LibraryFailure.import ||
+              message.failure == LibraryFailure.removal) {
+            _load();
+          }
+        }
+      case _LibraryReaderClosed():
+        if (_closing) break;
+        if (message.error case final error?) {
+          _emit(_model.copyWith(error: error));
+        }
+        _load();
+      case _LibraryEffectFinished():
+        _activeEffects -= 1;
+        if (!_closing) {
+          _emit(_model.copyWith(busy: _activeEffects > 0));
+        }
+        _disposeBridgeIfIdle();
     }
   }
 
-  void _load() {
-    final revision = _model.revision + 1;
-    _emit(_model.copyWith(busy: true, error: null, revision: revision));
+  void _beginEffect() {
+    _activeEffects += 1;
+    _emit(_model.copyWith(busy: true));
+  }
+
+  void _load({bool append = false}) {
+    if (_closing) return;
+    for (final cancellation in _loadCancellations) {
+      _bridge.cancel(id: cancellation);
+    }
+    final revision = ++_loadRevision;
+    final query = _model.query;
+    final format = _model.format;
+    final offset = append ? _model.books.length : 0;
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(loadError: _safeError(error), hasMore: false));
+      return;
+    }
+    _cancellations.add(cancellation);
+    _loadCancellations.add(cancellation);
+    _beginEffect();
     unawaited(() async {
       try {
-        final results = await Future.wait<Object>([
-          _bridge.libraryPage(
-            query: _model.query,
-            format: _model.format,
-            limit: 100,
-            offset: 0,
-          ),
-          _bridge.loadReaderSettings(),
-        ]);
+        final page = await _bridge.libraryPage(
+          query: query,
+          format: format,
+          limit: 50,
+          offset: offset,
+          cancellationId: cancellation,
+        );
+        final settings = _model.settings == null
+            ? await _bridge.loadReaderSettings(cancellationId: cancellation)
+            : null;
         dispatch(
-          _LibraryLoaded(
-            revision,
-            results[0] as FlutterLibraryPage,
-            results[1] as FlutterReaderSettings,
-          ),
+          _LibraryLoaded(revision, page, settings, append, cancellation),
         );
       } catch (error) {
-        dispatch(_LibraryFailed(revision, _safeError(error)));
+        dispatch(
+          _LibraryFailed(
+            revision,
+            _safeError(error),
+            LibraryFailure.load,
+            cancellation,
+          ),
+        );
+      } finally {
+        dispatch(const _LibraryEffectFinished());
       }
     }());
   }
 
-  void _import(String path) {
-    if (path.isEmpty || _model.busy) return;
-    final revision = _model.revision + 1;
-    _emit(_model.copyWith(busy: true, error: null, revision: revision));
+  void _import() {
+    if (_closing || _model.busy) return;
+    _beginEffect();
+    final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       BigInt? cancellation;
       try {
+        final path = await _pickImport();
+        if (path == null || path.isEmpty) return;
+        if (!_ownsAdapter(adapterRevision)) return;
         cancellation = _bridge.createCancellation();
+        _cancellations.add(cancellation);
         final result = await _bridge.importPaths(
           pathKeys: [path],
           managed: true,
           cancellationId: cancellation,
         );
         final failure = result.where((item) => item.error != null).firstOrNull;
-        if (failure != null) throw StateError(failure.error!);
-        if (revision == _model.revision) _load();
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.import,
+            error: failure == null ? null : _safeImportError(failure.error!),
+            cancellation: cancellation,
+          ),
+        );
+        cancellation = null;
       } catch (error) {
-        dispatch(_LibraryFailed(revision, _safeError(error)));
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.import,
+            error: _safeError(error),
+            cancellation: cancellation,
+          ),
+        );
+        cancellation = null;
       } finally {
         if (cancellation != null) {
+          _cancellations.remove(cancellation);
           _bridge.releaseCancellation(id: cancellation);
         }
+        dispatch(const _LibraryEffectFinished());
       }
     }());
   }
 
-  void _remove(int bookId) {
-    if (_model.busy) return;
-    final revision = _model.revision + 1;
-    _emit(_model.copyWith(busy: true, error: null, revision: revision));
+  void _requestRemoval(FlutterLibraryBook book) {
+    if (_closing || _model.busy) return;
+    _beginEffect();
+    final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       try {
-        await _bridge.removeLibraryBook(bookId: bookId);
-        if (revision == _model.revision) _load();
+        if (!await _confirmRemoval(book)) return;
+        if (!_ownsAdapter(adapterRevision)) return;
+        await _bridge.removeLibraryBook(bookId: book.bookId);
+        dispatch(
+          const _LibraryMutationCompleted(failure: LibraryFailure.removal),
+        );
       } catch (error) {
-        dispatch(_LibraryFailed(revision, _safeError(error)));
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.removal,
+            error: _safeError(error),
+          ),
+        );
+      } finally {
+        dispatch(const _LibraryEffectFinished());
       }
     }());
   }
 
-  void _saveSettings(FlutterReaderSettings settings) {
-    final revision = _model.revision + 1;
-    _emit(
-      _model.copyWith(
-        settings: settings,
-        busy: true,
-        error: null,
-        revision: revision,
-      ),
-    );
+  void _open(FlutterLibraryBook book) {
+    if (_closing || _model.busy) return;
+    _beginEffect();
     unawaited(() async {
       try {
+        await _openBook(book);
+        await _drainReaderSaves(book.bookId);
+        dispatch(const _LibraryReaderClosed(null));
+      } catch (error) {
+        dispatch(_LibraryReaderClosed(_safeError(error)));
+      } finally {
+        dispatch(const _LibraryEffectFinished());
+      }
+    }());
+  }
+
+  void _settings() {
+    final initial = _model.settings;
+    if (_closing || _model.busy || initial == null) return;
+    _beginEffect();
+    final adapterRevision = ++_adapterRevision;
+    unawaited(() async {
+      try {
+        final settings = await _editSettings(initial);
+        if (settings == null) return;
+        if (!_ownsAdapter(adapterRevision)) return;
         await _bridge.saveReaderSettings(value: settings);
-        if (revision == _model.revision) {
-          _emit(_model.copyWith(busy: false));
-        }
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.settings,
+            settings: settings,
+          ),
+        );
       } catch (error) {
-        dispatch(_LibraryFailed(revision, _safeError(error)));
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.settings,
+            error: _safeError(error),
+          ),
+        );
+      } finally {
+        dispatch(const _LibraryEffectFinished());
       }
     }());
   }
@@ -600,6 +1053,29 @@ class LibraryController implements Listenable {
     FlutterBridgeError() => error.message,
     _ => 'The operation could not be completed.',
   };
+
+  bool _ownsAdapter(int revision) => !_closing && revision == _adapterRevision;
+
+  String _safeImportError(String error) {
+    final lower = error.toLowerCase();
+    if (lower.contains('unsupported')) {
+      return 'This file type is not supported.';
+    }
+    if (lower.contains('not found') || lower.contains('no such file')) {
+      return 'The selected file could not be found.';
+    }
+    if (lower.contains('limit') || lower.contains('too large')) {
+      return 'The selected book exceeds the supported size limits.';
+    }
+    return 'The selected book could not be imported.';
+  }
+
+  void _releaseCancellation(BigInt cancellation) {
+    if (_cancellations.remove(cancellation)) {
+      _loadCancellations.remove(cancellation);
+      _bridge.releaseCancellation(id: cancellation);
+    }
+  }
 
   void _emit(LibraryModel model) {
     _model = model;
@@ -615,9 +1091,21 @@ class LibraryController implements Listenable {
   void removeListener(VoidCallback listener) => _listeners.remove(listener);
 
   void dispose() {
-    _disposed = true;
+    if (_closing) return;
+    _closing = true;
+    _adapterRevision += 1;
     _searchTimer?.cancel();
+    for (final cancellation in _cancellations) {
+      _bridge.cancel(id: cancellation);
+    }
     _listeners.clear();
-    _bridge.dispose();
+    _disposeBridgeIfIdle();
+  }
+
+  void _disposeBridgeIfIdle() {
+    if (_closing && _activeEffects == 0 && !_bridgeDisposed) {
+      _bridgeDisposed = true;
+      _bridge.dispose();
+    }
   }
 }

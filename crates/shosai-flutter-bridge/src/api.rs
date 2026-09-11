@@ -707,9 +707,16 @@ impl FlutterBridge {
         format: Option<FlutterBookFormat>,
         limit: u32,
         offset: u32,
+        cancellation_id: u64,
     ) -> Result<FlutterLibraryPage, FlutterBridgeError> {
         self.bridge
-            .library_page(query, format.map(Into::into), limit, offset)
+            .library_page_cancellable(
+                query,
+                format.map(Into::into),
+                limit,
+                offset,
+                self.cancellation(cancellation_id)?,
+            )
             .await
             .map(|v| FlutterLibraryPage {
                 books: v.books.into_iter().map(Into::into).collect(),
@@ -765,9 +772,10 @@ impl FlutterBridge {
     pub async fn list_bookmarks(
         &self,
         book_id: i64,
+        cancellation_id: u64,
     ) -> Result<Vec<FlutterBookmark>, FlutterBridgeError> {
         self.bridge
-            .list_bookmarks(book_id)
+            .list_bookmarks_cancellable(book_id, self.cancellation(cancellation_id)?)
             .await
             .map(|v| v.into_iter().map(Into::into).collect())
             .map_err(Into::into)
@@ -808,9 +816,10 @@ impl FlutterBridge {
     pub async fn load_reading_state(
         &self,
         book_id: i64,
+        cancellation_id: u64,
     ) -> Result<Option<FlutterReadingState>, FlutterBridgeError> {
         self.bridge
-            .load_reading_state(book_id)
+            .load_reading_state_cancellable(book_id, self.cancellation(cancellation_id)?)
             .await
             .map(|v| v.map(Into::into))
             .map_err(Into::into)
@@ -819,15 +828,23 @@ impl FlutterBridge {
         &self,
         book_id: i64,
         value: FlutterReadingState,
+        unit_count: u64,
     ) -> Result<(), FlutterBridgeError> {
+        let unit_count = usize::try_from(unit_count).map_err(|_| FlutterBridgeError {
+            kind: FlutterBridgeErrorKind::InvalidRequest,
+            message: "unit count exceeds this platform's range".into(),
+        })?;
         self.bridge
-            .save_reading_state(book_id, value.into())
+            .save_reading_state_with_unit_count(book_id, value.into(), unit_count)
             .await
             .map_err(Into::into)
     }
-    pub async fn load_reader_settings(&self) -> Result<FlutterReaderSettings, FlutterBridgeError> {
+    pub async fn load_reader_settings(
+        &self,
+        cancellation_id: u64,
+    ) -> Result<FlutterReaderSettings, FlutterBridgeError> {
         self.bridge
-            .load_reader_settings()
+            .load_reader_settings_cancellable(self.cancellation(cancellation_id)?)
             .await
             .map(Into::into)
             .map_err(Into::into)

@@ -2232,6 +2232,7 @@ class RustLibWire implements BaseWire {
     ffi.Pointer<ffi.Int32> format,
     int limit,
     int offset,
+    int cancellation_id,
   ) {
     return _wire__crate__api__FlutterBridge_library_page(
       port_,
@@ -2240,6 +2241,7 @@ class RustLibWire implements BaseWire {
       format,
       limit,
       offset,
+      cancellation_id,
     );
   }
 
@@ -2253,6 +2255,7 @@ class RustLibWire implements BaseWire {
             ffi.Pointer<ffi.Int32>,
             ffi.Uint32,
             ffi.Uint32,
+            ffi.Uint64,
           )
         >
       >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_library_page');
@@ -2264,6 +2267,7 @@ class RustLibWire implements BaseWire {
               int,
               ffi.Pointer<wire_cst_list_prim_u_8_strict>,
               ffi.Pointer<ffi.Int32>,
+              int,
               int,
               int,
             )
@@ -2361,58 +2365,75 @@ class RustLibWire implements BaseWire {
     int port_,
     int that,
     int book_id,
+    int cancellation_id,
   ) {
     return _wire__crate__api__FlutterBridge_list_bookmarks(
       port_,
       that,
       book_id,
+      cancellation_id,
     );
   }
 
   late final _wire__crate__api__FlutterBridge_list_bookmarksPtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64)>
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
       >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_list_bookmarks');
   late final _wire__crate__api__FlutterBridge_list_bookmarks =
       _wire__crate__api__FlutterBridge_list_bookmarksPtr
-          .asFunction<void Function(int, int, int)>();
+          .asFunction<void Function(int, int, int, int)>();
 
   void wire__crate__api__FlutterBridge_load_reader_settings(
     int port_,
     int that,
+    int cancellation_id,
   ) {
-    return _wire__crate__api__FlutterBridge_load_reader_settings(port_, that);
+    return _wire__crate__api__FlutterBridge_load_reader_settings(
+      port_,
+      that,
+      cancellation_id,
+    );
   }
 
   late final _wire__crate__api__FlutterBridge_load_reader_settingsPtr =
-      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr)>>(
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Uint64)
+        >
+      >(
         'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reader_settings',
       );
   late final _wire__crate__api__FlutterBridge_load_reader_settings =
       _wire__crate__api__FlutterBridge_load_reader_settingsPtr
-          .asFunction<void Function(int, int)>();
+          .asFunction<void Function(int, int, int)>();
 
   void wire__crate__api__FlutterBridge_load_reading_state(
     int port_,
     int that,
     int book_id,
+    int cancellation_id,
   ) {
     return _wire__crate__api__FlutterBridge_load_reading_state(
       port_,
       that,
       book_id,
+      cancellation_id,
     );
   }
 
   late final _wire__crate__api__FlutterBridge_load_reading_statePtr =
       _lookup<
-        ffi.NativeFunction<ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64)>
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
       >(
         'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_load_reading_state',
       );
   late final _wire__crate__api__FlutterBridge_load_reading_state =
       _wire__crate__api__FlutterBridge_load_reading_statePtr
-          .asFunction<void Function(int, int, int)>();
+          .asFunction<void Function(int, int, int, int)>();
 
   WireSyncRust2DartDco wire__crate__api__FlutterBridge_new() {
     return _wire__crate__api__FlutterBridge_new();
@@ -2721,12 +2742,14 @@ class RustLibWire implements BaseWire {
     int that,
     int book_id,
     ffi.Pointer<wire_cst_flutter_reading_state> value,
+    int unit_count,
   ) {
     return _wire__crate__api__FlutterBridge_save_reading_state(
       port_,
       that,
       book_id,
       value,
+      unit_count,
     );
   }
 
@@ -2738,6 +2761,7 @@ class RustLibWire implements BaseWire {
             ffi.UintPtr,
             ffi.Int64,
             ffi.Pointer<wire_cst_flutter_reading_state>,
+            ffi.Uint64,
           )
         >
       >(
@@ -2751,6 +2775,7 @@ class RustLibWire implements BaseWire {
               int,
               int,
               ffi.Pointer<wire_cst_flutter_reading_state>,
+              int,
             )
           >();
 

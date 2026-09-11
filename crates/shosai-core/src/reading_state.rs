@@ -27,6 +27,10 @@ pub(crate) enum CurrentBookPathSaveError {
     Persistence(#[from] anyhow::Error),
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("library book not found")]
+pub(crate) struct ReadingStateBookNotFound;
+
 async fn next_reading_state_revision(transaction: &mut Transaction<'_, Sqlite>) -> Result<i64> {
     sqlx::query_scalar(
         "UPDATE reading_state_revision SET value = value + 1 WHERE singleton = 1
@@ -640,13 +644,35 @@ impl ReadingStateStore {
 
     /// Save reading state using a stable library book identity.
     pub async fn set_for_book_async(&self, book_id: i64, state: &FileReadingState) -> Result<()> {
+        self.set_for_book_with_progress(book_id, state, None).await
+    }
+
+    pub(crate) async fn set_for_book_with_progress_async(
+        &self,
+        book_id: i64,
+        state: &FileReadingState,
+        progress: f64,
+    ) -> Result<()> {
+        if !progress.is_finite() {
+            bail!("book progress must be finite");
+        }
+        self.set_for_book_with_progress(book_id, state, Some(progress.clamp(0.0, 1.0)))
+            .await
+    }
+
+    async fn set_for_book_with_progress(
+        &self,
+        book_id: i64,
+        state: &FileReadingState,
+        progress: Option<f64>,
+    ) -> Result<()> {
         let (page, location_offset, zoom) = reading_state_db_values(state)?;
-        let mut transaction = self.pool.begin().await?;
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let current = bounded_book_locator(&mut transaction, book_id)
             .await
             .context("failed to resolve book path for reading state")?;
         let Some((current_key, content_hash)) = current else {
-            bail!("book {book_id} not found");
+            return Err(ReadingStateBookNotFound.into());
         };
         let content_hash = content_hash.context("book has no stable content hash")?;
         validate_path_key(&current_key)?;
@@ -678,6 +704,14 @@ impl ReadingStateStore {
         .execute(&mut *transaction)
         .await
         .context("failed to save reading state for book")?;
+        if let Some(progress) = progress {
+            sqlx::query("UPDATE books SET progress = ?, last_read = datetime('now') WHERE id = ?")
+                .bind(progress)
+                .bind(book_id)
+                .execute(&mut *transaction)
+                .await
+                .context("failed to update book progress with reading state")?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -868,6 +902,22 @@ impl ReadingStateStore {
         .execute(&mut *transaction)
         .await
         .context("failed to save preference")?;
+        validate_preference_totals(&mut transaction).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    /// Validate and commit a logical preference update atomically.
+    pub async fn set_prefs_async(&self, values: &[(&str, String)]) -> Result<()> {
+        for (key, value) in values {
+            validate_preference(key, value)?;
+        }
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        for (key, value) in values {
+            sqlx::query("INSERT INTO preferences (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+                .bind(key).bind(value).execute(&mut *transaction).await
+                .context("failed to save preferences")?;
+        }
         validate_preference_totals(&mut transaction).await?;
         transaction.commit().await?;
         Ok(())

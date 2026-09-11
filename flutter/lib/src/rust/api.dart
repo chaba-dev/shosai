@@ -55,6 +55,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     FlutterBookFormat? format,
     required int limit,
     required int offset,
+    required BigInt cancellationId,
   });
 
   Future<FlutterAnnotationAssociationSourcePage>
@@ -71,12 +72,18 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt cancellationId,
   });
 
-  Future<List<FlutterBookmark>> listBookmarks({required PlatformInt64 bookId});
+  Future<List<FlutterBookmark>> listBookmarks({
+    required PlatformInt64 bookId,
+    required BigInt cancellationId,
+  });
 
-  Future<FlutterReaderSettings> loadReaderSettings();
+  Future<FlutterReaderSettings> loadReaderSettings({
+    required BigInt cancellationId,
+  });
 
   Future<FlutterReadingState?> loadReadingState({
     required PlatformInt64 bookId,
+    required BigInt cancellationId,
   });
 
   factory FlutterBridge() => RustLib.instance.api.crateApiFlutterBridgeNew();
@@ -119,6 +126,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
   Future<void> saveReadingState({
     required PlatformInt64 bookId,
     required FlutterReadingState value,
+    required BigInt unitCount,
   });
 
   Future<List<FlutterSearchMatch>> searchDocument({

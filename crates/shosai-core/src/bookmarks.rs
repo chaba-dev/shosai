@@ -19,6 +19,23 @@ pub const MAX_BOOKMARK_COLOR_BYTES: usize = 64;
 pub const MAX_BOOKMARK_PAGE_SIZE: u32 = 500;
 pub const MAX_BOOKMARK_EXPORT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BOOKMARK_TIMESTAMP_BYTES: usize = 64;
+
+#[derive(Debug, thiserror::Error)]
+#[error("bookmark count limit exceeded")]
+pub struct BookmarkCountLimit;
+
+#[derive(Debug, thiserror::Error)]
+#[error("bookmark Markdown export exceeds byte limit")]
+pub struct BookmarkExportLimit;
+
+#[derive(Debug, thiserror::Error)]
+#[error("bookmark not found")]
+pub struct BookmarkNotFound;
+
+#[derive(Debug, thiserror::Error)]
+#[error("bookmark library book not found")]
+pub struct BookmarkBookNotFound;
+
 const BOOKMARK_SELECT_COLUMNS: &str = "id,
     CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 32768 THEN file_path END AS file_path,
     book_id, page, location_offset,
@@ -142,7 +159,7 @@ impl BookmarkStore {
         }
         .context("failed to count bookmarks")?;
         if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
-            anyhow::bail!("bookmark count limit exceeded");
+            return Err(BookmarkCountLimit.into());
         }
         let id = sqlx::query(
             "INSERT INTO bookmarks
@@ -296,7 +313,7 @@ impl BookmarkStore {
             }
             .context("failed to count bookmarks")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
-                anyhow::bail!("bookmark count limit exceeded");
+                return Err(BookmarkCountLimit.into());
             }
             let row = sqlx::query(
                 "INSERT INTO bookmarks
@@ -347,8 +364,10 @@ impl BookmarkStore {
         .bind(book_id)
         .fetch_optional(&mut *transaction)
         .await
-        .context("failed to resolve bookmark book")?
-        .with_context(|| format!("book {book_id} not found"))?;
+        .context("failed to resolve bookmark book")?;
+        let Some(book) = book else {
+            return Err(BookmarkBookNotFound.into());
+        };
         let current_path = book
             .try_get::<Option<String>, _>("file_path")?
             .context("stored bookmark book path is malformed or oversized")?;
@@ -398,7 +417,7 @@ impl BookmarkStore {
                 .await
                 .context("failed to count bookmarks for book")?;
             if count >= MAX_BOOKMARKS_PER_BOOK as i64 {
-                anyhow::bail!("bookmark count limit exceeded");
+                return Err(BookmarkCountLimit.into());
             }
             let row = sqlx::query(
                 "INSERT INTO bookmarks
@@ -467,7 +486,7 @@ impl BookmarkStore {
             .context("failed to list bookmarks")?;
 
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
-            anyhow::bail!("bookmark count limit exceeded");
+            return Err(BookmarkCountLimit.into());
         }
         rows.iter().map(row_to_bookmark).collect()
     }
@@ -532,8 +551,10 @@ impl BookmarkStore {
         .bind(book_id)
         .fetch_optional(&mut *transaction)
         .await
-        .context("failed to resolve bookmark book")?
-        .with_context(|| format!("book {book_id} not found"))?;
+        .context("failed to resolve bookmark book")?;
+        let Some(book) = book else {
+            return Err(BookmarkBookNotFound.into());
+        };
         let current_path = book
             .try_get::<Option<String>, _>("file_path")?
             .context("stored bookmark book path is malformed or oversized")?;
@@ -566,7 +587,7 @@ impl BookmarkStore {
             .await
             .context("failed to list bookmarks for book")?;
         if rows.len() > MAX_BOOKMARKS_PER_BOOK {
-            anyhow::bail!("bookmark count limit exceeded");
+            return Err(BookmarkCountLimit.into());
         }
         transaction.commit().await?;
         rows.iter().map(row_to_bookmark).collect()
@@ -637,6 +658,28 @@ impl BookmarkStore {
     }
 
     /// Update the note on a bookmark.
+    pub async fn update_fields_async(
+        &self,
+        bookmark_id: i64,
+        title: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<()> {
+        validate_optional_bytes(title, MAX_BOOKMARK_TITLE_BYTES, "bookmark title")?;
+        validate_optional_bytes(note, MAX_BOOKMARK_NOTE_BYTES, "bookmark note")?;
+        let result = sqlx::query("UPDATE bookmarks SET title = ?, note = ? WHERE id = ?")
+            .bind(title)
+            .bind(note)
+            .bind(bookmark_id)
+            .execute(&self.pool)
+            .await
+            .context("failed to update bookmark")?;
+        if result.rows_affected() != 1 {
+            return Err(BookmarkNotFound.into());
+        }
+        Ok(())
+    }
+
+    /// Update the note on a bookmark.
     pub async fn update_note_async(&self, bookmark_id: i64, note: Option<&str>) -> Result<()> {
         validate_optional_bytes(note, MAX_BOOKMARK_NOTE_BYTES, "bookmark note")?;
         let result = sqlx::query("UPDATE bookmarks SET note = ? WHERE id = ?")
@@ -646,7 +689,7 @@ impl BookmarkStore {
             .await
             .context("failed to update bookmark note")?;
         if result.rows_affected() != 1 {
-            anyhow::bail!("bookmark {bookmark_id} not found");
+            return Err(BookmarkNotFound.into());
         }
         Ok(())
     }
@@ -661,7 +704,7 @@ impl BookmarkStore {
             .await
             .context("failed to update bookmark title")?;
         if result.rows_affected() != 1 {
-            anyhow::bail!("bookmark {bookmark_id} not found");
+            return Err(BookmarkNotFound.into());
         }
         Ok(())
     }
@@ -755,7 +798,7 @@ impl BookmarkStore {
 
             md.push_str(&format!("*Added: {}*\n\n---\n\n", bm.created_at));
             if md.len() > MAX_BOOKMARK_EXPORT_BYTES {
-                anyhow::bail!("bookmark Markdown export exceeds byte limit");
+                return Err(BookmarkExportLimit.into());
             }
         }
 

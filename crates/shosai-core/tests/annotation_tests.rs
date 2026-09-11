@@ -1,13 +1,16 @@
 use std::borrow::Cow;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
+use sha2::Digest;
 use shosai_core::annotations::{
     AnnotationAssociationConflict, AnnotationAssociationOutcome,
-    AnnotationAssociationSourceCancelled, AnnotationDocumentFormat, AnnotationId,
-    AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint, EpubAnchor,
-    HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS, MAX_EPUB_RESOURCE_PATH_BYTES,
+    AnnotationAssociationSourceCancelled, AnnotationDocumentFormat, AnnotationDocumentVersionLimit,
+    AnnotationId, AnnotationSnapshotLimit, AnnotationStore, AnnotationTarget, DocumentFingerprint,
+    EpubAnchor, HighlightColor, ImportProvenance, MAX_ANNOTATION_BODY_SCALARS,
+    MAX_ANNOTATION_DOCUMENT_VERSIONS, MAX_EPUB_RESOURCE_PATH_BYTES,
     MAX_FINGERPRINT_ALGORITHM_BYTES, MAX_FINGERPRINT_BYTES, MAX_LOCAL_PATH_BYTES,
     MAX_PDF_RECTANGLES, MAX_PROVENANCE_ID_BYTES, MAX_PROVENANCE_SYSTEM_BYTES,
     MAX_QUOTE_CONTEXT_INPUT_SCALARS, MAX_QUOTE_SCALARS, NewAnnotation, PageRect, PdfAnchor,
@@ -309,6 +312,87 @@ async fn removing_a_book_preserves_its_annotation_document_identity() {
 }
 
 #[tokio::test]
+async fn reconciliation_continues_past_foreign_fingerprint_collections() {
+    let (store, pool, dir) = temp_store().await;
+    let target = dir.path().join("target.pdf");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("sample.pdf"),
+        &target,
+    )
+    .unwrap();
+    let bytes = std::fs::read(&target).unwrap();
+    let content_hash = format!("{:x}", sha2::Sha256::digest(&bytes));
+    let fingerprint =
+        DocumentFingerprint::new("sha256-hex", 1, content_hash.as_bytes().to_vec()).unwrap();
+    let mut transaction = pool.begin().await.unwrap();
+    for index in 0..129 {
+        let path = format!("/foreign-{index}.pdf");
+        let book_id: i64 = sqlx::query_scalar(
+            "INSERT INTO books (
+               title, format, file_path, storage_kind, original_path, content_hash)
+             VALUES (?, 'pdf', ?, 'referenced', ?, ?) RETURNING id",
+        )
+        .bind(format!("Foreign {index}"))
+        .bind(&path)
+        .bind(&path)
+        .bind(&content_hash)
+        .fetch_one(&mut *transaction)
+        .await
+        .unwrap();
+        let document_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO annotation_documents (id, format) VALUES (?, 'pdf')")
+            .bind(&document_id)
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO annotation_document_versions (
+               id, document_id, format, local_path, fingerprint_algorithm,
+               fingerprint_version, fingerprint)
+             VALUES (?, ?, 'pdf', ?, 'sha256-hex', 1, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(document_id)
+        .bind(path)
+        .bind(content_hash.as_bytes())
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+        assert!(book_id > 0);
+    }
+    transaction.commit().await.unwrap();
+
+    let source_path = "/untracked-old.pdf";
+    let source = NewAnnotation {
+        id: AnnotationId::new(),
+        book_id: None,
+        local_path: Some(source_path.into()),
+        fingerprint,
+        quote: None,
+        target: AnnotationTarget::Pdf(
+            PdfAnchor::new(0, None, vec![PageRect::new(0.0, 0.0, 1.0, 1.0).unwrap()]).unwrap(),
+        ),
+        color: HighlightColor::Yellow,
+        body: Some("retained".into()),
+        provenance: None,
+    };
+    store.create_async(&source).await.unwrap();
+
+    let library = Library::new(pool.clone(), dir.path().join("managed"));
+    let imported = library.import_file(&target).await.unwrap();
+    let associated = store.list_for_book_async(imported.id).await.unwrap();
+    assert_eq!(associated.len(), 1);
+    assert_eq!(associated[0].id, source.id);
+    assert_eq!(
+        associated[0].local_path.as_deref(),
+        Some(imported.file_path.as_str())
+    );
+}
+
+#[tokio::test]
 async fn removing_a_book_rolls_back_an_over_limit_collection_merge() {
     let (store, pool, dir) = temp_store().await;
     let full_body = "x".repeat(MAX_ANNOTATION_BODY_SCALARS);
@@ -324,41 +408,50 @@ async fn removing_a_book_rolls_back_an_over_limit_collection_merge() {
             }
         }
     }
-    let source = store
-        .list_association_sources_async(
-            AnnotationDocumentFormat::Epub,
-            "/books/target.epub",
-            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
-            None,
-            1,
-        )
-        .await
-        .unwrap()
-        .sources
-        .into_iter()
-        .next()
-        .unwrap();
+    let target_hash = "cd".repeat(32);
     let book_id: i64 = sqlx::query_scalar(
-        "INSERT INTO books (title, format, file_path)
-         VALUES ('Target', 'epub', '/books/target.epub') RETURNING id",
+        "INSERT INTO books (
+           title, format, file_path, storage_kind, original_path, content_hash)
+         VALUES (
+           'Target', 'epub', '/books/target.epub', 'managed',
+           '/books/source.epub', ?) RETURNING id",
     )
+    .bind(&target_hash)
     .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE annotation_document_versions
+         SET fingerprint_algorithm = 'sha256-hex', fingerprint = ?
+         WHERE local_path = '/books/source.epub'",
+    )
+    .bind(target_hash.as_bytes())
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE annotations
+         SET fingerprint_algorithm = 'sha256-hex', fingerprint = ?
+         WHERE local_path = '/books/source.epub'",
+    )
+    .bind(target_hash.as_bytes())
+    .execute(&pool)
     .await
     .unwrap();
     let mut target = epub_annotation(Some(book_id));
     target.local_path = Some("/books/target.epub".into());
-    target.fingerprint = DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap();
+    target.fingerprint =
+        DocumentFingerprint::new("sha256-hex", 1, target_hash.into_bytes()).unwrap();
     target.body = Some(full_body);
     let target = store.create_async(&target).await.unwrap();
-    store
-        .associate_document_version_async(
-            &source.version_id,
-            AnnotationDocumentFormat::Epub,
-            "/books/target.epub",
-            &DocumentFingerprint::new("sha256", 1, vec![0xcd; 32]).unwrap(),
-        )
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE annotations SET book_id = ?
+         WHERE local_path = '/books/source.epub'",
+    )
+    .bind(book_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let library = Library::new(pool.clone(), dir.path().join("managed"));
     let error = library.remove(book_id).await.unwrap_err();
@@ -370,7 +463,8 @@ async fn removing_a_book_rolls_back_an_over_limit_collection_merge() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(binding, (Some(book_id), None));
+    assert_eq!(binding.0, Some(book_id));
+    assert!(binding.1.is_some());
 }
 
 #[tokio::test]
@@ -389,6 +483,95 @@ async fn untracked_annotations_reopen_by_device_local_path() {
         .unwrap();
     assert_eq!(reopened.len(), 1);
     assert_eq!(reopened[0].id, first.id);
+}
+
+#[tokio::test]
+async fn path_only_listing_preflights_the_union_of_fingerprints() {
+    let (store, _pool, _dir) = temp_store().await;
+    for index in 0..130 {
+        let mut annotation = epub_annotation(None);
+        annotation.fingerprint =
+            DocumentFingerprint::new("sha256", 1, vec![if index < 65 { 1 } else { 2 }; 32])
+                .unwrap();
+        annotation.body = Some("x".repeat(MAX_ANNOTATION_BODY_SCALARS));
+        store.create_async(&annotation).await.unwrap();
+    }
+
+    let error = store
+        .list_for_local_path_async("/books/example.epub")
+        .await
+        .unwrap_err();
+    assert!(error.is::<AnnotationSnapshotLimit>());
+}
+
+#[tokio::test]
+async fn oversized_timestamp_is_rejected_before_snapshot_materialization() {
+    let (store, pool, _dir) = temp_store().await;
+    let book_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path)
+         VALUES ('Target', 'epub', '/books/example.epub') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let first = epub_annotation(Some(book_id));
+    store.create_async(&first).await.unwrap();
+    let mut annotation = epub_annotation(Some(book_id));
+    annotation.target =
+        AnnotationTarget::Epub(EpubAnchor::new(3, "EPUB/chapter-2.xhtml", 1, 2).unwrap());
+    store.create_async(&annotation).await.unwrap();
+    sqlx::query("UPDATE annotations SET modified_at = ? WHERE id = ?")
+        .bind("x".repeat(1024 * 1024))
+        .bind(annotation.id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let error = store.list_for_book_async(book_id).await.unwrap_err();
+    assert!(error.is::<AnnotationSnapshotLimit>());
+}
+
+#[tokio::test]
+async fn association_rejects_a_129th_document_version() {
+    let (store, _pool, _dir) = temp_store().await;
+    let source = epub_annotation(None);
+    store.create_async(&source).await.unwrap();
+    let source = store
+        .list_association_sources_async(
+            AnnotationDocumentFormat::Epub,
+            "/target.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![0; 32]).unwrap(),
+            None,
+            1,
+        )
+        .await
+        .unwrap()
+        .sources
+        .into_iter()
+        .next()
+        .unwrap();
+    for index in 1..MAX_ANNOTATION_DOCUMENT_VERSIONS {
+        store
+            .associate_document_version_async(
+                &source.version_id,
+                AnnotationDocumentFormat::Epub,
+                &format!("/version-{index}.epub"),
+                &DocumentFingerprint::new("sha256", 1, vec![index as u8; 32]).unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let error = store
+        .associate_document_version_async(
+            &source.version_id,
+            AnnotationDocumentFormat::Epub,
+            "/version-129.epub",
+            &DocumentFingerprint::new("sha256", 1, vec![255; 32]).unwrap(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<AnnotationDocumentVersionLimit>());
 }
 
 #[tokio::test]
@@ -742,6 +925,95 @@ async fn association_source_pages_filter_format_and_tombstones_before_limit() {
             .iter()
             .any(|(_, _, _, detail)| detail.contains("annotations_document_active_idx")),
         "source-page filtering must use the live annotation index: {page_plan:?}"
+    );
+}
+
+#[tokio::test]
+async fn reconciliation_ownership_checks_use_document_and_owner_indexes() {
+    let (_store, pool, _dir) = temp_store().await;
+    let annotation_plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT EXISTS(
+           SELECT 1 FROM annotations
+           WHERE annotation_document_id = ? AND book_id < ?
+         )",
+    )
+    .bind("document")
+    .bind(7_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        annotation_plan.iter().any(|(_, _, _, detail)| {
+            detail.contains("annotations_document_book_idx")
+                && detail.contains("annotation_document_id=? AND book_id<?")
+        }),
+        "foreign-owner lookup must seek by document and owner range: {annotation_plan:?}"
+    );
+
+    let book_plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT 1
+         FROM annotation_document_versions owned_version
+         JOIN books b
+           ON b.file_path = owned_version.local_path
+             OR b.original_path = owned_version.local_path
+         WHERE owned_version.document_id = ? AND b.id != ?
+           AND owned_version.fingerprint_algorithm = 'sha256-hex'
+           AND owned_version.fingerprint_version = 1
+           AND b.content_hash = CAST(owned_version.fingerprint AS TEXT)
+         LIMIT 1",
+    )
+    .bind("document")
+    .bind(7_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        book_plan.iter().any(|(_, _, _, detail)| {
+            detail.contains("annotation_document_versions_document_idx")
+        }),
+        "version ownership lookup must seek by document: {book_plan:?}"
+    );
+    assert!(
+        book_plan
+            .iter()
+            .any(|(_, _, _, detail)| detail.contains("books_original_path_content_idx")),
+        "original-path ownership lookup must preserve content-hash indexability: {book_plan:?}"
+    );
+
+    let snapshot_plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(a.id AS BLOB))), 0)
+         FROM annotations a
+         WHERE a.book_id = ? AND a.deleted_at IS NULL",
+    )
+    .bind(7_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        snapshot_plan
+            .iter()
+            .any(|(_, _, _, detail)| detail.contains("annotations_book_active_idx")),
+        "final snapshot measurement must seek by book and active state: {snapshot_plan:?}"
+    );
+    let rectangle_plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN
+         SELECT COUNT(*)
+         FROM annotations a
+         JOIN annotation_pdf_rectangles r ON r.annotation_id = a.id
+         WHERE a.book_id = ? AND a.deleted_at IS NULL",
+    )
+    .bind(7_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        rectangle_plan
+            .iter()
+            .any(|(_, _, _, detail)| detail.contains("annotations_book_active_idx")),
+        "final rectangle measurement must seek annotations by book: {rectangle_plan:?}"
     );
 }
 
