@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1306103135;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -804141099;
 
 // Section: executor
 
@@ -401,6 +401,61 @@ fn wire__crate__api__FlutterBridge_export_bookmarks_impl(
                         let output_ok = crate::api::FlutterBridge::export_bookmarks(
                             &*api_that_guard,
                             api_book_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_import_directory_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    path_key: impl CstDecode<String>,
+    managed: impl CstDecode<bool>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_import_directory",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_path_key = path_key.cst_decode();
+            let api_managed = managed.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::import_directory(
+                            &*api_that_guard,
+                            api_path_key,
+                            api_managed,
+                            api_cancellation_id,
                         )
                         .await?;
                         Ok(output_ok)
@@ -2111,6 +2166,7 @@ impl SseDecode for crate::api::FlutterLibraryBook {
         let mut var_format = <crate::api::FlutterBookFormat>::sse_decode(deserializer);
         let mut var_pathKey = <String>::sse_decode(deserializer);
         let mut var_managed = <bool>::sse_decode(deserializer);
+        let mut var_cover = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_progress = <f64>::sse_decode(deserializer);
         let mut var_dateAdded = <String>::sse_decode(deserializer);
         let mut var_lastRead = <Option<String>>::sse_decode(deserializer);
@@ -2121,6 +2177,7 @@ impl SseDecode for crate::api::FlutterLibraryBook {
             format: var_format,
             path_key: var_pathKey,
             managed: var_managed,
+            cover: var_cover,
             progress: var_progress,
             date_added: var_dateAdded,
             last_read: var_lastRead,
@@ -2612,6 +2669,17 @@ impl SseDecode for Option<Vec<crate::api::FlutterSelectionRect>> {
     }
 }
 
+impl SseDecode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<u8>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for u32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3035,6 +3103,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterLibraryBook {
             self.format.into_into_dart().into_dart(),
             self.path_key.into_into_dart().into_dart(),
             self.managed.into_into_dart().into_dart(),
+            self.cover.into_into_dart().into_dart(),
             self.progress.into_into_dart().into_dart(),
             self.date_added.into_into_dart().into_dart(),
             self.last_read.into_into_dart().into_dart(),
@@ -3577,6 +3646,7 @@ impl SseEncode for crate::api::FlutterLibraryBook {
         <crate::api::FlutterBookFormat>::sse_encode(self.format, serializer);
         <String>::sse_encode(self.path_key, serializer);
         <bool>::sse_encode(self.managed, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.cover, serializer);
         <f64>::sse_encode(self.progress, serializer);
         <String>::sse_encode(self.date_added, serializer);
         <Option<String>>::sse_encode(self.last_read, serializer);
@@ -3947,6 +4017,16 @@ impl SseEncode for Option<Vec<crate::api::FlutterSelectionRect>> {
     }
 }
 
+impl SseEncode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<u8>>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for u32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4260,6 +4340,7 @@ mod io {
                 format: self.format.cst_decode(),
                 path_key: self.path_key.cst_decode(),
                 managed: self.managed.cst_decode(),
+                cover: self.cover.cst_decode(),
                 progress: self.progress.cst_decode(),
                 date_added: self.date_added.cst_decode(),
                 last_read: self.last_read.cst_decode(),
@@ -4697,6 +4778,7 @@ mod io {
                 format: Default::default(),
                 path_key: core::ptr::null_mut(),
                 managed: Default::default(),
+                cover: core::ptr::null_mut(),
                 progress: Default::default(),
                 date_added: core::ptr::null_mut(),
                 last_read: core::ptr::null_mut(),
@@ -4979,6 +5061,23 @@ mod io {
         book_id: i64,
     ) {
         wire__crate__api__FlutterBridge_export_bookmarks_impl(port_, that, book_id)
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_import_directory(
+        port_: i64,
+        that: usize,
+        path_key: *mut wire_cst_list_prim_u_8_strict,
+        managed: bool,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_import_directory_impl(
+            port_,
+            that,
+            path_key,
+            managed,
+            cancellation_id,
+        )
     }
 
     #[unsafe(no_mangle)]
@@ -5699,6 +5798,7 @@ mod io {
         format: i32,
         path_key: *mut wire_cst_list_prim_u_8_strict,
         managed: bool,
+        cover: *mut wire_cst_list_prim_u_8_strict,
         progress: f64,
         date_added: *mut wire_cst_list_prim_u_8_strict,
         last_read: *mut wire_cst_list_prim_u_8_strict,

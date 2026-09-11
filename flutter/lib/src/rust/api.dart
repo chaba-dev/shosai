@@ -44,6 +44,12 @@ abstract class FlutterBridge implements RustOpaqueInterface {
 
   Future<String> exportBookmarks({required PlatformInt64 bookId});
 
+  Future<List<FlutterImportItem>> importDirectory({
+    required String pathKey,
+    required bool managed,
+    required BigInt cancellationId,
+  });
+
   Future<List<FlutterImportItem>> importPaths({
     required List<String> pathKeys,
     required bool managed,
@@ -489,6 +495,7 @@ class FlutterLibraryBook {
   final FlutterBookFormat format;
   final String pathKey;
   final bool managed;
+  final Uint8List? cover;
   final double progress;
   final String dateAdded;
   final String? lastRead;
@@ -500,6 +507,7 @@ class FlutterLibraryBook {
     required this.format,
     required this.pathKey,
     required this.managed,
+    this.cover,
     required this.progress,
     required this.dateAdded,
     this.lastRead,
@@ -513,6 +521,7 @@ class FlutterLibraryBook {
       format.hashCode ^
       pathKey.hashCode ^
       managed.hashCode ^
+      cover.hashCode ^
       progress.hashCode ^
       dateAdded.hashCode ^
       lastRead.hashCode;
@@ -528,6 +537,7 @@ class FlutterLibraryBook {
           format == other.format &&
           pathKey == other.pathKey &&
           managed == other.managed &&
+          cover == other.cover &&
           progress == other.progress &&
           dateAdded == other.dateAdded &&
           lastRead == other.lastRead;
