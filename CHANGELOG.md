@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-10
+## [0.1.0] - 2026-09-11
 
 ### 🚀 Features
 
@@ -39,6 +39,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Add responsive lifecycle-safe reader (#91)
 - Recover annotations across document versions (#92)
 - *(flutter)* Deliver RFD 4 M2 highlighting feasibility slice (#93)
+- *(flutter)* Start RFD 4 product migration (#95)
 
 ### 🐛 Bug Fixes
 
