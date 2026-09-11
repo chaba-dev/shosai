@@ -2,12 +2,14 @@ use sha2::{Digest, Sha256};
 use shosai_core::bookmarks::{BookmarkStore, MAX_BOOKMARKS_PER_BOOK};
 use shosai_core::library::{
     BookFormat, ImportCancellation, ImportDiscoveryProgress, ImportDuplicate, ImportFailure,
-    Library, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
+    Library, LibraryQueryCancelled, MANAGED_LIBRARY_DIR_PREFERENCE, StorageKind,
 };
 use shosai_core::path_from_key;
 use shosai_core::reading_state::{FileReadingState, ReadingStateStore};
 use shosai_core::state_writer::{StateSave, StateWriterMessage, start_state_writer};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tempfile::TempDir;
 
 fn fixture_path(name: &str) -> PathBuf {
@@ -576,6 +578,22 @@ async fn same_content_duplicates_choose_the_lowest_referenced_book_id() {
 }
 
 #[tokio::test]
+async fn identical_referenced_copies_do_not_share_a_document_version_quota() {
+    let (lib, _, dir) = temp_library().await;
+    let mut paths = Vec::new();
+    for index in 0..129 {
+        let path = dir.path().join(format!("copy-{index}.pdf"));
+        std::fs::copy(fixture_path("sample.pdf"), &path).unwrap();
+        lib.import_file(&path).await.unwrap();
+        paths.push(path);
+    }
+
+    lib.import_file(&paths[0]).await.unwrap();
+    lib.import_file(&paths[128]).await.unwrap();
+    assert_eq!(lib.list_all().await.unwrap().len(), 129);
+}
+
+#[tokio::test]
 async fn discovery_marks_repeated_content_in_the_selection() {
     let (lib, _, dir) = temp_library().await;
     let first = dir.path().join("a.pdf");
@@ -921,6 +939,19 @@ async fn managed_import_survives_the_source_being_removed() {
             .starts_with(dir.path().join("books").canonicalize().unwrap())
     );
     assert!(book.content_hash.is_some());
+}
+
+#[tokio::test]
+async fn managed_source_and_library_aliases_survive_reimport_and_removal() {
+    let (lib, _, dir) = temp_library().await;
+    let source = dir.path().join("source.pdf");
+    std::fs::copy(fixture_path("sample.pdf"), &source).unwrap();
+    let managed = lib.import_managed_file(&source).await.unwrap();
+
+    let reimported = lib.import_managed_file(&source).await.unwrap();
+    assert_eq!(reimported.id, managed.id);
+    assert!(lib.remove(managed.id).await.unwrap().is_some());
+    assert!(lib.get(managed.id).await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -1914,4 +1945,35 @@ async fn referenced_import_claims_captured_path_mutations_and_immediate_close_dr
 #[tokio::test]
 async fn managed_import_claims_captured_source_mutations_and_immediate_close_drains() {
     assert_captured_path_mutations_follow_import(true).await;
+}
+
+#[tokio::test]
+async fn metadata_scan_is_interrupted_by_its_sqlite_progress_handler() {
+    let (library, store, _dir) = temp_library().await;
+    let mut transaction = store.pool().begin().await.unwrap();
+    for index in 0..2_000 {
+        sqlx::query(
+            "INSERT INTO books (title, format, file_path, storage_kind)
+             VALUES (?, 'pdf', ?, 'referenced')",
+        )
+        .bind(format!("Book {index}"))
+        .bind(format!("/books/{index}.pdf"))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    }
+    transaction.commit().await.unwrap();
+
+    let error = library
+        .metadata_page_cancellable(
+            Some("Book"),
+            None,
+            500,
+            0,
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(tokio::sync::Notify::new()),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is::<LibraryQueryCancelled>());
 }

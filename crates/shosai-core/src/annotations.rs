@@ -1,5 +1,6 @@
 //! Renderer-independent text annotations and their SQLite persistence.
 
+use std::collections::HashSet;
 use std::future::Future;
 use std::ops::Range;
 use std::str::FromStr;
@@ -7,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, anyhow, bail};
-use sqlx::Row;
 use sqlx::sqlite::{SqliteConnection, SqlitePool, SqliteRow};
+use sqlx::{Connection, Row, Sqlite, Transaction};
 use thiserror::Error;
 #[cfg(test)]
 use tokio::sync::Semaphore;
@@ -29,6 +30,7 @@ pub const MAX_PDF_RECTANGLES_PER_SNAPSHOT: usize = 65_536;
 pub const MAX_ANNOTATION_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
 pub const ANNOTATION_SNAPSHOT_BASE_BYTES: usize = 256;
 pub const MAX_ANNOTATION_BODY_SCALARS: usize = 65_536;
+const MAX_ANNOTATION_TIMESTAMP_BYTES: usize = 64;
 pub const MAX_FINGERPRINT_BYTES: usize = 1_024;
 pub const MAX_FINGERPRINT_ALGORITHM_BYTES: usize = 64;
 pub const MAX_LOCAL_PATH_BYTES: usize = 32_768;
@@ -40,11 +42,22 @@ pub const MAX_ANNOTATION_DOCUMENT_VERSIONS: usize = 128;
 pub(crate) const MAX_TEXT_ANCHOR_RESOLUTION_WORK: usize = 64 * 1024 * 1024;
 const ANNOTATION_ASSOCIATION_PROGRESS_INTERVAL: usize = 1_000;
 const MAX_ANNOTATION_ASSOCIATION_DISCOVERY_WORK: usize = 10_000_000;
+const ANNOTATION_RECONCILIATION_PROGRESS_INTERVAL: usize = 1_000;
+const MAX_ANNOTATION_RECONCILIATION_WORK: usize = 10_000_000;
+const MAX_ANNOTATION_RECONCILIATION_ROWS: usize = 4_096;
+const MAX_ANNOTATION_RECONCILIATION_CANDIDATES: usize = 4_096;
+const MAX_ANNOTATION_RECONCILIATION_BEGIN_RETRIES: usize = 100;
+const ANNOTATION_RECONCILIATION_BEGIN_RETRY_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(10);
 const MAX_TEXT_ANCHOR_GRAPHEME_SCALARS: usize = 1_024;
 
 #[derive(Debug, Error)]
 #[error("annotation snapshot exceeds its aggregate retention limit")]
 pub struct AnnotationSnapshotLimit;
+
+#[derive(Debug, Error)]
+#[error("annotation document exceeds its version limit")]
+pub struct AnnotationDocumentVersionLimit;
 
 #[derive(Debug, Error)]
 #[error("annotation association source discovery was cancelled")]
@@ -53,6 +66,22 @@ pub struct AnnotationAssociationSourceCancelled;
 #[derive(Debug, Error)]
 #[error("annotation association source discovery exceeded its work limit")]
 pub struct AnnotationAssociationSourceWorkLimit;
+
+#[derive(Debug, Error)]
+#[error("annotation reconciliation was cancelled")]
+pub struct AnnotationReconciliationCancelled;
+
+#[derive(Debug, Error)]
+#[error("annotation reconciliation exceeded its work limit")]
+pub struct AnnotationReconciliationWorkLimit;
+
+#[derive(Debug, Error)]
+#[error("invalid annotation association request: {0}")]
+pub struct AnnotationAssociationInvalidRequest(pub String);
+
+#[derive(Debug, Error)]
+#[error("annotation association source was not found")]
+pub struct AnnotationAssociationSourceNotFound;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AnnotationId(Uuid);
@@ -1118,6 +1147,11 @@ impl AnnotationStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
     pub async fn create_async(&self, annotation: &NewAnnotation) -> Result<Annotation> {
         annotation.validate()?;
         let mut transaction = self
@@ -1134,8 +1168,8 @@ impl AnnotationStore {
             AnnotationTarget::Epub(anchor) => ("epub", Some(anchor), None),
             AnnotationTarget::Pdf(anchor) => ("pdf", None, Some(anchor)),
         };
-        let annotation_document_id = match (annotation.book_id, &annotation.local_path) {
-            (None, Some(local_path)) => Some(
+        let annotation_document_id = match &annotation.local_path {
+            Some(local_path) => Some(
                 ensure_annotation_document_version(
                     &mut transaction,
                     format,
@@ -1144,7 +1178,50 @@ impl AnnotationStore {
                 )
                 .await?,
             ),
-            _ => None,
+            None => None,
+        };
+        let existing_ownership = if let Some(document_id) = annotation_document_id.as_ref() {
+            let (owner, owner_count): (Option<i64>, i64) = sqlx::query_as(
+                "SELECT MIN(book_id), COUNT(DISTINCT book_id)
+                 FROM annotations
+                 WHERE annotation_document_id = ? AND book_id IS NOT NULL",
+            )
+            .bind(document_id)
+            .fetch_one(&mut *transaction)
+            .await?;
+            if owner_count > 1 {
+                return Err(AnnotationAssociationConflict.into());
+            }
+            owner
+        } else {
+            None
+        };
+        if existing_ownership.is_some()
+            && annotation.book_id.is_some()
+            && existing_ownership != annotation.book_id
+        {
+            return Err(AnnotationAssociationConflict.into());
+        }
+        let book_id = if existing_ownership.is_some() {
+            existing_ownership
+        } else if annotation.book_id.is_some() {
+            annotation.book_id
+        } else if let Some(document_id) = annotation_document_id.as_ref() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT b.id
+                 FROM annotation_document_versions v
+                 JOIN books b
+                   ON b.file_path = v.local_path
+                  AND b.content_hash = CAST(v.fingerprint AS TEXT)
+                 WHERE v.document_id = ?
+                   AND v.fingerprint_algorithm = 'sha256-hex'
+                 ORDER BY b.id LIMIT 1",
+            )
+            .bind(document_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+        } else {
+            None
         };
         let (char_start, char_end) = pdf
             .and_then(|anchor| anchor.character_range)
@@ -1165,7 +1242,7 @@ impl AnnotationStore {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(annotation.id.to_string())
-        .bind(annotation.book_id)
+        .bind(book_id)
         .bind(&annotation.local_path)
         .bind(annotation_document_id)
         .bind(format)
@@ -1267,16 +1344,24 @@ impl AnnotationStore {
             .begin()
             .await
             .context("failed to begin annotation list snapshot")?;
+        ensure_book_annotation_snapshot(&mut transaction, book_id).await?;
+        let limit = i64::try_from(MAX_ANNOTATIONS_PER_SNAPSHOT + 1)
+            .expect("annotation snapshot limit fits in i64");
         let rows = sqlx::query(
             "SELECT * FROM annotations
              WHERE book_id = ? AND deleted_at IS NULL
-             ORDER BY created_at, id",
+             ORDER BY created_at, id LIMIT ?",
         )
         .bind(book_id)
+        .bind(limit)
         .fetch_all(&mut *transaction)
         .await
         .context("failed to list annotations for book")?;
+        if rows.len() > MAX_ANNOTATIONS_PER_SNAPSHOT {
+            return Err(AnnotationSnapshotLimit.into());
+        }
         let mut annotations = Vec::with_capacity(rows.len());
+        let mut rectangle_count = 0usize;
         for row in rows {
             let id: String = row.try_get("id")?;
             let rectangle_rows = sqlx::query(
@@ -1288,6 +1373,12 @@ impl AnnotationStore {
             .fetch_all(&mut *transaction)
             .await
             .context("failed to load PDF annotation rectangles")?;
+            rectangle_count = rectangle_count
+                .checked_add(rectangle_rows.len())
+                .ok_or(AnnotationSnapshotLimit)?;
+            if rectangle_count > MAX_PDF_RECTANGLES_PER_SNAPSHOT {
+                return Err(AnnotationSnapshotLimit.into());
+            }
             annotations.push(row_to_annotation(row, rows_to_rectangles(rectangle_rows)?)?);
         }
         transaction
@@ -1321,6 +1412,32 @@ impl AnnotationStore {
         }
         let limit = i64::try_from(MAX_ANNOTATIONS_PER_SNAPSHOT + 1)
             .expect("annotation snapshot limit fits in i64");
+        if let Some(fingerprint) = fingerprint {
+            if let Some(representative) = sqlx::query_scalar::<_, String>(
+                "SELECT a.id FROM annotations a
+                 JOIN annotation_document_versions v
+                   ON v.document_id = a.annotation_document_id
+                 WHERE v.local_path = ? AND v.format = ?
+                   AND v.fingerprint_algorithm = ? AND v.fingerprint_version = ?
+                   AND v.fingerprint = ? AND a.deleted_at IS NULL LIMIT 1",
+            )
+            .bind(local_path)
+            .bind(format.as_str())
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .fetch_optional(&mut *transaction)
+            .await?
+            {
+                ensure_annotation_snapshot_within_limits(
+                    &mut transaction,
+                    &AnnotationId::from_str(&representative)?,
+                )
+                .await?;
+            }
+        } else {
+            ensure_local_path_snapshot_within_limits(&mut transaction, local_path).await?;
+        }
         let rows = if let Some(fingerprint) = fingerprint {
             sqlx::query(
                 "SELECT a.* FROM annotations a
@@ -1420,9 +1537,10 @@ impl AnnotationStore {
         let is_cancelled = Arc::new(is_cancelled);
         tokio::pin!(cancelled);
         if limit == 0 || limit > MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE {
-            bail!(
-                "annotation association source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
-            );
+            return Err(AnnotationAssociationInvalidRequest(format!(
+                "source limit must be between 1 and {MAX_ANNOTATION_ASSOCIATION_SOURCES_PER_PAGE}"
+            ))
+            .into());
         }
         if is_cancelled() {
             return Err(AnnotationAssociationSourceCancelled.into());
@@ -1612,6 +1730,24 @@ impl AnnotationStore {
         target_local_path: &str,
         target_fingerprint: &DocumentFingerprint,
     ) -> Result<AnnotationAssociationOutcome> {
+        self.associate_document_version_for_book_async(
+            source,
+            target_format,
+            target_local_path,
+            target_fingerprint,
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn associate_document_version_for_book_async(
+        &self,
+        source: &AnnotationDocumentVersionId,
+        target_format: AnnotationDocumentFormat,
+        target_local_path: &str,
+        target_fingerprint: &DocumentFingerprint,
+        book_id: Option<i64>,
+    ) -> Result<AnnotationAssociationOutcome> {
         if target_local_path.is_empty() || target_local_path.len() > MAX_LOCAL_PATH_BYTES {
             bail!("annotation local path is empty or exceeds {MAX_LOCAL_PATH_BYTES} bytes");
         }
@@ -1636,7 +1772,7 @@ impl AnnotationStore {
         .await
         .context("failed to lock annotation document association")?;
         if locked.rows_affected() != 1 {
-            bail!("annotation association source was not found");
+            return Err(AnnotationAssociationSourceNotFound.into());
         }
         let (document_id, source_format): (String, String) = sqlx::query_as(
             "SELECT v.document_id, d.format
@@ -1649,7 +1785,10 @@ impl AnnotationStore {
         .await
         .context("failed to load annotation association source")?;
         if source_format != target_format.as_str() {
-            bail!("selected annotation source has a different document format");
+            return Err(AnnotationAssociationInvalidRequest(
+                "selected source has a different document format".into(),
+            )
+            .into());
         }
         let existing = sqlx::query_scalar::<_, String>(
             "SELECT document_id FROM annotation_document_versions
@@ -1666,7 +1805,68 @@ impl AnnotationStore {
         .context("failed to resolve target annotation document version")?;
         if let Some(existing) = existing {
             if existing != document_id {
-                return Err(AnnotationAssociationConflict.into());
+                let Some(book_id) = book_id else {
+                    return Err(AnnotationAssociationConflict.into());
+                };
+                ensure_annotation_document_version_capacity(
+                    &mut transaction,
+                    &existing,
+                    Some(&document_id),
+                    0,
+                )
+                .await?;
+                sqlx::query(
+                    "UPDATE annotations
+                     SET book_id = ?, local_path = ?, annotation_document_id = ?
+                     WHERE book_id = ? OR annotation_document_id = ?
+                        OR annotation_document_id = ?",
+                )
+                .bind(book_id)
+                .bind(target_local_path)
+                .bind(&existing)
+                .bind(book_id)
+                .bind(&existing)
+                .bind(&document_id)
+                .execute(&mut *transaction)
+                .await?;
+                sqlx::query(
+                    "UPDATE annotation_document_versions SET document_id = ? WHERE document_id = ?",
+                )
+                .bind(&existing)
+                .bind(&document_id)
+                .execute(&mut *transaction)
+                .await?;
+                sqlx::query("DELETE FROM annotation_documents WHERE id = ?")
+                    .bind(&document_id)
+                    .execute(&mut *transaction)
+                    .await?;
+                if let Some(representative) = sqlx::query_scalar::<_, String>(
+                    "SELECT id FROM annotations WHERE book_id = ? LIMIT 1",
+                )
+                .bind(book_id)
+                .fetch_optional(&mut *transaction)
+                .await?
+                {
+                    ensure_annotation_snapshot_within_limits(
+                        &mut transaction,
+                        &AnnotationId::from_str(&representative)?,
+                    )
+                    .await?;
+                }
+                transaction.commit().await?;
+                return Ok(AnnotationAssociationOutcome::Associated);
+            }
+            if let Some(book_id) = book_id {
+                sqlx::query(
+                    "UPDATE annotations SET book_id = ?, local_path = ?
+                     WHERE annotation_document_id = ?",
+                )
+                .bind(book_id)
+                .bind(target_local_path)
+                .bind(&document_id)
+                .execute(&mut *transaction)
+                .await?;
+                ensure_book_annotation_snapshot(&mut transaction, book_id).await?;
             }
             transaction
                 .commit()
@@ -1683,9 +1883,7 @@ impl AnnotationStore {
         .context("failed to count annotation document versions")?;
         if usize::try_from(version_count).unwrap_or(usize::MAX) >= MAX_ANNOTATION_DOCUMENT_VERSIONS
         {
-            bail!(
-                "annotation document exceeds its {MAX_ANNOTATION_DOCUMENT_VERSIONS}-version limit"
-            );
+            return Err(AnnotationDocumentVersionLimit.into());
         }
         sqlx::query(
             "INSERT INTO annotation_document_versions (
@@ -1694,7 +1892,7 @@ impl AnnotationStore {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(Uuid::new_v4().to_string())
-        .bind(document_id)
+        .bind(&document_id)
         .bind(target_format.as_str())
         .bind(target_local_path)
         .bind(&target_fingerprint.algorithm)
@@ -1704,6 +1902,18 @@ impl AnnotationStore {
         .execute(&mut *transaction)
         .await
         .context("failed to associate annotation document version")?;
+        if let Some(book_id) = book_id {
+            sqlx::query(
+                "UPDATE annotations SET book_id = ?, local_path = ?
+                 WHERE annotation_document_id = ?",
+            )
+            .bind(book_id)
+            .bind(target_local_path)
+            .bind(&document_id)
+            .execute(&mut *transaction)
+            .await?;
+            ensure_book_annotation_snapshot(&mut transaction, book_id).await?;
+        }
         transaction
             .commit()
             .await
@@ -1796,6 +2006,55 @@ impl AnnotationStore {
         Ok(result.rows_affected() == 1)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn update_for_book_document_async(
+        &self,
+        id: &AnnotationId,
+        book_id: i64,
+        local_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+        color: HighlightColor,
+        body: Option<&str>,
+    ) -> Result<bool> {
+        if let Some(body) = body {
+            ensure_scalar_limit(body, MAX_ANNOTATION_BODY_SCALARS, "annotation body")?;
+        }
+        let mut transaction = self.pool.begin().await?;
+        let result = sqlx::query(
+            "UPDATE annotations
+             SET color = ?, body = ?, modified_at =
+                 CASE
+                     WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > modified_at
+                     THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     ELSE strftime('%Y-%m-%dT%H:%M:%fZ', modified_at, '+0.001 seconds')
+                 END
+             WHERE id = ? AND deleted_at IS NULL AND (
+               book_id = ? OR annotation_document_id = (
+                 SELECT document_id FROM annotation_document_versions
+                 WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
+                   AND fingerprint_version = ? AND fingerprint = ?
+               )
+             )",
+        )
+        .bind(color.as_str())
+        .bind(body)
+        .bind(id.to_string())
+        .bind(book_id)
+        .bind(local_path)
+        .bind(format.as_str())
+        .bind(&fingerprint.algorithm)
+        .bind(i64::from(fingerprint.version))
+        .bind(&fingerprint.bytes)
+        .execute(&mut *transaction)
+        .await?;
+        if result.rows_affected() == 1 {
+            ensure_annotation_snapshot_within_limits(&mut transaction, id).await?;
+        }
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     pub async fn delete_async(&self, id: &AnnotationId) -> Result<bool> {
         let result = sqlx::query(
             "UPDATE annotations
@@ -1813,6 +2072,570 @@ impl AnnotationStore {
         .await
         .context("failed to delete annotation")?;
         Ok(result.rows_affected() == 1)
+    }
+
+    pub(crate) async fn reconcile_book_document(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        book_id: i64,
+        old_path: &str,
+        new_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+    ) -> Result<()> {
+        Self::reconcile_book_document_inner(
+            transaction,
+            book_id,
+            old_path,
+            new_path,
+            format,
+            fingerprint,
+            false,
+            false,
+            Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            None,
+            #[cfg(test)]
+            None,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    pub(crate) async fn reconcile_book_document_before_detach(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        book_id: i64,
+        old_path: &str,
+        new_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+    ) -> Result<()> {
+        Self::reconcile_book_document_inner(
+            transaction,
+            book_id,
+            old_path,
+            new_path,
+            format,
+            fingerprint,
+            true,
+            false,
+            Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            None,
+            #[cfg(test)]
+            None,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn reconcile_book_document_inner(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        book_id: i64,
+        old_path: &str,
+        new_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+        ignore_foreign_exact_versions: bool,
+        use_progress_budget: bool,
+        cancelled: Arc<AtomicBool>,
+        #[cfg(test)] progress_barrier: Option<Arc<std::sync::Barrier>>,
+        #[cfg(test)] work_limit: Option<usize>,
+        #[cfg(test)] persistence_gate: Option<&Arc<AnnotationPersistenceTestGate>>,
+    ) -> Result<()> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(AnnotationReconciliationCancelled.into());
+        }
+        if !use_progress_budget {
+            return Self::reconcile_book_document_work(
+                transaction,
+                book_id,
+                old_path,
+                new_path,
+                format,
+                fingerprint,
+                ignore_foreign_exact_versions,
+                None,
+                #[cfg(test)]
+                persistence_gate,
+            )
+            .await;
+        }
+        let work_exhausted = Arc::new(AtomicBool::new(false));
+        let completed_work = Arc::new(AtomicUsize::new(0));
+        let handler_active = Arc::new(AtomicBool::new(true));
+        let budget_enabled = Arc::new(AtomicBool::new(true));
+        #[cfg(test)]
+        let progress_interval = if progress_barrier.is_some() || work_limit.is_some() {
+            1
+        } else {
+            ANNOTATION_RECONCILIATION_PROGRESS_INTERVAL
+        };
+        #[cfg(not(test))]
+        let progress_interval = ANNOTATION_RECONCILIATION_PROGRESS_INTERVAL;
+        #[cfg(test)]
+        let work_limit = work_limit.unwrap_or(MAX_ANNOTATION_RECONCILIATION_WORK);
+        #[cfg(not(test))]
+        let work_limit = MAX_ANNOTATION_RECONCILIATION_WORK;
+        {
+            let cancelled = Arc::clone(&cancelled);
+            let work_exhausted = Arc::clone(&work_exhausted);
+            let completed_work = Arc::clone(&completed_work);
+            let handler_active = Arc::clone(&handler_active);
+            let callback_budget_enabled = Arc::clone(&budget_enabled);
+            #[cfg(test)]
+            let mut progress_barrier = progress_barrier;
+            let mut handle = transaction.as_mut().lock_handle().await?;
+            handle.set_progress_handler(
+                i32::try_from(progress_interval).expect("SQLite progress interval fits in i32"),
+                move || {
+                    if !handler_active.load(Ordering::Acquire) {
+                        return true;
+                    }
+                    #[cfg(test)]
+                    if let Some(barrier) = progress_barrier.take() {
+                        barrier.wait();
+                        barrier.wait();
+                    }
+                    if cancelled.load(Ordering::Acquire) {
+                        handler_active.store(false, Ordering::Release);
+                        return false;
+                    }
+                    if !callback_budget_enabled.load(Ordering::Acquire) {
+                        return true;
+                    }
+                    let work = completed_work.fetch_add(progress_interval, Ordering::Relaxed)
+                        + progress_interval;
+                    if work >= work_limit {
+                        work_exhausted.store(true, Ordering::Release);
+                        handler_active.store(false, Ordering::Release);
+                        return false;
+                    }
+                    true
+                },
+            );
+        }
+        let result = Self::reconcile_book_document_work(
+            transaction,
+            book_id,
+            old_path,
+            new_path,
+            format,
+            fingerprint,
+            ignore_foreign_exact_versions,
+            Some(budget_enabled),
+            #[cfg(test)]
+            persistence_gate,
+        )
+        .await;
+        transaction
+            .as_mut()
+            .lock_handle()
+            .await?
+            .remove_progress_handler();
+        if cancelled.load(Ordering::Acquire) {
+            Err(AnnotationReconciliationCancelled.into())
+        } else if work_exhausted.load(Ordering::Acquire) {
+            Err(AnnotationReconciliationWorkLimit.into())
+        } else {
+            result
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn reconcile_book_document_work(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        book_id: i64,
+        old_path: &str,
+        new_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+        ignore_foreign_exact_versions: bool,
+        work_budget: Option<Arc<AtomicBool>>,
+        #[cfg(test)] persistence_gate: Option<&Arc<AnnotationPersistenceTestGate>>,
+    ) -> Result<()> {
+        let current_versions = sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT document_id, local_path,
+                    (SELECT COUNT(*) FROM (
+                       SELECT 1 FROM annotation_document_versions candidate_version
+                       WHERE candidate_version.document_id = annotation_document_versions.document_id
+                       LIMIT ?
+                     )) AS document_version_count
+             FROM annotation_document_versions
+             WHERE (local_path = ? OR local_path = ?)
+               AND format = ? AND fingerprint_algorithm = ?
+               AND fingerprint_version = ? AND fingerprint = ?
+             ORDER BY (local_path = ?) DESC
+             LIMIT 2",
+        )
+        .bind(i64::try_from(MAX_ANNOTATION_DOCUMENT_VERSIONS + 1).unwrap())
+        .bind(new_path)
+        .bind(old_path)
+        .bind(format.as_str())
+        .bind(&fingerprint.algorithm)
+        .bind(i64::from(fingerprint.version))
+        .bind(&fingerprint.bytes)
+        .bind(new_path)
+        .fetch_all(&mut **transaction)
+        .await?;
+        let mut rows = Vec::new();
+        let mut considered_documents = HashSet::new();
+        for (document_id, local_path, version_count) in current_versions {
+            if considered_documents.insert(document_id.clone())
+                && reconciliation_candidate_is_eligible(transaction, &document_id, book_id).await?
+            {
+                rows.push((document_id, local_path, version_count));
+            }
+        }
+        let mut inspected_candidates = 0usize;
+        let mut cursor: Option<(String, String)> = None;
+        loop {
+            let remaining = MAX_ANNOTATION_RECONCILIATION_CANDIDATES
+                .saturating_sub(inspected_candidates)
+                .saturating_add(1);
+            let page_limit = remaining.min(MAX_ANNOTATION_DOCUMENT_VERSIONS + 1);
+            let candidates = sqlx::query_as::<_, (String, String, String, String, i64)>(
+                "SELECT document_id, local_path, associated_at, id,
+                        (SELECT COUNT(*) FROM (
+                           SELECT 1 FROM annotation_document_versions candidate_version
+                           WHERE candidate_version.document_id = annotation_document_versions.document_id
+                           LIMIT ?
+                         )) AS document_version_count
+                 FROM annotation_document_versions
+                 WHERE local_path != ? AND local_path != ?
+                   AND format = ? AND fingerprint_algorithm = ?
+                   AND fingerprint_version = ? AND fingerprint = ?
+                   AND (associated_at, id) > (?, ?)
+                 ORDER BY associated_at, id
+                 LIMIT ?",
+            )
+            .bind(i64::try_from(MAX_ANNOTATION_DOCUMENT_VERSIONS + 1).unwrap())
+            .bind(new_path)
+            .bind(old_path)
+            .bind(format.as_str())
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .bind(
+                cursor
+                    .as_ref()
+                    .map_or("", |(associated_at, _)| associated_at),
+            )
+            .bind(cursor.as_ref().map_or("", |(_, id)| id))
+            .bind(i64::try_from(page_limit).unwrap())
+            .fetch_all(&mut **transaction)
+            .await?;
+            if candidates.is_empty() {
+                break;
+            }
+            inspected_candidates = inspected_candidates.saturating_add(candidates.len());
+            if inspected_candidates > MAX_ANNOTATION_RECONCILIATION_CANDIDATES {
+                return Err(AnnotationReconciliationWorkLimit.into());
+            }
+            let candidate_count = candidates.len();
+            for (document_id, local_path, associated_at, id, version_count) in candidates {
+                cursor = Some((associated_at, id));
+                if considered_documents.insert(document_id.clone())
+                    && reconciliation_candidate_is_eligible(transaction, &document_id, book_id)
+                        .await?
+                {
+                    rows.push((document_id, local_path, version_count));
+                }
+            }
+            if candidate_count < page_limit {
+                break;
+            }
+        }
+        #[cfg(test)]
+        if let Some(gate) = persistence_gate {
+            gate.entered.add_permits(1);
+            gate.release.acquire().await.unwrap().forget();
+        }
+        if rows.len() > MAX_ANNOTATION_DOCUMENT_VERSIONS {
+            return Err(AnnotationDocumentVersionLimit.into());
+        }
+        let candidate_documents = rows
+            .iter()
+            .map(|(document_id, _, _)| document_id.clone())
+            .collect::<HashSet<_>>();
+        let existing_old =
+            annotation_document_for_version(transaction, old_path, format.as_str(), fingerprint)
+                .await?;
+        let existing_new = if old_path == new_path {
+            existing_old.clone()
+        } else {
+            annotation_document_for_version(transaction, new_path, format.as_str(), fingerprint)
+                .await?
+        };
+        if existing_old
+            .as_ref()
+            .is_some_and(|document| !candidate_documents.contains(document))
+            || existing_new
+                .as_ref()
+                .is_some_and(|document| !candidate_documents.contains(document))
+        {
+            if ignore_foreign_exact_versions {
+                let has_current_annotations: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM annotations WHERE book_id = ?)",
+                )
+                .bind(book_id)
+                .fetch_one(&mut **transaction)
+                .await?;
+                if !has_current_annotations {
+                    return Ok(());
+                }
+            }
+            return Err(AnnotationAssociationConflict.into());
+        }
+        let mut has_old = existing_old.is_some();
+        let mut has_new = existing_new.is_some();
+        let mut version_count = 0usize;
+        for candidate in &candidate_documents {
+            let count = rows
+                .iter()
+                .find_map(|(document_id, _, count)| (document_id == candidate).then_some(*count))
+                .unwrap_or(0);
+            version_count = version_count
+                .checked_add(usize::try_from(count).unwrap_or(usize::MAX))
+                .ok_or(AnnotationDocumentVersionLimit)?;
+        }
+        let mut rewrite_rows = usize::try_from(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM (
+                   SELECT 1 FROM annotations WHERE book_id = ? LIMIT ?
+                 )",
+            )
+            .bind(book_id)
+            .bind(i64::try_from(MAX_ANNOTATION_RECONCILIATION_ROWS + 1).unwrap())
+            .fetch_one(&mut **transaction)
+            .await?,
+        )
+        .unwrap_or(usize::MAX);
+        if rewrite_rows > MAX_ANNOTATION_RECONCILIATION_ROWS {
+            return Err(AnnotationReconciliationWorkLimit.into());
+        }
+        for candidate in &candidate_documents {
+            let remaining = MAX_ANNOTATION_RECONCILIATION_ROWS - rewrite_rows;
+            let additional = usize::try_from(
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM (
+                       SELECT 1 FROM annotations
+                       WHERE annotation_document_id = ?
+                         AND (book_id IS NULL OR book_id != ?)
+                       LIMIT ?
+                     )",
+                )
+                .bind(candidate)
+                .bind(book_id)
+                .bind(i64::try_from(remaining + 1).unwrap())
+                .fetch_one(&mut **transaction)
+                .await?,
+            )
+            .unwrap_or(usize::MAX);
+            if additional > remaining {
+                return Err(AnnotationReconciliationWorkLimit.into());
+            }
+            rewrite_rows += additional;
+        }
+        if let Some(work_budget) = work_budget {
+            work_budget.store(false, Ordering::Release);
+        }
+        let document_id = if let Some((document_id, _, _)) = rows.first() {
+            document_id.clone()
+        } else {
+            has_new = true;
+            version_count = 1;
+            ensure_annotation_document_version(transaction, format.as_str(), new_path, fingerprint)
+                .await?
+        };
+        let additional_versions =
+            usize::from(old_path != new_path && !has_old) + usize::from(!has_new);
+        if version_count.saturating_add(additional_versions) > MAX_ANNOTATION_DOCUMENT_VERSIONS {
+            return Err(AnnotationDocumentVersionLimit.into());
+        }
+        if old_path != new_path && !has_old {
+            sqlx::query(
+                "INSERT INTO annotation_document_versions (
+                   id, document_id, format, local_path, fingerprint_algorithm,
+                   fingerprint_version, fingerprint)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&document_id)
+            .bind(format.as_str())
+            .bind(old_path)
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .execute(&mut **transaction)
+            .await?;
+            has_old = true;
+        }
+        if !has_new {
+            sqlx::query(
+                "INSERT INTO annotation_document_versions (
+                   id, document_id, format, local_path, fingerprint_algorithm,
+                   fingerprint_version, fingerprint)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(Uuid::new_v4().to_string())
+            .bind(&document_id)
+            .bind(format.as_str())
+            .bind(new_path)
+            .bind(&fingerprint.algorithm)
+            .bind(i64::from(fingerprint.version))
+            .bind(&fingerprint.bytes)
+            .execute(&mut **transaction)
+            .await?;
+            has_new = true;
+        }
+        debug_assert!(has_old || old_path == new_path);
+        debug_assert!(has_new);
+        let merged_documents = rows
+            .iter()
+            .map(|(candidate, _, _)| candidate)
+            .filter(|candidate| **candidate != document_id)
+            .cloned()
+            .collect::<HashSet<_>>();
+        for merged in &merged_documents {
+            sqlx::query(
+                "UPDATE annotation_document_versions SET document_id = ? WHERE document_id = ?",
+            )
+            .bind(&document_id)
+            .bind(merged)
+            .execute(&mut **transaction)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE annotations
+             SET book_id = ?, local_path = ?, annotation_document_id = ?
+             WHERE book_id = ? OR annotation_document_id = ?",
+        )
+        .bind(book_id)
+        .bind(new_path)
+        .bind(&document_id)
+        .bind(book_id)
+        .bind(&document_id)
+        .execute(&mut **transaction)
+        .await?;
+        for merged in &merged_documents {
+            sqlx::query(
+                "UPDATE annotations
+                 SET book_id = ?, local_path = ?, annotation_document_id = ?
+                 WHERE annotation_document_id = ?",
+            )
+            .bind(book_id)
+            .bind(new_path)
+            .bind(&document_id)
+            .bind(merged)
+            .execute(&mut **transaction)
+            .await?;
+        }
+        for merged in merged_documents {
+            sqlx::query("DELETE FROM annotation_documents WHERE id = ?")
+                .bind(merged)
+                .execute(&mut **transaction)
+                .await?;
+        }
+        ensure_book_annotation_snapshot_within_limits(transaction, book_id).await?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn reconcile_opened_book_cancellable_async(
+        &self,
+        book_id: i64,
+        local_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+        cancelled: Arc<AtomicBool>,
+        cancellation_notifier: Arc<tokio::sync::Notify>,
+        #[cfg(test)] progress_barrier: Option<Arc<std::sync::Barrier>>,
+        #[cfg(test)] work_limit: Option<usize>,
+        accept_commit: impl FnOnce() -> bool,
+    ) -> Result<()> {
+        let cancellation_notification = cancellation_notifier.notified();
+        tokio::pin!(cancellation_notification);
+        cancellation_notification.as_mut().enable();
+        if cancelled.load(Ordering::Acquire) {
+            return Err(AnnotationReconciliationCancelled.into());
+        }
+        let mut connection = tokio::select! {
+            connection = self.pool.acquire() => connection
+                .context("failed to acquire annotation reconciliation connection")?,
+            () = &mut cancellation_notification => {
+                return Err(AnnotationReconciliationCancelled.into());
+            }
+        };
+        connection.close_on_drop();
+        sqlx::query("PRAGMA busy_timeout = 0")
+            .execute(&mut *connection)
+            .await?;
+        let mut attempts = 0usize;
+        let mut transaction = loop {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(AnnotationReconciliationCancelled.into());
+            }
+            match connection.begin_with("BEGIN IMMEDIATE").await {
+                Ok(transaction) => break transaction,
+                Err(error) if sqlite_is_busy(&error) => {
+                    attempts += 1;
+                    if attempts >= MAX_ANNOTATION_RECONCILIATION_BEGIN_RETRIES {
+                        return Err(AnnotationReconciliationWorkLimit.into());
+                    }
+                    let cancellation_notification = cancellation_notifier.notified();
+                    tokio::pin!(cancellation_notification);
+                    cancellation_notification.as_mut().enable();
+                    if cancelled.load(Ordering::Acquire) {
+                        return Err(AnnotationReconciliationCancelled.into());
+                    }
+                    tokio::select! {
+                        () = tokio::time::sleep(ANNOTATION_RECONCILIATION_BEGIN_RETRY_DELAY) => {}
+                        () = &mut cancellation_notification => {
+                            return Err(AnnotationReconciliationCancelled.into());
+                        }
+                    }
+                }
+                Err(error) => {
+                    return Err(error.into());
+                }
+            }
+        };
+        let result = Self::reconcile_book_document_inner(
+            &mut transaction,
+            book_id,
+            local_path,
+            local_path,
+            format,
+            fingerprint,
+            false,
+            true,
+            Arc::clone(&cancelled),
+            #[cfg(test)]
+            progress_barrier,
+            #[cfg(test)]
+            work_limit,
+            #[cfg(test)]
+            self.persistence_gate.as_ref(),
+        )
+        .await;
+        if result.is_ok() && !accept_commit() {
+            let _ = transaction.rollback().await;
+            let _ = connection.close().await;
+            return Err(AnnotationReconciliationCancelled.into());
+        }
+        match result {
+            Ok(()) => transaction.commit().await?,
+            Err(error) => {
+                let _ = transaction.rollback().await;
+                let _ = connection.close().await;
+                return Err(error);
+            }
+        }
+        let _ = connection.close().await;
+        Ok(())
     }
 
     pub(crate) async fn bind_book_annotations_before_detach(
@@ -1845,6 +2668,18 @@ impl AnnotationStore {
             let document_id =
                 ensure_annotation_document_version(transaction, &format, &local_path, &fingerprint)
                     .await?;
+            let foreign_owner = sqlx::query_scalar::<_, i64>(
+                "SELECT book_id FROM annotations
+                 WHERE annotation_document_id = ? AND book_id IS NOT NULL AND book_id != ?
+                 LIMIT 1",
+            )
+            .bind(&document_id)
+            .bind(book_id)
+            .fetch_optional(&mut **transaction)
+            .await?;
+            if foreign_owner.is_some() {
+                return Err(AnnotationAssociationConflict.into());
+            }
             sqlx::query(
                 "UPDATE annotations SET annotation_document_id = ?
                  WHERE book_id = ? AND annotation_document_id IS NULL
@@ -1922,6 +2757,43 @@ impl AnnotationStore {
         Ok(result.rows_affected() == 1)
     }
 
+    pub(crate) async fn delete_for_book_document_async(
+        &self,
+        id: &AnnotationId,
+        book_id: i64,
+        local_path: &str,
+        format: AnnotationDocumentFormat,
+        fingerprint: &DocumentFingerprint,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE annotations
+             SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                 modified_at =
+                 CASE
+                     WHEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') > modified_at
+                     THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     ELSE strftime('%Y-%m-%dT%H:%M:%fZ', modified_at, '+0.001 seconds')
+                 END
+             WHERE id = ? AND deleted_at IS NULL AND (
+               book_id = ? OR annotation_document_id = (
+                 SELECT document_id FROM annotation_document_versions
+                 WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
+                   AND fingerprint_version = ? AND fingerprint = ?
+               )
+             )",
+        )
+        .bind(id.to_string())
+        .bind(book_id)
+        .bind(local_path)
+        .bind(format.as_str())
+        .bind(&fingerprint.algorithm)
+        .bind(i64::from(fingerprint.version))
+        .bind(&fingerprint.bytes)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     async fn load_pdf_rectangles(&self, annotation_id: &str) -> Result<Vec<PageRect>> {
         let rows = sqlx::query(
             "SELECT left, bottom, right, top FROM annotation_pdf_rectangles
@@ -1934,6 +2806,94 @@ impl AnnotationStore {
         .context("failed to load PDF annotation rectangles")?;
         rows_to_rectangles(rows)
     }
+}
+
+async fn ensure_annotation_document_version_capacity(
+    transaction: &mut Transaction<'_, Sqlite>,
+    document_id: &str,
+    merged_document_id: Option<&str>,
+    additional_versions: usize,
+) -> Result<()> {
+    let version_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM annotation_document_versions
+         WHERE document_id = ? OR (? IS NOT NULL AND document_id = ?)",
+    )
+    .bind(document_id)
+    .bind(merged_document_id)
+    .bind(merged_document_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let resulting_count = usize::try_from(version_count)
+        .unwrap_or(usize::MAX)
+        .saturating_add(additional_versions);
+    if resulting_count > MAX_ANNOTATION_DOCUMENT_VERSIONS {
+        return Err(AnnotationDocumentVersionLimit.into());
+    }
+    Ok(())
+}
+
+async fn reconciliation_candidate_is_eligible(
+    transaction: &mut Transaction<'_, Sqlite>,
+    document_id: &str,
+    book_id: i64,
+) -> Result<bool> {
+    let (has_current_owner, has_lower_owner, has_higher_owner, has_other_path_owner): (
+        bool,
+        bool,
+        bool,
+        bool,
+    ) = sqlx::query_as(
+        "SELECT
+           EXISTS(SELECT 1 FROM annotations
+                  WHERE annotation_document_id = ? AND book_id = ?),
+           EXISTS(SELECT 1 FROM annotations
+                  WHERE annotation_document_id = ? AND book_id < ?),
+           EXISTS(SELECT 1 FROM annotations
+                  WHERE annotation_document_id = ? AND book_id > ?),
+           EXISTS(
+             SELECT 1
+             FROM annotation_document_versions owned_version
+             JOIN books b
+               ON b.file_path = owned_version.local_path
+                 OR b.original_path = owned_version.local_path
+             WHERE owned_version.document_id = ? AND b.id != ?
+               AND owned_version.fingerprint_algorithm = 'sha256-hex'
+               AND owned_version.fingerprint_version = 1
+               AND b.content_hash = CAST(owned_version.fingerprint AS TEXT)
+           )",
+    )
+    .bind(document_id)
+    .bind(book_id)
+    .bind(document_id)
+    .bind(book_id)
+    .bind(document_id)
+    .bind(book_id)
+    .bind(document_id)
+    .bind(book_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(!has_lower_owner && !has_higher_owner && (has_current_owner || !has_other_path_owner))
+}
+
+async fn annotation_document_for_version(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    local_path: &str,
+    format: &str,
+    fingerprint: &DocumentFingerprint,
+) -> Result<Option<String>> {
+    sqlx::query_scalar(
+        "SELECT document_id FROM annotation_document_versions
+         WHERE local_path = ? AND format = ? AND fingerprint_algorithm = ?
+           AND fingerprint_version = ? AND fingerprint = ?",
+    )
+    .bind(local_path)
+    .bind(format)
+    .bind(&fingerprint.algorithm)
+    .bind(i64::from(fingerprint.version))
+    .bind(&fingerprint.bytes)
+    .fetch_optional(&mut **transaction)
+    .await
+    .context("failed to resolve annotation document version")
 }
 
 async fn ensure_annotation_document_version(
@@ -1996,6 +2956,76 @@ async fn ensure_annotation_document_version(
     Ok(document_id)
 }
 
+async fn ensure_book_annotation_snapshot_within_limits(
+    connection: &mut SqliteConnection,
+    book_id: i64,
+) -> Result<()> {
+    let usage = sqlx::query(
+        "SELECT COUNT(*) AS annotation_count,
+                COALESCE(SUM(
+                  LENGTH(CAST(a.id AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.local_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint_algorithm AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.body, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.original_quote, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalization_profile, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_exact, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_prefix, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_suffix, '') AS BLOB)) +
+                  LENGTH(CAST(a.color AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_system, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_id, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.epub_resource_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.created_at AS BLOB)) +
+                  LENGTH(CAST(a.modified_at AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB))
+                ), 0) AS string_bytes,
+                MAX(MAX(MAX(LENGTH(CAST(a.created_at AS BLOB)),
+                            LENGTH(CAST(a.modified_at AS BLOB))),
+                        LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB)))) AS timestamp_bytes
+         FROM annotations a
+         WHERE a.book_id = ? AND a.deleted_at IS NULL",
+    )
+    .bind(book_id)
+    .fetch_one(&mut *connection)
+    .await
+    .context("failed to measure book annotation snapshot")?;
+    let annotation_count = usize::try_from(usage.try_get::<i64, _>("annotation_count")?)
+        .map_err(|_| AnnotationSnapshotLimit)?;
+    let string_bytes = usize::try_from(usage.try_get::<i64, _>("string_bytes")?)
+        .map_err(|_| AnnotationSnapshotLimit)?;
+    let timestamp_bytes = usage
+        .try_get::<Option<i64>, _>("timestamp_bytes")?
+        .unwrap_or(0);
+    if usize::try_from(timestamp_bytes).unwrap_or(usize::MAX) > MAX_ANNOTATION_TIMESTAMP_BYTES {
+        return Err(AnnotationSnapshotLimit.into());
+    }
+    let rectangle_count = usize::try_from(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM annotations a
+             JOIN annotation_pdf_rectangles r ON r.annotation_id = a.id
+             WHERE a.book_id = ? AND a.deleted_at IS NULL",
+        )
+        .bind(book_id)
+        .fetch_one(&mut *connection)
+        .await
+        .context("failed to measure book annotation rectangles")?,
+    )
+    .map_err(|_| AnnotationSnapshotLimit)?;
+    let retained_bytes = annotation_count
+        .checked_mul(ANNOTATION_SNAPSHOT_BASE_BYTES)
+        .and_then(|base| base.checked_add(string_bytes))
+        .and_then(|bytes| {
+            rectangle_count
+                .checked_mul(std::mem::size_of::<PageRect>())
+                .and_then(|rectangles| bytes.checked_add(rectangles))
+        })
+        .ok_or(AnnotationSnapshotLimit)?;
+    ensure_annotation_snapshot_usage(annotation_count, retained_bytes, rectangle_count)
+}
+
 async fn ensure_annotation_snapshot_within_limits(
     connection: &mut SqliteConnection,
     annotation_id: &AnnotationId,
@@ -2009,15 +3039,32 @@ async fn ensure_annotation_snapshot_within_limits(
          SELECT COUNT(*) AS annotation_count,
                 COALESCE(SUM(
                   LENGTH(CAST(a.id AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.local_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint_algorithm AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint AS BLOB)) +
                   LENGTH(CAST(COALESCE(a.body, '') AS BLOB)) +
                   LENGTH(CAST(COALESCE(a.original_quote, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalization_profile, '') AS BLOB)) +
                   LENGTH(CAST(COALESCE(a.normalized_exact, '') AS BLOB)) +
                   LENGTH(CAST(COALESCE(a.normalized_prefix, '') AS BLOB)) +
-                  LENGTH(CAST(COALESCE(a.normalized_suffix, '') AS BLOB))
-                ), 0) AS string_bytes
+                  LENGTH(CAST(COALESCE(a.normalized_suffix, '') AS BLOB)) +
+                  LENGTH(CAST(a.color AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_system, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_id, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.epub_resource_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.created_at AS BLOB)) +
+                  LENGTH(CAST(a.modified_at AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB))
+                ), 0) AS string_bytes,
+                MAX(MAX(MAX(LENGTH(CAST(a.created_at AS BLOB)),
+                            LENGTH(CAST(a.modified_at AS BLOB))),
+                        LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB)))) AS timestamp_bytes
          FROM annotations a, target t
          WHERE a.deleted_at IS NULL AND (
-           (t.book_id IS NOT NULL AND a.book_id = t.book_id) OR
+           (t.book_id IS NOT NULL AND
+            (a.book_id = t.book_id OR
+             (t.annotation_document_id IS NOT NULL AND
+              a.annotation_document_id = t.annotation_document_id))) OR
            (t.book_id IS NULL AND t.annotation_document_id IS NOT NULL AND
             a.annotation_document_id = t.annotation_document_id) OR
            (t.book_id IS NULL AND t.annotation_document_id IS NULL AND
@@ -2036,6 +3083,12 @@ async fn ensure_annotation_snapshot_within_limits(
         .map_err(|_| AnnotationSnapshotLimit)?;
     let string_bytes = usize::try_from(usage.try_get::<i64, _>("string_bytes")?)
         .map_err(|_| AnnotationSnapshotLimit)?;
+    let timestamp_bytes = usage
+        .try_get::<Option<i64>, _>("timestamp_bytes")?
+        .unwrap_or(0);
+    if usize::try_from(timestamp_bytes).unwrap_or(usize::MAX) > MAX_ANNOTATION_TIMESTAMP_BYTES {
+        return Err(AnnotationSnapshotLimit.into());
+    }
     let rectangle_count = usize::try_from(
         sqlx::query_scalar::<_, i64>(
             "WITH target AS (
@@ -2048,7 +3101,10 @@ async fn ensure_annotation_snapshot_within_limits(
              JOIN annotations a ON a.id = r.annotation_id
              JOIN target t
              WHERE a.deleted_at IS NULL AND (
-               (t.book_id IS NOT NULL AND a.book_id = t.book_id) OR
+               (t.book_id IS NOT NULL AND
+                (a.book_id = t.book_id OR
+                 (t.annotation_document_id IS NOT NULL AND
+                  a.annotation_document_id = t.annotation_document_id))) OR
                (t.book_id IS NULL AND t.annotation_document_id IS NOT NULL AND
                 a.annotation_document_id = t.annotation_document_id) OR
                (t.book_id IS NULL AND t.annotation_document_id IS NULL AND
@@ -2076,6 +3132,94 @@ async fn ensure_annotation_snapshot_within_limits(
         .ok_or(AnnotationSnapshotLimit)?;
 
     ensure_annotation_snapshot_usage(annotation_count, retained_bytes, rectangle_count)
+}
+
+async fn ensure_local_path_snapshot_within_limits(
+    connection: &mut SqliteConnection,
+    local_path: &str,
+) -> Result<()> {
+    let usage = sqlx::query(
+        "SELECT COUNT(*) AS annotation_count,
+                COALESCE(SUM(
+                  LENGTH(CAST(a.id AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.local_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint_algorithm AS BLOB)) +
+                  LENGTH(CAST(a.fingerprint AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.body, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.original_quote, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalization_profile, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_exact, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_prefix, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.normalized_suffix, '') AS BLOB)) +
+                  LENGTH(CAST(a.color AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_system, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.source_id, '') AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.epub_resource_path, '') AS BLOB)) +
+                  LENGTH(CAST(a.created_at AS BLOB)) +
+                  LENGTH(CAST(a.modified_at AS BLOB)) +
+                  LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB))
+                ), 0) AS string_bytes,
+                MAX(MAX(MAX(LENGTH(CAST(a.created_at AS BLOB)),
+                            LENGTH(CAST(a.modified_at AS BLOB))),
+                        LENGTH(CAST(COALESCE(a.deleted_at, '') AS BLOB)))) AS timestamp_bytes
+         FROM annotations a
+         WHERE a.book_id IS NULL AND a.local_path = ? AND a.deleted_at IS NULL",
+    )
+    .bind(local_path)
+    .fetch_one(&mut *connection)
+    .await
+    .context("failed to measure local-path annotation snapshot")?;
+    let annotation_count = usize::try_from(usage.try_get::<i64, _>("annotation_count")?)
+        .map_err(|_| AnnotationSnapshotLimit)?;
+    let string_bytes = usize::try_from(usage.try_get::<i64, _>("string_bytes")?)
+        .map_err(|_| AnnotationSnapshotLimit)?;
+    let timestamp_bytes = usage
+        .try_get::<Option<i64>, _>("timestamp_bytes")?
+        .unwrap_or(0);
+    if usize::try_from(timestamp_bytes).unwrap_or(usize::MAX) > MAX_ANNOTATION_TIMESTAMP_BYTES {
+        return Err(AnnotationSnapshotLimit.into());
+    }
+    let rectangle_count = usize::try_from(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM annotation_pdf_rectangles r
+             JOIN annotations a ON a.id = r.annotation_id
+             WHERE a.book_id IS NULL AND a.local_path = ? AND a.deleted_at IS NULL",
+        )
+        .bind(local_path)
+        .fetch_one(&mut *connection)
+        .await
+        .context("failed to measure local-path annotation rectangles")?,
+    )
+    .map_err(|_| AnnotationSnapshotLimit)?;
+    let retained_bytes = annotation_count
+        .checked_mul(ANNOTATION_SNAPSHOT_BASE_BYTES)
+        .and_then(|base| base.checked_add(string_bytes))
+        .and_then(|bytes| {
+            rectangle_count
+                .checked_mul(std::mem::size_of::<PageRect>())
+                .and_then(|rectangles| bytes.checked_add(rectangles))
+        })
+        .ok_or(AnnotationSnapshotLimit)?;
+    ensure_annotation_snapshot_usage(annotation_count, retained_bytes, rectangle_count)
+}
+
+async fn ensure_book_annotation_snapshot(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+) -> Result<()> {
+    if let Some(representative) =
+        sqlx::query_scalar::<_, String>("SELECT id FROM annotations WHERE book_id = ? LIMIT 1")
+            .bind(book_id)
+            .fetch_optional(&mut **transaction)
+            .await?
+    {
+        ensure_annotation_snapshot_within_limits(
+            transaction,
+            &AnnotationId::from_str(&representative)?,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 fn ensure_annotation_snapshot_usage(
@@ -2332,6 +3476,14 @@ fn positive_u32(value: i64, field: &str) -> Result<u32> {
         bail!("invalid {field} in annotation database");
     }
     Ok(value)
+}
+
+fn sqlite_is_busy(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|error| error.code())
+        .and_then(|code| code.parse::<i32>().ok())
+        .is_some_and(|code| matches!(code & 0xff, 5 | 6))
 }
 
 fn ensure_scalar_limit(value: &str, limit: usize, field: &str) -> Result<()> {

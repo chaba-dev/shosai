@@ -1,6 +1,7 @@
 use shosai_core::bookmarks::{
-    BookmarkStore, MAX_BOOKMARK_COLOR_BYTES, MAX_BOOKMARK_EXPORT_BYTES, MAX_BOOKMARK_NOTE_BYTES,
-    MAX_BOOKMARK_PAGE_SIZE, MAX_BOOKMARK_TITLE_BYTES, MAX_BOOKMARKS_PER_BOOK,
+    BookmarkExportLimit, BookmarkStore, MAX_BOOKMARK_COLOR_BYTES, MAX_BOOKMARK_EXPORT_BYTES,
+    MAX_BOOKMARK_NOTE_BYTES, MAX_BOOKMARK_PAGE_SIZE, MAX_BOOKMARK_TITLE_BYTES,
+    MAX_BOOKMARKS_PER_BOOK,
 };
 use shosai_core::reading_state::ReadingStateStore;
 use std::path::PathBuf;
@@ -518,8 +519,7 @@ async fn bookmark_markdown_export_has_an_aggregate_byte_limit() {
             .export_markdown_async(&path, CONTENT_HASH)
             .await
             .unwrap_err()
-            .to_string()
-            .contains("export exceeds")
+            .is::<BookmarkExportLimit>()
     );
 }
 
@@ -532,7 +532,7 @@ async fn stable_book_toggle_reports_a_missing_book() {
         .await
         .unwrap_err();
 
-    assert!(error.to_string().contains("book 404 not found"));
+    assert!(error.is::<shosai_core::bookmarks::BookmarkBookNotFound>());
 }
 
 #[tokio::test]

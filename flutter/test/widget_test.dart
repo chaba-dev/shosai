@@ -695,7 +695,8 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.textContaining('missing its raster'), findsWidgets);
 
-    final desiredScale = tester.view.devicePixelRatio == 2 ? 3.0 : 2.0;
+    final originalScale = tester.view.devicePixelRatio;
+    final desiredScale = originalScale == 2 ? 3.0 : 2.0;
     tester.view.devicePixelRatio = desiredScale;
     await tester.pump();
     await tester.pump();
@@ -703,7 +704,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '/tmp/retry.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    expect(bridge.selectionLayouts.last.scale, desiredScale);
+    expect(bridge.selectionLayouts.last.scale, originalScale);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -2386,6 +2387,130 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('viewport reports during open preserve restored zoom', () async {
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      immediateLists: true,
+      initialReadingState: FlutterReadingState(unit: BigInt.zero, zoom: 2.5),
+    );
+    final controller = _epubController(bridge);
+    controller.dispatch(const ReaderOpenRequested('/books/a.epub', bookId: 7));
+    controller.dispatch(
+      const ReaderLayoutChanged(
+        ReaderLayout(scale: 1, width: 320, fontSize: 24),
+      ),
+    );
+    await bridge.waitForOp(2);
+
+    expect(
+      controller.model.layout,
+      const ReaderLayout(scale: 2.5, width: 320, fontSize: 24),
+    );
+    expect(bridge.selectionLayouts, [
+      const ReaderLayout(scale: 2.5, width: 680, fontSize: 18),
+      const ReaderLayout(scale: 2.5, width: 320, fontSize: 24),
+    ]);
+    controller.dispatch(
+      const ReaderViewportChanged(
+        ReaderLayout(scale: 1, width: 400, fontSize: 26),
+      ),
+    );
+    await bridge.waitForOp(3);
+    expect(
+      controller.model.layout,
+      const ReaderLayout(scale: 2.5, width: 400, fontSize: 26),
+    );
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  testWidgets('automatic PDF open uses configured zoom without saved state', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 2.75,
+          ),
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(bridge.renderScales.first, 2.75);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('automatic PDF open defaults to the initial device pixel ratio', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.pdf',
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 0,
+          ),
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(bridge.renderScales.first, 3);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  test('viewport changes preserve an in-flight navigation target', () async {
+    final bridge = _ControlledBridge(logicalUnitCount: 3, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+    final stale = Completer<FlutterSelectionSurface>();
+    bridge.selectionCompleters.add(stale);
+
+    controller.dispatch(const ReaderUnitRequested(1, offset: 17, length: 3));
+    await _waitUntil(() => bridge.selectionCalls == 2);
+    controller.dispatch(
+      const ReaderViewportChanged(
+        ReaderLayout(scale: 1, width: 400, fontSize: 22),
+      ),
+    );
+    await bridge.waitForOp(2);
+
+    expect(bridge.selectionUnits, [0, 1, 1]);
+    expect(controller.model.unit, 1);
+    expect(controller.model.readingOffset, 17);
+    expect(controller.model.anchor, 17);
+    expect(controller.model.focus, 20);
+    stale.complete(_surface(BigInt.from(30), raster: true));
+    await Future<void>.delayed(Duration.zero);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test('note completion during relayout reports a retryable error', () async {
     final bridge = _ControlledBridge(
       initialAnnotations: [_annotation('one')],
@@ -2973,6 +3098,30 @@ void main() {
     },
   );
 
+  test(
+    'accepted replacement clears the previous restorable book identity',
+    () async {
+      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final controller = _epubController(bridge);
+      controller.dispatch(
+        const ReaderOpenRequested('/books/a.epub', bookId: 7),
+      );
+      await bridge.waitForOp(1);
+      expect(controller.model.openBookId, 7);
+
+      bridge.openFailure = StateError('replacement failed');
+      controller.dispatch(const ReaderOpenRequested('/tmp/b.epub'));
+      expect(controller.model.openPath, '/tmp/b.epub');
+      expect(controller.model.openBookId, isNull);
+      await bridge.waitForOp(2);
+      expect(controller.model.error, contains('replacement failed'));
+      expect(controller.model.openBookId, isNull);
+
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
   for (final createSucceeds in [false, true]) {
     test(
       'recovery reports an interrupted note create when it ${createSucceeds ? 'succeeds' : 'fails'}',
@@ -3508,7 +3657,8 @@ void main() {
     await tester.tap(find.byTooltip('Change color'));
     await tester.pump();
 
-    final desiredScale = tester.view.devicePixelRatio == 2 ? 3.0 : 2.0;
+    final originalScale = tester.view.devicePixelRatio;
+    final desiredScale = originalScale == 2 ? 3.0 : 2.0;
     tester.view.devicePixelRatio = desiredScale;
     await tester.pump();
     await tester.pump();
@@ -3517,7 +3667,7 @@ void main() {
     bridge.updateCompleter!.complete(true);
     await tester.pumpAndSettle();
     expect(bridge.selectionCalls, selectionCalls + 1);
-    expect(bridge.selectionLayouts.last.scale, desiredScale);
+    expect(bridge.selectionLayouts.last.scale, originalScale);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -3744,7 +3894,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         bridge.selectionLayouts.last,
-        const ReaderLayout(scale: 3, width: 652, fontSize: 36),
+        const ReaderLayout(scale: 2, width: 652, fontSize: 36),
       );
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
@@ -5316,6 +5466,434 @@ void main() {
     await bridge.disposed.future;
     expect(tester.takeException(), isNull);
   });
+
+  test(
+    'failed unit navigation keeps committed content and permits retry',
+    () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 2,
+        immediateLists: true,
+      );
+      final controller = _epubController(bridge);
+      await _openControlled(controller, bridge, '/tmp/book.epub');
+      final failed = Completer<FlutterSelectionSurface>();
+      bridge.selectionCompleters.add(failed);
+
+      controller.dispatch(const ReaderUnitRequested(1));
+      failed.completeError(StateError('page two failed'));
+      await bridge.waitForOp(2);
+
+      expect(controller.model.unit, 0);
+      expect(
+        controller.model.selectionSurface?.text,
+        'Selectable fixture text',
+      );
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(3);
+      expect(controller.model.unit, 1);
+      expect(bridge.selectionUnits, [0, 1, 1]);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
+    'search and bookmark completions cannot strand each other busy',
+    () async {
+      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final controller = _epubController(bridge);
+      await _openControlled(controller, bridge, '/tmp/book.epub');
+      final search = Completer<List<FlutterSearchMatch>>();
+      final toggle = Completer<FlutterBookmark?>();
+      final listed = Completer<List<FlutterBookmark>>();
+      bridge.searchCompleters.add(search);
+      bridge.bookmarkToggleCompleters.add(toggle);
+      bridge.bookmarkListCompleters.add(listed);
+
+      controller.dispatch(const ReaderBookmarkToggled());
+      final bookmarkCancellation = bridge.createdCancellations.last;
+      controller.dispatch(const ReaderSearchRequested('needle'));
+      expect(
+        bridge.cancelled,
+        isNot(contains(bookmarkCancellation)),
+        reason: 'search replacement must not cancel bookmark reloads',
+      );
+      search.complete(const []);
+      toggle.complete(null);
+      listed.complete(const []);
+      await _waitUntil(
+        () => !controller.model.searchBusy && !controller.model.bookmarkBusy,
+      );
+
+      expect(controller.model.searchBusy, isFalse);
+      expect(controller.model.bookmarkBusy, isFalse);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
+    'bookmark toggles use the durable reading offset, not selection',
+    () async {
+      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final controller = _epubController(bridge);
+      await _openControlled(controller, bridge, '/tmp/book.epub');
+      controller.dispatch(const ReaderSelectionStarted(5));
+
+      controller.dispatch(const ReaderBookmarkToggled());
+      await _waitUntil(() => !controller.model.bookmarkBusy);
+
+      expect(controller.model.anchor, 5);
+      expect(bridge.toggledBookmarkOffsets, [null]);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('same-unit chapter bookmark clears a prior reading offset', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+    controller.dispatch(const ReaderBookmarkNavigated(0, offset: 5));
+    await bridge.waitForOp(2);
+    expect(controller.model.readingOffset, 5);
+
+    controller.dispatch(const ReaderBookmarkNavigated(0));
+    await bridge.waitForOp(3);
+
+    expect(controller.model.readingOffset, isNull);
+    expect(bridge.selectionUnits, [0, 0, 0]);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test(
+    'tool completion resumes recovery with stable library identity',
+    () async {
+      final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final controller = _epubController(bridge);
+      controller.dispatch(
+        const ReaderOpenRequested('/books/a.epub', bookId: 7),
+      );
+      await bridge.waitForOp(1);
+      final search = Completer<List<FlutterSearchMatch>>();
+      bridge.searchCompleters.add(search);
+
+      controller.dispatch(const ReaderSearchRequested('needle'));
+      controller.dispatch(const ReaderSuspended());
+      controller.dispatch(const ReaderResumed());
+      search.complete(const []);
+      await _waitUntil(() => bridge.openedLibraryBookIds.length == 2);
+      await bridge.waitForOp(3);
+
+      expect(bridge.openedLibraryBookIds, [7, 7]);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('reading-state writes remain ordered across rapid navigation', () async {
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      logicalUnitCount: 3,
+      immediateLists: true,
+    );
+    final firstSave = Completer<void>();
+    bridge.readingStateCompleters.add(firstSave);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+
+    controller.dispatch(const ReaderUnitRequested(1, offset: 11));
+    await bridge.waitForOp(2);
+    await _waitUntil(() => bridge.savedReadingStates.length == 1);
+    controller.dispatch(const ReaderUnitRequested(2, offset: 22));
+    await bridge.waitForOp(3);
+    expect(bridge.savedReadingStates.map((state) => state.unit.toInt()), [1]);
+
+    firstSave.complete();
+    await _waitUntil(() => bridge.savedReadingStates.length == 2);
+    expect(
+      bridge.savedReadingStates.map(
+        (state) => (state.unit.toInt(), state.offset?.toInt()),
+      ),
+      [(1, 11), (2, 22)],
+    );
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('newer reading-state success clears an obsolete save failure', () async {
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      logicalUnitCount: 3,
+      immediateLists: true,
+    );
+    final firstSave = Completer<void>();
+    bridge.readingStateCompleters.add(firstSave);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+
+    controller.dispatch(const ReaderUnitRequested(1, offset: 11));
+    await bridge.waitForOp(2);
+    await _waitUntil(() => bridge.savedReadingStates.length == 1);
+    controller.dispatch(const ReaderUnitRequested(2, offset: 22));
+    await bridge.waitForOp(3);
+
+    firstSave.completeError(StateError('old save failed'));
+    await controller.drainReadingStateWrites(7);
+
+    expect(bridge.savedReadingStates.map((state) => state.unit.toInt()), [
+      1,
+      2,
+    ]);
+    expect(controller.model.toolError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test(
+    'queued saves retain progress metadata after document replacement',
+    () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 3,
+        immediateLists: true,
+      );
+      final firstSave = Completer<void>();
+      bridge.readingStateCompleters.add(firstSave);
+      final controller = _epubController(bridge);
+      await _openControlled(controller, bridge, '/books/book.epub');
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(2);
+      await _waitUntil(() => bridge.savedReadingStates.length == 1);
+      controller.dispatch(const ReaderUnitRequested(2));
+      await bridge.waitForOp(3);
+
+      bridge.logicalUnitCount = 9;
+      controller.dispatch(const ReaderOpenRequested('/books/replacement.epub'));
+      await bridge.waitForOp(4);
+      firstSave.complete();
+      await _waitUntil(() => bridge.savedReadingStates.length == 2);
+
+      expect(bridge.savedReadingStateUnitCounts, [
+        BigInt.from(3),
+        BigInt.from(3),
+      ]);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
+    'blocked reading-state writes coalesce to the latest position',
+    () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 20,
+        immediateLists: true,
+      );
+      final firstSave = Completer<void>();
+      bridge.readingStateCompleters.add(firstSave);
+      final controller = _epubController(bridge);
+      await _openControlled(controller, bridge, '/books/book.epub');
+
+      for (var unit = 1; unit <= 10; unit += 1) {
+        controller.dispatch(ReaderUnitRequested(unit));
+        await bridge.waitForOp(unit + 1);
+      }
+      expect(bridge.savedReadingStates.map((state) => state.unit.toInt()), [1]);
+
+      firstSave.complete();
+      await controller.drainReadingStateWrites(7);
+      expect(bridge.savedReadingStates.map((state) => state.unit.toInt()), [
+        1,
+        10,
+      ]);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
+    'book queue orders saves and restoration across bridge instances',
+    () async {
+      final olderBridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 3,
+        immediateLists: true,
+      );
+      final newerBridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 3,
+        immediateLists: true,
+      );
+      final oldSave = Completer<void>();
+      olderBridge.readingStateCompleters.add(oldSave);
+      final older = _epubController(olderBridge);
+      older.dispatch(const ReaderOpenRequested('/books/book.epub', bookId: 7));
+      await olderBridge.waitForOp(1);
+      older.dispatch(const ReaderUnitRequested(1, offset: 11));
+      await olderBridge.waitForOp(2);
+      await _waitUntil(() => olderBridge.savedReadingStates.length == 1);
+
+      final newer = _epubController(newerBridge);
+      newer.dispatch(const ReaderOpenRequested('/books/book.epub', bookId: 7));
+      await Future<void>.delayed(Duration.zero);
+      expect(newerBridge.loadReadingStateCalls, 0);
+
+      oldSave.complete();
+      await newerBridge.waitForOp(1);
+      expect(newerBridge.loadReadingStateCalls, 1);
+      newer.dispatch(const ReaderUnitRequested(2, offset: 22));
+      await newerBridge.waitForOp(2);
+      await newer.drainReadingStateWrites(7);
+      expect(
+        [
+          ...olderBridge.savedReadingStates,
+          ...newerBridge.savedReadingStates,
+        ].map((state) => (state.unit.toInt(), state.offset?.toInt())),
+        [(1, 11), (2, 22)],
+      );
+
+      newer.dispose();
+      older.dispose();
+      await Future.wait([
+        newerBridge.disposed.future,
+        olderBridge.disposed.future,
+      ]);
+    },
+  );
+
+  test(
+    'annotation navigation loads its unit before revealing its range',
+    () async {
+      final bridge = _ControlledBridge(
+        logicalUnitCount: 2,
+        initialAnnotations: [_annotation('later', unit: 1)],
+        immediateLists: true,
+      );
+      final focusTargets = <ReaderFocusTarget>[];
+      final controller = ReaderController(
+        bridge: bridge,
+        decoder: (pixels, {required width, required height}) => _testImage(),
+        focusAdapter: focusTargets.add,
+      );
+      await _openControlled(controller, bridge, '/tmp/book.epub');
+
+      controller.dispatch(const ReaderAnnotationNavigated('later'));
+      await bridge.waitForOp(2);
+
+      expect(controller.model.unit, 1);
+      expect(controller.model.anchor, 1);
+      expect(controller.model.focus, 3);
+      expect(controller.model.selectionPhase, ReaderSelectionPhase.selected);
+      expect(controller.model.selectedText, 'el');
+      expect(controller.model.selectionDescription, contains('Selected text'));
+      expect(focusTargets, contains(ReaderFocusTarget.surface));
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('replaced cross-unit navigation cannot steal reader focus', () async {
+    final bridge = _ControlledBridge(
+      logicalUnitCount: 2,
+      initialAnnotations: [_annotation('later', unit: 1)],
+      immediateLists: true,
+    );
+    final scheduled = <VoidCallback>[];
+    final focusTargets = <ReaderFocusTarget>[];
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      focusAdapter: focusTargets.add,
+      frameScheduler: scheduled.add,
+    );
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+    controller.dispatch(const ReaderAnnotationNavigated('later'));
+    await bridge.waitForOp(2);
+    expect(scheduled, hasLength(1));
+    focusTargets.clear();
+
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+    await bridge.waitForOp(3);
+    scheduled.single();
+
+    expect(focusTargets, isEmpty);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('PDF navigation publishes render when optional tools fail', () async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.pdf,
+      logicalUnitCount: 2,
+      selectionFailure: true,
+      listFailure: true,
+      immediateLists: true,
+    );
+    final controller = ReaderController(
+      bridge: bridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+    );
+    await _openControlled(controller, bridge, '/tmp/book.pdf');
+
+    controller.dispatch(const ReaderUnitRequested(1));
+    await bridge.waitForOp(2);
+
+    expect(controller.model.unit, 1);
+    expect(controller.model.pageImage, isNotNull);
+    expect(controller.model.selectionError, contains('selection failed'));
+    expect(
+      controller.model.annotationError,
+      contains('annotation list failed'),
+    );
+    expect(bridge.renderUnits, [0, 1]);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  testWidgets('CBZ exposes keyboard navigation and bookmark chrome', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.cbz,
+      logicalUnitCount: 2,
+      bookId: 7,
+      immediateLists: true,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/comic.cbz',
+          initialBookId: 7,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('reader-document-semantics')));
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+    await tester.pumpAndSettle();
+    expect(find.text('2 / 2'), findsOneWidget);
+    expect(bridge.renderUnits, [0, 1]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+    await tester.pumpAndSettle();
+    expect(find.text('1 / 2'), findsOneWidget);
+    expect(bridge.renderUnits, [0, 1, 0]);
+    final semantics = tester.getSemantics(
+      find.byKey(const ValueKey('reader-document-semantics')),
+    );
+    expect(semantics.label, contains('page 1 of 2'));
+
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    expect(find.byTooltip('Bookmark this location'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
 }
 
 FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
@@ -5409,6 +5987,8 @@ Future<void> _openControlled(
 final class _ControlledBridge implements FlutterBridge {
   _ControlledBridge({
     this.format = FlutterBookFormat.epub,
+    this.logicalUnitCount = 1,
+    this.bookId,
     List<FlutterAnnotation> initialAnnotations = const [],
     List<FlutterAnnotationAssociationSource> associationSources = const [],
     List<FlutterAnnotation> associatedAnnotations = const [],
@@ -5419,12 +5999,15 @@ final class _ControlledBridge implements FlutterBridge {
     this.initialListCompleter,
     this.selectionVisualLines,
     this.copyEligible = true,
+    this.initialReadingState,
   }) : initialAnnotations = List.of(initialAnnotations),
        storedAnnotations = List.of(initialAnnotations),
        associationSources = List.of(associationSources),
        associatedAnnotations = List.of(associatedAnnotations);
 
   FlutterBookFormat format;
+  int logicalUnitCount;
+  final int? bookId;
   final List<FlutterAnnotation> initialAnnotations;
   final List<FlutterAnnotation> storedAnnotations;
   final List<FlutterAnnotationAssociationSource> associationSources;
@@ -5436,6 +6019,7 @@ final class _ControlledBridge implements FlutterBridge {
   final Completer<List<FlutterAnnotation>>? initialListCompleter;
   final List<FlutterSelectionVisualLine>? selectionVisualLines;
   final bool copyEligible;
+  final FlutterReadingState? initialReadingState;
   final disposed = Completer<void>();
   final createdCancellations = <BigInt>[];
   final releasedCancellations = <BigInt>[];
@@ -5462,6 +6046,7 @@ final class _ControlledBridge implements FlutterBridge {
   var associationCalls = 0;
   var selectionCalls = 0;
   var renderCalls = 0;
+  var loadReadingStateCalls = 0;
   var finishedOperations = 0;
   var disposeCount = 0;
   var failCancellationCreation = false;
@@ -5472,9 +6057,22 @@ final class _ControlledBridge implements FlutterBridge {
   final createdScales = <double>[];
   final selectionLayouts = <ReaderLayout>[];
   final renderScales = <double>[];
+  final selectionUnits = <int>[];
+  final renderUnits = <int>[];
   final listScales = <double>[];
   final openRequests = <FlutterOpenRequest>[];
+  final openedLibraryBookIds = <int>[];
+  final savedReadingStates = <FlutterReadingState>[];
+  final savedReadingStateUnitCounts = <BigInt>[];
+  final toggledBookmarkOffsets = <BigInt?>[];
+  final searchCompleters = Queue<Completer<List<FlutterSearchMatch>>>();
+  final bookmarkListCompleters = Queue<Completer<List<FlutterBookmark>>>();
+  final bookmarkToggleCompleters = Queue<Completer<FlutterBookmark?>>();
+  final readingStateCompleters = Queue<Completer<void>>();
   final associatedSourceIds = <String>[];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   Future<void> waitForOp(int count) async {
     while (finishedOperations < count) {
@@ -5520,9 +6118,85 @@ final class _ControlledBridge implements FlutterBridge {
     if (openFailure case final failure?) throw failure;
     return FlutterDocumentSummary(
       handle: FlutterDocumentHandle(registry: BigInt.one, id: cancellationId),
+      bookId: bookId,
       format: format,
-      logicalUnitCount: BigInt.one,
+      logicalUnitCount: BigInt.from(logicalUnitCount),
     );
+  }
+
+  @override
+  Future<FlutterDocumentSummary> openLibraryBook({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async {
+    openCalls += 1;
+    openedLibraryBookIds.add(bookId);
+    if (openFailure case final failure?) throw failure;
+    return FlutterDocumentSummary(
+      handle: FlutterDocumentHandle(registry: BigInt.one, id: cancellationId),
+      bookId: bookId,
+      format: format,
+      logicalUnitCount: BigInt.from(logicalUnitCount),
+    );
+  }
+
+  @override
+  Future<FlutterReadingState?> loadReadingState({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async {
+    loadReadingStateCalls += 1;
+    return initialReadingState;
+  }
+
+  @override
+  Future<List<FlutterBookmark>> listBookmarks({
+    required int bookId,
+    required BigInt cancellationId,
+  }) async {
+    if (bookmarkListCompleters.isNotEmpty) {
+      return bookmarkListCompleters.removeFirst().future;
+    }
+    return const [];
+  }
+
+  @override
+  Future<List<FlutterSearchMatch>> searchDocument({
+    required FlutterDocumentHandle document,
+    required String query,
+    required BigInt cancellationId,
+  }) async {
+    if (searchCompleters.isNotEmpty) {
+      return searchCompleters.removeFirst().future;
+    }
+    return const [];
+  }
+
+  @override
+  Future<FlutterBookmark?> toggleBookmark({
+    required int bookId,
+    required BigInt unit,
+    BigInt? offset,
+    String? title,
+  }) async {
+    toggledBookmarkOffsets.add(offset);
+    if (bookmarkToggleCompleters.isNotEmpty) {
+      return bookmarkToggleCompleters.removeFirst().future;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveReadingState({
+    required int bookId,
+    required FlutterReadingState value,
+    required BigInt unitCount,
+  }) async {
+    savedReadingStates.add(value);
+    savedReadingStateUnitCounts.add(unitCount);
+    if (readingStateCompleters.isNotEmpty) {
+      await readingStateCompleters.removeFirst().future;
+    }
   }
 
   @override
@@ -5535,6 +6209,7 @@ final class _ControlledBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     selectionCalls += 1;
+    selectionUnits.add(unit.toInt());
     selectionLayouts.add(
       ReaderLayout(scale: scale, width: width, fontSize: fontSize),
     );
@@ -5791,6 +6466,7 @@ final class _ControlledBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     renderCalls += 1;
+    renderUnits.add(page.toInt());
     renderScales.add(scale);
     if (renderCompleters.isNotEmpty) {
       return renderCompleters.removeFirst().future;
@@ -5880,6 +6556,9 @@ class _FakeBridge implements FlutterBridge {
   final selectionLayouts = <ReaderLayout>[];
   Completer<FlutterSelectionSurface>? selectionCompleter;
   FlutterBookFormat? completedFormat;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   void completeOpen(FlutterBookFormat format) {
     completedFormat = format;
@@ -6105,6 +6784,9 @@ final class _SequentialBridge implements FlutterBridge {
   var _nextBuffer = BigInt.one;
   var disposeCount = 0;
   FlutterBookFormat? currentFormat;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   Future<void> waitForFinishedOperations(int count) async {
     while (releasedCancellations.length < count) {

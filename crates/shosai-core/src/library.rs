@@ -17,9 +17,9 @@ use sqlx::sqlite::{Sqlite, SqlitePool};
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::annotations::AnnotationStore;
+use crate::annotations::{AnnotationDocumentFormat, AnnotationStore, DocumentFingerprint};
 use crate::application::{DeviceFileLocator, OpenDocument, OpenDocumentPlan};
-use crate::bookmarks::MAX_BOOKMARKS_PER_BOOK;
+use crate::bookmarks::{BookmarkCountLimit, MAX_BOOKMARKS_PER_BOOK};
 use crate::cbz::{CbzDoc, CbzLimits};
 use crate::document::Document;
 use crate::epub::{EpubDoc, EpubLimits};
@@ -35,7 +35,7 @@ const MAX_IMPORT_ROOTS: usize = 10_000;
 const MAX_IMPORT_TRAVERSAL_ENTRIES: usize = 50_000;
 const MAX_LIBRARY_PAGE_SIZE: u32 = 500;
 const MAX_LIBRARY_SNAPSHOT_SIZE: usize = 10_000;
-const MAX_LIBRARY_QUERY_BYTES: usize = 4 * 1024;
+pub const MAX_LIBRARY_QUERY_BYTES: usize = 4 * 1024;
 const MAX_IMPORT_PATH_BYTES: usize = 16 * 1024;
 const MAX_IMPORT_METADATA_BYTES: usize = 4 * 1024;
 const MAX_IMPORT_COVER_BYTES: usize = 512 * 1024;
@@ -46,6 +46,16 @@ const MAX_IMPORT_DETAIL_BYTES: usize = 512 * 1024;
 const MAX_IMPORT_FAILURE_DETAIL_BYTES: usize = 64 * 1024;
 const SQLITE_ID_CHUNK_SIZE: usize = 500;
 const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
+const LIBRARY_QUERY_PROGRESS_INTERVAL: usize = 1_000;
+const MAX_LIBRARY_QUERY_WORK: usize = 10_000_000;
+
+#[derive(Debug, thiserror::Error)]
+#[error("library query cancelled")]
+pub struct LibraryQueryCancelled;
+
+#[derive(Debug, thiserror::Error)]
+#[error("library query exceeded its work limit")]
+pub struct LibraryQueryWorkLimit;
 const COVER_DECODE_BYTE_CAPACITY: usize = 256 * 1024 * 1024;
 const COVER_DECODER_METADATA_BYTES: usize = 1024 * 1024;
 const BOOK_SELECT_COLUMNS: &str = "id,
@@ -70,6 +80,28 @@ const BOOK_SELECT_COLUMNS: &str = "id,
         AND (original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384))
         AND (content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64))
         AND (cover_blob IS NULL OR (typeof(cover_blob) = 'blob' AND length(cover_blob) <= 524288))
+        AND typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64
+        AND (last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64))
+    THEN 1 ELSE 0 END AS fields_valid";
+
+const BOOK_METADATA_SELECT_COLUMNS: &str = "id,
+    CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096 THEN title END AS title,
+    CASE WHEN author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096) THEN author END AS author,
+    CASE WHEN typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16 THEN format END AS format,
+    CASE WHEN typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384 THEN file_path END AS file_path,
+    CASE WHEN typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16 THEN storage_kind END AS storage_kind,
+    CASE WHEN original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384) THEN original_path END AS original_path,
+    CASE WHEN content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64) THEN content_hash END AS content_hash,
+    file_size, NULL AS cover_blob, progress,
+    CASE WHEN typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64 THEN date_added END AS date_added,
+    CASE WHEN last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64) THEN last_read END AS last_read,
+    CASE WHEN typeof(title) = 'text' AND length(CAST(title AS BLOB)) <= 4096
+        AND (author IS NULL OR (typeof(author) = 'text' AND length(CAST(author AS BLOB)) <= 4096))
+        AND typeof(format) = 'text' AND length(CAST(format AS BLOB)) <= 16
+        AND typeof(file_path) = 'text' AND length(CAST(file_path AS BLOB)) <= 16384
+        AND typeof(storage_kind) = 'text' AND length(CAST(storage_kind AS BLOB)) <= 16
+        AND (original_path IS NULL OR (typeof(original_path) = 'text' AND length(CAST(original_path AS BLOB)) <= 16384))
+        AND (content_hash IS NULL OR (typeof(content_hash) = 'text' AND length(CAST(content_hash AS BLOB)) <= 64))
         AND typeof(date_added) = 'text' AND length(CAST(date_added AS BLOB)) <= 64
         AND (last_read IS NULL OR (typeof(last_read) = 'text' AND length(CAST(last_read AS BLOB)) <= 64))
     THEN 1 ELSE 0 END AS fields_valid";
@@ -793,12 +825,19 @@ impl Drop for ManagedPublication {
 pub struct Library {
     pool: SqlitePool,
     managed_dir: PathBuf,
+    #[cfg(test)]
+    query_progress_barrier: Arc<std::sync::Mutex<Option<Arc<std::sync::Barrier>>>>,
 }
 
 impl Library {
     /// Create a library handle from an existing connection pool.
     pub fn new(pool: SqlitePool, managed_dir: PathBuf) -> Self {
-        Self { pool, managed_dir }
+        Self {
+            pool,
+            managed_dir,
+            #[cfg(test)]
+            query_progress_barrier: Arc::new(std::sync::Mutex::new(None)),
+        }
     }
 
     pub fn managed_dir(&self) -> &Path {
@@ -806,7 +845,20 @@ impl Library {
     }
 
     pub fn with_managed_dir(&self, managed_dir: PathBuf) -> Self {
-        Self::new(self.pool.clone(), managed_dir)
+        Self {
+            pool: self.pool.clone(),
+            managed_dir,
+            #[cfg(test)]
+            query_progress_barrier: Arc::clone(&self.query_progress_barrier),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_query_progress_barrier(&self, barrier: Arc<std::sync::Barrier>) {
+        *self
+            .query_progress_barrier
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(barrier);
     }
 
     async fn ensure_current_managed_dir(&self) -> Result<()> {
@@ -1501,6 +1553,30 @@ impl Library {
         self.add_discovered_files(candidates, true).await
     }
 
+    /// Copy one reviewed candidate, checking cancellation through preparation and publication.
+    pub async fn import_discovered_file_cancellable(
+        &self,
+        candidate: ImportCandidate,
+        cancellation: ImportCancellation,
+    ) -> ImportCompletion {
+        let source = candidate.path.clone();
+        let prepared = match self
+            .prepare_discovered_managed_file_cancellable(candidate, cancellation.clone())
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(_error) if cancellation.is_cancelled() => return ImportCompletion::Cancelled,
+            Err(error) => {
+                return ImportCompletion::Completed(Err(ImportFailure::new(
+                    source,
+                    format!("{error:#}"),
+                )));
+            }
+        };
+        self.commit_prepared_managed_file_cancellable(&prepared, cancellation)
+            .await
+    }
+
     /// Link candidates after verifying that they still match their discovery fingerprints.
     pub async fn link_discovered_files(&self, candidates: &[ImportCandidate]) -> ImportReport {
         self.add_discovered_files(candidates, false).await
@@ -1983,6 +2059,131 @@ impl Library {
         Ok(BookPage { books, has_more })
     }
 
+    /// Fetch bridge-facing library metadata without reading cover blobs from SQLite.
+    pub async fn metadata_page(
+        &self,
+        query: Option<&str>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<BookPage> {
+        if query.is_some_and(|query| query.len() > MAX_LIBRARY_QUERY_BYTES) {
+            bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
+        }
+        let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
+        let mut builder =
+            QueryBuilder::new(format!("SELECT {BOOK_METADATA_SELECT_COLUMNS} FROM books"));
+        push_library_filters(&mut builder, query, format);
+        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC LIMIT ");
+        builder.push_bind(i64::from(limit) + 1);
+        builder.push(" OFFSET ");
+        builder.push_bind(i64::from(offset));
+        let rows = builder
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .context("failed to load library metadata page")?;
+        let mut books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
+        let has_more = books.len() > limit as usize;
+        books.truncate(limit as usize);
+        Ok(BookPage { books, has_more })
+    }
+
+    pub async fn metadata_page_cancellable(
+        &self,
+        query: Option<&str>,
+        format: Option<BookFormat>,
+        limit: u32,
+        offset: u32,
+        cancelled: Arc<AtomicBool>,
+        cancellation_notifier: Arc<tokio::sync::Notify>,
+    ) -> Result<BookPage> {
+        if query.is_some_and(|query| query.len() > MAX_LIBRARY_QUERY_BYTES) {
+            bail!("library query exceeds {MAX_LIBRARY_QUERY_BYTES} bytes");
+        }
+        let limit = limit.clamp(1, MAX_LIBRARY_PAGE_SIZE);
+        let cancellation_notification = cancellation_notifier.notified();
+        tokio::pin!(cancellation_notification);
+        cancellation_notification.as_mut().enable();
+        if cancelled.load(Ordering::Acquire) {
+            return Err(LibraryQueryCancelled.into());
+        }
+        let mut connection = tokio::select! {
+            connection = self.pool.acquire() => connection?,
+            () = &mut cancellation_notification => {
+                return Err(LibraryQueryCancelled.into());
+            }
+        };
+        connection.close_on_drop();
+        let work_exhausted = Arc::new(AtomicBool::new(false));
+        {
+            let cancelled = Arc::clone(&cancelled);
+            let work_exhausted = Arc::clone(&work_exhausted);
+            let completed_work = Arc::new(AtomicU64::new(0));
+            #[cfg(test)]
+            let mut progress_barrier = self
+                .query_progress_barrier
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            #[cfg(test)]
+            let progress_interval = if progress_barrier.is_some() {
+                1
+            } else {
+                LIBRARY_QUERY_PROGRESS_INTERVAL
+            };
+            #[cfg(not(test))]
+            let progress_interval = LIBRARY_QUERY_PROGRESS_INTERVAL;
+            let mut handle = connection.lock_handle().await?;
+            handle.set_progress_handler(
+                i32::try_from(progress_interval).expect("SQLite progress interval fits in i32"),
+                move || {
+                    #[cfg(test)]
+                    if let Some(barrier) = progress_barrier.take() {
+                        barrier.wait();
+                        barrier.wait();
+                    }
+                    if cancelled.load(Ordering::Acquire) {
+                        return false;
+                    }
+                    let work = completed_work
+                        .fetch_add(LIBRARY_QUERY_PROGRESS_INTERVAL as u64, Ordering::Relaxed)
+                        + LIBRARY_QUERY_PROGRESS_INTERVAL as u64;
+                    if work >= MAX_LIBRARY_QUERY_WORK as u64 {
+                        work_exhausted.store(true, Ordering::Release);
+                        return false;
+                    }
+                    true
+                },
+            );
+        }
+        let mut builder =
+            QueryBuilder::new(format!("SELECT {BOOK_METADATA_SELECT_COLUMNS} FROM books"));
+        push_library_filters(&mut builder, query, format);
+        builder.push(" ORDER BY last_read DESC NULLS LAST, date_added DESC, id DESC LIMIT ");
+        builder.push_bind(i64::from(limit) + 1);
+        builder.push(" OFFSET ");
+        builder.push_bind(i64::from(offset));
+        let result = builder.build().fetch_all(&mut *connection).await;
+        connection.lock_handle().await?.remove_progress_handler();
+        let outcome = if cancelled.load(Ordering::Acquire) {
+            Err(LibraryQueryCancelled.into())
+        } else if work_exhausted.load(Ordering::Acquire) {
+            Err(LibraryQueryWorkLimit.into())
+        } else {
+            result
+                .context("failed to load library metadata page")
+                .and_then(|rows| {
+                    let mut books = rows.iter().map(row_to_book).collect::<Result<Vec<_>>>()?;
+                    let has_more = books.len() > limit as usize;
+                    books.truncate(limit as usize);
+                    Ok(BookPage { books, has_more })
+                })
+        };
+        connection.close().await?;
+        outcome
+    }
+
     /// Snapshot the matching library order without loading cover blobs.
     pub async fn matching_ids(
         &self,
@@ -2092,7 +2293,13 @@ impl Library {
                 .as_deref()
                 .context("managed book has no original path")?;
             validate_import_path(&path_from_key(original_path))?;
-            reconcile_identity(&mut transaction, book_id, &book.file_path, original_path).await?;
+            reconcile_identity_before_detach(
+                &mut transaction,
+                book_id,
+                &book.file_path,
+                original_path,
+            )
+            .await?;
             Some(original_path.to_owned())
         } else {
             None
@@ -2230,10 +2437,51 @@ impl Library {
         plan: OpenDocumentPlan,
         cancellation: crate::bridge::Cancellation,
     ) -> Result<(OpenDocument, String)> {
-        let book = self
-            .get(book_id)
-            .await?
+        self.open_book_document_plan_with_guards(
+            book_id,
+            path,
+            plan,
+            cancellation,
+            (),
+            #[cfg(test)]
+            None,
+        )
+        .await
+        .map(|(opened, ())| opened)
+    }
+
+    pub(crate) async fn open_book_document_plan_with_guards<G: Send + 'static>(
+        &self,
+        book_id: i64,
+        path: &Path,
+        plan: OpenDocumentPlan,
+        cancellation: crate::bridge::Cancellation,
+        guards: G,
+        #[cfg(test)] worker_barrier: Option<Arc<std::sync::Barrier>>,
+    ) -> Result<((OpenDocument, String), G)> {
+        let mut connection = tokio::select! {
+            connection = self.pool.acquire() => connection
+                .context("failed to acquire library connection for verified open")?,
+            () = cancellation.cancelled() => bail!("document open cancelled"),
+        };
+        if cancellation.is_cancelled() {
+            bail!("document open cancelled");
+        }
+        let query = format!("SELECT {BOOK_SELECT_COLUMNS} FROM books WHERE id = ?");
+        let row = sqlx::query(&query)
+            .bind(book_id)
+            .fetch_optional(&mut *connection)
+            .await
+            .context("failed to recheck book identity before verified open")?;
+        if cancellation.is_cancelled() {
+            bail!("document open cancelled");
+        }
+        let book = row
+            .as_ref()
+            .map(row_to_book)
+            .transpose()?
             .with_context(|| format!("book {book_id} not found"))?;
+        drop(connection);
         let requested_path = canonical_path(path);
         if canonical_path_key(&requested_path) != book.file_path {
             bail!("book location changed before it could be opened");
@@ -2245,28 +2493,38 @@ impl Library {
             .content_hash
             .context("cannot verify this legacy book; remove it and import it again")?;
         let format = book.format;
-        tokio::task::spawn_blocking(move || {
+        let (opened, guards) = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(barrier) = worker_barrier {
+                barrier.wait();
+                barrier.wait();
+            }
             let is_cancelled = || cancellation.is_cancelled();
-            if plan.format() != format {
-                bail!("book format no longer matches the library identity");
-            }
-            let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
-            let mut hasher = Sha256::new();
-            for chunk in admitted.data.chunks(64 * 1024) {
-                if cancellation.is_cancelled() {
-                    bail!("document open cancelled");
+            let opened = (|| {
+                if plan.format() != format {
+                    bail!("book format no longer matches the library identity");
                 }
-                hasher.update(chunk);
-            }
-            let actual_hash = format!("{:x}", hasher.finalize());
-            if actual_hash != expected_hash {
-                bail!("book contents no longer match the library identity");
-            }
-            let document = OpenDocument::from_admitted_bytes_cancellable(admitted, &is_cancelled)?;
-            Ok((document, actual_hash))
+                let admitted = plan.read_bytes_cancellable(Some(&is_cancelled))?;
+                let mut hasher = Sha256::new();
+                for chunk in admitted.data.chunks(64 * 1024) {
+                    if cancellation.is_cancelled() {
+                        bail!("document open cancelled");
+                    }
+                    hasher.update(chunk);
+                }
+                let actual_hash = format!("{:x}", hasher.finalize());
+                if actual_hash != expected_hash {
+                    bail!("book contents no longer match the library identity");
+                }
+                let document =
+                    OpenDocument::from_admitted_bytes_cancellable(admitted, &is_cancelled)?;
+                Ok((document, actual_hash))
+            })();
+            (opened, guards)
         })
         .await
-        .context("book open task failed")?
+        .context("book open task failed")?;
+        opened.map(|opened| (opened, guards))
     }
 
     async fn remove_unreferenced_managed_file(&self, file_path: &str) {
@@ -2288,10 +2546,7 @@ impl Library {
         if path.parent() == Some(managed_dir.as_path())
             && let Err(error) = std::fs::remove_file(&path)
         {
-            eprintln!(
-                "warning: failed to remove managed book {}: {error}",
-                path.display()
-            );
+            eprintln!("warning: failed to remove managed book: {error}");
         }
     }
 }
@@ -2621,20 +2876,47 @@ async fn reconcile_identity(
     old_path: &str,
     new_path: &str,
 ) -> Result<()> {
-    let content_hash: String = sqlx::query_scalar(
+    reconcile_identity_inner(transaction, book_id, old_path, new_path, false).await
+}
+
+async fn reconcile_identity_before_detach(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+    old_path: &str,
+    new_path: &str,
+) -> Result<()> {
+    reconcile_identity_inner(transaction, book_id, old_path, new_path, true).await
+}
+
+async fn reconcile_identity_inner(
+    transaction: &mut Transaction<'_, Sqlite>,
+    book_id: i64,
+    old_path: &str,
+    new_path: &str,
+    ignore_foreign_annotation_versions: bool,
+) -> Result<()> {
+    let (content_hash, format): (Option<String>, String) = sqlx::query_as(
         "SELECT CASE WHEN typeof(content_hash) = 'text'
                                AND length(CAST(content_hash AS BLOB)) <= 64
-                     THEN content_hash END
+                     THEN content_hash END,
+                format
          FROM books WHERE id = ?",
     )
     .bind(book_id)
     .fetch_optional(&mut **transaction)
     .await
     .context("failed to resolve book content identity")?
-    .context("book has no stable content hash")?;
+    .context("book was not found while reconciling content identity")?;
+    let content_hash = content_hash.context("book has no stable content hash")?;
     if content_hash.len() != 64 || !content_hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         bail!("stored book content hash is invalid");
     }
+    let annotation_format = match BookFormat::from_db(&format) {
+        Some(BookFormat::Epub) => Some(AnnotationDocumentFormat::Epub),
+        Some(BookFormat::Pdf) => Some(AnnotationDocumentFormat::Pdf),
+        Some(BookFormat::Cbz) => None,
+        None => bail!("stored book format is invalid"),
+    };
     record_book_path_alias(transaction, book_id, old_path, &content_hash).await?;
     let reading = sqlx::query(
         "SELECT page, location_offset, zoom,
@@ -2765,7 +3047,7 @@ async fn reconcile_identity(
     .await
     .context("failed to count merged bookmark aliases")?;
     if bookmark_count > MAX_BOOKMARKS_PER_BOOK as i64 {
-        bail!("bookmark count limit exceeded");
+        return Err(BookmarkCountLimit.into());
     }
     sqlx::query(
         "UPDATE bookmarks SET file_path = ?, content_hash = ?, book_id = ?
@@ -2782,6 +3064,32 @@ async fn reconcile_identity(
     .execute(&mut **transaction)
     .await
     .context("failed to merge bookmark aliases")?;
+    if let Some(format) = annotation_format {
+        let fingerprint =
+            DocumentFingerprint::new("sha256-hex", 1, content_hash.as_bytes().to_vec())?;
+        if ignore_foreign_annotation_versions {
+            AnnotationStore::reconcile_book_document_before_detach(
+                transaction,
+                book_id,
+                old_path,
+                new_path,
+                format,
+                &fingerprint,
+            )
+            .await
+        } else {
+            AnnotationStore::reconcile_book_document(
+                transaction,
+                book_id,
+                old_path,
+                new_path,
+                format,
+                &fingerprint,
+            )
+            .await
+        }
+        .context("failed to reconcile annotation aliases")?;
+    }
     Ok(())
 }
 

@@ -24,3 +24,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: ../assets/fonts/InterVariable.ttf
+    - family: Noto Sans JP
+      fonts:
+        - asset: ../assets/fonts/NotoSansJP-Variable.ttf
