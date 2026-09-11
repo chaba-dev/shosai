@@ -41,6 +41,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Deliver RFD 4 M2 highlighting feasibility slice (#93)
 - *(flutter)* Start RFD 4 product migration (#95)
 - *(library)* Display recent books and add reviewed import workflows (#96)
+- *(settings)* Add reader modes, themes, and review hardening (#97)
 
 ### 🐛 Bug Fixes
 
