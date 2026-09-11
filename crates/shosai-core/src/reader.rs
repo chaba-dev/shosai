@@ -30,6 +30,32 @@ impl ReadingMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReaderTheme {
+    #[default]
+    Light,
+    Sepia,
+    Dark,
+}
+
+impl ReaderTheme {
+    pub fn from_stored(value: Option<&str>) -> Self {
+        match value {
+            Some("sepia") => Self::Sepia,
+            Some("dark") => Self::Dark,
+            _ => Self::Light,
+        }
+    }
+
+    pub fn stored(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Sepia => "sepia",
+            Self::Dark => "dark",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZoomMode {
     Manual(f32),
@@ -87,6 +113,7 @@ impl ReaderLocation {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReaderPreferences {
     pub reading_mode: ReadingMode,
+    pub theme: ReaderTheme,
     pub epub_font_size: f32,
     pub epub_line_spacing: f32,
     pub pdf_zoom: ZoomMode,
@@ -96,6 +123,7 @@ impl Default for ReaderPreferences {
     fn default() -> Self {
         Self {
             reading_mode: ReadingMode::Paginated,
+            theme: ReaderTheme::Light,
             epub_font_size: 16.0,
             epub_line_spacing: 1.6,
             pdf_zoom: ZoomMode::FitPage,

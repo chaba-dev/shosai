@@ -158,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FlutterImportItem dco_decode_flutter_import_item(dynamic raw);
 
   @protected
+  FlutterImportReport dco_decode_flutter_import_report(dynamic raw);
+
+  @protected
   FlutterLibraryBook dco_decode_flutter_library_book(dynamic raw);
 
   @protected
@@ -478,6 +481,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FlutterImportItem sse_decode_flutter_import_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterImportReport sse_decode_flutter_import_report(
     SseDeserializer deserializer,
   );
 
@@ -1285,6 +1293,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_flutter_import_report(
+    FlutterImportReport apiObj,
+    wire_cst_flutter_import_report wireObj,
+  ) {
+    wireObj.imported = cst_encode_usize(apiObj.imported);
+    wireObj.failed = cst_encode_usize(apiObj.failed);
+    wireObj.cancelled = cst_encode_bool(apiObj.cancelled);
+    wireObj.items = cst_encode_list_flutter_import_item(apiObj.items);
+  }
+
+  @protected
   void cst_api_fill_to_wire_flutter_library_book(
     FlutterLibraryBook apiObj,
     wire_cst_flutter_library_book wireObj,
@@ -1328,6 +1347,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wire_cst_flutter_reader_settings wireObj,
   ) {
     wireObj.continuous = cst_encode_bool(apiObj.continuous);
+    wireObj.theme = cst_encode_String(apiObj.theme);
     wireObj.epub_font_size = cst_encode_f_32(apiObj.epubFontSize);
     wireObj.epub_line_spacing = cst_encode_f_32(apiObj.epubLineSpacing);
     wireObj.pdf_zoom = cst_encode_f_32(apiObj.pdfZoom);
@@ -1705,6 +1725,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_flutter_import_item(
     FlutterImportItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_import_report(
+    FlutterImportReport self,
     SseSerializer serializer,
   );
 
@@ -2286,6 +2312,30 @@ class RustLibWire implements BaseWire {
               int,
             )
           >();
+
+  void wire__crate__api__FlutterBridge_library_cover(
+    int port_,
+    int that,
+    int book_id,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_library_cover(
+      port_,
+      that,
+      book_id,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_library_coverPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(ffi.Int64, ffi.UintPtr, ffi.Int64, ffi.Uint64)
+        >
+      >('frbgen_shosai_flutter_wire__crate__api__FlutterBridge_library_cover');
+  late final _wire__crate__api__FlutterBridge_library_cover =
+      _wire__crate__api__FlutterBridge_library_coverPtr
+          .asFunction<void Function(int, int, int, int)>();
 
   void wire__crate__api__FlutterBridge_library_page(
     int port_,
@@ -3789,6 +3839,8 @@ final class wire_cst_flutter_reader_settings extends ffi.Struct {
   @ffi.Bool()
   external bool continuous;
 
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> theme;
+
   @ffi.Float()
   external double epub_font_size;
 
@@ -4003,6 +4055,19 @@ final class wire_cst_flutter_document_summary extends ffi.Struct {
 
   @ffi.UintPtr()
   external int logical_unit_count;
+}
+
+final class wire_cst_flutter_import_report extends ffi.Struct {
+  @ffi.UintPtr()
+  external int imported;
+
+  @ffi.UintPtr()
+  external int failed;
+
+  @ffi.Bool()
+  external bool cancelled;
+
+  external ffi.Pointer<wire_cst_list_flutter_import_item> items;
 }
 
 final class wire_cst_flutter_library_page extends ffi.Struct {

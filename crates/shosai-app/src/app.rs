@@ -1689,6 +1689,7 @@ fn capture_reader_tab(state: &State) -> Option<ReaderTab> {
             },
             preferences: ReaderPreferences {
                 reading_mode: state.reading_mode,
+                theme: shosai_core::reader::ReaderTheme::Light,
                 epub_font_size: state.font_size,
                 epub_line_spacing: state.line_spacing,
                 pdf_zoom: state.zoom,
@@ -2752,6 +2753,7 @@ fn install_document(
         ReaderPreferences {
             pdf_zoom: ZoomMode::FitPage,
             reading_mode: state.reading_mode,
+            theme: shosai_core::reader::ReaderTheme::Light,
             epub_font_size: state.font_size,
             epub_line_spacing: state.line_spacing,
         },
