@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -208,6 +209,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     return _showOwnedDialog<LibraryImportSelection>(
       (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          scrollable: true,
           title: Text(directory ? 'Review folder import' : 'Review books'),
           content: SizedBox(
             width: 480,
@@ -382,12 +384,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               Row(
                 children: [
                   const Expanded(child: LinearProgressIndicator()),
-                  IconButton(
-                    tooltip: 'Cancel operation',
-                    onPressed: () =>
-                        controller.dispatch(const LibraryOperationCancelled()),
-                    icon: const Icon(Icons.close),
-                  ),
+                  if (controller.canCancel)
+                    IconButton(
+                      tooltip: 'Cancel operation',
+                      onPressed: () => controller.dispatch(
+                        const LibraryOperationCancelled(),
+                      ),
+                      icon: const Icon(Icons.close),
+                    ),
                 ],
               ),
             if (model.displayError case final error?)
@@ -410,6 +414,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     controller.dispatch(LibraryBookRemovalRequested(book)),
                 loadMore: () =>
                     controller.dispatch(const LibraryMoreRequested()),
+                loadCover: (bookId) =>
+                    controller.dispatch(LibraryCoverRequested(bookId)),
               ),
             ),
           ],
@@ -471,12 +477,14 @@ class _LibraryCollection extends StatelessWidget {
     required this.openBook,
     required this.removeBook,
     required this.loadMore,
+    required this.loadCover,
   });
 
   final LibraryModel model;
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final VoidCallback loadMore;
+  final ValueChanged<int> loadCover;
 
   @override
   Widget build(BuildContext context) {
@@ -514,10 +522,7 @@ class _LibraryCollection extends StatelessWidget {
             crossAxisCount: columns,
             childAspectRatio: 1.35,
             mainAxisExtent: needsExpandedCard
-                ? (180 + (textScale - 1) * (columns == 1 ? 100 : 140)).clamp(
-                    180,
-                    columns == 1 ? 280 : 320,
-                  )
+                ? 180 + (textScale - 1) * (columns == 1 ? 100 : 140)
                 : (columns == 1 ? 180 : null),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
@@ -542,54 +547,58 @@ class _LibraryCollection extends StatelessWidget {
                 onTap: () => openBook(book),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      _BookCover(book: book),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              book.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            if (book.author case final author?)
+                  child: LayoutBuilder(
+                    builder: (context, cardConstraints) => Row(
+                      children: [
+                        if (cardConstraints.maxWidth >= 150) ...[
+                          _BookCover(book: book, loadCover: loadCover),
+                          const SizedBox(width: 14),
+                        ],
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
                               Text(
-                                author,
-                                maxLines: 1,
+                                book.title,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
                               ),
-                            const SizedBox(height: 8),
-                            LinearProgressIndicator(value: book.progress),
-                            Text(
-                              book.lastRead == null
-                                  ? '${(book.progress * 100).round()}% read'
-                                  : 'Continue reading · ${(book.progress * 100).round()}%',
+                              if (book.author case final author?)
+                                Text(
+                                  author,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              const SizedBox(height: 8),
+                              LinearProgressIndicator(value: book.progress),
+                              Text(
+                                book.lastRead == null
+                                    ? '${(book.progress * 100).round()}% read'
+                                    : 'Continue reading · ${(book.progress * 100).round()}%',
+                              ),
+                            ],
+                          ),
+                        ),
+                        PopupMenuButton<String>(
+                          tooltip: 'Book actions',
+                          onSelected: (action) {
+                            if (action == 'remove') removeBook(book);
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'remove',
+                              child: Text(
+                                book.managed
+                                    ? 'Remove and delete copy'
+                                    : 'Remove from library',
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                      PopupMenuButton<String>(
-                        tooltip: 'Book actions',
-                        onSelected: (action) {
-                          if (action == 'remove') removeBook(book);
-                        },
-                        itemBuilder: (_) => [
-                          PopupMenuItem(
-                            value: 'remove',
-                            child: Text(
-                              book.managed
-                                  ? 'Remove and delete copy'
-                                  : 'Remove from library',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -602,15 +611,22 @@ class _LibraryCollection extends StatelessWidget {
 }
 
 class _BookCover extends StatelessWidget {
-  const _BookCover({required this.book});
+  const _BookCover({required this.book, required this.loadCover});
 
   final FlutterLibraryBook book;
+  final ValueChanged<int> loadCover;
 
   @override
   Widget build(BuildContext context) {
     final fallback = Icon(_formatIcon(book.format), size: 42);
     final cover = book.cover;
-    if (cover == null || cover.isEmpty) return fallback;
+    if (cover == null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => loadCover(book.bookId),
+      );
+      return fallback;
+    }
+    if (cover.isEmpty) return fallback;
     return Semantics(
       image: true,
       label: 'Cover of ${book.title}',
@@ -646,28 +662,122 @@ Future<FlutterReaderSettings?> _settingsDialog(
         title: const Text('Reader settings'),
         content: SizedBox(
           width: 360,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: const Text('EPUB text size'),
-                subtitle: Slider(
-                  min: 12,
-                  max: 32,
-                  divisions: 10,
-                  value: value.epubFontSize.clamp(12, 32),
-                  label: value.epubFontSize.round().toString(),
-                  onChanged: (fontSize) => setState(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: value.theme,
+                  decoration: const InputDecoration(labelText: 'Reader theme'),
+                  items: const [
+                    DropdownMenuItem(value: 'light', child: Text('Light')),
+                    DropdownMenuItem(value: 'sepia', child: Text('Sepia')),
+                    DropdownMenuItem(value: 'dark', child: Text('Dark')),
+                  ],
+                  onChanged: (theme) {
+                    if (theme != null) {
+                      setState(
+                        () => value = FlutterReaderSettings(
+                          continuous: value.continuous,
+                          theme: theme,
+                          epubFontSize: value.epubFontSize,
+                          epubLineSpacing: value.epubLineSpacing,
+                          pdfZoom: value.pdfZoom,
+                        ),
+                      );
+                    }
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Continuous reading'),
+                  value: value.continuous,
+                  onChanged: (continuous) => setState(
                     () => value = FlutterReaderSettings(
-                      continuous: value.continuous,
-                      epubFontSize: fontSize,
+                      continuous: continuous,
+                      theme: value.theme,
+                      epubFontSize: value.epubFontSize,
                       epubLineSpacing: value.epubLineSpacing,
                       pdfZoom: value.pdfZoom,
                     ),
                   ),
                 ),
-              ),
-            ],
+                ListTile(
+                  title: const Text('EPUB text size'),
+                  subtitle: Slider(
+                    min: 12,
+                    max: 32,
+                    divisions: 10,
+                    value: value.epubFontSize.clamp(12, 32),
+                    label: value.epubFontSize.round().toString(),
+                    onChanged: (fontSize) => setState(
+                      () => value = FlutterReaderSettings(
+                        continuous: value.continuous,
+                        theme: value.theme,
+                        epubFontSize: fontSize,
+                        epubLineSpacing: value.epubLineSpacing,
+                        pdfZoom: value.pdfZoom,
+                      ),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  title: const Text('EPUB line spacing'),
+                  subtitle: Slider(
+                    min: 1,
+                    max: 3,
+                    divisions: 8,
+                    value: value.epubLineSpacing.clamp(1, 3),
+                    label: value.epubLineSpacing.toStringAsFixed(2),
+                    onChanged: (lineSpacing) => setState(
+                      () => value = FlutterReaderSettings(
+                        continuous: value.continuous,
+                        theme: value.theme,
+                        epubFontSize: value.epubFontSize,
+                        epubLineSpacing: lineSpacing,
+                        pdfZoom: value.pdfZoom,
+                      ),
+                    ),
+                  ),
+                ),
+                DropdownButtonFormField<double>(
+                  initialValue: value.pdfZoom,
+                  decoration: const InputDecoration(labelText: 'PDF zoom'),
+                  items: [
+                    const DropdownMenuItem(value: 0, child: Text('Fit page')),
+                    const DropdownMenuItem(value: -1, child: Text('Fit width')),
+                    const DropdownMenuItem(value: 1, child: Text('100%')),
+                    const DropdownMenuItem(value: 1.5, child: Text('150%')),
+                    const DropdownMenuItem(value: 2, child: Text('200%')),
+                    if (!const [
+                      0.0,
+                      -1.0,
+                      1.0,
+                      1.5,
+                      2.0,
+                    ].contains(value.pdfZoom))
+                      DropdownMenuItem(
+                        value: value.pdfZoom,
+                        child: Text(
+                          '${(value.pdfZoom * 100).round()}% (custom)',
+                        ),
+                      ),
+                  ],
+                  onChanged: (pdfZoom) {
+                    if (pdfZoom != null) {
+                      setState(
+                        () => value = FlutterReaderSettings(
+                          continuous: value.continuous,
+                          theme: value.theme,
+                          epubFontSize: value.epubFontSize,
+                          epubLineSpacing: value.epubLineSpacing,
+                          pdfZoom: pdfZoom,
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -781,6 +891,11 @@ final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
 }
 
+final class LibraryCoverRequested extends LibraryMessage {
+  const LibraryCoverRequested(this.bookId);
+  final int bookId;
+}
+
 final class LibraryOperationCancelled extends LibraryMessage {
   const LibraryOperationCancelled();
 }
@@ -838,11 +953,13 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.error,
     this.settings,
     this.cancellation,
+    this.refresh = false,
   });
   final LibraryFailure failure;
   final String? error;
   final FlutterReaderSettings? settings;
   final BigInt? cancellation;
+  final bool refresh;
 }
 
 final class _LibraryReaderClosed extends LibraryMessage {
@@ -852,6 +969,17 @@ final class _LibraryReaderClosed extends LibraryMessage {
 
 final class _LibraryEffectFinished extends LibraryMessage {
   const _LibraryEffectFinished();
+}
+
+final class _LibraryCoverLoaded extends LibraryMessage {
+  const _LibraryCoverLoaded(this.bookId, this.cover, this.cancellation);
+  final int bookId;
+  final Uint8List? cover;
+  final BigInt cancellation;
+}
+
+final class _LibraryCoverEffectFinished extends LibraryMessage {
+  const _LibraryCoverEffectFinished();
 }
 
 class LibraryController implements Listenable {
@@ -878,18 +1006,24 @@ class LibraryController implements Listenable {
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
   final Set<BigInt> _cancellations = {};
+  final Set<BigInt> _foregroundCancellations = {};
   final Set<BigInt> _loadCancellations = {};
+  final Set<int> _coverRequests = {};
   Timer? _searchTimer;
   int _loadRevision = 0;
   int _queryRevision = 0;
   int _activeEffects = 0;
+  int _activeBusyEffects = 0;
   int _adapterRevision = 0;
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
   bool _closing = false;
   bool _bridgeDisposed = false;
+  bool _pendingImportAdapter = false;
 
   LibraryModel get model => _model;
+  bool get canCancel =>
+      _pendingImportAdapter || _foregroundCancellations.isNotEmpty;
 
   void dispatch(LibraryMessage message) {
     if (_closing &&
@@ -897,7 +1031,9 @@ class LibraryController implements Listenable {
         message is! _LibraryFailed &&
         message is! _LibraryMutationCompleted &&
         message is! _LibraryReaderClosed &&
-        message is! _LibraryEffectFinished) {
+        message is! _LibraryEffectFinished &&
+        message is! _LibraryCoverLoaded &&
+        message is! _LibraryCoverEffectFinished) {
       return;
     }
     switch (message) {
@@ -935,10 +1071,15 @@ class LibraryController implements Listenable {
         _load();
       case LibraryImportRequested():
         _import();
+      case LibraryCoverRequested():
+        _loadCover(message.bookId);
       case LibraryOperationCancelled():
-        for (final cancellation in _cancellations) {
+        _adapterRevision += 1;
+        _pendingImportAdapter = false;
+        for (final cancellation in _foregroundCancellations) {
           _bridge.cancel(id: cancellation);
         }
+        _emit(_model);
       case LibraryBookOpened():
         _open(message.book);
       case LibraryBookRemovalRequested():
@@ -981,6 +1122,7 @@ class LibraryController implements Listenable {
         if (_closing) break;
         if (message.error case final error?) {
           _emit(_model.copyWith(error: error, failure: message.failure));
+          if (message.refresh) _load();
         } else {
           _emit(
             _model.copyWith(
@@ -1002,16 +1144,72 @@ class LibraryController implements Listenable {
         _load();
       case _LibraryEffectFinished():
         _activeEffects -= 1;
+        _activeBusyEffects -= 1;
         if (!_closing) {
-          _emit(_model.copyWith(busy: _activeEffects > 0));
+          _emit(_model.copyWith(busy: _activeBusyEffects > 0));
         }
+        _disposeBridgeIfIdle();
+      case _LibraryCoverLoaded():
+        _releaseCancellation(message.cancellation);
+        if (!_closing) {
+          _emit(
+            _model.copyWith(
+              books: _model.books
+                  .map(
+                    (book) => book.bookId == message.bookId
+                        ? FlutterLibraryBook(
+                            bookId: book.bookId,
+                            title: book.title,
+                            author: book.author,
+                            format: book.format,
+                            pathKey: book.pathKey,
+                            managed: book.managed,
+                            cover: message.cover ?? Uint8List(0),
+                            progress: book.progress,
+                            dateAdded: book.dateAdded,
+                            lastRead: book.lastRead,
+                          )
+                        : book,
+                  )
+                  .toList(growable: false),
+            ),
+          );
+        }
+      case _LibraryCoverEffectFinished():
+        _activeEffects -= 1;
         _disposeBridgeIfIdle();
     }
   }
 
   void _beginEffect() {
     _activeEffects += 1;
+    _activeBusyEffects += 1;
     _emit(_model.copyWith(busy: true));
+  }
+
+  void _loadCover(int bookId) {
+    if (_closing || !_coverRequests.add(bookId)) return;
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (_) {
+      return;
+    }
+    _cancellations.add(cancellation);
+    _activeEffects += 1;
+    unawaited(() async {
+      try {
+        final cover = await _bridge.libraryCover(
+          bookId: bookId,
+          cancellationId: cancellation,
+        );
+        dispatch(_LibraryCoverLoaded(bookId, cover, cancellation));
+      } catch (_) {
+        _releaseCancellation(cancellation);
+      } finally {
+        dispatch(const _LibraryCoverEffectFinished());
+      }
+    }());
   }
 
   void _load({bool append = false}) {
@@ -1031,6 +1229,7 @@ class LibraryController implements Listenable {
       return;
     }
     _cancellations.add(cancellation);
+    _foregroundCancellations.add(cancellation);
     _loadCancellations.add(cancellation);
     _beginEffect();
     unawaited(() async {
@@ -1066,32 +1265,55 @@ class LibraryController implements Listenable {
   void _import() {
     if (_closing || _model.busy) return;
     _beginEffect();
+    _pendingImportAdapter = true;
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       BigInt? cancellation;
       try {
         final selection = await _pickImport();
+        _pendingImportAdapter = false;
+        if (!_closing) _emit(_model);
         if (selection == null || selection.paths.isEmpty) return;
         if (!_ownsAdapter(adapterRevision)) return;
         cancellation = _bridge.createCancellation();
         _cancellations.add(cancellation);
-        final result = selection.directory
-            ? await _bridge.importDirectory(
-                pathKey: selection.paths.single,
-                managed: selection.managed,
-                cancellationId: cancellation,
-              )
-            : await _bridge.importPaths(
-                pathKeys: selection.paths,
-                managed: selection.managed,
-                cancellationId: cancellation,
-              );
-        final failure = result.where((item) => item.error != null).firstOrNull;
+        _foregroundCancellations.add(cancellation);
+        late final List<FlutterImportItem> items;
+        var refresh = false;
+        String? terminalStatus;
+        if (selection.directory) {
+          final report = await _bridge.importDirectory(
+            pathKey: selection.paths.single,
+            managed: selection.managed,
+            cancellationId: cancellation,
+          );
+          items = report.items;
+          refresh = report.imported > BigInt.zero;
+          if (report.cancelled) {
+            terminalStatus = report.imported == BigInt.zero
+                ? 'Import cancelled.'
+                : 'Import cancelled after ${report.imported} books.';
+          } else if (report.failed > BigInt.zero) {
+            terminalStatus =
+                'Imported ${report.imported} books; ${report.failed} failed.';
+          }
+        } else {
+          items = await _bridge.importPaths(
+            pathKeys: selection.paths,
+            managed: selection.managed,
+            cancellationId: cancellation,
+          );
+          refresh = items.any((item) => item.book != null);
+        }
+        final failure = items.where((item) => item.error != null).firstOrNull;
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
-            error: failure == null ? null : _safeImportError(failure.error!),
+            error:
+                terminalStatus ??
+                (failure == null ? null : _safeImportError(failure.error!)),
             cancellation: cancellation,
+            refresh: refresh,
           ),
         );
         cancellation = null;
@@ -1105,6 +1327,7 @@ class LibraryController implements Listenable {
         );
         cancellation = null;
       } finally {
+        _pendingImportAdapter = false;
         if (cancellation != null) {
           _cancellations.remove(cancellation);
           _bridge.releaseCancellation(id: cancellation);
@@ -1208,6 +1431,7 @@ class LibraryController implements Listenable {
 
   void _releaseCancellation(BigInt cancellation) {
     if (_cancellations.remove(cancellation)) {
+      _foregroundCancellations.remove(cancellation);
       _loadCancellations.remove(cancellation);
       _bridge.releaseCancellation(id: cancellation);
     }

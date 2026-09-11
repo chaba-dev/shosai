@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueNom,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -804141099;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 988530407;
 
 // Section: executor
 
@@ -510,6 +510,58 @@ fn wire__crate__api__FlutterBridge_import_paths_impl(
                             &*api_that_guard,
                             api_path_keys,
                             api_managed,
+                            api_cancellation_id,
+                        )
+                        .await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__FlutterBridge_library_cover_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    that: impl CstDecode<
+        RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>,
+    >,
+    book_id: impl CstDecode<i64>,
+    cancellation_id: impl CstDecode<u64>,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "FlutterBridge_library_cover",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let api_that = that.cst_decode();
+            let api_book_id = book_id.cst_decode();
+            let api_cancellation_id = cancellation_id.cst_decode();
+            move |context| async move {
+                transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
+                    (move || async move {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => {
+                                    api_that_guard =
+                                        Some(api_that.lockable_decode_async_ref().await)
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::FlutterBridge::library_cover(
+                            &*api_that_guard,
+                            api_book_id,
                             api_cancellation_id,
                         )
                         .await?;
@@ -2157,6 +2209,22 @@ impl SseDecode for crate::api::FlutterImportItem {
     }
 }
 
+impl SseDecode for crate::api::FlutterImportReport {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_imported = <usize>::sse_decode(deserializer);
+        let mut var_failed = <usize>::sse_decode(deserializer);
+        let mut var_cancelled = <bool>::sse_decode(deserializer);
+        let mut var_items = <Vec<crate::api::FlutterImportItem>>::sse_decode(deserializer);
+        return crate::api::FlutterImportReport {
+            imported: var_imported,
+            failed: var_failed,
+            cancelled: var_cancelled,
+            items: var_items,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FlutterLibraryBook {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2215,11 +2283,13 @@ impl SseDecode for crate::api::FlutterReaderSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_continuous = <bool>::sse_decode(deserializer);
+        let mut var_theme = <String>::sse_decode(deserializer);
         let mut var_epubFontSize = <f32>::sse_decode(deserializer);
         let mut var_epubLineSpacing = <f32>::sse_decode(deserializer);
         let mut var_pdfZoom = <f32>::sse_decode(deserializer);
         return crate::api::FlutterReaderSettings {
             continuous: var_continuous,
+            theme: var_theme,
             epub_font_size: var_epubFontSize,
             epub_line_spacing: var_epubLineSpacing,
             pdf_zoom: var_pdfZoom,
@@ -3094,6 +3164,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterImportItem>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterImportReport {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.imported.into_into_dart().into_dart(),
+            self.failed.into_into_dart().into_dart(),
+            self.cancelled.into_into_dart().into_dart(),
+            self.items.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterImportReport
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterImportReport>
+    for crate::api::FlutterImportReport
+{
+    fn into_into_dart(self) -> crate::api::FlutterImportReport {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FlutterLibraryBook {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3170,6 +3263,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterReaderSettings {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.continuous.into_into_dart().into_dart(),
+            self.theme.into_into_dart().into_dart(),
             self.epub_font_size.into_into_dart().into_dart(),
             self.epub_line_spacing.into_into_dart().into_dart(),
             self.pdf_zoom.into_into_dart().into_dart(),
@@ -3637,6 +3731,16 @@ impl SseEncode for crate::api::FlutterImportItem {
     }
 }
 
+impl SseEncode for crate::api::FlutterImportReport {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <usize>::sse_encode(self.imported, serializer);
+        <usize>::sse_encode(self.failed, serializer);
+        <bool>::sse_encode(self.cancelled, serializer);
+        <Vec<crate::api::FlutterImportItem>>::sse_encode(self.items, serializer);
+    }
+}
+
 impl SseEncode for crate::api::FlutterLibraryBook {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3674,6 +3778,7 @@ impl SseEncode for crate::api::FlutterReaderSettings {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.continuous, serializer);
+        <String>::sse_encode(self.theme, serializer);
         <f32>::sse_encode(self.epub_font_size, serializer);
         <f32>::sse_encode(self.epub_line_spacing, serializer);
         <f32>::sse_encode(self.pdf_zoom, serializer);
@@ -4330,6 +4435,17 @@ mod io {
             }
         }
     }
+    impl CstDecode<crate::api::FlutterImportReport> for wire_cst_flutter_import_report {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterImportReport {
+            crate::api::FlutterImportReport {
+                imported: self.imported.cst_decode(),
+                failed: self.failed.cst_decode(),
+                cancelled: self.cancelled.cst_decode(),
+                items: self.items.cst_decode(),
+            }
+        }
+    }
     impl CstDecode<crate::api::FlutterLibraryBook> for wire_cst_flutter_library_book {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterLibraryBook {
@@ -4371,6 +4487,7 @@ mod io {
         fn cst_decode(self) -> crate::api::FlutterReaderSettings {
             crate::api::FlutterReaderSettings {
                 continuous: self.continuous.cst_decode(),
+                theme: self.theme.cst_decode(),
                 epub_font_size: self.epub_font_size.cst_decode(),
                 epub_line_spacing: self.epub_line_spacing.cst_decode(),
                 pdf_zoom: self.pdf_zoom.cst_decode(),
@@ -4769,6 +4886,21 @@ mod io {
             Self::new_with_null_ptr()
         }
     }
+    impl NewWithNullPtr for wire_cst_flutter_import_report {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                imported: Default::default(),
+                failed: Default::default(),
+                cancelled: Default::default(),
+                items: core::ptr::null_mut(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_import_report {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
     impl NewWithNullPtr for wire_cst_flutter_library_book {
         fn new_with_null_ptr() -> Self {
             Self {
@@ -4821,6 +4953,7 @@ mod io {
         fn new_with_null_ptr() -> Self {
             Self {
                 continuous: Default::default(),
+                theme: core::ptr::null_mut(),
                 epub_font_size: Default::default(),
                 epub_line_spacing: Default::default(),
                 pdf_zoom: Default::default(),
@@ -5095,6 +5228,16 @@ mod io {
             managed,
             cancellation_id,
         )
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "C" fn frbgen_shosai_flutter_wire__crate__api__FlutterBridge_library_cover(
+        port_: i64,
+        that: usize,
+        book_id: i64,
+        cancellation_id: u64,
+    ) {
+        wire__crate__api__FlutterBridge_library_cover_impl(port_, that, book_id, cancellation_id)
     }
 
     #[unsafe(no_mangle)]
@@ -5791,6 +5934,14 @@ mod io {
     }
     #[repr(C)]
     #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_import_report {
+        imported: usize,
+        failed: usize,
+        cancelled: bool,
+        items: *mut wire_cst_list_flutter_import_item,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     pub struct wire_cst_flutter_library_book {
         book_id: i64,
         title: *mut wire_cst_list_prim_u_8_strict,
@@ -5820,6 +5971,7 @@ mod io {
     #[derive(Clone, Copy)]
     pub struct wire_cst_flutter_reader_settings {
         continuous: bool,
+        theme: *mut wire_cst_list_prim_u_8_strict,
         epub_font_size: f32,
         epub_line_spacing: f32,
         pdf_zoom: f32,

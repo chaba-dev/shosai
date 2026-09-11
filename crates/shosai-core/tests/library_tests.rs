@@ -480,6 +480,29 @@ async fn direct_directory_import_does_not_follow_directory_cycles() {
     assert!(report.failures().is_empty());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn directory_discovery_does_not_follow_symlinks_outside_the_selected_root() {
+    use std::os::unix::fs::symlink;
+
+    let (lib, _, dir) = temp_library().await;
+    let root = dir.path().join("selected");
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::create_dir(&outside).unwrap();
+    // Canonicalize so expectations match discovered paths on platforms where the
+    // temp root is a symlink (macOS).
+    let root = root.canonicalize().unwrap();
+    std::fs::copy(fixture_path("sample.epub"), root.join("inside.epub")).unwrap();
+    std::fs::copy(fixture_path("sample.pdf"), outside.join("outside.pdf")).unwrap();
+    symlink(&outside, root.join("linked-outside")).unwrap();
+
+    let discovery = lib.discover_directory(&root).await;
+
+    assert_eq!(discovery.candidates.len(), 1);
+    assert_eq!(discovery.candidates[0].path, root.join("inside.epub"));
+}
+
 #[tokio::test]
 async fn discovery_groups_exact_filename_stems_without_importing() {
     let (lib, _, dir) = temp_library().await;

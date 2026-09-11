@@ -7,8 +7,9 @@ use shosai_core::annotations::{AnnotationResolution, HighlightColor};
 use shosai_core::bridge::{
     AnnotationAssociationSourceDto, AnnotationAssociationSourcePageDto, AnnotationTextRange,
     BookmarkDto, Bridge, BridgeAnnotation, BridgeError, BufferHandle, Cancellation,
-    CreateAnnotationRequest, DocumentHandle, ImportItemDto, LibraryBookDto, OpenRequest,
-    ReaderSettingsDto, ReadingStateDto, RenderRequest, SelectionHandle, SelectionSurface,
+    CreateAnnotationRequest, DocumentHandle, ImportItemDto, ImportReportDto, LibraryBookDto,
+    OpenRequest, ReaderSettingsDto, ReadingStateDto, RenderRequest, SelectionHandle,
+    SelectionSurface,
 };
 use shosai_core::library::BookFormat;
 use shosai_core::search::SearchMatch;
@@ -261,6 +262,23 @@ impl From<ImportItemDto> for FlutterImportItem {
     }
 }
 #[derive(Debug, Clone)]
+pub struct FlutterImportReport {
+    pub imported: usize,
+    pub failed: usize,
+    pub cancelled: bool,
+    pub items: Vec<FlutterImportItem>,
+}
+impl From<ImportReportDto> for FlutterImportReport {
+    fn from(v: ImportReportDto) -> Self {
+        Self {
+            imported: v.imported,
+            failed: v.failed,
+            cancelled: v.cancelled,
+            items: v.items.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+#[derive(Debug, Clone)]
 pub struct FlutterSearchMatch {
     pub unit: usize,
     pub offset: usize,
@@ -326,9 +344,10 @@ impl From<FlutterReadingState> for ReadingStateDto {
         }
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FlutterReaderSettings {
     pub continuous: bool,
+    pub theme: String,
     pub epub_font_size: f32,
     pub epub_line_spacing: f32,
     pub pdf_zoom: f32,
@@ -337,6 +356,7 @@ impl From<ReaderSettingsDto> for FlutterReaderSettings {
     fn from(v: ReaderSettingsDto) -> Self {
         Self {
             continuous: v.continuous,
+            theme: v.theme,
             epub_font_size: v.epub_font_size,
             epub_line_spacing: v.epub_line_spacing,
             pdf_zoom: v.pdf_zoom,
@@ -347,6 +367,7 @@ impl From<FlutterReaderSettings> for ReaderSettingsDto {
     fn from(v: FlutterReaderSettings) -> Self {
         Self {
             continuous: v.continuous,
+            theme: v.theme,
             epub_font_size: v.epub_font_size,
             epub_line_spacing: v.epub_line_spacing,
             pdf_zoom: v.pdf_zoom,
@@ -727,6 +748,17 @@ impl FlutterBridge {
             .map_err(Into::into)
     }
 
+    pub async fn library_cover(
+        &self,
+        book_id: i64,
+        cancellation_id: u64,
+    ) -> Result<Option<Vec<u8>>, FlutterBridgeError> {
+        self.bridge
+            .library_cover(book_id, self.cancellation(cancellation_id)?)
+            .await
+            .map_err(Into::into)
+    }
+
     pub async fn import_paths(
         &self,
         path_keys: Vec<String>,
@@ -745,11 +777,11 @@ impl FlutterBridge {
         path_key: String,
         managed: bool,
         cancellation_id: u64,
-    ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
+    ) -> Result<FlutterImportReport, FlutterBridgeError> {
         self.bridge
             .import_directory(path_key, managed, self.cancellation(cancellation_id)?)
             .await
-            .map(|v| v.into_iter().map(Into::into).collect())
+            .map(Into::into)
             .map_err(Into::into)
     }
 

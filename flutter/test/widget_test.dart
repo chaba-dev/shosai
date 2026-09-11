@@ -2438,6 +2438,7 @@ void main() {
           initialPath: '/books/book.pdf',
           initialSettings: const FlutterReaderSettings(
             continuous: false,
+            theme: 'light',
             epubFontSize: 18,
             epubLineSpacing: 1.5,
             pdfZoom: 2.75,
@@ -2449,6 +2450,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(bridge.renderScales.first, 2.75);
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
+
+  testWidgets('reader applies the persisted dark theme', (tester) async {
+    final bridge = _ControlledBridge(immediateLists: true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialSettings: const FlutterReaderSettings(
+            continuous: false,
+            theme: 'dark',
+            epubFontSize: 18,
+            epubLineSpacing: 1.5,
+            pdfZoom: 0,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final scaffoldContext = tester.element(find.byType(Scaffold));
+    expect(Theme.of(scaffoldContext).brightness, Brightness.dark);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
@@ -2469,6 +2494,7 @@ void main() {
           initialPath: '/books/book.pdf',
           initialSettings: const FlutterReaderSettings(
             continuous: false,
+            theme: 'light',
             epubFontSize: 18,
             epubLineSpacing: 1.5,
             pdfZoom: 0,

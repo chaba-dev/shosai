@@ -7,7 +7,7 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `cancellation`, `from_bridge`, `invalid_request`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `assert_receiver_is_total_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 // Rust type: RustOpaqueNom<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<FlutterBridge>>
 abstract class FlutterBridge implements RustOpaqueInterface {
@@ -44,7 +44,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
 
   Future<String> exportBookmarks({required PlatformInt64 bookId});
 
-  Future<List<FlutterImportItem>> importDirectory({
+  Future<FlutterImportReport> importDirectory({
     required String pathKey,
     required bool managed,
     required BigInt cancellationId,
@@ -53,6 +53,11 @@ abstract class FlutterBridge implements RustOpaqueInterface {
   Future<List<FlutterImportItem>> importPaths({
     required List<String> pathKeys,
     required bool managed,
+    required BigInt cancellationId,
+  });
+
+  Future<Uint8List?> libraryCover({
+    required PlatformInt64 bookId,
     required BigInt cancellationId,
   });
 
@@ -488,6 +493,34 @@ class FlutterImportItem {
           error == other.error;
 }
 
+class FlutterImportReport {
+  final BigInt imported;
+  final BigInt failed;
+  final bool cancelled;
+  final List<FlutterImportItem> items;
+
+  const FlutterImportReport({
+    required this.imported,
+    required this.failed,
+    required this.cancelled,
+    required this.items,
+  });
+
+  @override
+  int get hashCode =>
+      imported.hashCode ^ failed.hashCode ^ cancelled.hashCode ^ items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlutterImportReport &&
+          runtimeType == other.runtimeType &&
+          imported == other.imported &&
+          failed == other.failed &&
+          cancelled == other.cancelled &&
+          items == other.items;
+}
+
 class FlutterLibraryBook {
   final PlatformInt64 bookId;
   final String title;
@@ -587,12 +620,14 @@ class FlutterOpenRequest {
 
 class FlutterReaderSettings {
   final bool continuous;
+  final String theme;
   final double epubFontSize;
   final double epubLineSpacing;
   final double pdfZoom;
 
   const FlutterReaderSettings({
     required this.continuous,
+    required this.theme,
     required this.epubFontSize,
     required this.epubLineSpacing,
     required this.pdfZoom,
@@ -601,6 +636,7 @@ class FlutterReaderSettings {
   @override
   int get hashCode =>
       continuous.hashCode ^
+      theme.hashCode ^
       epubFontSize.hashCode ^
       epubLineSpacing.hashCode ^
       pdfZoom.hashCode;
@@ -611,6 +647,7 @@ class FlutterReaderSettings {
       other is FlutterReaderSettings &&
           runtimeType == other.runtimeType &&
           continuous == other.continuous &&
+          theme == other.theme &&
           epubFontSize == other.epubFontSize &&
           epubLineSpacing == other.epubLineSpacing &&
           pdfZoom == other.pdfZoom;

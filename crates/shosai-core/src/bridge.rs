@@ -44,7 +44,7 @@ use crate::library::{
     Book, BookPage, ImportCancellation, ImportCandidate, ImportCompletion, Library,
     LibraryQueryCancelled, LibraryQueryWorkLimit, StorageKind,
 };
-use crate::reader::{ReaderPreferences, ReadingMode, ZoomMode};
+use crate::reader::{ReaderPreferences, ReaderTheme, ReadingMode, ZoomMode};
 use crate::reading_state::{FileReadingState, ReadingStateBookNotFound, ReadingStateStore};
 use crate::search::{SearchCancellation, SearchError, SearchLimits, SearchMatch};
 use unicode_segmentation::UnicodeSegmentation;
@@ -143,6 +143,16 @@ impl From<Book> for LibraryBookDto {
     }
 }
 
+fn import_item(path_key: String, book: Book) -> ImportItemDto {
+    let mut book = LibraryBookDto::from(book);
+    book.cover = None;
+    ImportItemDto {
+        path_key,
+        book: Some(book),
+        error: None,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LibraryPageDto {
     pub books: Vec<LibraryBookDto>,
@@ -154,6 +164,14 @@ pub struct ImportItemDto {
     pub path_key: String,
     pub book: Option<LibraryBookDto>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportReportDto {
+    pub imported: usize,
+    pub failed: usize,
+    pub cancelled: bool,
+    pub items: Vec<ImportItemDto>,
 }
 
 #[derive(Debug, Clone)]
@@ -190,9 +208,10 @@ pub struct ReadingStateDto {
     pub zoom: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReaderSettingsDto {
     pub continuous: bool,
+    pub theme: String,
     pub epub_font_size: f32,
     pub epub_line_spacing: f32,
     /// Zero is fit-page, -1 is fit-width, and a positive value is manual scale.
@@ -203,6 +222,7 @@ impl From<ReaderPreferences> for ReaderSettingsDto {
     fn from(value: ReaderPreferences) -> Self {
         Self {
             continuous: value.reading_mode == ReadingMode::Continuous,
+            theme: value.theme.stored().to_owned(),
             epub_font_size: value.epub_font_size,
             epub_line_spacing: value.epub_line_spacing,
             pdf_zoom: match value.pdf_zoom {
@@ -974,6 +994,27 @@ impl Bridge {
         })
     }
 
+    pub async fn library_cover(
+        &self,
+        book_id: i64,
+        cancellation: Cancellation,
+    ) -> Result<Option<Vec<u8>>, BridgeError> {
+        check_cancelled(&cancellation)?;
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let cover = self
+            .library()
+            .await?
+            .cover(book_id)
+            .await
+            .map_err(storage_error)?;
+        drop(request_slot);
+        check_cancelled(&cancellation)?;
+        Ok(cover)
+    }
+
     pub async fn import_paths(
         &self,
         path_keys: Vec<String>,
@@ -1001,7 +1042,7 @@ impl Bridge {
         path_key: String,
         managed: bool,
         cancellation: Cancellation,
-    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+    ) -> Result<ImportReportDto, BridgeError> {
         check_cancelled(&cancellation)?;
         if path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
             return Err(BridgeError::InvalidRequest(
@@ -1031,9 +1072,12 @@ impl Bridge {
                     }
                 };
                 check_cancelled(&cancellation)?;
+                let mut imported = 0;
+                let mut failed = discovery.failures.len();
                 let mut items = discovery
                     .failures
                     .into_iter()
+                    .take(256)
                     .map(|failure| ImportItemDto {
                         path_key: crate::path_key(failure.path()),
                         book: None,
@@ -1046,21 +1090,39 @@ impl Bridge {
                         .import_candidate(&library, candidate, managed, &cancellation)
                         .await
                     {
-                        Ok(book) => items.push(ImportItemDto {
-                            path_key: candidate_path_key,
-                            book: Some(book.into()),
-                            error: None,
-                        }),
-                        Err(BridgeError::Cancelled) if !items.is_empty() => break,
+                        Ok(book) => {
+                            imported += 1;
+                            if items.len() < 256 {
+                                items.push(import_item(candidate_path_key, book));
+                            }
+                        }
+                        Err(BridgeError::Cancelled) if imported > 0 || failed > 0 => {
+                            return Ok(ImportReportDto {
+                                imported,
+                                failed,
+                                cancelled: true,
+                                items,
+                            });
+                        }
                         Err(BridgeError::Cancelled) => return Err(BridgeError::Cancelled),
-                        Err(error) => items.push(ImportItemDto {
-                            path_key: candidate_path_key,
-                            book: None,
-                            error: Some(error.to_string()),
-                        }),
+                        Err(error) => {
+                            failed += 1;
+                            if items.len() < 256 {
+                                items.push(ImportItemDto {
+                                    path_key: candidate_path_key,
+                                    book: None,
+                                    error: Some(error.to_string()),
+                                });
+                            }
+                        }
                     }
                 }
-                Ok(items)
+                Ok(ImportReportDto {
+                    imported,
+                    failed,
+                    cancelled: false,
+                    items,
+                })
             }
             .await;
             (result, request_slot)
@@ -1201,11 +1263,7 @@ impl Bridge {
                 }
             };
             items.push(match result {
-                Ok(book) => ImportItemDto {
-                    path_key,
-                    book: Some(book.into()),
-                    error: None,
-                },
+                Ok(book) => import_item(path_key, book),
                 Err(error) => ImportItemDto {
                     path_key,
                     book: None,
@@ -1742,6 +1800,13 @@ impl Bridge {
                     .map_err(storage_error)?
                     .as_deref(),
             ),
+            theme: ReaderTheme::from_stored(
+                store
+                    .get_pref_async("reader.theme")
+                    .await
+                    .map_err(storage_error)?
+                    .as_deref(),
+            ),
             ..ReaderPreferences::default()
         };
         if let Some(v) = store
@@ -1816,6 +1881,7 @@ impl Bridge {
     pub async fn save_reader_settings(&self, value: ReaderSettingsDto) -> Result<(), BridgeError> {
         if !(8.0..=72.0).contains(&value.epub_font_size)
             || !(1.0..=3.0).contains(&value.epub_line_spacing)
+            || !matches!(value.theme.as_str(), "light" | "sepia" | "dark")
             || !value.pdf_zoom.is_finite()
             || (value.pdf_zoom != 0.0
                 && value.pdf_zoom != -1.0
@@ -1837,6 +1903,7 @@ impl Bridge {
                     }
                     .to_owned(),
                 ),
+                ("reader.theme", value.theme),
                 ("reader.epub_font_size", value.epub_font_size.to_string()),
                 (
                     "reader.epub_line_spacing",
@@ -3901,7 +3968,7 @@ mod tests {
     #[test]
     fn library_dto_retains_the_bounded_cover_payload() {
         let cover = vec![1, 2, 3, 4];
-        let dto = LibraryBookDto::from(crate::library::Book {
+        let book = crate::library::Book {
             id: 7,
             title: "Cover book".to_owned(),
             author: None,
@@ -3915,9 +3982,17 @@ mod tests {
             progress: 0.25,
             date_added: "2026-09-10".to_owned(),
             last_read: None,
-        });
+        };
+        let dto = LibraryBookDto::from(book.clone());
 
         assert_eq!(dto.cover, Some(cover));
+        assert_eq!(
+            import_item("cover.epub".to_owned(), book)
+                .book
+                .unwrap()
+                .cover,
+            None
+        );
     }
 
     fn cbz_request() -> OpenRequest {
@@ -7048,17 +7123,44 @@ mod tests {
         );
         let settings = ReaderSettingsDto {
             continuous: true,
+            theme: "sepia".into(),
             epub_font_size: 18.0,
             epub_line_spacing: 1.8,
             pdf_zoom: -1.0,
         };
-        bridge.save_reader_settings(settings).await.unwrap();
+        bridge.save_reader_settings(settings.clone()).await.unwrap();
         assert_eq!(bridge.load_reader_settings().await.unwrap(), settings);
         assert!(bridge.remove_library_book(book_id).await.unwrap());
         assert!(!bridge.remove_library_book(book_id).await.unwrap());
         assert!(
             source.exists(),
             "referenced imports must not delete user files"
+        );
+    }
+
+    #[tokio::test]
+    async fn library_cover_is_loaded_separately_from_metadata_pages() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.cbz"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+        let book_id = imported[0].book.as_ref().unwrap().book_id;
+
+        let page = bridge.library_page(None, None, 10, 0).await.unwrap();
+        assert_eq!(page.books.len(), 1);
+        assert_eq!(page.books[0].cover, None);
+        assert!(
+            bridge
+                .library_cover(book_id, Cancellation::new())
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 
@@ -7084,23 +7186,50 @@ mod tests {
         std::fs::write(source.join("ignored.txt"), "not a book").unwrap();
         let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
 
-        let imported = bridge
+        let report = bridge
             .import_directory(crate::path_key(&source), false, Cancellation::new())
             .await
             .unwrap();
 
-        assert_eq!(imported.len(), 2);
-        assert!(imported.iter().all(|item| item.book.is_some()));
+        assert_eq!(report.imported, 2);
+        assert_eq!(report.failed, 0);
+        assert!(!report.cancelled);
+        assert_eq!(report.items.len(), 2);
+        assert!(report.items.iter().all(|item| item.book.is_some()));
         assert!(
-            imported
+            report
+                .items
                 .iter()
                 .any(|item| item.path_key == crate::path_key(&source.join("one.pdf")))
         );
         assert!(
-            imported
+            report
+                .items
                 .iter()
                 .any(|item| item.path_key == crate::path_key(&nested.join("two.epub")))
         );
+    }
+
+    #[tokio::test]
+    async fn directory_import_bounds_retained_item_details() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("selected");
+        std::fs::create_dir(&source).unwrap();
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.pdf");
+        for index in 0..257 {
+            std::fs::copy(fixture, source.join(format!("book-{index}.pdf"))).unwrap();
+        }
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+
+        let report = bridge
+            .import_directory(crate::path_key(&source), false, Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(report.imported, 257);
+        assert_eq!(report.failed, 0);
+        assert!(!report.cancelled);
+        assert_eq!(report.items.len(), 256);
     }
 
     #[tokio::test]
