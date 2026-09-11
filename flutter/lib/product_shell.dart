@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -16,11 +17,23 @@ typedef ProductReaderBuilder =
     );
 typedef LibraryRemovalConfirmer =
     Future<bool> Function(FlutterLibraryBook book);
-typedef LibraryImportPicker = Future<String?> Function();
+typedef LibraryImportPicker = Future<LibraryImportSelection?> Function();
 typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);
 typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
 typedef LibrarySettingsEditor =
     Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
+
+final class LibraryImportSelection {
+  const LibraryImportSelection({
+    required this.paths,
+    required this.managed,
+    this.directory = false,
+  });
+
+  final List<String> paths;
+  final bool managed;
+  final bool directory;
+}
 
 class ProductShell extends StatefulWidget {
   const ProductShell({
@@ -148,12 +161,112 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
   }
 
-  Future<String?> _pickImport() => _textDialog(
-    context,
-    showOwnedDialog: _showOwnedDialog,
-    title: 'Add a book',
-    label: 'Local PDF, EPUB, or CBZ path',
-  );
+  Future<LibraryImportSelection?> _pickImport() async {
+    final directory = await _showOwnedDialog<bool>(
+      (context) => SimpleDialog(
+        title: const Text('Add books'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, false),
+            child: const ListTile(
+              leading: Icon(Icons.file_open_outlined),
+              title: Text('Choose files'),
+              subtitle: Text('Select one or more PDF, EPUB, or CBZ files'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, true),
+            child: const ListTile(
+              leading: Icon(Icons.folder_open_outlined),
+              title: Text('Choose a folder'),
+              subtitle: Text('Find supported books in all subfolders'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (directory == null || !mounted) return null;
+    final paths = directory
+        ? [
+            await getDirectoryPath(confirmButtonText: 'Review books'),
+          ].whereType<String>().toList()
+        : (await openFiles(
+            acceptedTypeGroups: const [
+              XTypeGroup(label: 'Books', extensions: ['pdf', 'epub', 'cbz']),
+            ],
+            confirmButtonText: 'Review books',
+          )).map((file) => file.path).toList();
+    if (paths.isEmpty || !mounted) return null;
+    return _reviewImport(paths, directory: directory);
+  }
+
+  Future<LibraryImportSelection?> _reviewImport(
+    List<String> paths, {
+    required bool directory,
+  }) async {
+    var managed = true;
+    return _showOwnedDialog<LibraryImportSelection>(
+      (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(directory ? 'Review folder import' : 'Review books'),
+          content: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: paths.length,
+                    itemBuilder: (_, index) => ListTile(
+                      leading: Icon(
+                        directory
+                            ? Icons.folder_outlined
+                            : Icons.description_outlined,
+                      ),
+                      title: Text(
+                        paths[index],
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('Copy into managed storage'),
+                  subtitle: Text(
+                    managed
+                        ? 'Shōsai keeps a private copy available to the reader.'
+                        : 'Keep books in their selected locations.',
+                  ),
+                  value: managed,
+                  onChanged: (value) => setState(() => managed = value),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                context,
+                LibraryImportSelection(
+                  paths: List.unmodifiable(paths),
+                  managed: managed,
+                  directory: directory,
+                ),
+              ),
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<FlutterReaderSettings?> _editSettings(FlutterReaderSettings initial) =>
       _settingsDialog(context, initial, showOwnedDialog: _showOwnedDialog);
@@ -265,7 +378,18 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ),
               ),
             ),
-            if (model.busy) const LinearProgressIndicator(),
+            if (model.busy)
+              Row(
+                children: [
+                  const Expanded(child: LinearProgressIndicator()),
+                  IconButton(
+                    tooltip: 'Cancel operation',
+                    onPressed: () =>
+                        controller.dispatch(const LibraryOperationCancelled()),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
             if (model.displayError case final error?)
               MaterialBanner(
                 content: Semantics(liveRegion: true, child: Text(error)),
@@ -326,6 +450,7 @@ String _encodeBook(
       format: format,
       pathKey: value['path']! as String,
       managed: value['managed']! as bool,
+      cover: null,
       progress: (value['progress']! as num).toDouble(),
       dateAdded: value['added']! as String,
       lastRead: value['read'] as String?,
@@ -419,7 +544,7 @@ class _LibraryCollection extends StatelessWidget {
                   padding: const EdgeInsets.all(14),
                   child: Row(
                     children: [
-                      Icon(_formatIcon(book.format), size: 42),
+                      _BookCover(book: book),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
@@ -440,7 +565,11 @@ class _LibraryCollection extends StatelessWidget {
                               ),
                             const SizedBox(height: 8),
                             LinearProgressIndicator(value: book.progress),
-                            Text('${(book.progress * 100).round()}% read'),
+                            Text(
+                              book.lastRead == null
+                                  ? '${(book.progress * 100).round()}% read'
+                                  : 'Continue reading · ${(book.progress * 100).round()}%',
+                            ),
                           ],
                         ),
                       ),
@@ -472,45 +601,38 @@ class _LibraryCollection extends StatelessWidget {
   }
 }
 
+class _BookCover extends StatelessWidget {
+  const _BookCover({required this.book});
+
+  final FlutterLibraryBook book;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Icon(_formatIcon(book.format), size: 42);
+    final cover = book.cover;
+    if (cover == null || cover.isEmpty) return fallback;
+    return Semantics(
+      image: true,
+      label: 'Cover of ${book.title}',
+      child: SizedBox(
+        width: 56,
+        height: 80,
+        child: Image.memory(
+          cover,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, _, _) => Center(child: fallback),
+        ),
+      ),
+    );
+  }
+}
+
 IconData _formatIcon(FlutterBookFormat format) => switch (format) {
   FlutterBookFormat.pdf => Icons.picture_as_pdf_outlined,
   FlutterBookFormat.epub => Icons.menu_book_outlined,
   FlutterBookFormat.cbz => Icons.collections_bookmark_outlined,
 };
-
-Future<String?> _textDialog(
-  BuildContext context, {
-  required Future<T?> Function<T>(WidgetBuilder builder) showOwnedDialog,
-  required String title,
-  required String label,
-}) async {
-  final controller = TextEditingController();
-  try {
-    return await showOwnedDialog<String>(
-      (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(labelText: label),
-          onSubmitted: (value) => Navigator.pop(context, value.trim()),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
-  } finally {
-    controller.dispose();
-  }
-}
 
 Future<FlutterReaderSettings?> _settingsDialog(
   BuildContext context,
@@ -657,6 +779,10 @@ final class LibraryFormatChanged extends LibraryMessage {
 
 final class LibraryImportRequested extends LibraryMessage {
   const LibraryImportRequested();
+}
+
+final class LibraryOperationCancelled extends LibraryMessage {
+  const LibraryOperationCancelled();
 }
 
 final class LibraryBookOpened extends LibraryMessage {
@@ -809,6 +935,10 @@ class LibraryController implements Listenable {
         _load();
       case LibraryImportRequested():
         _import();
+      case LibraryOperationCancelled():
+        for (final cancellation in _cancellations) {
+          _bridge.cancel(id: cancellation);
+        }
       case LibraryBookOpened():
         _open(message.book);
       case LibraryBookRemovalRequested():
@@ -940,16 +1070,22 @@ class LibraryController implements Listenable {
     unawaited(() async {
       BigInt? cancellation;
       try {
-        final path = await _pickImport();
-        if (path == null || path.isEmpty) return;
+        final selection = await _pickImport();
+        if (selection == null || selection.paths.isEmpty) return;
         if (!_ownsAdapter(adapterRevision)) return;
         cancellation = _bridge.createCancellation();
         _cancellations.add(cancellation);
-        final result = await _bridge.importPaths(
-          pathKeys: [path],
-          managed: true,
-          cancellationId: cancellation,
-        );
+        final result = selection.directory
+            ? await _bridge.importDirectory(
+                pathKey: selection.paths.single,
+                managed: selection.managed,
+                cancellationId: cancellation,
+              )
+            : await _bridge.importPaths(
+                pathKeys: selection.paths,
+                managed: selection.managed,
+                cancellationId: cancellation,
+              );
         final failure = result.where((item) => item.error != null).firstOrNull;
         dispatch(
           _LibraryMutationCompleted(

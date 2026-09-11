@@ -219,6 +219,7 @@ pub struct FlutterLibraryBook {
     pub format: FlutterBookFormat,
     pub path_key: String,
     pub managed: bool,
+    pub cover: Option<Vec<u8>>,
     pub progress: f64,
     pub date_added: String,
     pub last_read: Option<String>,
@@ -232,6 +233,7 @@ impl From<LibraryBookDto> for FlutterLibraryBook {
             format: v.format.into(),
             path_key: v.path_key,
             managed: v.managed,
+            cover: v.cover,
             progress: v.progress,
             date_added: v.date_added,
             last_read: v.last_read,
@@ -733,6 +735,19 @@ impl FlutterBridge {
     ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
         self.bridge
             .import_paths(path_keys, managed, self.cancellation(cancellation_id)?)
+            .await
+            .map(|v| v.into_iter().map(Into::into).collect())
+            .map_err(Into::into)
+    }
+
+    pub async fn import_directory(
+        &self,
+        path_key: String,
+        managed: bool,
+        cancellation_id: u64,
+    ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
+        self.bridge
+            .import_directory(path_key, managed, self.cancellation(cancellation_id)?)
             .await
             .map(|v| v.into_iter().map(Into::into).collect())
             .map_err(Into::into)

@@ -293,6 +293,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
+
+  @protected
   int dco_decode_u_32(dynamic raw);
 
   @protected
@@ -652,6 +655,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<FlutterSelectionRect>? sse_decode_opt_list_flutter_selection_rect(
     SseDeserializer deserializer,
   );
+
+  @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -1049,6 +1055,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  ffi.Pointer<wire_cst_list_prim_u_8_strict>
+  cst_encode_opt_list_prim_u_8_strict(Uint8List? raw) {
+    // Codec=Cst (C-struct based), see doc to use other codecs
+    return raw == null ? ffi.nullptr : cst_encode_list_prim_u_8_strict(raw);
+  }
+
+  @protected
   int cst_encode_u_64(BigInt raw) {
     // Codec=Cst (C-struct based), see doc to use other codecs
     return raw.toSigned(64).toInt();
@@ -1282,6 +1295,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wireObj.format = cst_encode_flutter_book_format(apiObj.format);
     wireObj.path_key = cst_encode_String(apiObj.pathKey);
     wireObj.managed = cst_encode_bool(apiObj.managed);
+    wireObj.cover = cst_encode_opt_list_prim_u_8_strict(apiObj.cover);
     wireObj.progress = cst_encode_f_64(apiObj.progress);
     wireObj.date_added = cst_encode_String(apiObj.dateAdded);
     wireObj.last_read = cst_encode_opt_String(apiObj.lastRead);
@@ -1908,6 +1922,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -2184,6 +2204,48 @@ class RustLibWire implements BaseWire {
   late final _wire__crate__api__FlutterBridge_export_bookmarks =
       _wire__crate__api__FlutterBridge_export_bookmarksPtr
           .asFunction<void Function(int, int, int)>();
+
+  void wire__crate__api__FlutterBridge_import_directory(
+    int port_,
+    int that,
+    ffi.Pointer<wire_cst_list_prim_u_8_strict> path_key,
+    bool managed,
+    int cancellation_id,
+  ) {
+    return _wire__crate__api__FlutterBridge_import_directory(
+      port_,
+      that,
+      path_key,
+      managed,
+      cancellation_id,
+    );
+  }
+
+  late final _wire__crate__api__FlutterBridge_import_directoryPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.Void Function(
+            ffi.Int64,
+            ffi.UintPtr,
+            ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+            ffi.Bool,
+            ffi.Uint64,
+          )
+        >
+      >(
+        'frbgen_shosai_flutter_wire__crate__api__FlutterBridge_import_directory',
+      );
+  late final _wire__crate__api__FlutterBridge_import_directory =
+      _wire__crate__api__FlutterBridge_import_directoryPtr
+          .asFunction<
+            void Function(
+              int,
+              int,
+              ffi.Pointer<wire_cst_list_prim_u_8_strict>,
+              bool,
+              int,
+            )
+          >();
 
   void wire__crate__api__FlutterBridge_import_paths(
     int port_,
@@ -3790,6 +3852,8 @@ final class wire_cst_flutter_library_book extends ffi.Struct {
 
   @ffi.Bool()
   external bool managed;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> cover;
 
   @ffi.Double()
   external double progress;

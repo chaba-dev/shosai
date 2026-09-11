@@ -41,8 +41,8 @@ use crate::epub::{
 };
 use crate::library::BookFormat;
 use crate::library::{
-    Book, BookPage, ImportCancellation, ImportCompletion, Library, LibraryQueryCancelled,
-    LibraryQueryWorkLimit, StorageKind,
+    Book, BookPage, ImportCancellation, ImportCandidate, ImportCompletion, Library,
+    LibraryQueryCancelled, LibraryQueryWorkLimit, StorageKind,
 };
 use crate::reader::{ReaderPreferences, ReadingMode, ZoomMode};
 use crate::reading_state::{FileReadingState, ReadingStateBookNotFound, ReadingStateStore};
@@ -120,6 +120,7 @@ pub struct LibraryBookDto {
     pub format: BookFormat,
     pub path_key: String,
     pub managed: bool,
+    pub cover: Option<Vec<u8>>,
     pub progress: f64,
     pub date_added: String,
     pub last_read: Option<String>,
@@ -134,6 +135,7 @@ impl From<Book> for LibraryBookDto {
             format: book.format,
             path_key: book.file_path,
             managed: book.storage_kind == StorageKind::Managed,
+            cover: book.cover,
             progress: book.progress,
             date_added: book.date_added,
             last_read: book.last_read,
@@ -992,6 +994,120 @@ impl Bridge {
         });
         let (result, _request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
         result
+    }
+
+    pub async fn import_directory(
+        &self,
+        path_key: String,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+        check_cancelled(&cancellation)?;
+        if path_key.len() > MAX_BRIDGE_PATH_KEY_BYTES {
+            return Err(BridgeError::InvalidRequest(
+                "import path key is too long".into(),
+            ));
+        }
+        let path = crate::path_key::try_path_from_key(&path_key)
+            .map_err(|_| BridgeError::InvalidRequest("invalid import path key".into()))?;
+        let request_slot = try_acquire_slot(
+            Arc::clone(&self.admission.request_slots),
+            BridgeError::RequestLimit,
+        )?;
+        let bridge = self.clone();
+        let operation = tokio::spawn(async move {
+            let result = async {
+                let library = bridge.library().await?;
+                let discovery_cancellation = ImportCancellation::default();
+                let operation_cancellation = discovery_cancellation.clone();
+                let discovering =
+                    library.discover_directory_cancellable(path, operation_cancellation.clone());
+                tokio::pin!(discovering);
+                let discovery = tokio::select! {
+                    discovery = &mut discovering => discovery,
+                    () = cancellation.cancelled() => {
+                        discovery_cancellation.cancel();
+                        discovering.await
+                    }
+                };
+                check_cancelled(&cancellation)?;
+                let mut items = discovery
+                    .failures
+                    .into_iter()
+                    .map(|failure| ImportItemDto {
+                        path_key: crate::path_key(failure.path()),
+                        book: None,
+                        error: Some(failure.error().to_owned()),
+                    })
+                    .collect::<Vec<_>>();
+                for candidate in discovery.candidates {
+                    let candidate_path_key = crate::path_key(&candidate.path);
+                    match bridge
+                        .import_candidate(&library, candidate, managed, &cancellation)
+                        .await
+                    {
+                        Ok(book) => items.push(ImportItemDto {
+                            path_key: candidate_path_key,
+                            book: Some(book.into()),
+                            error: None,
+                        }),
+                        Err(BridgeError::Cancelled) if !items.is_empty() => break,
+                        Err(BridgeError::Cancelled) => return Err(BridgeError::Cancelled),
+                        Err(error) => items.push(ImportItemDto {
+                            path_key: candidate_path_key,
+                            book: None,
+                            error: Some(error.to_string()),
+                        }),
+                    }
+                }
+                Ok(items)
+            }
+            .await;
+            (result, request_slot)
+        });
+        let (result, _request_slot) = operation.await.map_err(|_| BridgeError::Worker)?;
+        result
+    }
+
+    async fn import_candidate(
+        &self,
+        library: &Library,
+        candidate: ImportCandidate,
+        managed: bool,
+        cancellation: &Cancellation,
+    ) -> Result<Book, BridgeError> {
+        let import_cancellation = ImportCancellation::default();
+        let operation_cancellation = import_cancellation.clone();
+        let importing = async {
+            if managed {
+                library
+                    .import_discovered_file_cancellable(candidate, operation_cancellation)
+                    .await
+            } else {
+                library
+                    .link_discovered_file_cancellable(candidate, operation_cancellation)
+                    .await
+            }
+        };
+        tokio::pin!(importing);
+        let completion = tokio::select! {
+            completion = &mut importing => completion,
+            () = cancellation.cancelled() => {
+                import_cancellation.cancel();
+                importing.await
+            }
+        };
+        match completion {
+            ImportCompletion::Cancelled => Err(BridgeError::Cancelled),
+            ImportCompletion::Completed(Ok(imported)) => library
+                .get(imported.book_id())
+                .await
+                .map_err(storage_error)?
+                .ok_or_else(|| BridgeError::Storage("book not found after import".into())),
+            ImportCompletion::Completed(Err(failure)) => {
+                Err(BridgeError::Storage(failure.error().to_owned()))
+            }
+        }
     }
 
     async fn import_paths_admitted(
@@ -3781,6 +3897,28 @@ mod tests {
     use super::*;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn library_dto_retains_the_bounded_cover_payload() {
+        let cover = vec![1, 2, 3, 4];
+        let dto = LibraryBookDto::from(crate::library::Book {
+            id: 7,
+            title: "Cover book".to_owned(),
+            author: None,
+            format: BookFormat::Epub,
+            file_path: "/library/cover.epub".to_owned(),
+            storage_kind: crate::library::StorageKind::Managed,
+            original_path: None,
+            content_hash: None,
+            file_size: None,
+            cover: Some(cover.clone()),
+            progress: 0.25,
+            date_added: "2026-09-10".to_owned(),
+            last_read: None,
+        });
+
+        assert_eq!(dto.cover, Some(cover));
+    }
 
     fn cbz_request() -> OpenRequest {
         OpenRequest {
@@ -6921,6 +7059,47 @@ mod tests {
         assert!(
             source.exists(),
             "referenced imports must not delete user files"
+        );
+    }
+
+    #[tokio::test]
+    async fn directory_import_recursively_returns_every_supported_book() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(directory.path().join("selected/nested")).unwrap();
+        // Canonicalize before joining so expectations match the scanned paths on
+        // platforms where the temp root is a symlink (macOS) or uses an extended
+        // prefix (Windows).
+        let source = directory.path().join("selected").canonicalize().unwrap();
+        let nested = source.join("nested");
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.pdf"),
+            source.join("one.pdf"),
+        )
+        .unwrap();
+        std::fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.epub"),
+            nested.join("two.epub"),
+        )
+        .unwrap();
+        std::fs::write(source.join("ignored.txt"), "not a book").unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+
+        let imported = bridge
+            .import_directory(crate::path_key(&source), false, Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(imported.len(), 2);
+        assert!(imported.iter().all(|item| item.book.is_some()));
+        assert!(
+            imported
+                .iter()
+                .any(|item| item.path_key == crate::path_key(&source.join("one.pdf")))
+        );
+        assert!(
+            imported
+                .iter()
+                .any(|item| item.path_key == crate::path_key(&nested.join("two.epub")))
         );
     }
 
