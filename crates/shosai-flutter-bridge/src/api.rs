@@ -939,6 +939,7 @@ impl FlutterBridge {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn selection_surface(
         &self,
         document: FlutterDocumentHandle,
@@ -946,11 +947,20 @@ impl FlutterBridge {
         scale: f32,
         width: f32,
         font_size: f32,
+        line_spacing: f32,
         cancellation_id: u64,
     ) -> Result<FlutterSelectionSurface, FlutterBridgeError> {
         let cancellation = self.cancellation(cancellation_id)?;
         self.bridge
-            .selection_surface(document.into(), unit, scale, width, font_size, cancellation)
+            .selection_surface_with_line_spacing(
+                document.into(),
+                unit,
+                scale,
+                width,
+                font_size,
+                line_spacing,
+                cancellation,
+            )
             .await
             .map(Into::into)
             .map_err(Into::into)

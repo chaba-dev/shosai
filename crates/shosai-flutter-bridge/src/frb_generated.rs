@@ -1492,6 +1492,7 @@ fn wire__crate__api__FlutterBridge_selection_surface_impl(
     scale: impl CstDecode<f32>,
     width: impl CstDecode<f32>,
     font_size: impl CstDecode<f32>,
+    line_spacing: impl CstDecode<f32>,
     cancellation_id: impl CstDecode<u64>,
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::DcoCodec, _, _, _>(
@@ -1507,6 +1508,7 @@ fn wire__crate__api__FlutterBridge_selection_surface_impl(
             let api_scale = scale.cst_decode();
             let api_width = width.cst_decode();
             let api_font_size = font_size.cst_decode();
+            let api_line_spacing = line_spacing.cst_decode();
             let api_cancellation_id = cancellation_id.cst_decode();
             move |context| async move {
                 transform_result_dco::<_, _, crate::api::FlutterBridgeError>(
@@ -1535,6 +1537,7 @@ fn wire__crate__api__FlutterBridge_selection_surface_impl(
                             api_scale,
                             api_width,
                             api_font_size,
+                            api_line_spacing,
                             api_cancellation_id,
                         )
                         .await?;
@@ -5478,6 +5481,7 @@ mod io {
         scale: f32,
         width: f32,
         font_size: f32,
+        line_spacing: f32,
         cancellation_id: u64,
     ) {
         wire__crate__api__FlutterBridge_selection_surface_impl(
@@ -5488,6 +5492,7 @@ mod io {
             scale,
             width,
             font_size,
+            line_spacing,
             cancellation_id,
         )
     }

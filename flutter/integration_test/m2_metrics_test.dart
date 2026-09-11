@@ -66,6 +66,7 @@ void main() {
       scale: 1,
       width: 680,
       fontSize: 18,
+      lineSpacing: 1.5,
       cancellationId: cancellation,
     );
     for (var index = 0; index < _warmups; index += 1) {
@@ -120,6 +121,7 @@ void main() {
         scale: 1,
         width: 680,
         fontSize: 18,
+        lineSpacing: 1.5,
         cancellationId: cancellation,
       );
       final rendered = await bridge.renderPage(
@@ -385,6 +387,7 @@ Future<void> _exercisePackagedFormat(
     scale: 1,
     width: 680,
     fontSize: 18,
+    lineSpacing: 1.5,
     cancellationId: cancellation,
   );
   expect(surface.endpoints, isNotEmpty);

@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
@@ -23,17 +24,21 @@ typedef LibraryBookOpener = Future<void> Function(FlutterLibraryBook book);
 typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
 typedef LibrarySettingsEditor =
     Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
+typedef LibraryImportAdapterCanceller = void Function();
+void _ignoreImportAdapterCancellation() {}
 
 final class LibraryImportSelection {
   const LibraryImportSelection({
     required this.paths,
     required this.managed,
     this.directory = false,
+    this.cleanup,
   });
 
   final List<String> paths;
   final bool managed;
   final bool directory;
+  final Future<void> Function()? cleanup;
 }
 
 class ProductShell extends StatefulWidget {
@@ -57,6 +62,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   ({FlutterLibraryBook book, String path, int? bookId})? _pendingRestoredBook;
   ({String path, int? bookId})? _restoredLocator;
   bool _restoredOpenScheduled = false;
+  final AndroidDocumentImportAdapter _androidImport =
+      AndroidDocumentImportAdapter();
+  final Set<String> _providerOperations = {};
+  int _providerRevision = 0;
   late final LibraryController controller = LibraryController(
     bridge: widget.bridgeFactory(),
     confirmRemoval: _confirmRemoval,
@@ -64,6 +73,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookReadingStateWrites,
     editSettings: _editSettings,
+    cancelImportAdapter: _cancelImportAdapter,
   )..addListener(_changed);
 
   void _changed() {
@@ -163,6 +173,26 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 
   Future<LibraryImportSelection?> _pickImport() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return _pickAndroidImport();
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _showOwnedDialog<void>(
+        (context) => AlertDialog(
+          title: const Text('Import unavailable'),
+          content: const Text(
+            'Document-provider import has not yet been validated on iOS.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      return null;
+    }
     final directory = await _showOwnedDialog<bool>(
       (context) => SimpleDialog(
         title: const Text('Add books'),
@@ -201,9 +231,87 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     return _reviewImport(paths, directory: directory);
   }
 
+  Future<LibraryImportSelection?> _pickAndroidImport() async {
+    final revision = _providerRevision;
+    final selected = await _androidImport.selectFiles();
+    if (revision != _providerRevision) {
+      if (selected case DocumentSelection(:final documents)) {
+        await Future.wait(
+          documents.map(
+            (document) => _androidImport.discardSelection(document.token),
+          ),
+        );
+      }
+      return null;
+    }
+    if (selected is! DocumentSelection || selected.documents.isEmpty) {
+      return null;
+    }
+    final documents = selected.documents;
+    final reviewed = await _reviewImport(
+      documents.map((document) => document.name).toList(growable: false),
+      directory: false,
+      managedOnly: true,
+    );
+    if (reviewed == null || revision != _providerRevision) {
+      await Future.wait(
+        documents.map(
+          (document) => _androidImport.discardSelection(document.token),
+        ),
+      );
+      return null;
+    }
+    final acquired = <AcquiredProviderDocument>[];
+    for (var index = 0; index < documents.length; index += 1) {
+      final document = documents[index];
+      final operation = '${revision}_${document.token}';
+      _providerOperations.add(operation);
+      final result = await _androidImport.acquire(
+        document: document,
+        operationId: operation,
+      );
+      _providerOperations.remove(operation);
+      if (result case AcquiredProviderDocument()) {
+        acquired.add(result);
+      } else {
+        await Future.wait([
+          ...acquired.map((item) => _androidImport.release(item.releaseToken)),
+          ...documents
+              .skip(acquired.length + 1)
+              .map((item) => _androidImport.discardSelection(item.token)),
+        ]);
+        return null;
+      }
+      if (revision != _providerRevision) {
+        await Future.wait([
+          ...acquired.map((item) => _androidImport.release(item.releaseToken)),
+          ...documents
+              .skip(index + 1)
+              .map((item) => _androidImport.discardSelection(item.token)),
+        ]);
+        return null;
+      }
+    }
+    return LibraryImportSelection(
+      paths: acquired.map((item) => item.path).toList(growable: false),
+      managed: true,
+      cleanup: () => Future.wait(
+        acquired.map((item) => _androidImport.release(item.releaseToken)),
+      ),
+    );
+  }
+
+  void _cancelImportAdapter() {
+    _providerRevision += 1;
+    for (final operation in _providerOperations) {
+      unawaited(_androidImport.cancel(operation));
+    }
+  }
+
   Future<LibraryImportSelection?> _reviewImport(
     List<String> paths, {
     required bool directory,
+    bool managedOnly = false,
   }) async {
     var managed = true;
     return _showOwnedDialog<LibraryImportSelection>(
@@ -235,16 +343,25 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     ),
                   ),
                 ),
-                SwitchListTile(
-                  title: const Text('Copy into managed storage'),
-                  subtitle: Text(
-                    managed
-                        ? 'Shōsai keeps a private copy available to the reader.'
-                        : 'Keep books in their selected locations.',
+                if (managedOnly)
+                  const ListTile(
+                    leading: Icon(Icons.lock_outline),
+                    title: Text('Copy into managed storage'),
+                    subtitle: Text(
+                      'Android provider documents are copied, then temporary access is released.',
+                    ),
+                  )
+                else
+                  SwitchListTile(
+                    title: const Text('Copy into managed storage'),
+                    subtitle: Text(
+                      managed
+                          ? 'Shōsai keeps a private copy available to the reader.'
+                          : 'Keep books in their selected locations.',
+                    ),
+                    value: managed,
+                    onChanged: (value) => setState(() => managed = value),
                   ),
-                  value: managed,
-                  onChanged: (value) => setState(() => managed = value),
-                ),
               ],
             ),
           ),
@@ -990,12 +1107,15 @@ class LibraryController implements Listenable {
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
     required LibrarySettingsEditor editSettings,
+    LibraryImportAdapterCanceller cancelImportAdapter =
+        _ignoreImportAdapterCancellation,
   }) : _bridge = bridge,
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
-       _editSettings = editSettings;
+       _editSettings = editSettings,
+       _cancelImportAdapter = cancelImportAdapter;
 
   final FlutterBridge _bridge;
   final LibraryRemovalConfirmer _confirmRemoval;
@@ -1003,6 +1123,7 @@ class LibraryController implements Listenable {
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
   final LibrarySettingsEditor _editSettings;
+  final LibraryImportAdapterCanceller _cancelImportAdapter;
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
   final Set<BigInt> _cancellations = {};
@@ -1076,6 +1197,7 @@ class LibraryController implements Listenable {
       case LibraryOperationCancelled():
         _adapterRevision += 1;
         _pendingImportAdapter = false;
+        _cancelImportAdapter();
         for (final cancellation in _foregroundCancellations) {
           _bridge.cancel(id: cancellation);
         }
@@ -1269,8 +1391,9 @@ class LibraryController implements Listenable {
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
       BigInt? cancellation;
+      LibraryImportSelection? selection;
       try {
-        final selection = await _pickImport();
+        selection = await _pickImport();
         _pendingImportAdapter = false;
         if (!_closing) _emit(_model);
         if (selection == null || selection.paths.isEmpty) return;
@@ -1328,6 +1451,12 @@ class LibraryController implements Listenable {
         cancellation = null;
       } finally {
         _pendingImportAdapter = false;
+        try {
+          await selection?.cleanup?.call();
+        } catch (_) {
+          // The import result is authoritative; cleanup is best effort here and
+          // the Android host also removes retained acquisitions on teardown.
+        }
         if (cancellation != null) {
           _cancellations.remove(cancellation);
           _bridge.releaseCancellation(id: cancellation);

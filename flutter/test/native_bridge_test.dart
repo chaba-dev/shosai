@@ -46,6 +46,7 @@ void main() {
           scale: 1,
           width: 680,
           fontSize: 18,
+          lineSpacing: 1.5,
           cancellationId: cancellation,
         );
         expect(surface.width, greaterThan(0));
@@ -113,6 +114,7 @@ void main() {
           scale: 1,
           width: 680,
           fontSize: 18,
+          lineSpacing: 1.5,
           cancellationId: cancellation,
         );
         expect(surface.text, isNotEmpty);
@@ -198,6 +200,7 @@ void main() {
         scale: 1,
         width: 680,
         fontSize: 18,
+        lineSpacing: 1.5,
         cancellationId: cancellation!,
       );
       final endpoint = surface.endpoints.firstWhere(
@@ -329,6 +332,7 @@ void main() {
           scale: 1,
           width: 680,
           fontSize: 18,
+          lineSpacing: 1.5,
           cancellationId: cancellation,
         );
         final endpoint = surface.endpoints.firstWhere(

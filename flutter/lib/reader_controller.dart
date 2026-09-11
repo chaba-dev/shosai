@@ -121,11 +121,17 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
 }
 
 final class ReaderLayout {
-  const ReaderLayout({this.scale = 1, this.width = 680, this.fontSize = 18});
+  const ReaderLayout({
+    this.scale = 1,
+    this.width = 680,
+    this.fontSize = 18,
+    this.lineSpacing = 1.5,
+  });
 
   final double scale;
   final double width;
   final double fontSize;
+  final double lineSpacing;
 
   bool get isValid =>
       scale.isFinite &&
@@ -133,17 +139,21 @@ final class ReaderLayout {
       width.isFinite &&
       width > 0 &&
       fontSize.isFinite &&
-      fontSize > 0;
+      fontSize > 0 &&
+      lineSpacing.isFinite &&
+      lineSpacing >= 1 &&
+      lineSpacing <= 3;
 
   @override
   bool operator ==(Object other) =>
       other is ReaderLayout &&
       scale == other.scale &&
       width == other.width &&
-      fontSize == other.fontSize;
+      fontSize == other.fontSize &&
+      lineSpacing == other.lineSpacing;
 
   @override
-  int get hashCode => Object.hash(scale, width, fontSize);
+  int get hashCode => Object.hash(scale, width, fontSize, lineSpacing);
 }
 
 final class ReaderModel {
@@ -433,6 +443,16 @@ final class ReaderSearchRequested extends ReaderMessage {
 
 final class ReaderBookmarkToggled extends ReaderMessage {
   const ReaderBookmarkToggled();
+}
+
+final class ReaderBookmarkNoteRequested extends ReaderMessage {
+  const ReaderBookmarkNoteRequested([this.bookmark]);
+  final FlutterBookmark? bookmark;
+}
+
+final class ReaderBookmarkDeleted extends ReaderMessage {
+  const ReaderBookmarkDeleted(this.id);
+  final int id;
 }
 
 final class ReaderBookmarkNavigated extends ReaderMessage {
@@ -954,6 +974,7 @@ final class ReaderController implements Listenable {
     required FlutterBridge bridge,
     required PageDecoder decoder,
     double initialScale = 1,
+    double initialLineSpacing = 1.5,
     NoteEditor? noteEditor,
     NoteEditorCanceller? noteEditorCanceller,
     AnnotationAssociationPicker? annotationAssociationPicker,
@@ -975,7 +996,10 @@ final class ReaderController implements Listenable {
        _frameScheduler = frameScheduler ?? ((callback) => callback()),
        _selectionCopier = selectionCopier ?? ((_) async {}),
        _selectionAnnouncer = selectionAnnouncer,
-       _requestedLayout = ReaderLayout(scale: initialScale);
+       _requestedLayout = ReaderLayout(
+         scale: initialScale,
+         lineSpacing: initialLineSpacing,
+       );
 
   final FlutterBridge _bridge;
   final PageDecoder _decoder;
@@ -1077,6 +1101,8 @@ final class ReaderController implements Listenable {
           ReaderAnnotationAssociationRequested() ||
           ReaderSearchRequested() ||
           ReaderBookmarkToggled() ||
+          ReaderBookmarkNoteRequested() ||
+          ReaderBookmarkDeleted() ||
           ReaderBookmarkNavigated() => true,
           _ => false,
         }) {
@@ -1099,6 +1125,10 @@ final class ReaderController implements Listenable {
         _searchRequested(message.query);
       case ReaderBookmarkToggled():
         _bookmarkToggled();
+      case ReaderBookmarkNoteRequested():
+        _bookmarkNoteRequested(message.bookmark);
+      case ReaderBookmarkDeleted():
+        _bookmarkDeleted(message.id);
       case ReaderBookmarkNavigated():
         _unitRequested(
           message.unit,
@@ -1534,6 +1564,7 @@ final class ReaderController implements Listenable {
               scale: restored.zoom,
               width: layout.width,
               fontSize: layout.fontSize,
+              lineSpacing: layout.lineSpacing,
             );
       List<FlutterBookmark> bookmarks = const [];
       if (bookId != null) {
@@ -1570,6 +1601,7 @@ final class ReaderController implements Listenable {
             scale: restoredLayout.scale,
             width: restoredLayout.width,
             fontSize: restoredLayout.fontSize,
+            lineSpacing: restoredLayout.lineSpacing,
             cancellationId: cancellation,
           );
           effectSurface = surface;
@@ -1721,6 +1753,7 @@ final class ReaderController implements Listenable {
           : _requestedLayout.scale,
       width: _requestedLayout.width,
       fontSize: _requestedLayout.fontSize,
+      lineSpacing: _requestedLayout.lineSpacing,
     );
     _requestedLayout = requestedLayout;
     _emit(
@@ -1801,6 +1834,7 @@ final class ReaderController implements Listenable {
             scale: _requestedLayout.scale,
             width: observed.width,
             fontSize: observed.fontSize,
+            lineSpacing: observed.lineSpacing,
           );
     final document = _model.document;
     final intent = _activeRelayoutIntent;
@@ -2018,6 +2052,95 @@ final class ReaderController implements Listenable {
     }());
   }
 
+  void _bookmarkNoteRequested(FlutterBookmark? bookmark) {
+    if (_model.bookmarkBusy || _closing || _suspended || _recovering) return;
+    final generation = _model.generation;
+    final revision = ++_bookmarkRevision;
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    unawaited(() async {
+      try {
+        final note = await _noteEditor(bookmark?.note);
+        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
+        if (note == null) {
+          _emit(_model.copyWith(bookmarkBusy: false));
+          return;
+        }
+        final bookId = _model.document?.bookId;
+        if (bookId == null) return;
+        if (bookmark == null) {
+          final created = await _bridge.toggleBookmark(
+            bookId: bookId,
+            unit: BigInt.from(_model.unit),
+            offset: _model.readingOffset == null
+                ? null
+                : BigInt.from(_model.readingOffset!),
+          );
+          if (created != null) {
+            await _bridge.updateBookmark(id: created.id, note: note);
+          }
+        } else {
+          await _bridge.updateBookmark(id: bookmark.id, note: note);
+        }
+        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
+        _reloadBookmarks(generation, revision, bookId);
+      } catch (error) {
+        if (_isCurrent(generation) && revision == _bookmarkRevision) {
+          _emit(
+            _model.copyWith(bookmarkBusy: false, toolError: error.toString()),
+          );
+        }
+      }
+    }());
+  }
+
+  void _bookmarkDeleted(int id) {
+    final bookId = _model.document?.bookId;
+    if (bookId == null || _model.bookmarkBusy || _closing || _suspended) return;
+    final generation = _model.generation;
+    final revision = ++_bookmarkRevision;
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
+    unawaited(() async {
+      try {
+        await _bridge.deleteBookmark(id: id);
+        if (!_isCurrent(generation) || revision != _bookmarkRevision) return;
+        _reloadBookmarks(generation, revision, bookId);
+      } catch (error) {
+        if (_isCurrent(generation) && revision == _bookmarkRevision) {
+          _emit(
+            _model.copyWith(bookmarkBusy: false, toolError: error.toString()),
+          );
+        }
+      }
+    }());
+  }
+
+  void _reloadBookmarks(int generation, int revision, int bookId) {
+    late final BigInt cancellation;
+    try {
+      cancellation = _bridge.createCancellation();
+    } catch (error) {
+      _emit(_model.copyWith(bookmarkBusy: false, toolError: error.toString()));
+      return;
+    }
+    _toolCancellations.add(cancellation);
+    _activeBridgeOperations += 1;
+    unawaited(() async {
+      try {
+        final items = await _bridge.listBookmarks(
+          bookId: bookId,
+          cancellationId: cancellation,
+        );
+        dispatch(_ReaderBookmarksCompleted(generation, revision, items));
+      } catch (error) {
+        dispatch(
+          _ReaderBookmarksFailed(generation, revision, error.toString()),
+        );
+      } finally {
+        dispatch(_ReaderBookmarkFinished(cancellation));
+      }
+    }());
+  }
+
   Future<void> _relayoutEffect(
     FlutterDocumentSummary document,
     int generation,
@@ -2043,6 +2166,7 @@ final class ReaderController implements Listenable {
             scale: layout.scale,
             width: layout.width,
             fontSize: layout.fontSize,
+            lineSpacing: layout.lineSpacing,
             cancellationId: cancellation,
           );
           ownedSurface = surface;
