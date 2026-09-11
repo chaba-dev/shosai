@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -77,6 +78,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened?.bookId, 7);
     expect(find.text('Reading A Book'), findsOneWidget);
+  });
+
+  testWidgets('library lazily renders bounded covers and recent activity', (
+    tester,
+  ) async {
+    final bridge = _LibraryBridge(
+      books: [
+        _book(
+          7,
+          'Recently Read',
+          cover: base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+          ),
+          lastRead: '2026-09-10T12:00:00Z',
+        ),
+        ...List.generate(60, (index) => _book(index + 8, 'Book $index')),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Continue reading'), findsOneWidget);
+    expect(find.bySemanticsLabel('Cover of Recently Read'), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('Book 59'), findsNothing);
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -239,6 +272,77 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test(
+    'reviewed multi-file import preserves selection and storage choice',
+    () async {
+      final bridge = _ControlledLibraryBridge();
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => const LibraryImportSelection(
+          paths: ['/books/one.pdf', '/books/two.epub'],
+          managed: false,
+        ),
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+      );
+      controller.dispatch(const LibraryImportRequested());
+      await _waitUntil(() => !controller.model.busy);
+
+      expect(bridge.importedPaths, ['/books/one.pdf', '/books/two.epub']);
+      expect(bridge.importedManaged, isFalse);
+      expect(bridge.importedDirectory, isNull);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test('reviewed folder import uses recursive bridge operation', () async {
+    final bridge = _ControlledLibraryBridge();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => const LibraryImportSelection(
+        paths: ['/books/folder'],
+        managed: true,
+        directory: true,
+      ),
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => !controller.model.busy);
+
+    expect(bridge.importedDirectory, '/books/folder');
+    expect(bridge.importedManaged, isTrue);
+    expect(bridge.importedPaths, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('active import can be cancelled from product progress', () async {
+    final bridge = _ControlledLibraryBridge();
+    bridge.importCompleter = Completer<List<FlutterImportItem>>();
+    final controller = _libraryController(bridge);
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.importCalls == 1);
+
+    controller.dispatch(const LibraryOperationCancelled());
+
+    expect(bridge.cancelled, [BigInt.one]);
+    bridge.importCompleter!.completeError(
+      const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.cancelled,
+        message: 'cancelled',
+      ),
+    );
+    await _waitUntil(() => !controller.model.busy);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test('reader close drains its book save queue before refreshing', () async {
     final books = [_book(7, 'A Book')];
     final bridge = _ControlledLibraryBridge(books: books);
@@ -369,7 +473,7 @@ void main() {
       '$adapter affirmative completion after dispose makes no bridge writes',
       () async {
         final bridge = _ControlledLibraryBridge();
-        final picker = Completer<String?>();
+        final picker = Completer<LibraryImportSelection?>();
         final removal = Completer<bool>();
         final settings = Completer<FlutterReaderSettings?>();
         final controller = LibraryController(
@@ -394,7 +498,9 @@ void main() {
         controller.dispose();
         switch (adapter) {
           case 'picker':
-            picker.complete('/book.pdf');
+            picker.complete(
+              const LibraryImportSelection(paths: ['/book.pdf'], managed: true),
+            );
           case 'removal':
             removal.complete(true);
           case 'settings':
@@ -504,23 +610,31 @@ void main() {
   }
 }
 
-FlutterLibraryBook _book(int id, String title, {String? author}) =>
-    FlutterLibraryBook(
-      bookId: id,
-      title: title,
-      author: author,
-      format: FlutterBookFormat.pdf,
-      pathKey: '/books/$id.pdf',
-      managed: true,
-      progress: 0.5,
-      dateAdded: '2026-09-10',
-    );
+FlutterLibraryBook _book(
+  int id,
+  String title, {
+  String? author,
+  Uint8List? cover,
+  String? lastRead,
+}) => FlutterLibraryBook(
+  bookId: id,
+  title: title,
+  author: author,
+  format: FlutterBookFormat.pdf,
+  pathKey: '/books/$id.pdf',
+  managed: true,
+  cover: cover,
+  progress: 0.5,
+  dateAdded: '2026-09-10',
+  lastRead: lastRead,
+);
 
 LibraryController _libraryController(_ControlledLibraryBridge bridge) =>
     LibraryController(
       bridge: bridge,
       confirmRemoval: (_) async => true,
-      pickImport: () async => '/tmp/book.pdf',
+      pickImport: () async =>
+          const LibraryImportSelection(paths: ['/tmp/book.pdf'], managed: true),
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
       editSettings: (_) async => null,
@@ -646,6 +760,9 @@ class _ControlledLibraryBridge implements FlutterBridge {
   final List<BigInt> cancelled = [];
   final List<BigInt> released = [];
   final List<String> events = [];
+  List<String>? importedPaths;
+  bool? importedManaged;
+  String? importedDirectory;
   final Completer<void> disposed = Completer<void>();
   Completer<List<FlutterImportItem>>? importCompleter;
   int importCalls = 0;
@@ -706,6 +823,20 @@ class _ControlledLibraryBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) {
     importCalls += 1;
+    importedPaths = pathKeys;
+    importedManaged = managed;
+    return importCompleter?.future ?? Future.value(const []);
+  }
+
+  @override
+  Future<List<FlutterImportItem>> importDirectory({
+    required String pathKey,
+    required bool managed,
+    required BigInt cancellationId,
+  }) {
+    importCalls += 1;
+    importedDirectory = pathKey;
+    importedManaged = managed;
     return importCompleter?.future ?? Future.value(const []);
   }
 

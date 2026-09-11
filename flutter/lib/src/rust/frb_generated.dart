@@ -66,7 +66,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1306103135;
+  int get rustContentHash => -804141099;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -120,6 +120,13 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiFlutterBridgeExportBookmarks({
     required FlutterBridge that,
     required PlatformInt64 bookId,
+  });
+
+  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportDirectory({
+    required FlutterBridge that,
+    required String pathKey,
+    required bool managed,
+    required BigInt cancellationId,
   });
 
   Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
@@ -618,6 +625,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "FlutterBridge_export_bookmarks",
         argNames: ["that", "bookId"],
+      );
+
+  @override
+  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportDirectory({
+    required FlutterBridge that,
+    required String pathKey,
+    required bool managed,
+    required BigInt cancellationId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          var arg0 =
+              cst_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerFlutterBridge(
+                that,
+              );
+          var arg1 = cst_encode_String(pathKey);
+          var arg2 = cst_encode_bool(managed);
+          var arg3 = cst_encode_u_64(cancellationId);
+          return wire.wire__crate__api__FlutterBridge_import_directory(
+            port_,
+            arg0,
+            arg1,
+            arg2,
+            arg3,
+          );
+        },
+        codec: DcoCodec(
+          decodeSuccessData: dco_decode_list_flutter_import_item,
+          decodeErrorData: dco_decode_flutter_bridge_error,
+        ),
+        constMeta: kCrateApiFlutterBridgeImportDirectoryConstMeta,
+        argValues: [that, pathKey, managed, cancellationId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFlutterBridgeImportDirectoryConstMeta =>
+      const TaskConstMeta(
+        debugName: "FlutterBridge_import_directory",
+        argNames: ["that", "pathKey", "managed", "cancellationId"],
       );
 
   @override
@@ -2022,8 +2071,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterLibraryBook dco_decode_flutter_library_book(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return FlutterLibraryBook(
       bookId: dco_decode_i_64(arr[0]),
       title: dco_decode_String(arr[1]),
@@ -2031,9 +2080,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       format: dco_decode_flutter_book_format(arr[3]),
       pathKey: dco_decode_String(arr[4]),
       managed: dco_decode_bool(arr[5]),
-      progress: dco_decode_f_64(arr[6]),
-      dateAdded: dco_decode_String(arr[7]),
-      lastRead: dco_decode_opt_String(arr[8]),
+      cover: dco_decode_opt_list_prim_u_8_strict(arr[6]),
+      progress: dco_decode_f_64(arr[7]),
+      dateAdded: dco_decode_String(arr[8]),
+      lastRead: dco_decode_opt_String(arr[9]),
     );
   }
 
@@ -2392,6 +2442,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_flutter_selection_rect(raw);
+  }
+
+  @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
   }
 
   @protected
@@ -2820,6 +2876,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_format = sse_decode_flutter_book_format(deserializer);
     var var_pathKey = sse_decode_String(deserializer);
     var var_managed = sse_decode_bool(deserializer);
+    var var_cover = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_progress = sse_decode_f_64(deserializer);
     var var_dateAdded = sse_decode_String(deserializer);
     var var_lastRead = sse_decode_opt_String(deserializer);
@@ -2830,6 +2887,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       format: var_format,
       pathKey: var_pathKey,
       managed: var_managed,
+      cover: var_cover,
       progress: var_progress,
       dateAdded: var_dateAdded,
       lastRead: var_lastRead,
@@ -3346,6 +3404,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_prim_u_8_strict(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int sse_decode_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint32();
@@ -3851,6 +3920,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_flutter_book_format(self.format, serializer);
     sse_encode_String(self.pathKey, serializer);
     sse_encode_bool(self.managed, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.cover, serializer);
     sse_encode_f_64(self.progress, serializer);
     sse_encode_String(self.dateAdded, serializer);
     sse_encode_opt_String(self.lastRead, serializer);
@@ -4289,6 +4359,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_prim_u_8_strict(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint32(self);
@@ -4393,6 +4476,17 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
       .instance
       .api
       .crateApiFlutterBridgeExportBookmarks(that: this, bookId: bookId);
+
+  Future<List<FlutterImportItem>> importDirectory({
+    required String pathKey,
+    required bool managed,
+    required BigInt cancellationId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeImportDirectory(
+    that: this,
+    pathKey: pathKey,
+    managed: managed,
+    cancellationId: cancellationId,
+  );
 
   Future<List<FlutterImportItem>> importPaths({
     required List<String> pathKeys,
