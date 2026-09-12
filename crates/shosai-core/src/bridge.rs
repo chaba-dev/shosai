@@ -160,6 +160,12 @@ pub struct LibraryPageDto {
     pub has_more: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibraryRemoveDto {
+    pub removed: bool,
+    pub managed_file_deletion_pending: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ImportItemDto {
     pub path_key: String,
@@ -623,6 +629,7 @@ pub struct Bridge {
     annotation_store: Arc<tokio::sync::OnceCell<AnnotationStore>>,
     annotation_database: Option<Arc<PathBuf>>,
     state_store: Arc<tokio::sync::OnceCell<ReadingStateStore>>,
+    managed_deletion_retry_running: Arc<AtomicBool>,
     #[cfg(test)]
     selection_worker_barrier: Option<Arc<std::sync::Barrier>>,
     #[cfg(test)]
@@ -705,6 +712,7 @@ impl Bridge {
             annotation_store: Arc::new(tokio::sync::OnceCell::new()),
             annotation_database,
             state_store: Arc::new(tokio::sync::OnceCell::new()),
+            managed_deletion_retry_running: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             selection_worker_barrier: None,
             #[cfg(test)]
@@ -891,6 +899,18 @@ impl Bridge {
     async fn library(&self) -> Result<Library, BridgeError> {
         let state = self.state_store().await?;
         let library = Library::new(state.pool().clone(), state.managed_books_dir());
+        // Best effort: durable deletion debt must not delay foreground or
+        // cancellation-aware library operations.
+        if !self.managed_deletion_retry_running.swap(true, Ordering::AcqRel) {
+            let retry_library = library.clone();
+            let retry_running = Arc::clone(&self.managed_deletion_retry_running);
+            tokio::spawn(async move {
+                if retry_library.retry_managed_file_deletions().await.is_err() {
+                    eprintln!("warning: managed file deletion retry failed");
+                }
+                retry_running.store(false, Ordering::Release);
+            });
+        }
         #[cfg(test)]
         if let Some(barrier) = &self.library_query_progress_barrier {
             library.set_query_progress_barrier(Arc::clone(barrier));
@@ -1999,16 +2019,22 @@ impl Bridge {
             .map_err(storage_error)
     }
 
-    pub async fn remove_library_book(&self, book_id: i64) -> Result<bool, BridgeError> {
+    pub async fn remove_library_book(&self, book_id: i64) -> Result<LibraryRemoveDto, BridgeError> {
         let library = self.library().await?;
         if library.get(book_id).await.map_err(storage_error)?.is_none() {
-            return Ok(false);
+            return Ok(LibraryRemoveDto {
+                removed: false,
+                managed_file_deletion_pending: false,
+            });
         }
-        library
-            .remove(book_id)
+        let outcome = library
+            .remove_with_outcome(book_id)
             .await
             .map_err(library_mutation_error)?;
-        Ok(true)
+        Ok(LibraryRemoveDto {
+            removed: true,
+            managed_file_deletion_pending: outcome.managed_file_deletion_pending,
+        })
     }
 
     async fn annotation_store(&self) -> Result<&AnnotationStore, BridgeError> {
@@ -6043,7 +6069,13 @@ mod tests {
             .execute(pool)
             .await
             .unwrap();
-        assert!(bridge.remove_library_book(first_book).await.unwrap());
+        assert!(
+            bridge
+                .remove_library_book(first_book)
+                .await
+                .unwrap()
+                .removed
+        );
         assert!(!std::path::Path::new(&first_managed_path).exists());
 
         let reopened = bridge
@@ -7262,8 +7294,8 @@ mod tests {
         };
         bridge.save_reader_settings(settings.clone()).await.unwrap();
         assert_eq!(bridge.load_reader_settings().await.unwrap(), settings);
-        assert!(bridge.remove_library_book(book_id).await.unwrap());
-        assert!(!bridge.remove_library_book(book_id).await.unwrap());
+        assert!(bridge.remove_library_book(book_id).await.unwrap().removed);
+        assert!(!bridge.remove_library_book(book_id).await.unwrap().removed);
         assert!(
             source.exists(),
             "referenced imports must not delete user files"

@@ -84,7 +84,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     confirmRemoval: _confirmRemoval,
     pickImport: _pickImport,
     openBook: _openBook,
-    drainReaderSaves: ReaderController.drainBookReadingStateWrites,
+    drainReaderSaves: ReaderController.drainBookWrites,
     editSettings: _editSettings,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
@@ -639,6 +639,23 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                   ),
                 ],
               ),
+            if (model.managedFileDeletionPending)
+              MaterialBanner(
+                content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                    'Book removed. Its private copy will be deleted later.',
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => controller.dispatch(
+                      const LibraryManagedDeletionNoticeDismissed(),
+                    ),
+                    child: const Text('Dismiss'),
+                  ),
+                ],
+              ),
             if (model.displayError case final error?)
               MaterialBanner(
                 content: Semantics(liveRegion: true, child: Text(error)),
@@ -1122,6 +1139,7 @@ final class LibraryModel {
     this.hasMore = false,
     this.failure = LibraryFailure.none,
     this.providerCleanupPending = false,
+    this.managedFileDeletionPending = false,
   });
 
   final List<FlutterLibraryBook> books;
@@ -1138,6 +1156,7 @@ final class LibraryModel {
   final bool hasMore;
   final LibraryFailure failure;
   final bool providerCleanupPending;
+  final bool managedFileDeletionPending;
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
@@ -1153,6 +1172,7 @@ final class LibraryModel {
     bool? hasMore,
     LibraryFailure? failure,
     bool? providerCleanupPending,
+    bool? managedFileDeletionPending,
   }) => LibraryModel(
     books: books ?? this.books,
     covers: covers ?? this.covers,
@@ -1174,6 +1194,8 @@ final class LibraryModel {
     failure: failure ?? this.failure,
     providerCleanupPending:
         providerCleanupPending ?? this.providerCleanupPending,
+    managedFileDeletionPending:
+        managedFileDeletionPending ?? this.managedFileDeletionPending,
   );
 }
 
@@ -1203,6 +1225,10 @@ final class LibraryRetryRequested extends LibraryMessage {
 
 final class LibraryCleanupRetryRequested extends LibraryMessage {
   const LibraryCleanupRetryRequested();
+}
+
+final class LibraryManagedDeletionNoticeDismissed extends LibraryMessage {
+  const LibraryManagedDeletionNoticeDismissed();
 }
 
 final class LibraryQueryChanged extends LibraryMessage {
@@ -1282,12 +1308,14 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.settings,
     this.cancellation,
     this.refresh = false,
+    this.managedFileDeletionPending = false,
   });
   final LibraryFailure failure;
   final String? error;
   final FlutterReaderSettings? settings;
   final BigInt? cancellation;
   final bool refresh;
+  final bool managedFileDeletionPending;
 }
 
 final class _LibraryReaderClosed extends LibraryMessage {
@@ -1507,6 +1535,7 @@ class LibraryController implements Listenable {
               settings: message.settings ?? _model.settings,
               error: null,
               failure: LibraryFailure.none,
+              managedFileDeletionPending: message.managedFileDeletionPending,
             ),
           );
           if (message.failure == LibraryFailure.import ||
@@ -1514,6 +1543,8 @@ class LibraryController implements Listenable {
             _load();
           }
         }
+      case LibraryManagedDeletionNoticeDismissed():
+        _emit(_model.copyWith(managedFileDeletionPending: false));
       case _LibraryReaderClosed():
         if (_closing) break;
         if (message.error case final error?) {
@@ -1767,9 +1798,12 @@ class LibraryController implements Listenable {
       try {
         if (!await _confirmRemoval(book)) return;
         if (!_ownsAdapter(adapterRevision)) return;
-        await _bridge.removeLibraryBook(bookId: book.bookId);
+        final outcome = await _bridge.removeLibraryBook(bookId: book.bookId);
         dispatch(
-          const _LibraryMutationCompleted(failure: LibraryFailure.removal),
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.removal,
+            managedFileDeletionPending: outcome.managedFileDeletionPending,
+          ),
         );
       } catch (error) {
         dispatch(
