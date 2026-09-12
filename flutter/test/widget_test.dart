@@ -1614,6 +1614,42 @@ void main() {
     },
   );
 
+  test('accepted association blocks a second native open', () async {
+    final source = _associationSource();
+    final association = Completer<FlutterAnnotationAssociationOutcome>();
+    final olderBridge = _ControlledBridge(
+      bookId: 7,
+      associationSources: [source],
+      immediateLists: true,
+    )..associationCompleters.add(association);
+    final older = ReaderController(
+      bridge: olderBridge,
+      decoder: (pixels, {required width, required height}) => _testImage(),
+      annotationAssociationPicker: (page) async =>
+          AnnotationAssociationSelected(page.sources.single),
+    );
+    await _openControlled(older, olderBridge, '/books/book.epub');
+    older.dispatch(const ReaderAnnotationAssociationRequested());
+    await _waitUntil(() => olderBridge.associationCalls == 1);
+    older.dispose();
+
+    final newerBridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final newer = _epubController(newerBridge);
+    newer.dispatch(const ReaderOpenRequested('/books/book.epub', bookId: 7));
+    await Future<void>.delayed(Duration.zero);
+    expect(newerBridge.openCalls, 0);
+
+    association.complete(FlutterAnnotationAssociationOutcome.associated);
+    await newerBridge.waitForOp(1);
+    expect(newerBridge.openCalls, 1);
+
+    newer.dispose();
+    await Future.wait([
+      olderBridge.disposed.future,
+      newerBridge.disposed.future,
+    ]);
+  });
+
   test('cancelled document association does not infer identity', () async {
     final bridge = _ControlledBridge(
       associationSources: [_associationSource()],
@@ -2511,6 +2547,93 @@ void main() {
     );
   });
 
+  testWidgets('continuous fit-width and manual PDF content remain reachable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Future<void> verify({
+      required double zoom,
+      required bool continuous,
+    }) async {
+      final bridge = _ControlledBridge(
+        format: FlutterBookFormat.pdf,
+        immediateLists: true,
+      );
+      FlutterSelectionSurface largeSurface(int id) => FlutterSelectionSurface(
+        handle: FlutterSelectionHandle(
+          registry: BigInt.one,
+          id: BigInt.from(id),
+        ),
+        width: 800,
+        height: 1200,
+        text: 'large page',
+        copyEligible: true,
+        endpoints: const [],
+        graphemeBoundaries: Uint32List.fromList([0, 10]),
+        wordBoundaries: Uint32List.fromList([0, 10]),
+        visualLines: const [],
+      );
+      bridge.selectionCompleters
+        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(30)))
+        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(31)));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            initialPath: '/books/book.pdf',
+            initialSettings: FlutterReaderSettings(
+              continuous: continuous,
+              theme: 'light',
+              epubFontSize: 18,
+              epubLineSpacing: 1.5,
+              pdfZoom: zoom,
+            ),
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final presentation = find.byKey(
+        ValueKey(
+          continuous
+              ? 'reader-continuous-presentation'
+              : 'reader-paginated-presentation',
+        ),
+      );
+      final scrollables = find.descendant(
+        of: presentation,
+        matching: find.byType(Scrollable),
+      );
+      final directions = tester
+          .widgetList<Scrollable>(scrollables)
+          .map((widget) => widget.axisDirection)
+          .toSet();
+      expect(directions, contains(AxisDirection.down));
+      if (zoom > 0) expect(directions, contains(AxisDirection.right));
+      for (final element in scrollables.evaluate()) {
+        final state = tester.state<ScrollableState>(
+          find.byWidget(element.widget),
+        );
+        expect(
+          state.position.maxScrollExtent,
+          greaterThan(0),
+          reason: 'zoom=$zoom direction=${state.axisDirection}',
+        );
+      }
+
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    }
+
+    await verify(zoom: -1, continuous: true);
+    await verify(zoom: 2, continuous: false);
+  });
+
   testWidgets(
     'fit-width PDF maps pointer input on a scrolled asymmetric page',
     (tester) async {
@@ -2519,6 +2642,7 @@ void main() {
       addTearDown(tester.view.reset);
       final bridge = _ControlledBridge(
         format: FlutterBookFormat.pdf,
+        logicalUnitCount: 2,
         immediateLists: true,
       );
       FlutterSelectionSurface asymmetricSurface(int id) =>
@@ -2588,6 +2712,13 @@ void main() {
       final pagePaint = find.byWidgetPredicate(
         (widget) => widget is CustomPaint && widget.painter is PagePainter,
       );
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('reader-content-semantics')))
+            .height,
+        greaterThan(250),
+        reason: 'hidden tools must not reserve half the reader',
+      );
       expect(tester.getSize(pagePaint).height, greaterThan(900));
       final verticalScroll = find.descendant(
         of: find.byKey(const ValueKey('reader-paginated-presentation')),
@@ -2599,6 +2730,14 @@ void main() {
       );
       expect(verticalScroll, findsOneWidget);
       final position = tester.state<ScrollableState>(verticalScroll).position;
+      await tester.flingFrom(
+        const Offset(200, 250),
+        const Offset(0, -200),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      expect(position.pixels, greaterThan(0));
+      expect(find.byKey(const ValueKey('selection-actions')), findsNothing);
       position.jumpTo(position.maxScrollExtent);
       await tester.pump();
 
@@ -2611,11 +2750,41 @@ void main() {
       final dragTarget =
           pageTopLeft +
           Offset(pageSize.width * 80 / 200, pageSize.height * 550 / 600);
-      final gesture = await tester.startGesture(endpointCenter);
+      final gesture = await tester.createGesture(
+        kind: ui.PointerDeviceKind.mouse,
+      );
+      await gesture.down(endpointCenter);
       await gesture.moveTo(dragTarget);
       await gesture.up();
       await tester.pump();
-      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+      final actions = find.byKey(const ValueKey('selection-actions'));
+      expect(actions, findsOneWidget);
+      final viewport = tester.getRect(
+        find.byKey(const ValueKey('reader-content-semantics')),
+      );
+      expect(viewport.contains(tester.getRect(actions).topLeft), isTrue);
+      expect(viewport.contains(tester.getRect(actions).bottomRight), isTrue);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pump();
+      expect(actions, findsNothing);
+
+      bridge.selectionCompleters.add(
+        Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(42)),
+      );
+      await tester.tap(find.byTooltip('Next'));
+      await tester.pumpAndSettle();
+      final nextVerticalScroll = find.descendant(
+        of: find.byKey(const ValueKey('reader-paginated-presentation')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Scrollable &&
+              widget.axisDirection == AxisDirection.down,
+        ),
+      );
+      expect(
+        tester.state<ScrollableState>(nextVerticalScroll).position.pixels,
+        0,
+      );
 
       await tester.pumpWidget(const SizedBox());
       await bridge.disposed.future;
@@ -5086,7 +5255,11 @@ void main() {
           expect(painter().savedSelections, isEmpty);
           final gesture = await tester.createGesture(kind: device);
           await gesture.down(surfaceTopLeft + Offset(side * .2, side * .2));
-          await tester.pump();
+          await tester.pump(
+            device == ui.PointerDeviceKind.touch
+                ? const Duration(milliseconds: 600)
+                : Duration.zero,
+          );
           expect(painter().anchor, 1, reason: 'press must retain the anchor');
           expect(painter().focus, 1);
           await gesture.moveBy(Offset(side * .5, side * .5));
@@ -5287,7 +5460,7 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
-    expect(bridge.createdRanges.last, (BigInt.one, BigInt.from(4)));
+    expect(bridge.createdRanges.last, (BigInt.one, BigInt.from(5)));
 
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -5377,6 +5550,7 @@ void main() {
     final topLeft = bounds.center - Offset(side / 2, side / 2);
     final owner = await tester.createGesture(kind: ui.PointerDeviceKind.touch);
     await owner.down(topLeft + Offset(side * .2, side * .2));
+    await tester.pump(const Duration(milliseconds: 600));
     await owner.moveBy(Offset(side * .5, side * .5));
     final second = await tester.createGesture(kind: ui.PointerDeviceKind.touch);
     await second.down(tester.getCenter(find.byType(TextField)));
@@ -5772,6 +5946,51 @@ void main() {
     },
   );
 
+  testWidgets('bookmark save failure stays visible when tools close', (
+    tester,
+  ) async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final toggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters.add(toggle);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/book.epub',
+          initialBookId: 7,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Bookmark this location'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    toggle.completeError(StateError('bookmark commit failed'));
+    await tester.pumpAndSettle();
+
+    final error = find.textContaining('Bookmark changes were not saved');
+    expect(error, findsOneWidget);
+    expect(
+      tester
+          .getSemantics(error)
+          .getSemanticsData()
+          .flagsCollection
+          .isLiveRegion,
+      isTrue,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await expectLater(
+      ReaderController.drainBookWrites(7),
+      throwsA(isA<ReaderPersistenceException>()),
+    );
+    await bridge.disposed.future;
+  });
+
   test('document replacement cannot overtake a bookmark mutation', () async {
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
     final controller = _epubController(bridge);
@@ -6115,11 +6334,67 @@ void main() {
     await bridge.waitForOp(2);
     await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
     save.completeError(StateError('commit failed'));
-    await controller.drainReadingStateWrites(7);
+    await expectLater(
+      controller.drainReadingStateWrites(7),
+      throwsA(
+        isA<ReaderPersistenceException>().having(
+          (error) => error.message,
+          'message',
+          contains('commit failed'),
+        ),
+      ),
+    );
 
     expect(controller.model.persistenceError, contains('commit failed'));
     expect(controller.model.toolsVisible, isFalse);
     controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  testWidgets('persistence errors fit a compact reader at large text scale', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.epub,
+      bookId: 7,
+      logicalUnitCount: 2,
+      immediateLists: true,
+      saveReadingStateFailure: StateError('commit failed'),
+    );
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+        child: MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            initialPath: '/books/book.epub',
+            initialBookId: 7,
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Next'));
+    await tester.pump();
+    await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Reading position was not saved'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    await expectLater(
+      find.byType(ReaderScreen),
+      matchesGoldenFile('goldens/reader-compact-persistence-error.png'),
+    );
+    await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
 
@@ -6147,7 +6422,7 @@ void main() {
       );
       await bridge.waitForOp(3);
 
-      expect(controller.model.toolError, contains('could not be restored'));
+      expect(controller.model.toolError, isNull);
       expect(
         controller.model.persistenceError,
         contains('could not be restored'),
@@ -6307,6 +6582,36 @@ void main() {
       ]);
     },
   );
+
+  test('book drain reports an accepted save failure after disposal', () async {
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      logicalUnitCount: 2,
+      immediateLists: true,
+    );
+    final commit = Completer<void>();
+    bridge.readingStateCompleters.add(commit);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/books/book.epub');
+    controller.dispatch(const ReaderUnitRequested(1));
+    await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
+
+    controller.dispose();
+    final drain = ReaderController.drainBookWrites(7);
+    commit.completeError(StateError('late commit failed'));
+
+    await expectLater(
+      drain,
+      throwsA(
+        isA<ReaderPersistenceException>().having(
+          (error) => error.message,
+          'message',
+          contains('late commit failed'),
+        ),
+      ),
+    );
+    await bridge.disposed.future;
+  });
 
   test(
     'annotation navigation loads its unit before revealing its range',
@@ -6601,6 +6906,7 @@ final class _ControlledBridge implements FlutterBridge {
     this.copyEligible = true,
     this.initialReadingState,
     this.loadReadingStateFailure,
+    this.saveReadingStateFailure,
   }) : initialAnnotations = List.of(initialAnnotations),
        storedAnnotations = List.of(initialAnnotations),
        associationSources = List.of(associationSources),
@@ -6622,6 +6928,7 @@ final class _ControlledBridge implements FlutterBridge {
   final bool copyEligible;
   final FlutterReadingState? initialReadingState;
   final Object? loadReadingStateFailure;
+  final Object? saveReadingStateFailure;
   final disposed = Completer<void>();
   final createdCancellations = <BigInt>[];
   final releasedCancellations = <BigInt>[];
@@ -6671,6 +6978,8 @@ final class _ControlledBridge implements FlutterBridge {
   final updatedBookmarkNotes = <(int, String?)>[];
   final deletedBookmarkIds = <int>[];
   final searchCompleters = Queue<Completer<List<FlutterSearchMatch>>>();
+  final associationCompleters =
+      Queue<Completer<FlutterAnnotationAssociationOutcome>>();
   final bookmarkListCompleters = Queue<Completer<List<FlutterBookmark>>>();
   final bookmarkToggleCompleters = Queue<Completer<FlutterBookmark?>>();
   final readingStateCompleters = Queue<Completer<void>>();
@@ -6824,6 +7133,7 @@ final class _ControlledBridge implements FlutterBridge {
     if (readingStateCompleters.isNotEmpty) {
       await readingStateCompleters.removeFirst().future;
     }
+    if (saveReadingStateFailure case final error?) throw error;
   }
 
   @override
@@ -7014,6 +7324,9 @@ final class _ControlledBridge implements FlutterBridge {
   }) async {
     associationCalls += 1;
     if (associationFailure case final failure?) throw failure;
+    if (associationCompleters.isNotEmpty) {
+      return associationCompleters.removeFirst().future;
+    }
     associatedSourceIds.add(sourceVersionId);
     storedAnnotations
       ..clear()
