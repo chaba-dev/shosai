@@ -8,6 +8,18 @@ import org.junit.Test
 
 class ResourceOwnershipTest {
     @Test
+    fun `cache discovery cannot replace a live resource lease`() {
+        val ownership = ResourceOwnership()
+        val live = File("live")
+        ownership.register("token", live, "engine")
+
+        ownership.restore("token", File("stale-cache-entry"))
+
+        assertTrue(ownership.beginUse("engine", "token"))
+        assertEquals(live, ownership.requestRelease("token")!!.file)
+    }
+
+    @Test
     fun `recreation reclaims delivered resources but preserves active consumers`() {
         val ownership = ResourceOwnership()
         val delivered = File("delivered")

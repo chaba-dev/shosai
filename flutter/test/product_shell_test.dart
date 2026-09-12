@@ -93,6 +93,61 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  test('stale cleanup results cannot overwrite a newer retry', () async {
+    final bridge = _ControlledLibraryBridge();
+    final cleanups = <Completer<bool>>[];
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+      retryProviderCleanup: () {
+        final cleanup = Completer<bool>();
+        cleanups.add(cleanup);
+        return cleanup.future;
+      },
+    );
+    controller.dispatch(const LibraryStarted());
+    await _waitUntil(() => cleanups.length == 1);
+    controller.dispatch(const LibraryCleanupRetryRequested());
+    await _waitUntil(() => cleanups.length == 2);
+
+    cleanups[1].complete(false);
+    await Future<void>.delayed(Duration.zero);
+    cleanups[0].complete(true);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.model.providerCleanupPending, isFalse);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('library transitions preserve pending provider cleanup', () async {
+    final bridge = _ControlledLibraryBridge();
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+      retryProviderCleanup: () async => true,
+    );
+    controller.dispatch(const LibraryStarted());
+    await _waitUntil(
+      () => controller.model.loaded && controller.model.providerCleanupPending,
+    );
+
+    controller.dispatch(const LibraryQueryChanged('new query'));
+    await _waitUntil(() => controller.model.loaded);
+
+    expect(controller.model.providerCleanupPending, isTrue);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   testWidgets('library renders content, progress, filters, and opens a book', (
     tester,
   ) async {
