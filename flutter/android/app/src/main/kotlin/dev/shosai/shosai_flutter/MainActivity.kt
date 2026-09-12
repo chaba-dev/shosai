@@ -134,14 +134,23 @@ private object DocumentImportManager {
 
     fun release(token: String): Boolean {
         val resource = ownership.requestRelease(token) ?: return true
+        return removeResource(token, resource)
+    }
+
+    private fun removeResource(token: String, resource: ProviderResource): Boolean {
         if (!deleteOwnedSession(resource.file)) return false
         ownership.removed(token, resource)
         return true
     }
 
     fun releaseAsync(token: String, result: (Boolean) -> Unit) {
+        val resource = ownership.requestRelease(token)
+        if (resource == null) {
+            mainHandler.post { result(true) }
+            return
+        }
         cleanupExecutor.execute {
-            val removed = release(token)
+            val removed = removeResource(token, resource)
             mainHandler.post { result(removed) }
         }
     }
@@ -254,9 +263,15 @@ private object DocumentImportManager {
                 return
             }
         }
-        releaseToken?.let(::release)
-        if (acquisition.owner.active.get()) {
-            acquisition.result.error((outcome as AcquisitionOutcome.Failure).code, null, null)
+        val completeFailure = {
+            if (acquisition.owner.active.get()) {
+                acquisition.result.error((outcome as AcquisitionOutcome.Failure).code, null, null)
+            }
+        }
+        if (releaseToken == null) {
+            completeFailure()
+        } else {
+            releaseAsync(releaseToken) { completeFailure() }
         }
     }
 
@@ -326,9 +341,16 @@ private object DocumentImportChannel {
     private var activity = WeakReference<MainActivity>(null)
     private var channel: MethodChannel? = null
     private var pendingSelection: MethodChannel.Result? = null
+    private var awaitingRecreation = false
 
     @Synchronized
     fun attach(host: MainActivity, flutterEngine: FlutterEngine) {
+        val previous = activity.get()
+        if (previous != null && previous !== host && !awaitingRecreation) {
+            pendingSelection?.error("unavailable", null, null)
+            pendingSelection = null
+        }
+        awaitingRecreation = false
         activity = WeakReference(host)
         if (channel == null) {
             channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).also {
@@ -338,10 +360,11 @@ private object DocumentImportChannel {
     }
 
     @Synchronized
-    fun detach(host: MainActivity, terminal: Boolean) {
+    fun detach(host: MainActivity, recreating: Boolean) {
         if (activity.get() !== host) return
         activity.clear()
-        if (terminal) {
+        awaitingRecreation = recreating
+        if (!recreating) {
             pendingSelection?.error("unavailable", null, null)
             pendingSelection = null
         }
@@ -492,7 +515,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
-        DocumentImportChannel.detach(this, isFinishing)
+        DocumentImportChannel.detach(this, isChangingConfigurations)
         super.onDestroy()
     }
 }
