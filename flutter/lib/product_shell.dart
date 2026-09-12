@@ -83,8 +83,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     drainReaderSaves: ReaderController.drainBookReadingStateWrites,
     editSettings: _editSettings,
     cancelImportAdapter: _cancelImportAdapter,
-    evictCover: (bytes) =>
-        imageCache.evict(MemoryImage(bytes), includeLive: true),
+    evictCover: (bytes) {
+      final provider = MemoryImage(bytes);
+      imageCache.evict(provider, includeLive: true);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => imageCache.evict(provider, includeLive: true),
+      );
+    },
   )..addListener(_changed);
 
   void _changed() {
@@ -332,6 +337,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 managed: true,
                 cancellationId: cancellation,
               );
+              imported += importedReport.imported.toInt();
+              failed += importedReport.failed.toInt();
               for (final item in importedReport.items) {
                 final reviewedItem = FlutterImportItem(
                   pathKey: document.name,
@@ -339,8 +346,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                   error: item.error,
                 );
                 items.add(reviewedItem);
-                if (reviewedItem.book != null) imported += 1;
-                if (reviewedItem.error != null) failed += 1;
               }
               if (importedReport.cancelled) cancelled = true;
             } on FlutterBridgeError catch (error) {
@@ -1571,14 +1576,7 @@ class LibraryController implements Listenable {
           final report = await runner(_bridge, cancellation);
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          if (report.cancelled) {
-            terminalStatus = report.imported == BigInt.zero
-                ? 'Import cancelled.'
-                : 'Import cancelled after ${_bookCount(report.imported)}.';
-          } else if (report.failed > BigInt.zero) {
-            terminalStatus =
-                'Imported ${report.imported} books; ${report.failed} failed.';
-          }
+          terminalStatus = _importReportStatus(report);
         } else if (selection.directory) {
           final report = await _bridge.importDirectory(
             pathKey: selection.paths.single,
@@ -1587,14 +1585,7 @@ class LibraryController implements Listenable {
           );
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          if (report.cancelled) {
-            terminalStatus = report.imported == BigInt.zero
-                ? 'Import cancelled.'
-                : 'Import cancelled after ${_bookCount(report.imported)}.';
-          } else if (report.failed > BigInt.zero) {
-            terminalStatus =
-                'Imported ${report.imported} books; ${report.failed} failed.';
-          }
+          terminalStatus = _importReportStatus(report);
         } else {
           final report = await _bridge.importPaths(
             pathKeys: selection.paths,
@@ -1603,14 +1594,7 @@ class LibraryController implements Listenable {
           );
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          if (report.cancelled) {
-            terminalStatus = report.imported == BigInt.zero
-                ? 'Import cancelled.'
-                : 'Import cancelled after ${_bookCount(report.imported)}.';
-          } else if (report.failed > BigInt.zero) {
-            terminalStatus =
-                'Imported ${report.imported} books; ${report.failed} failed.';
-          }
+          terminalStatus = _importReportStatus(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
         dispatch(
@@ -1736,6 +1720,27 @@ class LibraryController implements Listenable {
     return 'The selected book could not be imported.';
   }
 
+  String? _importReportStatus(FlutterImportReport report) {
+    final failure = report.items
+        .where((item) => item.error != null)
+        .firstOrNull;
+    if (!report.cancelled && report.failed == BigInt.zero && failure == null) {
+      return null;
+    }
+    final parts = <String>[];
+    if (report.cancelled) parts.add('Import cancelled.');
+    if (report.imported > BigInt.zero) {
+      parts.add('Imported ${_bookCount(report.imported)}.');
+    }
+    if (report.failed > BigInt.zero) {
+      parts.add('${report.failed} failed.');
+      if (failure != null) parts.add(_safeImportError(failure.error!));
+    } else if (failure != null) {
+      parts.add('Some imported book details could not be loaded.');
+    }
+    return parts.join(' ');
+  }
+
   void _releaseCancellation(BigInt cancellation) {
     if (_cancellations.remove(cancellation)) {
       _foregroundCancellations.remove(cancellation);
@@ -1765,6 +1770,7 @@ class LibraryController implements Listenable {
     }
     _coverCache.clear();
     _coverCacheBytes = 0;
+    _model = _model.copyWith(covers: const {});
     _adapterRevision += 1;
     _cancelImportAdapter();
     _searchTimer?.cancel();

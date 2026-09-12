@@ -222,17 +222,26 @@ void main() {
     expect(evicted, hasLength(4));
     controller.dispose();
     expect(evicted, hasLength(20));
+    expect(controller.model.covers, isEmpty);
   });
 
   testWidgets('mounted covers stop requesting after bounded eviction', (
     tester,
   ) async {
+    final png = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final covers = {
+      for (var index = 0; index < 40; index += 1)
+        index: Uint8List.fromList([
+          ...png,
+          ...List<int>.filled(512 * 1024 - png.length - 1, 0),
+          index,
+        ]),
+    };
     final bridge = _LibraryBridge(
       books: List.generate(40, (index) => _book(index, 'Book $index')),
-      covers: {
-        for (var index = 0; index < 40; index += 1)
-          index: Uint8List(512 * 1024),
-      },
+      covers: covers,
     );
     tester.view.physicalSize = const Size(1400, 4000);
     tester.view.devicePixelRatio = 1;
@@ -254,6 +263,23 @@ void main() {
       await tester.pump();
     }
     expect(bridge.coverRequests, hasLength(completedDemand));
+    final residentBytes = tester
+        .widgetList<Image>(find.byType(Image))
+        .map((image) => image.image)
+        .whereType<MemoryImage>()
+        .map((image) => image.bytes)
+        .toSet();
+    final evicted = covers.values
+        .where((bytes) => !residentBytes.contains(bytes))
+        .toList();
+    expect(evicted, hasLength(8));
+    for (final bytes in evicted) {
+      final key = await MemoryImage(bytes).obtainKey(ImageConfiguration.empty);
+      final status = imageCache.statusForKey(key);
+      expect(status.pending, isFalse);
+      expect(status.live, isFalse);
+      expect(status.keepAlive, isFalse);
+    }
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -525,7 +551,10 @@ void main() {
       ]);
       await _waitUntil(() => bridge.queries.length == 2);
 
-      expect(controller.model.error, 'Imported 1 books; 1 failed.');
+      expect(
+        controller.model.error,
+        'Imported 1 book. 1 failed. This file type is not supported.',
+      );
       expect(controller.model.failure, LibraryFailure.import);
       controller.dispose();
       await bridge.disposed.future;
@@ -641,7 +670,7 @@ void main() {
       );
       await _waitUntil(() => bridge.queries.isNotEmpty);
 
-      expect(controller.model.error, 'Import cancelled after 2 books.');
+      expect(controller.model.error, 'Import cancelled. Imported 2 books.');
       expect(controller.model.failure, LibraryFailure.import);
       controller.dispose();
       await bridge.disposed.future;
@@ -680,7 +709,7 @@ void main() {
 
     expect(runnerCalls, 1);
     expect(bridge.importCalls, 0);
-    expect(controller.model.error, 'Import cancelled after 1 book.');
+    expect(controller.model.error, 'Import cancelled. Imported 1 book.');
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -691,10 +720,14 @@ void main() {
       final bridge = _ControlledLibraryBridge()
         ..importReport = FlutterImportReport(
           imported: BigInt.one,
-          failed: BigInt.zero,
+          failed: BigInt.one,
           cancelled: true,
           items: [
             FlutterImportItem(pathKey: '/first.pdf', book: _book(1, 'First')),
+            const FlutterImportItem(
+              pathKey: '/second.pdf',
+              error: 'unsupported',
+            ),
           ],
         );
       final controller = LibraryController(
@@ -712,7 +745,11 @@ void main() {
       controller.dispatch(const LibraryImportRequested());
       await _waitUntil(() => bridge.queries.isNotEmpty);
 
-      expect(controller.model.error, 'Import cancelled after 1 book.');
+      expect(
+        controller.model.error,
+        'Import cancelled. Imported 1 book. 1 failed. '
+        'This file type is not supported.',
+      );
       expect(bridge.importedPaths, ['/first.pdf', '/second.pdf']);
       controller.dispose();
       await bridge.disposed.future;
@@ -872,7 +909,10 @@ void main() {
     controller.dispatch(const LibraryRefreshed());
     await _waitUntil(() => !controller.model.busy);
 
-    expect(controller.model.error, 'Imported 0 books; 1 failed.');
+    expect(
+      controller.model.error,
+      '1 failed. This file type is not supported.',
+    );
     expect(controller.model.failure, LibraryFailure.import);
     controller.dispose();
     await bridge.disposed.future;
