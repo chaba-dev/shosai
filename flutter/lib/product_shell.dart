@@ -261,7 +261,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return null;
     }
     if (selected case DocumentSelectionFailure(:final error)) {
-      throw StateError(_documentImportErrorText(error));
+      throw _SafeUserError(_documentImportErrorText(error));
     }
     if (selected is! DocumentSelection || selected.documents.isEmpty) {
       return null;
@@ -366,18 +366,28 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             try {
               await _androidImport.release(acquisition.releaseToken);
             } catch (_) {
-              // The adapter retains the token and retries it before acquisition.
+              // The adapter retains cleanup ownership and retries below.
             }
           }
       }
       if (cancelled) break;
     }
     await _discardProviderDocuments(documents);
+    await _androidImport.retryPendingReleases();
+    final retainedItems = items.take(255).toList(growable: true);
+    if (_androidImport.hasPendingReleases) {
+      retainedItems.add(
+        const FlutterImportItem(
+          pathKey: '',
+          warning: 'provider_cleanup_pending',
+        ),
+      );
+    }
     return FlutterImportReport(
       imported: BigInt.from(imported),
       failed: BigInt.from(failed),
       cancelled: cancelled,
-      items: List.unmodifiable(items.take(256)),
+      items: List.unmodifiable(retainedItems),
     );
   }
 
@@ -636,8 +646,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
 String _safeError(Object error) => switch (error) {
   FlutterBridgeError() => error.message,
+  _SafeUserError() => error.message,
   _ => 'The operation could not be completed.',
 };
+
+final class _SafeUserError implements Exception {
+  const _SafeUserError(this.message);
+  final String message;
+}
 
 String _documentImportErrorText(DocumentImportError error) => switch (error) {
   DocumentImportError.unavailable => 'The document provider is unavailable.',
@@ -1725,13 +1741,14 @@ class LibraryController implements Listenable {
     final failure = report.items
         .where((item) => item.error != null)
         .firstOrNull;
-    final warning = report.items
-        .where((item) => item.warning != null)
-        .firstOrNull;
+    final warnings = report.items
+        .map((item) => item.warning)
+        .whereType<String>()
+        .toList(growable: false);
     if (!report.cancelled &&
         report.failed == BigInt.zero &&
         failure == null &&
-        warning == null) {
+        warnings.isEmpty) {
       return null;
     }
     final parts = <String>[];
@@ -1743,8 +1760,14 @@ class LibraryController implements Listenable {
       parts.add('${report.failed} failed.');
       if (failure != null) parts.add(_safeImportError(failure.error!));
     }
-    if (warning != null) {
+    if (warnings.any((warning) => warning != 'provider_cleanup_pending')) {
       parts.add('Some imported book details could not be loaded.');
+    }
+    if (warnings.contains('provider_cleanup_pending')) {
+      parts.add(
+        'Temporary import data could not be removed. Shōsai will try again '
+        'during the next import or app launch.',
+      );
     }
     return parts.join(' ');
   }

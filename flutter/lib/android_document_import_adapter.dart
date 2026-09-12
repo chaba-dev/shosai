@@ -105,6 +105,8 @@ final class AndroidDocumentImportAdapter {
   final AndroidDocumentImportChannel _channel;
   final Set<String> _pendingReleases = {};
 
+  bool get hasPendingReleases => _pendingReleases.isNotEmpty;
+
   Future<DocumentImportCapabilities> capabilities() async {
     final value = _map(await _channel.invoke('capabilities'));
     return DocumentImportCapabilities(

@@ -97,9 +97,11 @@ void main() {
       adapter.release('release-1'),
       throwsA(isA<PlatformException>()),
     );
+    expect(adapter.hasPendingReleases, isTrue);
     channel.replies['release'] = null;
     await adapter.retryPendingReleases();
 
     expect(channel.calls.where((call) => call.$1 == 'release').length, 2);
+    expect(adapter.hasPendingReleases, isFalse);
   });
 }

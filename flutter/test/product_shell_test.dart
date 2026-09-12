@@ -589,6 +589,33 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('import summary reports deferred provider cleanup', () async {
+    final bridge = _ControlledLibraryBridge()
+      ..importReport = FlutterImportReport(
+        imported: BigInt.one,
+        failed: BigInt.zero,
+        cancelled: false,
+        items: const [
+          FlutterImportItem(
+            pathKey: 'book.pdf',
+            warning: 'provider_cleanup_pending',
+          ),
+        ],
+      );
+    final controller = _libraryController(bridge);
+
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.queries.isNotEmpty);
+
+    expect(
+      controller.model.error,
+      'Imported 1 book. Temporary import data could not be removed. '
+      'Shōsai will try again during the next import or app launch.',
+    );
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test(
     'cancelling a pending picker invalidates its eventual selection',
     () async {
