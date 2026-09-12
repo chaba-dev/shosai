@@ -330,7 +330,11 @@ impl BookFormat {
     }
 }
 
-fn book_format_for_path(path: &Path) -> Result<Option<BookFormat>> {
+fn book_format_for_path(
+    path: &Path,
+    cancellation: Option<&ImportCancellation>,
+) -> Result<Option<BookFormat>> {
+    check_import_cancelled(cancellation)?;
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_lowercase())
@@ -358,13 +362,18 @@ fn book_format_for_path(path: &Path) -> Result<Option<BookFormat>> {
         return Ok(None);
     }
 
-    let mut archive = zip::ZipArchive::new(file).context("selected ZIP archive is invalid")?;
     let max_entries = EpubLimits::default()
         .max_archive_entries
         .max(CbzLimits::default().max_entries);
-    if archive.len() > max_entries {
-        bail!("book archive has too many entries");
-    }
+    let cancelled = || cancellation.is_some_and(ImportCancellation::is_cancelled);
+    let preflight = crate::zip_preflight::preflight(&file, max_entries, Some(&cancelled))
+        .context("failed to preflight selected ZIP archive")?;
+    let metadata_bytes = crate::zip_preflight::metadata_allocation_ceiling(preflight)
+        .context("selected ZIP metadata admission overflowed")?;
+    let _admission =
+        crate::document_admission::ProvisionalDocumentAdmission::acquire(metadata_bytes)?;
+    check_import_cancelled(cancellation)?;
+    let mut archive = zip::ZipArchive::new(file).context("selected ZIP archive is invalid")?;
     if let Ok(mimetype) = archive.by_name("mimetype") {
         let mut bytes = Vec::new();
         mimetype
@@ -376,6 +385,7 @@ fn book_format_for_path(path: &Path) -> Result<Option<BookFormat>> {
         }
     }
     for index in 0..archive.len() {
+        check_import_cancelled(cancellation)?;
         let entry = archive
             .by_index(index)
             .context("failed to inspect ZIP archive entry")?;
@@ -1150,9 +1160,15 @@ impl Library {
         validate_import_path(&path)?;
         let path_str = canonical_path_key(&path);
 
-        let format = book_format_for_path(&path)?
-            .with_context(|| format!("unsupported format: {}", path.display()))?;
         let work_permit = acquire_import_work(cancellation).await?;
+        let format_path = path.clone();
+        let format_cancellation = cancellation.cloned();
+        let (format, work_permit) = run_blocking_with(work_permit, move || {
+            book_format_for_path(&format_path, format_cancellation.as_ref())
+        })
+        .await
+        .context("book format detection task failed")?;
+        let format = format?.with_context(|| format!("unsupported format: {}", path.display()))?;
         let storage_guard = acquire_managed_storage(cancellation).await?;
         self.ensure_current_managed_dir().await?;
         let stage_source = path.clone();
@@ -1332,8 +1348,15 @@ impl Library {
         let source = canonical_path(source);
         validate_import_path(&source)?;
         let source_str = canonical_path_key(&source);
-        let format = book_format_for_path(&source)?
-            .with_context(|| format!("unsupported format: {}", source.display()))?;
+        let format_source = source.clone();
+        let format_cancellation = cancellation.cloned();
+        let (format, preparation_permit) = run_blocking_with(preparation_permit, move || {
+            book_format_for_path(&format_source, format_cancellation.as_ref())
+        })
+        .await
+        .context("book format detection task failed")?;
+        let format =
+            format?.with_context(|| format!("unsupported format: {}", source.display()))?;
         let ext = format.as_str().to_owned();
         let stage_source = source.clone();
         let stage_dir = self.managed_dir.clone();
@@ -1535,7 +1558,13 @@ impl Library {
             .await?
             .with_context(|| format!("book {book_id} not found"))?;
         let replacement = canonical_path(replacement);
-        if book_format_for_path(&replacement)? != Some(book.format) {
+        let format_path = replacement.clone();
+        let (replacement_format, next_guards) =
+            run_blocking_with(guards, move || book_format_for_path(&format_path, None))
+                .await
+                .context("replacement format detection task failed")?;
+        guards = next_guards;
+        if replacement_format? != Some(book.format) {
             bail!("selected file has a different book format");
         }
         let stage_source = replacement.clone();
@@ -3727,7 +3756,7 @@ fn scan_import_candidates(
             continue;
         }
 
-        let format = match book_format_for_path(&path) {
+        let format = match book_format_for_path(&path, Some(cancellation)) {
             Ok(Some(format)) => format,
             Ok(None) => {
                 let extension = path
@@ -4384,7 +4413,10 @@ mod tests {
             let selected = directory.path().join(format!("{fixture}.document"));
             std::fs::copy(source, &selected).unwrap();
 
-            assert_eq!(book_format_for_path(&selected).unwrap(), Some(expected));
+            assert_eq!(
+                book_format_for_path(&selected, None).unwrap(),
+                Some(expected)
+            );
         }
     }
 
@@ -4401,9 +4433,49 @@ mod tests {
         archive.finish().unwrap();
 
         assert_eq!(
-            book_format_for_path(&selected).unwrap(),
+            book_format_for_path(&selected, None).unwrap(),
             Some(BookFormat::Cbz)
         );
+    }
+
+    #[tokio::test]
+    async fn managed_import_canonicalizes_an_extensionless_epub() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("selected.document");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"),
+            &source,
+        )
+        .unwrap();
+        let store = crate::reading_state::ReadingStateStore::open_at_async(
+            &directory.path().join("state.db"),
+        )
+        .await
+        .unwrap();
+        let library = Library::new(store.pool().clone(), directory.path().join("managed"));
+
+        let book = library.import_managed_file(&source).await.unwrap();
+
+        assert_eq!(book.format, BookFormat::Epub);
+        assert_eq!(Path::new(&book.file_path).extension().unwrap(), "epub");
+        assert!(Path::new(&book.file_path).is_file());
+    }
+
+    #[test]
+    fn content_detection_honors_pre_cancelled_zip_inspection() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("selected.document");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample.epub"),
+            &source,
+        )
+        .unwrap();
+        let cancellation = ImportCancellation::default();
+        cancellation.cancel();
+
+        let error = book_format_for_path(&source, Some(&cancellation)).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 
     #[test]
