@@ -1,6 +1,6 @@
 //! Owned, coarse-grained API suitable for a generated Dart/Rust bridge.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -619,6 +619,7 @@ impl BridgeAdmission {
 }
 
 static GLOBAL_ADMISSION: OnceLock<Arc<BridgeAdmission>> = OnceLock::new();
+static MANAGED_DELETION_RETRIES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct Bridge {
@@ -629,7 +630,6 @@ pub struct Bridge {
     annotation_store: Arc<tokio::sync::OnceCell<AnnotationStore>>,
     annotation_database: Option<Arc<PathBuf>>,
     state_store: Arc<tokio::sync::OnceCell<ReadingStateStore>>,
-    managed_deletion_retry_running: Arc<AtomicBool>,
     #[cfg(test)]
     selection_worker_barrier: Option<Arc<std::sync::Barrier>>,
     #[cfg(test)]
@@ -712,7 +712,6 @@ impl Bridge {
             annotation_store: Arc::new(tokio::sync::OnceCell::new()),
             annotation_database,
             state_store: Arc::new(tokio::sync::OnceCell::new()),
-            managed_deletion_retry_running: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             selection_worker_barrier: None,
             #[cfg(test)]
@@ -901,14 +900,24 @@ impl Bridge {
         let library = Library::new(state.pool().clone(), state.managed_books_dir());
         // Best effort: durable deletion debt must not delay foreground or
         // cancellation-aware library operations.
-        if !self.managed_deletion_retry_running.swap(true, Ordering::AcqRel) {
+        let retry_key = crate::canonical_path_key(library.managed_dir());
+        let retries = MANAGED_DELETION_RETRIES.get_or_init(|| Mutex::new(HashSet::new()));
+        let should_retry = retries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(retry_key.clone());
+        if should_retry {
             let retry_library = library.clone();
-            let retry_running = Arc::clone(&self.managed_deletion_retry_running);
             tokio::spawn(async move {
                 if retry_library.retry_managed_file_deletions().await.is_err() {
                     eprintln!("warning: managed file deletion retry failed");
                 }
-                retry_running.store(false, Ordering::Release);
+                MANAGED_DELETION_RETRIES
+                    .get()
+                    .expect("managed deletion retry set is initialized")
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove(&retry_key);
             });
         }
         #[cfg(test)]
@@ -7300,6 +7309,72 @@ mod tests {
             source.exists(),
             "referenced imports must not delete user files"
         );
+    }
+
+    #[tokio::test]
+    async fn managed_removal_dto_discloses_pending_cleanup() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.epub"
+        ));
+        let imported = bridge
+            .import_paths(vec![crate::path_key(source)], true, Cancellation::new())
+            .await
+            .unwrap();
+        let book = imported[0].book.as_ref().unwrap();
+        let managed_path = crate::path_from_key(&book.path_key);
+        std::fs::remove_file(&managed_path).unwrap();
+        std::fs::create_dir(&managed_path).unwrap();
+        std::fs::write(managed_path.join("blocker"), b"blocked").unwrap();
+
+        let outcome = bridge.remove_library_book(book.book_id).await.unwrap();
+
+        assert!(outcome.removed);
+        assert!(outcome.managed_file_deletion_pending);
+    }
+
+    #[tokio::test]
+    async fn fresh_bridge_retries_durable_managed_deletion_debt() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = directory.path().join("state.sqlite");
+        let store = ReadingStateStore::open_at_async(&database).await.unwrap();
+        let library = Library::new(store.pool().clone(), store.managed_books_dir());
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.epub"
+        ));
+        let book = library.import_managed_file(source).await.unwrap();
+        sqlx::query(
+            "CREATE TRIGGER reject_debt_cleanup BEFORE DELETE ON managed_file_deletion_debt
+             BEGIN SELECT RAISE(FAIL, 'blocked'); END",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        let outcome = library.remove_with_outcome(book.id).await.unwrap();
+        assert!(outcome.managed_file_deletion_pending);
+        sqlx::query("DROP TRIGGER reject_debt_cleanup")
+            .execute(store.pool())
+            .await
+            .unwrap();
+
+        let fresh = Bridge::with_database_path(database);
+        fresh.library_page(None, None, 10, 0).await.unwrap();
+
+        for _ in 0..100 {
+            let debt_count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM managed_file_deletion_debt")
+                    .fetch_one(store.pool())
+                    .await
+                    .unwrap();
+            if debt_count == 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("fresh bridge did not retry durable managed deletion debt");
     }
 
     #[tokio::test]
