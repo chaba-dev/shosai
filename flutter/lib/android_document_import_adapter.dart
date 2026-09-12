@@ -181,7 +181,7 @@ final class AndroidDocumentImportAdapter {
   }
 
   Future<void> retryPendingReleases() async {
-    for (final token in _pendingReleases.toList(growable: false)) {
+    for (final token in _pendingReleases.take(64).toList(growable: false)) {
       try {
         await release(token);
       } catch (_) {
