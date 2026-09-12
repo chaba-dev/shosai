@@ -251,6 +251,7 @@ pub struct FlutterImportItem {
     pub path_key: String,
     pub book: Option<FlutterLibraryBook>,
     pub error: Option<String>,
+    pub warning: Option<String>,
 }
 impl From<ImportItemDto> for FlutterImportItem {
     fn from(v: ImportItemDto) -> Self {
@@ -258,6 +259,7 @@ impl From<ImportItemDto> for FlutterImportItem {
             path_key: v.path_key,
             book: v.book.map(Into::into),
             error: v.error,
+            warning: v.warning,
         }
     }
 }

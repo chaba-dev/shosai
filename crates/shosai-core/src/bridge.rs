@@ -150,6 +150,7 @@ fn import_item(path_key: String, book: Book) -> ImportItemDto {
         path_key,
         book: Some(book),
         error: None,
+        warning: None,
     }
 }
 
@@ -164,6 +165,7 @@ pub struct ImportItemDto {
     pub path_key: String,
     pub book: Option<LibraryBookDto>,
     pub error: Option<String>,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1109,6 +1111,7 @@ impl Bridge {
                         path_key: crate::path_key(failure.path()),
                         book: None,
                         error: Some(failure.error().to_owned()),
+                        warning: None,
                     })
                     .collect::<Vec<_>>();
                 for candidate in discovery.candidates {
@@ -1139,6 +1142,7 @@ impl Bridge {
                                     path_key: candidate_path_key,
                                     book: None,
                                     error: Some(error.to_string()),
+                                    warning: None,
                                 });
                             }
                         }
@@ -1298,12 +1302,14 @@ impl Bridge {
                         Ok(None) => ImportItemDto {
                             path_key,
                             book: None,
-                            error: Some("book metadata unavailable after import".into()),
+                            error: None,
+                            warning: Some("book metadata unavailable after import".into()),
                         },
                         Err(error) => ImportItemDto {
                             path_key,
                             book: None,
-                            error: Some(error.to_string()),
+                            error: None,
+                            warning: Some(error.to_string()),
                         },
                     }
                 }
@@ -1313,6 +1319,7 @@ impl Bridge {
                         path_key,
                         book: None,
                         error: Some(failure.error().to_owned()),
+                        warning: None,
                     }
                 }
             };
@@ -8294,7 +8301,8 @@ mod tests {
         assert_eq!(report.failed, 0);
         assert!(!report.cancelled);
         assert!(report.items[0].book.is_none());
-        assert!(report.items[0].error.is_some());
+        assert!(report.items[0].error.is_none());
+        assert!(report.items[0].warning.is_some());
         assert_eq!(
             bridge
                 .library()

@@ -561,6 +561,34 @@ void main() {
     },
   );
 
+  test('import summary distinguishes metadata warning from failure', () async {
+    final bridge = _ControlledLibraryBridge()
+      ..importReport = FlutterImportReport(
+        imported: BigInt.one,
+        failed: BigInt.one,
+        cancelled: false,
+        items: const [
+          FlutterImportItem(
+            pathKey: '/tmp/imported.pdf',
+            warning: 'metadata readback failed',
+          ),
+          FlutterImportItem(pathKey: '/tmp/bad.bin', error: 'unsupported'),
+        ],
+      );
+    final controller = _libraryController(bridge);
+
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.queries.isNotEmpty);
+
+    expect(
+      controller.model.error,
+      'Imported 1 book. 1 failed. This file type is not supported. '
+      'Some imported book details could not be loaded.',
+    );
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test(
     'cancelling a pending picker invalidates its eventual selection',
     () async {

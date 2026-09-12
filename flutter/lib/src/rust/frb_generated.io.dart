@@ -1290,6 +1290,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     wireObj.path_key = cst_encode_String(apiObj.pathKey);
     wireObj.book = cst_encode_opt_box_autoadd_flutter_library_book(apiObj.book);
     wireObj.error = cst_encode_opt_String(apiObj.error);
+    wireObj.warning = cst_encode_opt_String(apiObj.warning);
   }
 
   @protected
@@ -4036,6 +4037,8 @@ final class wire_cst_flutter_import_item extends ffi.Struct {
   external ffi.Pointer<wire_cst_flutter_library_book> book;
 
   external ffi.Pointer<wire_cst_list_prim_u_8_strict> error;
+
+  external ffi.Pointer<wire_cst_list_prim_u_8_strict> warning;
 }
 
 final class wire_cst_list_flutter_import_item extends ffi.Struct {

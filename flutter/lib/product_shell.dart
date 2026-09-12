@@ -344,6 +344,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                   pathKey: document.name,
                   book: item.book,
                   error: item.error,
+                  warning: item.warning,
                 );
                 items.add(reviewedItem);
               }
@@ -1724,7 +1725,13 @@ class LibraryController implements Listenable {
     final failure = report.items
         .where((item) => item.error != null)
         .firstOrNull;
-    if (!report.cancelled && report.failed == BigInt.zero && failure == null) {
+    final warning = report.items
+        .where((item) => item.warning != null)
+        .firstOrNull;
+    if (!report.cancelled &&
+        report.failed == BigInt.zero &&
+        failure == null &&
+        warning == null) {
       return null;
     }
     final parts = <String>[];
@@ -1735,7 +1742,8 @@ class LibraryController implements Listenable {
     if (report.failed > BigInt.zero) {
       parts.add('${report.failed} failed.');
       if (failure != null) parts.add(_safeImportError(failure.error!));
-    } else if (failure != null) {
+    }
+    if (warning != null) {
       parts.add('Some imported book details could not be loaded.');
     }
     return parts.join(' ');
