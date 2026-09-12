@@ -121,6 +121,7 @@ pub(crate) fn preflight<R: Read + Seek>(
     let mut has_epub_mimetype = false;
     let mut has_epub_container = false;
     let mut has_comic_image = false;
+    let mut mimetype_entry = None;
     for _ in 0..entries {
         check_cancelled(is_cancelled)?;
         let mut header = [0; 46];
@@ -144,10 +145,19 @@ pub(crate) fn preflight<R: Read + Seek>(
             .context("ZIP entry metadata overflowed")?;
         let mut variable = vec![0; variable_len];
         read_exact_cancellable(&mut reader, &mut variable, is_cancelled)?;
-        let name = &variable[..name_len];
-        has_epub_mimetype |= name == b"mimetype";
+        let raw_name = &variable[..name_len];
+        let name = effective_name(raw_name, &variable[name_len..name_len + extra_len])?;
+        if name == b"mimetype" {
+            mimetype_entry = Some((
+                le16(&header, 8).unwrap(),
+                le16(&header, 10).unwrap(),
+                le32(&header, 20).unwrap(),
+                le32(&header, 24).unwrap(),
+                u64::from(le32(&header, 42).unwrap()),
+            ));
+        }
         has_epub_container |= name == b"META-INF/container.xml";
-        has_comic_image |= comic_image_name(name);
+        has_comic_image |= comic_image_name(&name);
         let size = effective_uncompressed_size(
             le32(&header, 24).unwrap(),
             &variable[name_len..name_len + extra_len],
@@ -159,6 +169,9 @@ pub(crate) fn preflight<R: Read + Seek>(
     if reader.stream_position()? != central_end {
         bail!("ZIP central-directory size does not match its entries");
     }
+    if let Some(entry) = mimetype_entry {
+        has_epub_mimetype = epub_mimetype_matches(&mut reader, entry, is_cancelled)?;
+    }
     Ok(ZipPreflight {
         entries: usize::try_from(entries).context("ZIP entry count cannot be represented")?,
         declared_uncompressed_bytes: declared,
@@ -169,6 +182,64 @@ pub(crate) fn preflight<R: Read + Seek>(
         has_epub_container,
         has_comic_image,
     })
+}
+
+fn effective_name(raw_name: &[u8], extra: &[u8]) -> Result<Vec<u8>> {
+    let mut name = raw_name.to_vec();
+    let mut at = 0_usize;
+    while at < extra.len() {
+        let id = le16(extra, at).context("malformed ZIP extra field")?;
+        let len = usize::from(le16(extra, at + 2).context("malformed ZIP extra field")?);
+        let value = extra
+            .get(
+                at + 4
+                    ..at.checked_add(4 + len)
+                        .context("ZIP extra field overflowed")?,
+            )
+            .context("truncated ZIP extra field")?;
+        if id == 0x7075 {
+            let version = value.first().context("Unicode path field is empty")?;
+            if *version != 1 || value.len() < 5 {
+                bail!("invalid Unicode path field");
+            }
+            let expected = le32(value, 1).unwrap();
+            if crc32fast::hash(&name) != expected {
+                bail!("Unicode path checksum does not match its filename");
+            }
+            std::str::from_utf8(&value[5..]).context("Unicode path is not UTF-8")?;
+            name = value[5..].to_vec();
+        }
+        at = at
+            .checked_add(4 + len)
+            .context("ZIP extra field overflowed")?;
+    }
+    Ok(name)
+}
+
+fn epub_mimetype_matches<R: Read + Seek>(
+    reader: &mut R,
+    (flags, method, compressed_size, uncompressed_size, offset): (u16, u16, u32, u32, u64),
+    cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<bool> {
+    const MIME: &[u8] = b"application/epub+zip";
+    if flags & 1 != 0
+        || method != 0
+        || compressed_size != MIME.len() as u32
+        || uncompressed_size != MIME.len() as u32
+    {
+        return Ok(false);
+    }
+    reader.seek(SeekFrom::Start(offset))?;
+    let mut header = [0_u8; 30];
+    read_exact_cancellable(reader, &mut header, cancelled)?;
+    if &header[..4] != b"PK\x03\x04" || le16(&header, 8) != Some(0) {
+        return Ok(false);
+    }
+    let variable = u64::from(le16(&header, 26).unwrap()) + u64::from(le16(&header, 28).unwrap());
+    reader.seek(SeekFrom::Current(variable as i64))?;
+    let mut value = [0_u8; MIME.len()];
+    read_exact_cancellable(reader, &mut value, cancelled)?;
+    Ok(value == MIME)
 }
 
 fn comic_image_name(name: &[u8]) -> bool {
@@ -386,20 +457,35 @@ mod tests {
     }
 
     #[test]
-    fn preflight_classifies_epub_and_comic_names_without_opening_payloads() {
+    fn preflight_requires_the_epub_mimetype_value_and_classifies_comic_names() {
         let epub = preflight(
             Cursor::new(named_archive(&["mimetype", "META-INF/container.xml"])),
             10,
             None,
         )
         .unwrap();
-        assert!(epub.has_epub_mimetype);
+        assert!(!epub.has_epub_mimetype);
         assert!(epub.has_epub_container);
         assert!(!epub.has_comic_image);
 
         let comic = preflight(Cursor::new(named_archive(&["pages/001.BMP"])), 10, None).unwrap();
         assert!(comic.has_comic_image);
         assert!(!comic.has_epub_mimetype);
+    }
+
+    #[test]
+    fn unicode_path_fields_use_the_consumers_effective_name() {
+        let raw = b"page";
+        let unicode = b"pages/001.jpg";
+        let mut extra = Vec::new();
+        extra.extend_from_slice(&0x7075_u16.to_le_bytes());
+        extra.extend_from_slice(&(5_u16 + unicode.len() as u16).to_le_bytes());
+        extra.push(1);
+        extra.extend_from_slice(&crc32fast::hash(raw).to_le_bytes());
+        extra.extend_from_slice(unicode);
+
+        assert_eq!(effective_name(raw, &extra).unwrap(), unicode);
+        assert!(comic_image_name(&effective_name(raw, &extra).unwrap()));
     }
 
     #[test]
