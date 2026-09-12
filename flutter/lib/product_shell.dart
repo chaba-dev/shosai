@@ -31,8 +31,10 @@ typedef LibrarySettingsEditor =
     Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 typedef LibraryImportAdapterCanceller = void Function();
 typedef LibraryCoverEvicter = void Function(Uint8List bytes);
+typedef LibraryProviderCleanupRetrier = Future<bool> Function();
 void _ignoreImportAdapterCancellation() {}
 void _ignoreCoverEviction(Uint8List _) {}
+Future<bool> _ignoreProviderCleanupRetry() async => false;
 
 final class LibraryImportSelection {
   const LibraryImportSelection({
@@ -77,7 +79,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
   int _providerRevision = 0;
-  bool _providerCleanupPending = false;
   late final LibraryController controller = LibraryController(
     bridge: widget.bridgeFactory(),
     confirmRemoval: _confirmRemoval,
@@ -85,6 +86,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     openBook: _openBook,
     drainReaderSaves: ReaderController.drainBookReadingStateWrites,
     editSettings: _editSettings,
+    retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
@@ -137,16 +139,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      unawaited(_retryProviderCleanup());
-    }
-  }
-
-  Future<void> _retryProviderCleanup() async {
-    final pending = await _androidImport.retryCleanup();
-    if (mounted && pending != _providerCleanupPending) {
-      setState(() => _providerCleanupPending = pending);
-    }
   }
 
   @override
@@ -400,9 +392,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
     await _discardProviderDocuments(documents);
     final cleanupPending = await _androidImport.retryCleanup();
-    if (mounted && cleanupPending != _providerCleanupPending) {
-      setState(() => _providerCleanupPending = cleanupPending);
-    }
+    controller.dispatch(_LibraryCleanupStatusChanged(cleanupPending));
     return FlutterImportReport(
       imported: BigInt.from(imported),
       failed: BigInt.from(failed),
@@ -633,7 +623,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     ),
                 ],
               ),
-            if (_providerCleanupPending)
+            if (model.providerCleanupPending)
               MaterialBanner(
                 content: Semantics(
                   liveRegion: true,
@@ -643,7 +633,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: _retryProviderCleanup,
+                    onPressed: () => controller.dispatch(
+                      const LibraryCleanupRetryRequested(),
+                    ),
                     child: const Text('Retry cleanup'),
                   ),
                 ],
@@ -913,14 +905,22 @@ class _BookCover extends StatefulWidget {
 }
 
 class _BookCoverState extends State<_BookCover> {
-  bool _requested = false;
+  late bool _requested;
+
+  @override
+  void initState() {
+    super.initState();
+    _requested = widget.cover != null;
+  }
 
   @override
   void didUpdateWidget(_BookCover oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.book.bookId != widget.book.bookId ||
         oldWidget.demandRevision != widget.demandRevision) {
-      _requested = false;
+      _requested = widget.cover != null;
+    } else if (widget.cover != null) {
+      _requested = true;
     }
   }
 
@@ -1122,6 +1122,7 @@ final class LibraryModel {
     this.loadError,
     this.hasMore = false,
     this.failure = LibraryFailure.none,
+    this.providerCleanupPending = false,
   });
 
   final List<FlutterLibraryBook> books;
@@ -1137,6 +1138,7 @@ final class LibraryModel {
   String? get displayError => error ?? loadError;
   final bool hasMore;
   final LibraryFailure failure;
+  final bool providerCleanupPending;
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
@@ -1151,6 +1153,7 @@ final class LibraryModel {
     Object? loadError = _same,
     bool? hasMore,
     LibraryFailure? failure,
+    bool? providerCleanupPending,
   }) => LibraryModel(
     books: books ?? this.books,
     covers: covers ?? this.covers,
@@ -1170,6 +1173,8 @@ final class LibraryModel {
         : loadError as String?,
     hasMore: hasMore ?? this.hasMore,
     failure: failure ?? this.failure,
+    providerCleanupPending:
+        providerCleanupPending ?? this.providerCleanupPending,
   );
 }
 
@@ -1195,6 +1200,10 @@ final class LibraryMoreRequested extends LibraryMessage {
 
 final class LibraryRetryRequested extends LibraryMessage {
   const LibraryRetryRequested();
+}
+
+final class LibraryCleanupRetryRequested extends LibraryMessage {
+  const LibraryCleanupRetryRequested();
 }
 
 final class LibraryQueryChanged extends LibraryMessage {
@@ -1309,6 +1318,12 @@ final class _LibraryCoverEffectFinished extends LibraryMessage {
   final int bookId;
 }
 
+final class _LibraryCleanupStatusChanged extends LibraryMessage {
+  const _LibraryCleanupStatusChanged(this.pending, [this.revision]);
+  final bool pending;
+  final int? revision;
+}
+
 const _coverCacheByteLimit = 16 * 1024 * 1024;
 const _coverCacheEntryLimit = 64;
 const _coverLoadLimit = 4;
@@ -1321,6 +1336,8 @@ class LibraryController implements Listenable {
     required LibraryBookOpener openBook,
     required LibraryReaderSaveDrainer drainReaderSaves,
     required LibrarySettingsEditor editSettings,
+    LibraryProviderCleanupRetrier retryProviderCleanup =
+        _ignoreProviderCleanupRetry,
     LibraryImportAdapterCanceller cancelImportAdapter =
         _ignoreImportAdapterCancellation,
     LibraryCoverEvicter evictCover = _ignoreCoverEviction,
@@ -1330,6 +1347,7 @@ class LibraryController implements Listenable {
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
        _editSettings = editSettings,
+       _retryProviderCleanup = retryProviderCleanup,
        _cancelImportAdapter = cancelImportAdapter,
        _evictCover = evictCover;
 
@@ -1339,6 +1357,7 @@ class LibraryController implements Listenable {
   final LibraryBookOpener _openBook;
   final LibraryReaderSaveDrainer _drainReaderSaves;
   final LibrarySettingsEditor _editSettings;
+  final LibraryProviderCleanupRetrier _retryProviderCleanup;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
   final LibraryCoverEvicter _evictCover;
   LibraryModel _model = const LibraryModel();
@@ -1356,6 +1375,7 @@ class LibraryController implements Listenable {
   int _activeEffects = 0;
   int _activeBusyEffects = 0;
   int _adapterRevision = 0;
+  int _cleanupRevision = 0;
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
   bool _closing = false;
@@ -1381,11 +1401,13 @@ class LibraryController implements Listenable {
         message is! _LibraryEffectFinished &&
         message is! _LibraryCoverLoaded &&
         message is! _LibraryCoverFailed &&
-        message is! _LibraryCoverEffectFinished) {
+        message is! _LibraryCoverEffectFinished &&
+        message is! _LibraryCleanupStatusChanged) {
       return;
     }
     switch (message) {
       case LibraryStarted():
+        _retryCleanup();
         _load();
       case LibraryRefreshed():
         _coverFailures.clear();
@@ -1408,6 +1430,8 @@ class LibraryController implements Listenable {
           case LibraryFailure.settings:
             _settings();
         }
+      case LibraryCleanupRetryRequested():
+        _retryCleanup();
       case LibraryQueryChanged():
         _emit(_model.copyWith(query: message.query, hasMore: false));
         _loadRevision += 1;
@@ -1531,6 +1555,14 @@ class LibraryController implements Listenable {
         _activeEffects -= 1;
         if (!_closing) _emit(_model);
         _disposeBridgeIfIdle();
+      case _LibraryCleanupStatusChanged():
+        if (_closing) break;
+        if (message.revision == null) {
+          _cleanupRevision += 1;
+          _emit(_model.copyWith(providerCleanupPending: message.pending));
+        } else if (message.revision == _cleanupRevision) {
+          _emit(_model.copyWith(providerCleanupPending: message.pending));
+        }
     }
   }
 
@@ -1538,6 +1570,19 @@ class LibraryController implements Listenable {
     _activeEffects += 1;
     _activeBusyEffects += 1;
     _emit(_model.copyWith(busy: true));
+  }
+
+  void _retryCleanup() {
+    final revision = ++_cleanupRevision;
+    unawaited(() async {
+      bool pending;
+      try {
+        pending = await _retryProviderCleanup();
+      } catch (_) {
+        pending = true;
+      }
+      dispatch(_LibraryCleanupStatusChanged(pending, revision));
+    }());
   }
 
   void _loadCover(int bookId) {

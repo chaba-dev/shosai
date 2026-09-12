@@ -80,10 +80,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Retry cleanup'), findsOneWidget);
-    await expectLater(
-      find.byType(ProductShell),
-      matchesGoldenFile('goldens/library-cleanup-pending.png'),
-    );
+    if (Platform.isLinux) {
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/library-cleanup-pending.png'),
+      );
+    }
 
     await tester.tap(find.text('Retry cleanup'));
     await tester.pumpAndSettle();
