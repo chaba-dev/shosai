@@ -456,6 +456,40 @@ mod tests {
         writer.finish().unwrap().into_inner()
     }
 
+    fn zip64_mimetype_archive(extra_values: &[u64], raw: (u32, u32, u32)) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("mimetype", stored).unwrap();
+        writer.write_all(b"application/epub+zip").unwrap();
+        writer.start_file("META-INF/container.xml", stored).unwrap();
+        writer.write_all(b"container").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let central = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .unwrap();
+        bytes[central + 20..central + 24].copy_from_slice(&raw.0.to_le_bytes());
+        bytes[central + 24..central + 28].copy_from_slice(&raw.1.to_le_bytes());
+        bytes[central + 42..central + 46].copy_from_slice(&raw.2.to_le_bytes());
+        let name_len = usize::from(le16(&bytes, central + 28).unwrap());
+        let extra = central + 46 + name_len;
+        let mut field = Vec::new();
+        field.extend_from_slice(&1_u16.to_le_bytes());
+        field.extend_from_slice(&(extra_values.len() as u16 * 8).to_le_bytes());
+        for (index, value) in extra_values.iter().enumerate() {
+            debug_assert_eq!(index * 8 + 4, field.len());
+            field.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.splice(extra..extra, field.iter().copied());
+        bytes[central + 30..central + 32]
+            .copy_from_slice(&((extra_values.len() * 8 + 4) as u16).to_le_bytes());
+        let eocd = bytes.len() - 22;
+        let central_size = le32(&bytes, eocd + 12).unwrap() + extra_values.len() as u32 * 8 + 4;
+        bytes[eocd + 12..eocd + 16].copy_from_slice(&central_size.to_le_bytes());
+        bytes
+    }
+
     #[test]
     fn preflight_is_cancellable_before_directory_work() {
         let error = preflight(Cursor::new(archive(b"page")), 10, Some(&|| true)).unwrap_err();
@@ -640,5 +674,33 @@ mod tests {
         );
 
         assert!(effective_entry_sizes_and_offset(20, 20, 41, &sentinel).is_err());
+    }
+
+    #[test]
+    fn preflight_and_zip_consumer_agree_on_zip64_mimetype_entries() {
+        let sentinel = zip64_mimetype_archive(&[20, 20, 0], (u32::MAX, u32::MAX, u32::MAX));
+        let admitted = preflight(Cursor::new(&sentinel), 10, None).unwrap();
+        assert!(admitted.has_epub_mimetype);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&sentinel)).unwrap();
+        let mut value = String::new();
+        archive
+            .by_name("mimetype")
+            .unwrap()
+            .read_to_string(&mut value)
+            .unwrap();
+        assert_eq!(value, "application/epub+zip");
+
+        let short = zip64_mimetype_archive(&[20], (20, u32::MAX, 0));
+        assert!(
+            preflight(Cursor::new(short), 10, None)
+                .unwrap()
+                .has_epub_mimetype
+        );
+    }
+
+    #[test]
+    fn preflight_rejects_a_zip64_offset_that_overrides_a_zip32_decoy() {
+        let decoy = zip64_mimetype_archive(&[20, 20, 0], (20, 20, 1));
+        assert!(preflight(Cursor::new(decoy), 10, None).is_err());
     }
 }
