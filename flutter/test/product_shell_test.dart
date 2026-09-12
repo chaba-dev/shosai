@@ -3,9 +3,11 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
@@ -46,6 +48,48 @@ void main() {
     // Goldens are recorded on Linux; text rasterization differs on other
     // desktop platforms, so only assert pixels there.
   }, skip: !Platform.isLinux);
+
+  testWidgets('deferred provider cleanup has a dedicated retry banner', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _LibraryBridge();
+    final channel = _CleanupChannel([1, 0]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
+          useMaterial3: true,
+          fontFamily: 'Inter',
+        ),
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+          androidImport: AndroidDocumentImportAdapter(channel: channel),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Temporary import data could not be removed yet.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry cleanup'), findsOneWidget);
+    await expectLater(
+      find.byType(ProductShell),
+      matchesGoldenFile('goldens/library-cleanup-pending.png'),
+    );
+
+    await tester.tap(find.text('Retry cleanup'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry cleanup'), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets('library renders content, progress, filters, and opens a book', (
     tester,
@@ -280,6 +324,52 @@ void main() {
       expect(status.live, isFalse);
       expect(status.keepAlive, isFalse);
     }
+  });
+
+  testWidgets('an evicted cover reloads after leaving and re-entering view', (
+    tester,
+  ) async {
+    final png = Uint8List.fromList(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      ),
+    );
+    final bridge = _LibraryBridge(
+      books: List.generate(80, (index) => _book(index, 'Book $index')),
+      covers: {for (var index = 0; index < 80; index += 1) index: png},
+    );
+    tester.view.physicalSize = const Size(700, 500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(1));
+
+    final grid = find.descendant(
+      of: find.byType(GridView),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.text('Book 79'),
+      600,
+      scrollable: grid,
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Book 0'),
+      -600,
+      scrollable: grid,
+    );
+    await tester.pumpAndSettle();
+
+    expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(2));
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -578,7 +668,7 @@ void main() {
     final controller = _libraryController(bridge);
 
     controller.dispatch(const LibraryImportRequested());
-    await _waitUntil(() => bridge.queries.isNotEmpty);
+    await _waitUntil(() => controller.model.error != null);
 
     expect(
       controller.model.error,
@@ -589,28 +679,27 @@ void main() {
     await bridge.disposed.future;
   });
 
-  test('import summary reports deferred provider cleanup', () async {
+  test('import summary preserves allowlisted provider errors', () async {
     final bridge = _ControlledLibraryBridge()
       ..importReport = FlutterImportReport(
-        imported: BigInt.one,
-        failed: BigInt.zero,
+        imported: BigInt.zero,
+        failed: BigInt.one,
         cancelled: false,
         items: const [
           FlutterImportItem(
-            pathKey: 'book.pdf',
-            warning: 'provider_cleanup_pending',
+            pathKey: 'Document 1',
+            error: 'provider_error:permissionDenied',
           ),
         ],
       );
     final controller = _libraryController(bridge);
 
     controller.dispatch(const LibraryImportRequested());
-    await _waitUntil(() => bridge.queries.isNotEmpty);
+    await _waitUntil(() => controller.model.error != null);
 
     expect(
       controller.model.error,
-      'Imported 1 book. Temporary import data could not be removed. '
-      'Shōsai will try again during the next import or app launch.',
+      '1 failed. Permission to read the selected document was denied.',
     );
     controller.dispose();
     await bridge.disposed.future;
@@ -1113,6 +1202,23 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+  }
+}
+
+final class _CleanupChannel implements AndroidDocumentImportChannel {
+  _CleanupChannel(Iterable<int> pending) : _pending = Queue.of(pending);
+
+  final Queue<int> _pending;
+
+  @override
+  Future<Object?> invoke(
+    String method, [
+    Map<String, Object?>? arguments,
+  ]) async {
+    if (method == 'retryCleanup') {
+      return <String, Object?>{'pending': _pending.removeFirst()};
+    }
+    return null;
   }
 }
 

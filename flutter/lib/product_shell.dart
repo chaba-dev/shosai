@@ -55,10 +55,12 @@ class ProductShell extends StatefulWidget {
     super.key,
     required this.bridgeFactory,
     required this.readerBuilder,
+    this.androidImport,
   });
 
   final FlutterBridge Function() bridgeFactory;
   final ProductReaderBuilder readerBuilder;
+  final AndroidDocumentImportAdapter? androidImport;
 
   @override
   State<ProductShell> createState() => _ProductShellState();
@@ -71,10 +73,11 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   ({FlutterLibraryBook book, String path, int? bookId})? _pendingRestoredBook;
   ({String path, int? bookId})? _restoredLocator;
   bool _restoredOpenScheduled = false;
-  final AndroidDocumentImportAdapter _androidImport =
-      AndroidDocumentImportAdapter();
+  late final AndroidDocumentImportAdapter _androidImport =
+      widget.androidImport ?? AndroidDocumentImportAdapter();
   final Set<String> _providerOperations = {};
   int _providerRevision = 0;
+  bool _providerCleanupPending = false;
   late final LibraryController controller = LibraryController(
     bridge: widget.bridgeFactory(),
     confirmRemoval: _confirmRemoval,
@@ -134,6 +137,16 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   void initState() {
     super.initState();
     controller.dispatch(const LibraryStarted());
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      unawaited(_retryProviderCleanup());
+    }
+  }
+
+  Future<void> _retryProviderCleanup() async {
+    final pending = await _androidImport.retryCleanup();
+    if (mounted && pending != _providerCleanupPending) {
+      setState(() => _providerCleanupPending = pending);
+    }
   }
 
   @override
@@ -325,41 +338,54 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             items.add(
               FlutterImportItem(
                 pathKey: document.name,
-                error: _documentImportErrorText(error),
+                error: _documentImportErrorToken(error),
               ),
             );
           }
         case AcquiredProviderDocument():
           try {
-            try {
-              final importedReport = await bridge.importPaths(
-                pathKeys: [acquisition.path],
-                managed: true,
-                cancellationId: cancellation,
-              );
-              imported += importedReport.imported.toInt();
-              failed += importedReport.failed.toInt();
-              for (final item in importedReport.items) {
-                final reviewedItem = FlutterImportItem(
+            final beginUseError = await _androidImport.beginUse(
+              acquisition.releaseToken,
+            );
+            if (beginUseError != null) {
+              failed += 1;
+              items.add(
+                FlutterImportItem(
                   pathKey: document.name,
-                  book: item.book,
-                  error: item.error,
-                  warning: item.warning,
+                  error: _documentImportErrorToken(beginUseError),
+                ),
+              );
+            } else {
+              try {
+                final importedReport = await bridge.importPaths(
+                  pathKeys: [acquisition.path],
+                  managed: true,
+                  cancellationId: cancellation,
                 );
-                items.add(reviewedItem);
-              }
-              if (importedReport.cancelled) cancelled = true;
-            } on FlutterBridgeError catch (error) {
-              if (error.kind == FlutterBridgeErrorKind.cancelled) {
-                cancelled = true;
-              } else {
-                failed += 1;
-                items.add(
-                  FlutterImportItem(
+                imported += importedReport.imported.toInt();
+                failed += importedReport.failed.toInt();
+                for (final item in importedReport.items) {
+                  final reviewedItem = FlutterImportItem(
                     pathKey: document.name,
-                    error: _safeError(error),
-                  ),
-                );
+                    book: item.book,
+                    error: item.error,
+                    warning: item.warning,
+                  );
+                  items.add(reviewedItem);
+                }
+                if (importedReport.cancelled) cancelled = true;
+              } on FlutterBridgeError catch (error) {
+                if (error.kind == FlutterBridgeErrorKind.cancelled) {
+                  cancelled = true;
+                } else {
+                  failed += 1;
+                  items.add(
+                    FlutterImportItem(
+                      pathKey: document.name,
+                      error: _safeError(error),
+                    ),
+                  );
+                }
               }
             }
           } finally {
@@ -373,21 +399,15 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       if (cancelled) break;
     }
     await _discardProviderDocuments(documents);
-    await _androidImport.retryPendingReleases();
-    final retainedItems = items.take(255).toList(growable: true);
-    if (_androidImport.hasPendingReleases) {
-      retainedItems.add(
-        const FlutterImportItem(
-          pathKey: '',
-          warning: 'provider_cleanup_pending',
-        ),
-      );
+    final cleanupPending = await _androidImport.retryCleanup();
+    if (mounted && cleanupPending != _providerCleanupPending) {
+      setState(() => _providerCleanupPending = cleanupPending);
     }
     return FlutterImportReport(
       imported: BigInt.from(imported),
       failed: BigInt.from(failed),
       cancelled: cancelled,
-      items: List.unmodifiable(retainedItems),
+      items: List.unmodifiable(items.take(256)),
     );
   }
 
@@ -613,6 +633,21 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     ),
                 ],
               ),
+            if (_providerCleanupPending)
+              MaterialBanner(
+                content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                    'Temporary import data could not be removed yet.',
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: _retryProviderCleanup,
+                    child: const Text('Retry cleanup'),
+                  ),
+                ],
+              ),
             if (model.displayError case final error?)
               MaterialBanner(
                 content: Semantics(liveRegion: true, child: Text(error)),
@@ -633,8 +668,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     controller.dispatch(LibraryBookRemovalRequested(book)),
                 loadMore: () =>
                     controller.dispatch(const LibraryMoreRequested()),
-                loadCover: (bookId) =>
-                    controller.dispatch(LibraryCoverRequested(bookId)),
+                loadCover: controller.requestCover,
               ),
             ),
           ],
@@ -667,6 +701,9 @@ String _documentImportErrorText(DocumentImportError error) => switch (error) {
   DocumentImportError.invalidRequest =>
     'The document provider request is no longer valid.',
 };
+
+String _documentImportErrorToken(DocumentImportError error) =>
+    'provider_error:${error.name}';
 
 String _encodeBook(
   FlutterLibraryBook book, {
@@ -727,7 +764,7 @@ class _LibraryCollection extends StatelessWidget {
   final ValueChanged<FlutterLibraryBook> openBook;
   final ValueChanged<FlutterLibraryBook> removeBook;
   final VoidCallback loadMore;
-  final ValueChanged<int> loadCover;
+  final bool Function(int) loadCover;
 
   @override
   Widget build(BuildContext context) {
@@ -797,6 +834,7 @@ class _LibraryCollection extends StatelessWidget {
                           _BookCover(
                             book: book,
                             cover: model.covers[book.bookId],
+                            demandRevision: model.coverRevision,
                             loadCover: loadCover,
                           ),
                           const SizedBox(width: 14),
@@ -857,31 +895,53 @@ class _LibraryCollection extends StatelessWidget {
   }
 }
 
-class _BookCover extends StatelessWidget {
+class _BookCover extends StatefulWidget {
   const _BookCover({
     required this.book,
     required this.cover,
+    required this.demandRevision,
     required this.loadCover,
   });
 
   final FlutterLibraryBook book;
   final Uint8List? cover;
-  final ValueChanged<int> loadCover;
+  final int demandRevision;
+  final bool Function(int) loadCover;
+
+  @override
+  State<_BookCover> createState() => _BookCoverState();
+}
+
+class _BookCoverState extends State<_BookCover> {
+  bool _requested = false;
+
+  @override
+  void didUpdateWidget(_BookCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.book.bookId != widget.book.bookId ||
+        oldWidget.demandRevision != widget.demandRevision) {
+      _requested = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final fallback = Icon(_formatIcon(book.format), size: 42);
-    final bytes = cover;
+    final fallback = Icon(_formatIcon(widget.book.format), size: 42);
+    final bytes = widget.cover;
+    if (bytes == null && !_requested) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.loadCover(widget.book.bookId)) {
+          setState(() => _requested = true);
+        }
+      });
+    }
     if (bytes == null) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => loadCover(book.bookId),
-      );
       return fallback;
     }
     if (bytes.isEmpty) return fallback;
     return Semantics(
       image: true,
-      label: 'Cover of ${book.title}',
+      label: 'Cover of ${widget.book.title}',
       child: SizedBox(
         width: 56,
         height: 80,
@@ -1052,6 +1112,7 @@ final class LibraryModel {
   const LibraryModel({
     this.books = const [],
     this.covers = const {},
+    this.coverRevision = 0,
     this.query = '',
     this.format,
     this.settings,
@@ -1065,6 +1126,7 @@ final class LibraryModel {
 
   final List<FlutterLibraryBook> books;
   final Map<int, Uint8List> covers;
+  final int coverRevision;
   final String query;
   final FlutterBookFormat? format;
   final FlutterReaderSettings? settings;
@@ -1079,6 +1141,7 @@ final class LibraryModel {
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
     Map<int, Uint8List>? covers,
+    int? coverRevision,
     String? query,
     Object? format = _same,
     Object? settings = _same,
@@ -1091,6 +1154,7 @@ final class LibraryModel {
   }) => LibraryModel(
     books: books ?? this.books,
     covers: covers ?? this.covers,
+    coverRevision: coverRevision ?? this.coverRevision,
     query: query ?? this.query,
     format: identical(format, _same)
         ? this.format
@@ -1285,7 +1349,6 @@ class LibraryController implements Listenable {
   final Map<int, BigInt> _coverRequests = {};
   final Map<int, Uint8List> _coverCache = {};
   final Set<int> _coverFailures = {};
-  final Set<int> _coverAttempts = {};
   int _coverCacheBytes = 0;
   Timer? _searchTimer;
   int _loadRevision = 0;
@@ -1302,6 +1365,12 @@ class LibraryController implements Listenable {
   LibraryModel get model => _model;
   bool get canCancel =>
       _pendingImportAdapter || _foregroundCancellations.isNotEmpty;
+
+  bool requestCover(int bookId) {
+    if (!_canLoadCover(bookId)) return false;
+    dispatch(LibraryCoverRequested(bookId));
+    return true;
+  }
 
   void dispatch(LibraryMessage message) {
     if (_closing &&
@@ -1320,7 +1389,7 @@ class LibraryController implements Listenable {
         _load();
       case LibraryRefreshed():
         _coverFailures.clear();
-        _coverAttempts.clear();
+        _emit(_model.copyWith(coverRevision: _model.coverRevision + 1));
         _load();
       case LibraryMoreRequested():
         if (_model.hasMore &&
@@ -1472,15 +1541,7 @@ class LibraryController implements Listenable {
   }
 
   void _loadCover(int bookId) {
-    if (_closing ||
-        _coverRequests.containsKey(bookId) ||
-        _coverCache.containsKey(bookId) ||
-        _coverFailures.contains(bookId) ||
-        _coverAttempts.contains(bookId) ||
-        _coverRequests.length >= _coverLoadLimit) {
-      return;
-    }
-    _coverAttempts.add(bookId);
+    if (!_canLoadCover(bookId)) return;
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -1504,6 +1565,13 @@ class LibraryController implements Listenable {
       }
     }());
   }
+
+  bool _canLoadCover(int bookId) =>
+      !_closing &&
+      !_coverRequests.containsKey(bookId) &&
+      !_coverCache.containsKey(bookId) &&
+      !_coverFailures.contains(bookId) &&
+      _coverRequests.length < _coverLoadLimit;
 
   FlutterLibraryBook _withoutCover(FlutterLibraryBook book) =>
       FlutterLibraryBook(
@@ -1724,6 +1792,13 @@ class LibraryController implements Listenable {
   bool _ownsAdapter(int revision) => !_closing && revision == _adapterRevision;
 
   String _safeImportError(String error) {
+    if (error.startsWith('provider_error:')) {
+      final name = error.substring('provider_error:'.length);
+      final providerError = DocumentImportError.values
+          .where((value) => value.name == name)
+          .firstOrNull;
+      if (providerError != null) return _documentImportErrorText(providerError);
+    }
     final lower = error.toLowerCase();
     if (lower.contains('unsupported')) {
       return 'This file type is not supported.';
@@ -1760,14 +1835,8 @@ class LibraryController implements Listenable {
       parts.add('${report.failed} failed.');
       if (failure != null) parts.add(_safeImportError(failure.error!));
     }
-    if (warnings.any((warning) => warning != 'provider_cleanup_pending')) {
+    if (warnings.isNotEmpty) {
       parts.add('Some imported book details could not be loaded.');
-    }
-    if (warnings.contains('provider_cleanup_pending')) {
-      parts.add(
-        'Temporary import data could not be removed. Shōsai will try again '
-        'during the next import or app launch.',
-      );
     }
     return parts.join(' ');
   }
