@@ -1873,6 +1873,88 @@ async fn removing_a_managed_book_deletes_its_private_copy() {
 }
 
 #[tokio::test]
+async fn failed_managed_unlink_is_reported_and_durably_retried() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = library.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&book.file_path);
+    std::fs::remove_file(&managed_path).unwrap();
+    std::fs::create_dir(&managed_path).unwrap();
+    std::fs::write(managed_path.join("blocker"), b"block deletion").unwrap();
+
+    let outcome = library.remove_with_outcome(book.id).await.unwrap();
+    assert!(outcome.managed_file_deletion_pending);
+    assert!(library.get(book.id).await.unwrap().is_none());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Simulate restart, then make the path deletable before startup's retry hook runs.
+    std::fs::remove_file(managed_path.join("blocker")).unwrap();
+    std::fs::remove_dir(&managed_path).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &managed_path).unwrap();
+    let restarted_store = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let restarted = Library::new(
+        restarted_store.pool().clone(),
+        restarted_store.managed_books_dir(),
+    );
+    let report = restarted.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.cleared, 1);
+    assert_eq!(report.pending, 0);
+    assert!(!managed_path.exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+            .fetch_one(restarted_store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn managed_deletion_debt_never_unlinks_a_shared_path() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let managed = library.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&managed.file_path);
+    std::fs::remove_file(&managed_path).unwrap();
+    std::fs::create_dir(&managed_path).unwrap();
+    std::fs::write(managed_path.join("blocker"), b"block deletion").unwrap();
+
+    let outcome = library.remove_with_outcome(managed.id).await.unwrap();
+    assert!(outcome.managed_file_deletion_pending);
+    std::fs::remove_file(managed_path.join("blocker")).unwrap();
+    std::fs::remove_dir(&managed_path).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &managed_path).unwrap();
+    let shared_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, storage_kind)
+         VALUES ('Shared', 'epub', ?, 'referenced') RETURNING id",
+    )
+    .bind(&managed.file_path)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    assert!(PathBuf::from(&managed.file_path).exists());
+    let report = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.pending, 1);
+    assert!(PathBuf::from(&managed.file_path).exists());
+
+    library.remove(shared_id).await.unwrap();
+    let report = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.cleared, 1);
+    assert!(!PathBuf::from(&managed.file_path).exists());
+}
+
+#[tokio::test]
 async fn removing_a_referenced_book_never_deletes_the_original() {
     let (lib, _, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
