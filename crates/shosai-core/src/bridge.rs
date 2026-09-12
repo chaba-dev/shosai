@@ -1022,6 +1022,17 @@ impl Bridge {
         cancellation: Cancellation,
     ) -> Result<Vec<ImportItemDto>, BridgeError> {
         check_cancelled(&cancellation)?;
+        self.import_paths_report(path_keys, managed, cancellation)
+            .await
+            .map(|report| report.items)
+    }
+
+    pub async fn import_paths_report(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<ImportReportDto, BridgeError> {
         let request_slot = try_acquire_slot(
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
@@ -1177,7 +1188,7 @@ impl Bridge {
         path_keys: Vec<String>,
         managed: bool,
         cancellation: Cancellation,
-    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+    ) -> Result<ImportReportDto, BridgeError> {
         if path_keys.len() > 256 {
             return Err(BridgeError::InvalidRequest(
                 "at most 256 selected paths may be imported".into(),
@@ -1198,13 +1209,14 @@ impl Bridge {
             .collect::<Result<Vec<_>, _>>()?;
         let library = self.library().await?;
         let mut items = Vec::with_capacity(path_keys.len());
+        let mut imported = 0;
+        let mut failed = 0;
+        let mut cancelled = false;
         for (path_key, path) in path_keys.into_iter().zip(paths) {
             // Once an item has committed, preserve and return that definitive outcome instead of
             // replacing the whole batch with an ambiguous cancellation error.
             if cancellation.is_cancelled() {
-                if items.is_empty() {
-                    return Err(BridgeError::Cancelled);
-                }
+                cancelled = true;
                 break;
             }
             let import_cancellation = ImportCancellation::default();
@@ -1246,9 +1258,7 @@ impl Bridge {
             };
             let result: anyhow::Result<Book> = match completion {
                 ImportCompletion::Cancelled => {
-                    if items.is_empty() {
-                        return Err(BridgeError::Cancelled);
-                    }
+                    cancelled = true;
                     break;
                 }
                 ImportCompletion::Completed(Ok(imported)) => {
@@ -1263,15 +1273,26 @@ impl Bridge {
                 }
             };
             items.push(match result {
-                Ok(book) => import_item(path_key, book),
-                Err(error) => ImportItemDto {
-                    path_key,
-                    book: None,
-                    error: Some(error.to_string()),
-                },
+                Ok(book) => {
+                    imported += 1;
+                    import_item(path_key, book)
+                }
+                Err(error) => {
+                    failed += 1;
+                    ImportItemDto {
+                        path_key,
+                        book: None,
+                        error: Some(error.to_string()),
+                    }
+                }
             });
         }
-        Ok(items)
+        Ok(ImportReportDto {
+            imported,
+            failed,
+            cancelled,
+            items,
+        })
     }
 
     pub async fn open_library_book(
@@ -8154,6 +8175,28 @@ mod tests {
         let stored = bridge.list_bookmarks(book_id).await.unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].note.as_deref(), Some("draft"));
+    }
+
+    #[tokio::test]
+    async fn selected_path_import_reports_cancellation_definitively() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let cancellation = Cancellation::new();
+        cancellation.cancel();
+
+        let report = bridge
+            .import_paths_report(vec![crate::path_key(source)], false, cancellation)
+            .await
+            .unwrap();
+
+        assert!(report.cancelled);
+        assert_eq!(report.imported, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.items.is_empty());
     }
 
     #[test]

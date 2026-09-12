@@ -50,7 +50,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt cancellationId,
   });
 
-  Future<List<FlutterImportItem>> importPaths({
+  Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
     required BigInt cancellationId,

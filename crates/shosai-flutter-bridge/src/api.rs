@@ -764,11 +764,11 @@ impl FlutterBridge {
         path_keys: Vec<String>,
         managed: bool,
         cancellation_id: u64,
-    ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
+    ) -> Result<FlutterImportReport, FlutterBridgeError> {
         self.bridge
-            .import_paths(path_keys, managed, self.cancellation(cancellation_id)?)
+            .import_paths_report(path_keys, managed, self.cancellation(cancellation_id)?)
             .await
-            .map(|v| v.into_iter().map(Into::into).collect())
+            .map(Into::into)
             .map_err(Into::into)
     }
 

@@ -115,7 +115,7 @@ void main() {
     expect(bridge.coverRequests.where((bookId) => bookId == 7), hasLength(1));
   });
 
-  testWidgets('library retries failed covers and bounds concurrent loads', (
+  testWidgets('library retries failed covers only after explicit refresh', (
     tester,
   ) async {
     final bridge = _LibraryBridge(
@@ -139,11 +139,53 @@ void main() {
     first.completeError(StateError('temporary failure'));
     await tester.pump();
     await tester.pump();
-    expect(bridge.coverRequests.length, greaterThan(4));
+    expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(1));
     for (final pending in covers) {
       if (!pending.isCompleted) pending.complete(null);
     }
     await tester.pumpAndSettle();
+
+    expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(1));
+    await tester.tap(find.byTooltip('Refresh library'));
+    await tester.pumpAndSettle();
+    expect(bridge.coverRequests.where((bookId) => bookId == 0), hasLength(2));
+  });
+
+  test('library model retains only bounded cover bytes', () async {
+    final cover = Uint8List(1024 * 1024);
+    final bridge = _LibraryBridge(
+      books: List.generate(20, (index) => _book(index, 'Book $index')),
+      covers: {for (var index = 0; index < 20; index += 1) index: cover},
+    );
+    final controller = LibraryController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+    controller.dispatch(const LibraryStarted());
+    await _waitUntil(() => controller.model.loaded);
+
+    for (var index = 0; index < 20; index += 1) {
+      controller.dispatch(LibraryCoverRequested(index));
+      await _waitUntil(() => bridge.coverRequests.length == index + 1);
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    expect(
+      controller.model.covers.values.fold<int>(
+        0,
+        (total, bytes) => total + bytes.length,
+      ),
+      lessThanOrEqualTo(16 * 1024 * 1024),
+    );
+    expect(
+      controller.model.books,
+      everyElement(predicate<FlutterLibraryBook>((book) => book.cover == null)),
+    );
+    controller.dispose();
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -570,10 +612,44 @@ void main() {
 
     expect(runnerCalls, 1);
     expect(bridge.importCalls, 0);
-    expect(controller.model.error, 'Import cancelled after 1 books.');
+    expect(controller.model.error, 'Import cancelled after 1 book.');
     controller.dispose();
     await bridge.disposed.future;
   });
+
+  test(
+    'selected-file import reports committed work before cancellation',
+    () async {
+      final bridge = _ControlledLibraryBridge()
+        ..importReport = FlutterImportReport(
+          imported: BigInt.one,
+          failed: BigInt.zero,
+          cancelled: true,
+          items: [
+            FlutterImportItem(pathKey: '/first.pdf', book: _book(1, 'First')),
+          ],
+        );
+      final controller = LibraryController(
+        bridge: bridge,
+        confirmRemoval: (_) async => true,
+        pickImport: () async => const LibraryImportSelection(
+          paths: ['/first.pdf', '/second.pdf'],
+          managed: true,
+        ),
+        openBook: (_) async {},
+        drainReaderSaves: (_) async {},
+        editSettings: (_) async => null,
+      );
+
+      controller.dispatch(const LibraryImportRequested());
+      await _waitUntil(() => bridge.queries.isNotEmpty);
+
+      expect(controller.model.error, 'Import cancelled after 1 book.');
+      expect(bridge.importedPaths, ['/first.pdf', '/second.pdf']);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
 
   test('active import can be cancelled from product progress', () async {
     final bridge = _ControlledLibraryBridge();
@@ -1059,6 +1135,7 @@ class _ControlledLibraryBridge implements FlutterBridge {
   String? importedDirectory;
   final Completer<void> disposed = Completer<void>();
   Completer<List<FlutterImportItem>>? importCompleter;
+  FlutterImportReport? importReport;
   Completer<FlutterImportReport>? directoryImportCompleter;
   int importCalls = 0;
   int removeCalls = 0;
@@ -1113,15 +1190,24 @@ class _ControlledLibraryBridge implements FlutterBridge {
   }
 
   @override
-  Future<List<FlutterImportItem>> importPaths({
+  Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
     required BigInt cancellationId,
-  }) {
+  }) async {
     importCalls += 1;
     importedPaths = pathKeys;
     importedManaged = managed;
-    return importCompleter?.future ?? Future.value(const []);
+    if (importReport case final report?) return report;
+    final items =
+        await (importCompleter?.future ??
+            Future.value(const <FlutterImportItem>[]));
+    return FlutterImportReport(
+      imported: BigInt.from(items.where((item) => item.book != null).length),
+      failed: BigInt.from(items.where((item) => item.error != null).length),
+      cancelled: false,
+      items: items,
+    );
   }
 
   @override

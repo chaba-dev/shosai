@@ -129,7 +129,7 @@ abstract class RustLibApi extends BaseApi {
     required BigInt cancellationId,
   });
 
-  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+  Future<FlutterImportReport> crateApiFlutterBridgeImportPaths({
     required FlutterBridge that,
     required List<String> pathKeys,
     required bool managed,
@@ -684,7 +684,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+  Future<FlutterImportReport> crateApiFlutterBridgeImportPaths({
     required FlutterBridge that,
     required List<String> pathKeys,
     required bool managed,
@@ -709,7 +709,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: DcoCodec(
-          decodeSuccessData: dco_decode_list_flutter_import_item,
+          decodeSuccessData: dco_decode_flutter_import_report,
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeImportPathsConstMeta,
@@ -4635,7 +4635,7 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     cancellationId: cancellationId,
   );
 
-  Future<List<FlutterImportItem>> importPaths({
+  Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
     required BigInt cancellationId,
