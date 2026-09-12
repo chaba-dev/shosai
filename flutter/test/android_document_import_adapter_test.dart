@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
@@ -104,4 +106,42 @@ void main() {
     expect(channel.calls.where((call) => call.$1 == 'release').length, 2);
     expect(adapter.hasPendingReleases, isFalse);
   });
+
+  test(
+    'pending cleanup cannot delay native acquisition registration',
+    () async {
+      final release = Completer<Object?>();
+      final channel = FakeChannel()
+        ..replies['release'] = release.future
+        ..replies['acquire'] = <String, Object?>{
+          'path': '/cache/import',
+          'releaseToken': 'release-2',
+        };
+      final adapter = AndroidDocumentImportAdapter(channel: channel);
+      final releasing = adapter.release('release-1');
+      await Future<void>.delayed(Duration.zero);
+
+      final acquired = await adapter.acquire(
+        document: const SelectedProviderDocument(token: 'selection', name: 'a'),
+        operationId: 'operation',
+      );
+
+      expect(acquired, isA<AcquiredProviderDocument>());
+      expect(channel.calls.last.$1, 'acquire');
+      release.complete(null);
+      await releasing;
+    },
+  );
+
+  test(
+    'native cleanup debt participates in the final cleanup status',
+    () async {
+      final channel = FakeChannel()
+        ..replies['retryCleanup'] = <String, Object?>{'pending': 1};
+      final adapter = AndroidDocumentImportAdapter(channel: channel);
+
+      expect(await adapter.retryCleanup(), isTrue);
+      expect(channel.calls.last.$1, 'retryCleanup');
+    },
+  );
 }

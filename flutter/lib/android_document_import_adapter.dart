@@ -144,7 +144,6 @@ final class AndroidDocumentImportAdapter {
     required String operationId,
   }) async {
     try {
-      await retryPendingReleases();
       final value = _map(
         await _channel.invoke('acquire', {
           'token': document.token,
@@ -157,6 +156,15 @@ final class AndroidDocumentImportAdapter {
       );
     } on PlatformException catch (error) {
       return DocumentAcquisitionFailure(_error(error.code));
+    }
+  }
+
+  Future<DocumentImportError?> beginUse(String releaseToken) async {
+    try {
+      await _channel.invoke('beginUse', {'releaseToken': releaseToken});
+      return null;
+    } on PlatformException catch (error) {
+      return _error(error.code);
     }
   }
 
@@ -179,6 +187,18 @@ final class AndroidDocumentImportAdapter {
       } catch (_) {
         // Keep ownership so a later operation can retry cleanup.
       }
+    }
+  }
+
+  Future<bool> retryCleanup() async {
+    await retryPendingReleases();
+    try {
+      final value = _map(await _channel.invoke('retryCleanup'));
+      return _integer(value['pending']) > 0 || hasPendingReleases;
+    } on PlatformException catch (_) {
+      return true;
+    } on MissingPluginException catch (_) {
+      return false;
     }
   }
 
