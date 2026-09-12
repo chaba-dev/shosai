@@ -20,6 +20,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.lang.ref.WeakReference
+import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -72,11 +74,14 @@ private object DocumentImportManager {
     private val acquisitions = ConcurrentHashMap<String, Acquisition>()
     private val slots = Semaphore(MAX_ACQUISITIONS)
     private val executor = Executors.newFixedThreadPool(MAX_ACQUISITIONS)
+    private val cleanupExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var resolver: ContentResolver
     private lateinit var cacheDir: File
     private var initialized = false
     private var cleanupDiscoveryFailed = false
+    private var cleanupRunning = false
+    private val cleanupResults = mutableListOf<(Int) -> Unit>()
 
     @Synchronized
     fun initialize(context: Context) {
@@ -86,8 +91,6 @@ private object DocumentImportManager {
             cacheDir = application.cacheDir.absoluteFile
             initialized = true
         }
-        discoverOwnedSessions()
-        retryPendingCleanups()
     }
 
     fun addSelections(owner: Owner, uris: List<Uri>): List<Map<String, String>> =
@@ -144,22 +147,52 @@ private object DocumentImportManager {
         ownership.abandonOwner(owner.id).forEach { (token, _) -> release(token) }
     }
 
-    fun retryPendingCleanups(): Int {
-        discoverOwnedSessions()
-        ownership.retryable().forEach { (token, _) -> release(token) }
-        return ownership.pendingCount() + if (cleanupDiscoveryFailed) 1 else 0
+    @Synchronized
+    fun retryPendingCleanups(result: (Int) -> Unit) {
+        cleanupResults.add(result)
+        if (cleanupRunning) return
+        cleanupRunning = true
+        cleanupExecutor.execute {
+            val moreSessions = discoverOwnedSessions()
+            ownership.retryable().take(64).forEach { (token, _) -> release(token) }
+            val pending = ownership.pendingCount() +
+                if (cleanupDiscoveryFailed || moreSessions) 1 else 0
+            mainHandler.post {
+                val results = synchronized(this) {
+                    cleanupRunning = false
+                    val waiting = cleanupResults.toList()
+                    cleanupResults.clear()
+                    waiting
+                }
+                results.forEach { it(pending) }
+            }
+        }
     }
 
-    @Synchronized
-    private fun discoverOwnedSessions() {
-        val entries = cacheDir.listFiles()
-        if (entries == null) {
+    private fun discoverOwnedSessions(): Boolean {
+        try {
+            Files.newDirectoryStream(cacheDir.toPath(), "$SESSION_PREFIX*").use { entries ->
+                val iterator = entries.iterator()
+                var discovered = 0
+                while (iterator.hasNext()) {
+                    val resource = iterator.next().toFile()
+                    if (!isOwnedName(resource.name)) continue
+                    if (discovered == 64) {
+                        cleanupDiscoveryFailed = false
+                        return true
+                    }
+                    ownership.restore(resource.name.removePrefix(SESSION_PREFIX), resource)
+                    discovered += 1
+                }
+            }
+            cleanupDiscoveryFailed = false
+            return false
+        } catch (_: IOException) {
             cleanupDiscoveryFailed = true
-            return
-        }
-        cleanupDiscoveryFailed = false
-        entries.filter { isOwnedName(it.name) }.forEach { resource ->
-            ownership.restore(resource.name.removePrefix(SESSION_PREFIX), resource)
+            return false
+        } catch (_: SecurityException) {
+            cleanupDiscoveryFailed = true
+            return false
         }
     }
 
@@ -172,7 +205,9 @@ private object DocumentImportManager {
             val session = File(cacheDir, "$SESSION_PREFIX$releaseToken")
             ownership.register(releaseToken, session, acquisition.owner.id)
             if (!session.mkdir()) throw IOException()
-            val stagedFile = File(session, selection.displayName)
+            // Provider names are display hints, not format authority. Rust performs bounded
+            // content detection on this deliberately extensionless staging path.
+            val stagedFile = File(session, "document")
             resolver.openAssetFileDescriptor(selection.uri, "r", acquisition.signal).use { descriptor ->
                 if (descriptor == null) throw IOException()
                 descriptor.createInputStream().use { input ->
@@ -296,22 +331,32 @@ private object DocumentImportManager {
     private class AcquisitionTooLarge : Exception()
 }
 
-class MainActivity : FlutterActivity() {
-    private val owner: Owner
-        get() = DocumentImportManager.owner
+private object DocumentImportChannel {
+    private var activity = WeakReference<MainActivity>(null)
+    private var channel: MethodChannel? = null
     private var pendingSelection: MethodChannel.Result? = null
 
-    override fun provideFlutterEngine(context: Context): FlutterEngine =
-        ShosaiFlutterEngine.get(context)
-
-    override fun shouldDestroyEngineWithHost(): Boolean = false
-
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        DocumentImportManager.initialize(this)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-            .setMethodCallHandler(::onMethodCall)
+    @Synchronized
+    fun attach(host: MainActivity, flutterEngine: FlutterEngine) {
+        activity = WeakReference(host)
+        if (channel == null) {
+            channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).also {
+                it.setMethodCallHandler(::onMethodCall)
+            }
+        }
     }
+
+    @Synchronized
+    fun detach(host: MainActivity, terminal: Boolean) {
+        if (activity.get() === host) activity.clear()
+        if (terminal) {
+            pendingSelection?.error("unavailable", null, null)
+            pendingSelection = null
+        }
+    }
+
+    private val owner: Owner
+        get() = DocumentImportManager.owner
 
     private fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -361,14 +406,20 @@ class MainActivity : FlutterActivity() {
                 else if (DocumentImportManager.release(token)) result.success(null)
                 else result.error("read_failed", null, null)
             }
-            "retryCleanup" -> result.success(
-                mapOf("pending" to DocumentImportManager.retryPendingCleanups()),
-            )
+            "retryCleanup" -> DocumentImportManager.retryPendingCleanups { pending ->
+                result.success(mapOf("pending" to pending))
+            }
             else -> result.notImplemented()
         }
     }
 
+    @Synchronized
     private fun selectFiles(result: MethodChannel.Result) {
+        val host = activity.get()
+        if (host == null) {
+            result.error("unavailable", null, null)
+            return
+        }
         if (pendingSelection != null) {
             result.error("busy", null, null)
             return
@@ -392,17 +443,15 @@ class MainActivity : FlutterActivity() {
             )
         }
         try {
-            startActivityForResult(intent, PICK_DOCUMENTS)
+            host.startActivityForResult(intent, PICK_DOCUMENTS)
         } catch (_: RuntimeException) {
             pendingSelection = null
             result.error("unavailable", null, null)
         }
     }
 
-    @Deprecated("Deprecated by Android, retained for FlutterActivity result forwarding")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != PICK_DOCUMENTS) return
+    @Synchronized
+    fun onActivityResult(resultCode: Int, data: Intent?) {
         val result = pendingSelection ?: return
         pendingSelection = null
         if (resultCode != Activity.RESULT_OK || data == null) {
@@ -425,9 +474,30 @@ class MainActivity : FlutterActivity() {
             ),
         )
     }
+}
+
+class MainActivity : FlutterActivity() {
+
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        ShosaiFlutterEngine.get(context)
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        DocumentImportManager.initialize(this)
+        DocumentImportChannel.attach(this, flutterEngine)
+    }
+
+    @Deprecated("Deprecated by Android, retained for FlutterActivity result forwarding")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_DOCUMENTS) return
+        DocumentImportChannel.onActivityResult(resultCode, data)
+    }
 
     override fun onDestroy() {
-        pendingSelection = null
+        DocumentImportChannel.detach(this, isFinishing)
         super.onDestroy()
     }
 }
