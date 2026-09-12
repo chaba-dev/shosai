@@ -5921,6 +5921,33 @@ void main() {
   });
 
   test(
+    'failed reading-state restoration does not save fallback progress',
+    () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 2,
+        immediateLists: true,
+        loadReadingStateFailure: StateError('temporary read failure'),
+      );
+      final controller = _epubController(bridge);
+      controller.dispatch(
+        const ReaderOpenRequested('/tmp/book.epub', bookId: 7),
+      );
+      await bridge.waitForOp(1);
+
+      controller.dispatch(
+        const ReaderViewportChanged(ReaderLayout(width: 520)),
+      );
+      await bridge.waitForOp(2);
+
+      expect(controller.model.toolError, contains('could not be restored'));
+      expect(bridge.savedReadingStates, isEmpty);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
     'queued saves retain progress metadata after document replacement',
     () async {
       final bridge = _ControlledBridge(
@@ -6278,6 +6305,7 @@ final class _ControlledBridge implements FlutterBridge {
     this.selectionVisualLines,
     this.copyEligible = true,
     this.initialReadingState,
+    this.loadReadingStateFailure,
   }) : initialAnnotations = List.of(initialAnnotations),
        storedAnnotations = List.of(initialAnnotations),
        associationSources = List.of(associationSources),
@@ -6298,6 +6326,7 @@ final class _ControlledBridge implements FlutterBridge {
   final List<FlutterSelectionVisualLine>? selectionVisualLines;
   final bool copyEligible;
   final FlutterReadingState? initialReadingState;
+  final Object? loadReadingStateFailure;
   final disposed = Completer<void>();
   final createdCancellations = <BigInt>[];
   final releasedCancellations = <BigInt>[];
@@ -6427,6 +6456,7 @@ final class _ControlledBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     loadReadingStateCalls += 1;
+    if (loadReadingStateFailure case final failure?) throw failure;
     return initialReadingState;
   }
 

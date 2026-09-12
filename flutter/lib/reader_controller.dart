@@ -818,6 +818,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     required this.bookmarks,
     required this.layout,
     required this.restoredLayout,
+    required this.restorationFailed,
     this.offset,
     this.toolError,
   });
@@ -828,6 +829,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final List<FlutterBookmark> bookmarks;
   final ReaderLayout layout;
   final bool restoredLayout;
+  final bool restorationFailed;
   final int? offset;
   final String? toolError;
 }
@@ -1086,6 +1088,7 @@ final class ReaderController implements Listenable {
   bool _listenersDisposed = false;
   int _readingStateSaveRevision = 0;
   String? _readingStateSaveError;
+  bool _readingStatePersistenceBlocked = false;
   final Set<VoidCallback> _listeners = {};
 
   ReaderModel get model => _model;
@@ -1584,6 +1587,7 @@ final class ReaderController implements Listenable {
       final document = opened;
       FlutterReadingState? restored;
       String? toolError;
+      var restorationFailed = false;
       if (bookId != null) {
         try {
           await drainReadingStateWrites(bookId);
@@ -1592,6 +1596,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
+          restorationFailed = true;
           toolError = 'Reading position could not be restored: $error';
         }
       }
@@ -1626,6 +1631,7 @@ final class ReaderController implements Listenable {
           bookmarks: bookmarks,
           layout: restoredLayout,
           restoredLayout: restored != null,
+          restorationFailed: restorationFailed,
           offset: restored?.offset?.toInt(),
           toolError: toolError,
         ),
@@ -1797,6 +1803,7 @@ final class ReaderController implements Listenable {
       lineSpacing: _requestedLayout.lineSpacing,
     );
     _requestedLayout = requestedLayout;
+    _readingStatePersistenceBlocked = message.restorationFailed;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -1992,6 +1999,7 @@ final class ReaderController implements Listenable {
         _suspended) {
       return;
     }
+    _readingStatePersistenceBlocked = false;
     _startRelayout(
       document,
       _model.layout,
@@ -2396,6 +2404,7 @@ final class ReaderController implements Listenable {
     BigInt unitCount,
     FlutterReadingState value,
   ) {
+    if (_readingStatePersistenceBlocked) return;
     final generation = _model.generation;
     final revision = ++_readingStateSaveRevision;
     _activeBridgeOperations += 1;
