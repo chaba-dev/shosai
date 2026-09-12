@@ -1070,7 +1070,7 @@ final class ReaderController implements Listenable {
   String _searchQuery = '';
   final Set<BigInt> _toolCancellations = {};
   final Set<BigInt> _searchCancellations = {};
-  bool _bookmarkMutationInFlight = false;
+  BigInt? _bookmarkMutationCancellation;
   _ReaderNoteTarget? _activeNoteEditor;
   int? _activeNoteEditorRevision;
   bool _associationPickerActive = false;
@@ -1205,7 +1205,9 @@ final class ReaderController implements Listenable {
           _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
         }
       case _ReaderBookmarkFinished():
-        _bookmarkMutationInFlight = false;
+        if (_bookmarkMutationCancellation == message.cancellation) {
+          _bookmarkMutationCancellation = null;
+        }
         _toolCancellations.remove(message.cancellation);
         _bridge.releaseCancellation(id: message.cancellation);
         _activeBridgeOperations -= 1;
@@ -1476,10 +1478,16 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(openPath: path, openBookId: message.bookId));
       return;
     }
-    if (_model.busy ||
-        _bookmarkMutationInFlight ||
-        _model.annotationOperations.isNotEmpty ||
-        _suspended) {
+    if (_bookmarkMutationCancellation != null) {
+      _emit(
+        _model.copyWith(
+          toolError:
+              'Bookmark changes are still saving. Try opening again shortly.',
+        ),
+      );
+      return;
+    }
+    if (_model.busy || _model.annotationOperations.isNotEmpty || _suspended) {
       return;
     }
 
@@ -2080,7 +2088,6 @@ final class ReaderController implements Listenable {
               bookmark.offset?.toInt() == offset,
         )
         .firstOrNull;
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     _startBookmarkMutation(
       generation: generation,
       revision: revision,
@@ -2164,7 +2171,6 @@ final class ReaderController implements Listenable {
     if (bookId == null || _model.bookmarkBusy || _closing || _suspended) return;
     final generation = _model.generation;
     final revision = ++_bookmarkRevision;
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     _startBookmarkMutation(
       generation: generation,
       revision: revision,
@@ -2187,8 +2193,9 @@ final class ReaderController implements Listenable {
       return;
     }
     _toolCancellations.add(cancellation);
-    _bookmarkMutationInFlight = true;
+    _bookmarkMutationCancellation = cancellation;
     _activeBridgeOperations += 1;
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     unawaited(() async {
       try {
         await mutation();

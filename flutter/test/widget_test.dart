@@ -5667,13 +5667,24 @@ void main() {
     await _openControlled(controller, bridge, '/tmp/first.epub');
     final toggle = Completer<FlutterBookmark?>();
     bridge.bookmarkToggleCompleters.add(toggle);
+    var attemptedReplacement = false;
+    controller.addListener(() {
+      if (controller.model.bookmarkBusy && !attemptedReplacement) {
+        attemptedReplacement = true;
+        controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+      }
+    });
 
     controller.dispatch(const ReaderBookmarkToggled());
     await _waitUntil(() => controller.model.bookmarkBusy);
-    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
 
+    expect(attemptedReplacement, isTrue);
     expect(bridge.openCalls, 1);
     expect(controller.model.openPath, '/tmp/first.epub');
+    expect(
+      controller.model.toolError,
+      'Bookmark changes are still saving. Try opening again shortly.',
+    );
     toggle.complete(null);
     await _waitUntil(() => !controller.model.bookmarkBusy);
 
@@ -5681,6 +5692,39 @@ void main() {
     await bridge.waitForOp(2);
     expect(bridge.openCalls, 2);
     expect(controller.model.openPath, '/tmp/replacement.epub');
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('an earlier bookmark completion cannot clear a newer fence', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/first.epub');
+    final firstToggle = Completer<FlutterBookmark?>();
+    final firstList = Completer<List<FlutterBookmark>>();
+    final secondToggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters
+      ..add(firstToggle)
+      ..add(secondToggle);
+    bridge.bookmarkListCompleters.add(firstList);
+    var startedSecond = false;
+    controller.addListener(() {
+      if (!controller.model.bookmarkBusy && !startedSecond) {
+        startedSecond = true;
+        controller.dispatch(const ReaderBookmarkToggled());
+      }
+    });
+
+    controller.dispatch(const ReaderBookmarkToggled());
+    firstToggle.complete(null);
+    firstList.complete(const []);
+    await _waitUntil(() => bridge.toggledBookmarkOffsets.length == 2);
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+
+    expect(bridge.openCalls, 1);
+    expect(controller.model.openPath, '/tmp/first.epub');
+    secondToggle.complete(null);
+    await _waitUntil(() => !controller.model.bookmarkBusy);
     controller.dispose();
     await bridge.disposed.future;
   });
