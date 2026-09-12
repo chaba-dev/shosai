@@ -6267,6 +6267,53 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
+
+  testWidgets('rejected Open reveals bookmark save feedback', (tester) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.epub,
+      bookId: 7,
+      immediateLists: true,
+    );
+    final toggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters.add(toggle);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/first.epub',
+          initialBookId: 7,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Bookmark this location'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    expect(find.byTooltip('Bookmark this location'), findsNothing);
+
+    await tester.enterText(
+      find.bySemanticsLabel('Document path'),
+      '/books/replacement.epub',
+    );
+    await tester.tap(find.text('Open document'));
+    await tester.pump();
+
+    expect(
+      find.text(
+        'Bookmark changes are still saving. Try opening again shortly.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Bookmark this location'), findsOneWidget);
+    toggle.complete(null);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
 }
 
 FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(

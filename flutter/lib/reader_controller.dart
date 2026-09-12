@@ -1483,6 +1483,7 @@ final class ReaderController implements Listenable {
         _model.copyWith(
           toolError:
               'Bookmark changes are still saving. Try opening again shortly.',
+          toolsVisible: true,
         ),
       );
       return;
