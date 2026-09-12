@@ -37,7 +37,7 @@ private data class Owner(
     val id: String = UUID.randomUUID().toString(),
     val active: AtomicBoolean = AtomicBoolean(true),
 )
-private data class Selection(val ownerId: String, val uri: Uri)
+private data class Selection(val ownerId: String, val uri: Uri, val displayName: String)
 private data class Acquisition(
     val owner: Owner,
     val result: MethodChannel.Result,
@@ -45,7 +45,6 @@ private data class Acquisition(
     val signal: CancellationSignal = CancellationSignal(),
     val input: AtomicReference<FileInputStream?> = AtomicReference(null),
 )
-
 private sealed interface AcquisitionOutcome {
     data class Success(val path: String, val releaseToken: String) : AcquisitionOutcome
     data class Failure(val code: String) : AcquisitionOutcome
@@ -54,8 +53,7 @@ private sealed interface AcquisitionOutcome {
 /** Process-owned storage and workers survive activity recreation without losing cleanup ownership. */
 private object DocumentImportManager {
     private val selections = ConcurrentHashMap<String, Selection>()
-    private val resources = ConcurrentHashMap<String, File>()
-    private val pendingCleanup = ConcurrentHashMap.newKeySet<String>()
+    private val ownership = ResourceOwnership()
     private val acquisitions = ConcurrentHashMap<String, Acquisition>()
     private val slots = Semaphore(MAX_ACQUISITIONS)
     private val executor = Executors.newFixedThreadPool(MAX_ACQUISITIONS)
@@ -70,12 +68,9 @@ private object DocumentImportManager {
             val application = context.applicationContext
             resolver = application.contentResolver
             cacheDir = application.cacheDir.absoluteFile
-            cacheDir.listFiles { file ->
-                file.isDirectory && isOwnedName(file.name)
-            }?.forEach { resource ->
+            cacheDir.listFiles { file -> isOwnedName(file.name) }?.forEach { resource ->
                 val token = resource.name.removePrefix(SESSION_PREFIX)
-                resources[token] = resource
-                pendingCleanup.add(token)
+                ownership.restore(token, resource)
             }
             initialized = true
         }
@@ -85,8 +80,9 @@ private object DocumentImportManager {
     fun addSelections(owner: Owner, uris: List<Uri>): List<Map<String, String>> =
         uris.mapIndexed { index, uri ->
             val token = UUID.randomUUID().toString()
-            selections[token] = Selection(owner.id, uri)
-            mapOf("token" to token, "name" to "Document ${index + 1}")
+            val name = selectionName(uri, index)
+            selections[token] = Selection(owner.id, uri, name)
+            mapOf("token" to token, "name" to name)
         }
 
     fun discardSelection(token: String) {
@@ -117,12 +113,14 @@ private object DocumentImportManager {
         acquisitions[operationId]?.let(::cancelAcquisition)
     }
 
+    fun beginUse(owner: Owner, token: String): Boolean {
+        return ownership.beginUse(owner.id, token)
+    }
+
     fun release(token: String): Boolean {
-        val resource = resources[token] ?: return true
-        pendingCleanup.add(token)
-        if (!deleteOwnedSession(resource)) return false
-        resources.remove(token, resource)
-        pendingCleanup.remove(token)
+        val resource = ownership.requestRelease(token) ?: return true
+        if (!deleteOwnedSession(resource.file)) return false
+        ownership.removed(token, resource)
         return true
     }
 
@@ -130,6 +128,12 @@ private object DocumentImportManager {
         owner.active.set(false)
         selections.entries.removeIf { it.value.ownerId == owner.id }
         acquisitions.values.filter { it.owner.id == owner.id }.forEach(::cancelAcquisition)
+        ownership.abandonOwner(owner.id).forEach { (token, _) -> release(token) }
+    }
+
+    fun retryPendingCleanups(): Int {
+        ownership.retryable().forEach { (token, _) -> release(token) }
+        return ownership.pendingCount()
     }
 
     private fun copySelection(operationId: String, selection: Selection, acquisition: Acquisition) {
@@ -140,8 +144,8 @@ private object DocumentImportManager {
             releaseToken = UUID.randomUUID().toString()
             val session = File(cacheDir, "$SESSION_PREFIX$releaseToken")
             if (!session.mkdir()) throw IOException()
-            resources[releaseToken] = session
-            val stagedFile = File(session, "Document.document")
+            ownership.register(releaseToken, session, acquisition.owner.id)
+            val stagedFile = File(session, selection.displayName)
             resolver.openAssetFileDescriptor(selection.uri, "r", acquisition.signal).use { descriptor ->
                 if (descriptor == null) throw IOException()
                 descriptor.createInputStream().use { input ->
@@ -224,19 +228,15 @@ private object DocumentImportManager {
         if (owned.parentFile != cacheDir || !isOwnedName(owned.name)) return false
         try {
             if (OsConstants.S_ISLNK(Os.lstat(owned.path).st_mode)) {
-                return owned.delete() || !owned.exists()
+                return owned.delete()
             }
-        } catch (_: ErrnoException) {
-            return !owned.exists()
+        } catch (error: ErrnoException) {
+            return error.errno == OsConstants.ENOENT
         }
-        val children = owned.listFiles() ?: return !owned.exists()
+        val children = owned.listFiles() ?: return false
         // Sessions contain one flat staged file. Delete direct children only: never follow links.
         if (children.any { !it.delete() }) return false
-        return owned.delete() || !owned.exists()
-    }
-
-    private fun retryPendingCleanups() {
-        pendingCleanup.toList().forEach(::release)
+        return owned.delete()
     }
 
     private fun isOwnedName(name: String): Boolean =
@@ -247,6 +247,23 @@ private object DocumentImportManager {
             } catch (_: IllegalArgumentException) {
                 false
             }
+
+    private fun selectionName(uri: Uri, index: Int): String {
+        val candidate = uri.lastPathSegment
+            ?.substringAfterLast(':')
+            ?.substringAfterLast('/')
+            ?: return "Document ${index + 1}"
+        val extension = candidate.substringAfterLast('.', "").lowercase()
+        if (extension !in setOf("pdf", "epub", "cbz")) return "Document ${index + 1}"
+        val stem = candidate.dropLast(extension.length + 1)
+            .take(60)
+            .map { character ->
+                if (character.isLetterOrDigit() || character in " _-") character else '_'
+            }
+            .joinToString("")
+            .trim(' ', '_')
+        return if (stem.isEmpty()) "Document ${index + 1}" else "$stem.$extension"
+    }
 
     private class AcquisitionCancelled : Exception()
     private class AcquisitionTooLarge : Exception()
@@ -291,6 +308,12 @@ class MainActivity : FlutterActivity() {
                 call.argument("operationId"),
                 result,
             )
+            "beginUse" -> {
+                val token = call.argument<String>("releaseToken")
+                if (token == null) result.error("invalid_request", null, null)
+                else if (DocumentImportManager.beginUse(owner, token)) result.success(null)
+                else result.error("invalid_request", null, null)
+            }
             "cancel" -> {
                 val operationId = call.argument<String>("operationId")
                 if (operationId == null) result.error("invalid_request", null, null)
@@ -305,6 +328,9 @@ class MainActivity : FlutterActivity() {
                 else if (DocumentImportManager.release(token)) result.success(null)
                 else result.error("read_failed", null, null)
             }
+            "retryCleanup" -> result.success(
+                mapOf("pending" to DocumentImportManager.retryPendingCleanups()),
+            )
             else -> result.notImplemented()
         }
     }
