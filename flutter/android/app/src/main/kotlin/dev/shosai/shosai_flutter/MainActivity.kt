@@ -13,6 +13,7 @@ import android.system.Os
 import android.system.OsConstants
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -50,8 +51,22 @@ private sealed interface AcquisitionOutcome {
     data class Failure(val code: String) : AcquisitionOutcome
 }
 
+/** Keeps the Dart import continuation alive while Android recreates its Activity. */
+private object ShosaiFlutterEngine {
+    private var engine: FlutterEngine? = null
+
+    @Synchronized
+    fun get(context: Context): FlutterEngine = engine ?: FlutterEngine(
+        context.applicationContext,
+    ).also { created ->
+        created.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        engine = created
+    }
+}
+
 /** Process-owned storage and workers survive activity recreation without losing cleanup ownership. */
 private object DocumentImportManager {
+    val owner = Owner()
     private val selections = ConcurrentHashMap<String, Selection>()
     private val ownership = ResourceOwnership()
     private val acquisitions = ConcurrentHashMap<String, Acquisition>()
@@ -61,6 +76,7 @@ private object DocumentImportManager {
     private lateinit var resolver: ContentResolver
     private lateinit var cacheDir: File
     private var initialized = false
+    private var cleanupDiscoveryFailed = false
 
     @Synchronized
     fun initialize(context: Context) {
@@ -68,12 +84,9 @@ private object DocumentImportManager {
             val application = context.applicationContext
             resolver = application.contentResolver
             cacheDir = application.cacheDir.absoluteFile
-            cacheDir.listFiles { file -> isOwnedName(file.name) }?.forEach { resource ->
-                val token = resource.name.removePrefix(SESSION_PREFIX)
-                ownership.restore(token, resource)
-            }
             initialized = true
         }
+        discoverOwnedSessions()
         retryPendingCleanups()
     }
 
@@ -132,8 +145,22 @@ private object DocumentImportManager {
     }
 
     fun retryPendingCleanups(): Int {
+        discoverOwnedSessions()
         ownership.retryable().forEach { (token, _) -> release(token) }
-        return ownership.pendingCount()
+        return ownership.pendingCount() + if (cleanupDiscoveryFailed) 1 else 0
+    }
+
+    @Synchronized
+    private fun discoverOwnedSessions() {
+        val entries = cacheDir.listFiles()
+        if (entries == null) {
+            cleanupDiscoveryFailed = true
+            return
+        }
+        cleanupDiscoveryFailed = false
+        entries.filter { isOwnedName(it.name) }.forEach { resource ->
+            ownership.restore(resource.name.removePrefix(SESSION_PREFIX), resource)
+        }
     }
 
     private fun copySelection(operationId: String, selection: Selection, acquisition: Acquisition) {
@@ -143,8 +170,8 @@ private object DocumentImportManager {
             checkCancelled(acquisition)
             releaseToken = UUID.randomUUID().toString()
             val session = File(cacheDir, "$SESSION_PREFIX$releaseToken")
-            if (!session.mkdir()) throw IOException()
             ownership.register(releaseToken, session, acquisition.owner.id)
+            if (!session.mkdir()) throw IOException()
             val stagedFile = File(session, selection.displayName)
             resolver.openAssetFileDescriptor(selection.uri, "r", acquisition.signal).use { descriptor ->
                 if (descriptor == null) throw IOException()
@@ -270,8 +297,14 @@ private object DocumentImportManager {
 }
 
 class MainActivity : FlutterActivity() {
-    private val owner = Owner()
+    private val owner: Owner
+        get() = DocumentImportManager.owner
     private var pendingSelection: MethodChannel.Result? = null
+
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        ShosaiFlutterEngine.get(context)
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -395,7 +428,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         pendingSelection = null
-        DocumentImportManager.destroyOwner(owner)
         super.onDestroy()
     }
 }

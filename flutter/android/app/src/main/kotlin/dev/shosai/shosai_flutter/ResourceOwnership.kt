@@ -15,6 +15,7 @@ internal class ResourceOwnership {
 
     @Synchronized
     fun restore(token: String, file: File) {
+        if (resources.containsKey(token)) return
         resources[token] = ProviderResource(file, "")
         pendingCleanup.add(token)
     }
