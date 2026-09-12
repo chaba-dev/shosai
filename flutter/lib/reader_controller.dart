@@ -1070,6 +1070,7 @@ final class ReaderController implements Listenable {
   String _searchQuery = '';
   final Set<BigInt> _toolCancellations = {};
   final Set<BigInt> _searchCancellations = {};
+  bool _bookmarkMutationInFlight = false;
   _ReaderNoteTarget? _activeNoteEditor;
   int? _activeNoteEditorRevision;
   bool _associationPickerActive = false;
@@ -1204,6 +1205,7 @@ final class ReaderController implements Listenable {
           _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
         }
       case _ReaderBookmarkFinished():
+        _bookmarkMutationInFlight = false;
         _toolCancellations.remove(message.cancellation);
         _bridge.releaseCancellation(id: message.cancellation);
         _activeBridgeOperations -= 1;
@@ -1474,7 +1476,10 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(openPath: path, openBookId: message.bookId));
       return;
     }
-    if (_model.busy || _model.annotationOperations.isNotEmpty || _suspended) {
+    if (_model.busy ||
+        _bookmarkMutationInFlight ||
+        _model.annotationOperations.isNotEmpty ||
+        _suspended) {
       return;
     }
 
@@ -2182,6 +2187,7 @@ final class ReaderController implements Listenable {
       return;
     }
     _toolCancellations.add(cancellation);
+    _bookmarkMutationInFlight = true;
     _activeBridgeOperations += 1;
     unawaited(() async {
       try {

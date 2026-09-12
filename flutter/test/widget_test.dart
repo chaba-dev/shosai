@@ -5661,6 +5661,30 @@ void main() {
     },
   );
 
+  test('document replacement cannot overtake a bookmark mutation', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/first.epub');
+    final toggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters.add(toggle);
+
+    controller.dispatch(const ReaderBookmarkToggled());
+    await _waitUntil(() => controller.model.bookmarkBusy);
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+
+    expect(bridge.openCalls, 1);
+    expect(controller.model.openPath, '/tmp/first.epub');
+    toggle.complete(null);
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+    await bridge.waitForOp(2);
+    expect(bridge.openCalls, 2);
+    expect(controller.model.openPath, '/tmp/replacement.epub');
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test(
     'bookmark toggles use the durable reading offset, not selection',
     () async {
