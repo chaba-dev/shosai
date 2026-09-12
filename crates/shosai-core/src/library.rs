@@ -373,30 +373,11 @@ fn book_format_for_path(
     let _admission =
         crate::document_admission::ProvisionalDocumentAdmission::acquire(metadata_bytes)?;
     check_import_cancelled(cancellation)?;
-    let mut archive = zip::ZipArchive::new(file).context("selected ZIP archive is invalid")?;
-    if let Ok(mimetype) = archive.by_name("mimetype") {
-        let mut bytes = Vec::new();
-        mimetype
-            .take(21)
-            .read_to_end(&mut bytes)
-            .context("failed to inspect EPUB media type")?;
-        if bytes == b"application/epub+zip" {
-            return Ok(Some(BookFormat::Epub));
-        }
+    if preflight.has_epub_mimetype && preflight.has_epub_container {
+        return Ok(Some(BookFormat::Epub));
     }
-    for index in 0..archive.len() {
-        check_import_cancelled(cancellation)?;
-        let entry = archive
-            .by_index(index)
-            .context("failed to inspect ZIP archive entry")?;
-        let extension = Path::new(entry.name())
-            .extension()
-            .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
-        if extension.as_deref().is_some_and(|extension| {
-            matches!(extension, "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp")
-        }) {
-            return Ok(Some(BookFormat::Cbz));
-        }
+    if preflight.has_comic_image {
+        return Ok(Some(BookFormat::Cbz));
     }
     Ok(None)
 }

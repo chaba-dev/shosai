@@ -10,6 +10,9 @@ pub(crate) struct ZipPreflight {
     pub(crate) declared_uncompressed_bytes: u64,
     pub(crate) central_directory_bytes: usize,
     pub(crate) copied_filename_ceiling: usize,
+    pub(crate) has_epub_mimetype: bool,
+    pub(crate) has_epub_container: bool,
+    pub(crate) has_comic_image: bool,
 }
 
 pub(crate) fn preflight<R: Read + Seek>(
@@ -115,6 +118,9 @@ pub(crate) fn preflight<R: Read + Seek>(
     reader.seek(SeekFrom::Start(central_offset))?;
     let mut declared = 0_u64;
     let mut copied_filename_ceiling = 0_usize;
+    let mut has_epub_mimetype = false;
+    let mut has_epub_container = false;
+    let mut has_comic_image = false;
     for _ in 0..entries {
         check_cancelled(is_cancelled)?;
         let mut header = [0; 46];
@@ -138,6 +144,10 @@ pub(crate) fn preflight<R: Read + Seek>(
             .context("ZIP entry metadata overflowed")?;
         let mut variable = vec![0; variable_len];
         read_exact_cancellable(&mut reader, &mut variable, is_cancelled)?;
+        let name = &variable[..name_len];
+        has_epub_mimetype |= name == b"mimetype";
+        has_epub_container |= name == b"META-INF/container.xml";
+        has_comic_image |= comic_image_name(name);
         let size = effective_uncompressed_size(
             le32(&header, 24).unwrap(),
             &variable[name_len..name_len + extra_len],
@@ -155,6 +165,25 @@ pub(crate) fn preflight<R: Read + Seek>(
         central_directory_bytes: usize::try_from(central_size)
             .context("ZIP central-directory size cannot be represented")?,
         copied_filename_ceiling,
+        has_epub_mimetype,
+        has_epub_container,
+        has_comic_image,
+    })
+}
+
+fn comic_image_name(name: &[u8]) -> bool {
+    [
+        b".jpg".as_slice(),
+        b".jpeg",
+        b".png",
+        b".gif",
+        b".webp",
+        b".bmp",
+    ]
+    .iter()
+    .any(|extension| {
+        name.len() >= extension.len()
+            && name[name.len() - extension.len()..].eq_ignore_ascii_case(extension)
     })
 }
 
@@ -307,6 +336,7 @@ fn effective_uncompressed_size(declared: u32, extra: &[u8]) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::io::{Cursor, Write};
     use zip::write::SimpleFileOptions;
 
@@ -319,10 +349,57 @@ mod tests {
         writer.finish().unwrap().into_inner()
     }
 
+    fn named_archive(names: &[&str]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for name in names {
+            writer
+                .start_file(*name, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"data").unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
     #[test]
     fn preflight_is_cancellable_before_directory_work() {
         let error = preflight(Cursor::new(archive(b"page")), 10, Some(&|| true)).unwrap_err();
         assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn preflight_observes_cancellation_after_inspection_starts() {
+        let checks = Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() > 3
+        };
+
+        let error = preflight(
+            Cursor::new(named_archive(&["one", "two", "three"])),
+            10,
+            Some(&cancelled),
+        )
+        .unwrap_err();
+
+        assert!(checks.get() > 3);
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn preflight_classifies_epub_and_comic_names_without_opening_payloads() {
+        let epub = preflight(
+            Cursor::new(named_archive(&["mimetype", "META-INF/container.xml"])),
+            10,
+            None,
+        )
+        .unwrap();
+        assert!(epub.has_epub_mimetype);
+        assert!(epub.has_epub_container);
+        assert!(!epub.has_comic_image);
+
+        let comic = preflight(Cursor::new(named_archive(&["pages/001.BMP"])), 10, None).unwrap();
+        assert!(comic.has_comic_image);
+        assert!(!comic.has_epub_mimetype);
     }
 
     #[test]
