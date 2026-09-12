@@ -21,7 +21,6 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.lang.ref.WeakReference
-import java.nio.file.Files
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -140,6 +139,13 @@ private object DocumentImportManager {
         return true
     }
 
+    fun releaseAsync(token: String, result: (Boolean) -> Unit) {
+        cleanupExecutor.execute {
+            val removed = release(token)
+            mainHandler.post { result(removed) }
+        }
+    }
+
     fun destroyOwner(owner: Owner) {
         owner.active.set(false)
         selections.entries.removeIf { it.value.ownerId == owner.id }
@@ -153,46 +159,29 @@ private object DocumentImportManager {
         if (cleanupRunning) return
         cleanupRunning = true
         cleanupExecutor.execute {
-            val moreSessions = discoverOwnedSessions()
-            ownership.retryable().take(64).forEach { (token, _) -> release(token) }
-            val pending = ownership.pendingCount() +
-                if (cleanupDiscoveryFailed || moreSessions) 1 else 0
+            discoverOwnedSessions()
+            ownership.retryable(64).forEach { (token, _) -> release(token) }
             mainHandler.post {
-                val results = synchronized(this) {
+                val (results, pending) = synchronized(this) {
                     cleanupRunning = false
                     val waiting = cleanupResults.toList()
                     cleanupResults.clear()
-                    waiting
+                    waiting to (ownership.pendingCount() + if (cleanupDiscoveryFailed) 1 else 0)
                 }
                 results.forEach { it(pending) }
             }
         }
     }
 
-    private fun discoverOwnedSessions(): Boolean {
-        try {
-            Files.newDirectoryStream(cacheDir.toPath(), "$SESSION_PREFIX*").use { entries ->
-                val iterator = entries.iterator()
-                var discovered = 0
-                while (iterator.hasNext()) {
-                    val resource = iterator.next().toFile()
-                    if (!isOwnedName(resource.name)) continue
-                    if (discovered == 64) {
-                        cleanupDiscoveryFailed = false
-                        return true
-                    }
-                    ownership.restore(resource.name.removePrefix(SESSION_PREFIX), resource)
-                    discovered += 1
-                }
-            }
-            cleanupDiscoveryFailed = false
-            return false
-        } catch (_: IOException) {
+    private fun discoverOwnedSessions() {
+        val entries = cacheDir.listFiles()
+        if (entries == null) {
             cleanupDiscoveryFailed = true
-            return false
-        } catch (_: SecurityException) {
-            cleanupDiscoveryFailed = true
-            return false
+            return
+        }
+        cleanupDiscoveryFailed = false
+        entries.filter { isOwnedName(it.name) }.forEach { resource ->
+            ownership.restore(resource.name.removePrefix(SESSION_PREFIX), resource)
         }
     }
 
@@ -207,7 +196,9 @@ private object DocumentImportManager {
             if (!session.mkdir()) throw IOException()
             // Provider names are display hints, not format authority. Rust performs bounded
             // content detection on this deliberately extensionless staging path.
-            val stagedFile = File(session, "document")
+            val stagedName = selection.displayName.substringBeforeLast('.', selection.displayName)
+                .ifBlank { "Document" }
+            val stagedFile = File(session, stagedName)
             resolver.openAssetFileDescriptor(selection.uri, "r", acquisition.signal).use { descriptor ->
                 if (descriptor == null) throw IOException()
                 descriptor.createInputStream().use { input ->
@@ -348,7 +339,8 @@ private object DocumentImportChannel {
 
     @Synchronized
     fun detach(host: MainActivity, terminal: Boolean) {
-        if (activity.get() === host) activity.clear()
+        if (activity.get() !== host) return
+        activity.clear()
         if (terminal) {
             pendingSelection?.error("unavailable", null, null)
             pendingSelection = null
@@ -403,8 +395,10 @@ private object DocumentImportChannel {
             "release" -> {
                 val token = call.argument<String>("releaseToken")
                 if (token == null) result.error("invalid_request", null, null)
-                else if (DocumentImportManager.release(token)) result.success(null)
-                else result.error("read_failed", null, null)
+                else DocumentImportManager.releaseAsync(token) { removed ->
+                    if (removed) result.success(null)
+                    else result.error("read_failed", null, null)
+                }
             }
             "retryCleanup" -> DocumentImportManager.retryPendingCleanups { pending ->
                 result.success(mapOf("pending" to pending))
@@ -451,7 +445,8 @@ private object DocumentImportChannel {
     }
 
     @Synchronized
-    fun onActivityResult(resultCode: Int, data: Intent?) {
+    fun onActivityResult(host: MainActivity, resultCode: Int, data: Intent?) {
+        if (activity.get() !== host) return
         val result = pendingSelection ?: return
         pendingSelection = null
         if (resultCode != Activity.RESULT_OK || data == null) {
@@ -493,7 +488,7 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != PICK_DOCUMENTS) return
-        DocumentImportChannel.onActivityResult(resultCode, data)
+        DocumentImportChannel.onActivityResult(this, resultCode, data)
     }
 
     override fun onDestroy() {

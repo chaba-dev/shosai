@@ -52,12 +52,19 @@ internal class ResourceOwnership {
             .filter { (_, resource) -> !resource.inUse }
 
     @Synchronized
-    fun retryable(): List<Pair<String, ProviderResource>> =
-        pendingCleanup.mapNotNull { token ->
+    fun retryable(limit: Int = Int.MAX_VALUE): List<Pair<String, ProviderResource>> {
+        val selected = pendingCleanup.mapNotNull { token ->
             resources[token]
                 ?.takeUnless { it.inUse }
                 ?.let { token to it }
+        }.take(limit)
+        // Rotate attempted resources so persistent failures cannot starve later cleanup debt.
+        selected.forEach { (token, _) ->
+            pendingCleanup.remove(token)
+            pendingCleanup.add(token)
         }
+        return selected
+    }
 
     @Synchronized
     fun removed(token: String, resource: ProviderResource) {

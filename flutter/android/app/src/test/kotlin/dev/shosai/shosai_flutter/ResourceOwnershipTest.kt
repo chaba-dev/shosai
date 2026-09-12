@@ -54,4 +54,15 @@ class ResourceOwnershipTest {
         assertEquals(0, ownership.pendingCount())
         assertTrue(ownership.retryable().isEmpty())
     }
+
+    @Test
+    fun `failed cleanup batches rotate instead of starving later resources`() {
+        val ownership = ResourceOwnership()
+        for (index in 0..64) {
+            ownership.restore("token-$index", File("resource-$index"))
+        }
+
+        assertEquals("token-0", ownership.retryable(64).first().first)
+        assertEquals("token-64", ownership.retryable(64).first().first)
+    }
 }
