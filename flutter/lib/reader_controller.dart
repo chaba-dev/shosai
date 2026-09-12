@@ -65,6 +65,23 @@ final class _ReadingStateSaveQueue {
   }
 }
 
+final class _BookWriteDrain {
+  int pending = 0;
+  Completer<void> drained = Completer<void>()..complete();
+
+  void begin() {
+    if (pending == 0) drained = Completer<void>();
+    pending += 1;
+  }
+
+  bool finish() {
+    pending -= 1;
+    if (pending != 0) return false;
+    drained.complete();
+    return true;
+  }
+}
+
 final class _RelayoutIntent {
   const _RelayoutIntent({
     required this.unit,
@@ -184,6 +201,7 @@ final class ReaderModel {
     this.searchBusy = false,
     this.bookmarkBusy = false,
     this.toolError,
+    this.persistenceError,
     this.toolsVisible = false,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
@@ -229,6 +247,9 @@ final class ReaderModel {
   final bool searchBusy;
   final bool bookmarkBusy;
   final String? toolError;
+
+  /// Reading-position restoration/save feedback, independent of tool chrome.
+  final String? persistenceError;
   final bool toolsVisible;
   final ReaderLayout layout;
   final bool relayoutBusy;
@@ -295,6 +316,7 @@ final class ReaderModel {
     bool? searchBusy,
     bool? bookmarkBusy,
     Object? toolError = _unchanged,
+    Object? persistenceError = _unchanged,
     bool? toolsVisible,
     ReaderLayout? layout,
     bool? relayoutBusy,
@@ -364,6 +386,9 @@ final class ReaderModel {
       toolError: identical(toolError, _unchanged)
           ? this.toolError
           : toolError as String?,
+      persistenceError: identical(persistenceError, _unchanged)
+          ? this.persistenceError
+          : persistenceError as String?,
       toolsVisible: toolsVisible ?? this.toolsVisible,
       layout: layout ?? this.layout,
       relayoutBusy: relayoutBusy ?? this.relayoutBusy,
@@ -1082,6 +1107,7 @@ final class ReaderController implements Listenable {
   String? _recoveryPath;
   int? _recoveryBookId;
   static final Map<int, _ReadingStateSaveQueue> _bookReadingStateSaves = {};
+  static final Map<int, _BookWriteDrain> _bookWrites = {};
   bool _suspended = false;
   bool _releaseForRecovery = false;
   bool _reopenForRecovery = false;
@@ -1094,12 +1120,26 @@ final class ReaderController implements Listenable {
 
   ReaderModel get model => _model;
 
-  /// Completes after every reading-state write queued for [bookId] in-process.
-  static Future<void> drainBookReadingStateWrites(int bookId) =>
-      _bookReadingStateSaves[bookId]?.drained ?? Future<void>.value();
+  /// Completes after every accepted durable write for [bookId] in-process.
+  static Future<void> drainBookWrites(int bookId) =>
+      _bookWrites[bookId]?.drained.future ?? Future<void>.value();
 
-  Future<void> drainReadingStateWrites(int bookId) =>
-      drainBookReadingStateWrites(bookId);
+  @Deprecated(
+    'Use drainBookWrites; it also includes bookmarks and annotations.',
+  )
+  static Future<void> drainBookReadingStateWrites(int bookId) =>
+      drainBookWrites(bookId);
+
+  Future<void> drainReadingStateWrites(int bookId) => drainBookWrites(bookId);
+
+  static void _beginBookWrite(int bookId) {
+    _bookWrites.putIfAbsent(bookId, _BookWriteDrain.new).begin();
+  }
+
+  static void _finishBookWrite(int bookId) {
+    final drain = _bookWrites[bookId];
+    if (drain != null && drain.finish()) _bookWrites.remove(bookId);
+  }
 
   bool get _recovering => _releaseForRecovery || _reopenForRecovery;
 
@@ -1226,15 +1266,20 @@ final class ReaderController implements Listenable {
             !_closing) {
           final error = 'Reading position was not saved: ${message.error}';
           _readingStateSaveError = error;
-          _emit(_model.copyWith(toolError: error));
+          _emit(_model.copyWith(toolError: error, persistenceError: error));
         }
       case _ReaderReadingStateSaveSucceeded():
         if (_isCurrent(message.generation) &&
             message.revision == _readingStateSaveRevision &&
-            _readingStateSaveError != null &&
-            _model.toolError == _readingStateSaveError) {
+            _readingStateSaveError != null) {
+          final ownsToolError = _model.toolError == _readingStateSaveError;
           _readingStateSaveError = null;
-          _emit(_model.copyWith(toolError: null));
+          _emit(
+            _model.copyWith(
+              toolError: ownsToolError ? null : _unchanged,
+              persistenceError: null,
+            ),
+          );
         }
       case _ReaderReadingStateSaveFinished():
         _activeBridgeOperations -= 1;
@@ -1566,6 +1611,7 @@ final class ReaderController implements Listenable {
         searchBusy: false,
         bookmarkBusy: false,
         toolError: null,
+        persistenceError: null,
         toolsVisible: false,
         relayoutBusy: false,
         relayoutPending: false,
@@ -1604,7 +1650,7 @@ final class ReaderController implements Listenable {
       var restorationFailed = false;
       if (bookId != null) {
         try {
-          await drainReadingStateWrites(bookId);
+          await drainBookWrites(bookId);
           restored = await _bridge.loadReadingState(
             bookId: bookId,
             cancellationId: cancellation,
@@ -1829,6 +1875,7 @@ final class ReaderController implements Listenable {
         anchor: message.offset,
         focus: message.offset,
         toolError: message.toolError,
+        persistenceError: message.restorationFailed ? message.toolError : null,
       ),
     );
   }
@@ -2196,6 +2243,7 @@ final class ReaderController implements Listenable {
     _toolCancellations.add(cancellation);
     _bookmarkMutationCancellation = cancellation;
     _activeBridgeOperations += 1;
+    _beginBookWrite(bookId);
     _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     unawaited(() async {
       try {
@@ -2210,6 +2258,7 @@ final class ReaderController implements Listenable {
           _ReaderBookmarksFailed(generation, revision, error.toString()),
         );
       } finally {
+        _finishBookWrite(bookId);
         dispatch(_ReaderBookmarkFinished(cancellation));
       }
     }());
@@ -2422,6 +2471,7 @@ final class ReaderController implements Listenable {
     final generation = _model.generation;
     final revision = ++_readingStateSaveRevision;
     _activeBridgeOperations += 1;
+    _beginBookWrite(bookId);
     late final _ReadingStateSaveQueue queue;
     queue = _bookReadingStateSaves.putIfAbsent(
       bookId,
@@ -2450,10 +2500,14 @@ final class ReaderController implements Listenable {
               ),
             );
           } finally {
+            _finishBookWrite(bookId);
             dispatch(const _ReaderReadingStateSaveFinished());
           }
         },
-        discard: () => dispatch(const _ReaderReadingStateSaveFinished()),
+        discard: () {
+          _finishBookWrite(bookId);
+          dispatch(const _ReaderReadingStateSaveFinished());
+        },
       ),
     );
   }
@@ -2845,6 +2899,8 @@ final class ReaderController implements Listenable {
     if (body != null) _noteCreateCancellations.add(cancellation);
     _selectionCancellations[cancellation] = selectionRevision;
     _activeBridgeOperations += 1;
+    final bookId = document.bookId;
+    if (bookId != null) _beginBookWrite(bookId);
     _emit(
       _model.copyWith(
         selectionPhase: ReaderSelectionPhase.committing,
@@ -2888,6 +2944,7 @@ final class ReaderController implements Listenable {
           ),
         );
       } finally {
+        if (bookId != null) _finishBookWrite(bookId);
         dispatch(
           _ReaderAnnotationCreateFinished(cancellation, succeeded: succeeded),
         );
@@ -2940,6 +2997,8 @@ final class ReaderController implements Listenable {
     if (fromNote) _noteUpdateOperations.add(operationId);
     _annotationCancellations.add(cancellation);
     _activeBridgeOperations += 1;
+    final bookId = document.bookId;
+    if (bookId != null) _beginBookWrite(bookId);
     _emit(
       _model.copyWith(
         annotationOperations: {operationId},
@@ -2976,6 +3035,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } finally {
+      if (bookId != null) _finishBookWrite(bookId);
       _annotationCancellations.remove(cancellation);
       _bridge.releaseCancellation(id: cancellation);
       dispatch(const _ReaderAnnotationOperationFinished());
@@ -3028,6 +3088,8 @@ final class ReaderController implements Listenable {
     final revision = ++_annotationRevision;
     final operationId = 'delete:$id:${++_nextOperationId}';
     _activeBridgeOperations += 1;
+    final bookId = document.bookId;
+    if (bookId != null) _beginBookWrite(bookId);
     _emit(
       _model.copyWith(
         annotationOperations: {operationId},
@@ -3063,6 +3125,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } finally {
+      if (bookId != null) _finishBookWrite(bookId);
       dispatch(const _ReaderAnnotationOperationFinished());
     }
   }
