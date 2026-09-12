@@ -1999,7 +1999,6 @@ final class ReaderController implements Listenable {
         _suspended) {
       return;
     }
-    _readingStatePersistenceBlocked = false;
     _startRelayout(
       document,
       _model.layout,
@@ -2344,6 +2343,7 @@ final class ReaderController implements Listenable {
         message.unit != _model.unit ||
         message.offset != null ||
         message.replaceReadingOffset;
+    if (changedLocation) _readingStatePersistenceBlocked = false;
     final readingOffset = changedLocation
         ? message.offset
         : _model.readingOffset;

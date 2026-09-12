@@ -115,6 +115,36 @@ void main() {
     expect(bridge.coverRequests.where((bookId) => bookId == 7), hasLength(1));
   });
 
+  testWidgets('disposing library evicts its memory image keys', (tester) async {
+    final cover = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final bridge = _LibraryBridge(
+      covers: {7: cover},
+      books: [_book(7, 'Covered')],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final image = tester.widget<Image>(find.byType(Image));
+    final key = await image.image.obtainKey(ImageConfiguration.empty);
+    final loaded = imageCache.statusForKey(key);
+    expect(loaded.live || loaded.keepAlive, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    final status = imageCache.statusForKey(key);
+    expect(status.pending, isFalse);
+    expect(status.live, isFalse);
+    expect(status.keepAlive, isFalse);
+  });
+
   testWidgets('library retries failed covers only after explicit refresh', (
     tester,
   ) async {
@@ -152,10 +182,13 @@ void main() {
   });
 
   test('library model retains only bounded cover bytes', () async {
-    final cover = Uint8List(1024 * 1024);
+    final evicted = <Uint8List>[];
     final bridge = _LibraryBridge(
       books: List.generate(20, (index) => _book(index, 'Book $index')),
-      covers: {for (var index = 0; index < 20; index += 1) index: cover},
+      covers: {
+        for (var index = 0; index < 20; index += 1)
+          index: Uint8List(1024 * 1024),
+      },
     );
     final controller = LibraryController(
       bridge: bridge,
@@ -164,6 +197,7 @@ void main() {
       openBook: (_) async {},
       drainReaderSaves: (_) async {},
       editSettings: (_) async => null,
+      evictCover: evicted.add,
     );
     controller.dispatch(const LibraryStarted());
     await _waitUntil(() => controller.model.loaded);
@@ -185,7 +219,41 @@ void main() {
       controller.model.books,
       everyElement(predicate<FlutterLibraryBook>((book) => book.cover == null)),
     );
+    expect(evicted, hasLength(4));
     controller.dispose();
+    expect(evicted, hasLength(20));
+  });
+
+  testWidgets('mounted covers stop requesting after bounded eviction', (
+    tester,
+  ) async {
+    final bridge = _LibraryBridge(
+      books: List.generate(40, (index) => _book(index, 'Book $index')),
+      covers: {
+        for (var index = 0; index < 40; index += 1)
+          index: Uint8List(512 * 1024),
+      },
+    );
+    tester.view.physicalSize = const Size(1400, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final completedDemand = bridge.coverRequests.length;
+    expect(completedDemand, 40);
+
+    for (var frame = 0; frame < 10; frame += 1) {
+      await tester.pump();
+    }
+    expect(bridge.coverRequests, hasLength(completedDemand));
   });
 
   testWidgets('library refresh waits for popped reader route disposal', (
@@ -457,7 +525,7 @@ void main() {
       ]);
       await _waitUntil(() => bridge.queries.length == 2);
 
-      expect(controller.model.error, 'This file type is not supported.');
+      expect(controller.model.error, 'Imported 1 books; 1 failed.');
       expect(controller.model.failure, LibraryFailure.import);
       controller.dispose();
       await bridge.disposed.future;
@@ -804,7 +872,7 @@ void main() {
     controller.dispatch(const LibraryRefreshed());
     await _waitUntil(() => !controller.model.busy);
 
-    expect(controller.model.error, 'This file type is not supported.');
+    expect(controller.model.error, 'Imported 0 books; 1 failed.');
     expect(controller.model.failure, LibraryFailure.import);
     controller.dispose();
     await bridge.disposed.future;

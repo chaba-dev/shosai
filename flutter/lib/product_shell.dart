@@ -30,7 +30,9 @@ typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
 typedef LibrarySettingsEditor =
     Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 typedef LibraryImportAdapterCanceller = void Function();
+typedef LibraryCoverEvicter = void Function(Uint8List bytes);
 void _ignoreImportAdapterCancellation() {}
+void _ignoreCoverEviction(Uint8List _) {}
 
 final class LibraryImportSelection {
   const LibraryImportSelection({
@@ -81,6 +83,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     drainReaderSaves: ReaderController.drainBookReadingStateWrites,
     editSettings: _editSettings,
     cancelImportAdapter: _cancelImportAdapter,
+    evictCover: (bytes) =>
+        imageCache.evict(MemoryImage(bytes), includeLive: true),
   )..addListener(_changed);
 
   void _changed() {
@@ -1233,13 +1237,15 @@ class LibraryController implements Listenable {
     required LibrarySettingsEditor editSettings,
     LibraryImportAdapterCanceller cancelImportAdapter =
         _ignoreImportAdapterCancellation,
+    LibraryCoverEvicter evictCover = _ignoreCoverEviction,
   }) : _bridge = bridge,
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
        _editSettings = editSettings,
-       _cancelImportAdapter = cancelImportAdapter;
+       _cancelImportAdapter = cancelImportAdapter,
+       _evictCover = evictCover;
 
   final FlutterBridge _bridge;
   final LibraryRemovalConfirmer _confirmRemoval;
@@ -1248,6 +1254,7 @@ class LibraryController implements Listenable {
   final LibraryReaderSaveDrainer _drainReaderSaves;
   final LibrarySettingsEditor _editSettings;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
+  final LibraryCoverEvicter _evictCover;
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
   final Set<BigInt> _cancellations = {};
@@ -1256,6 +1263,7 @@ class LibraryController implements Listenable {
   final Map<int, BigInt> _coverRequests = {};
   final Map<int, Uint8List> _coverCache = {};
   final Set<int> _coverFailures = {};
+  final Set<int> _coverAttempts = {};
   int _coverCacheBytes = 0;
   Timer? _searchTimer;
   int _loadRevision = 0;
@@ -1290,6 +1298,7 @@ class LibraryController implements Listenable {
         _load();
       case LibraryRefreshed():
         _coverFailures.clear();
+        _coverAttempts.clear();
         _load();
       case LibraryMoreRequested():
         if (_model.hasMore &&
@@ -1419,6 +1428,7 @@ class LibraryController implements Listenable {
             final oldest = _coverCache.keys.first;
             final removed = _coverCache.remove(oldest)!;
             _coverCacheBytes -= removed.length;
+            _evictCover(removed);
           }
           _emit(_model.copyWith(covers: Map.unmodifiable(_coverCache)));
         }
@@ -1444,9 +1454,11 @@ class LibraryController implements Listenable {
         _coverRequests.containsKey(bookId) ||
         _coverCache.containsKey(bookId) ||
         _coverFailures.contains(bookId) ||
+        _coverAttempts.contains(bookId) ||
         _coverRequests.length >= _coverLoadLimit) {
       return;
     }
+    _coverAttempts.add(bookId);
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -1748,6 +1760,11 @@ class LibraryController implements Listenable {
   void dispose() {
     if (_closing) return;
     _closing = true;
+    for (final cover in _coverCache.values) {
+      _evictCover(cover);
+    }
+    _coverCache.clear();
+    _coverCacheBytes = 0;
     _adapterRevision += 1;
     _cancelImportAdapter();
     _searchTimer?.cancel();

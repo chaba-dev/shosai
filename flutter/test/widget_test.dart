@@ -5935,13 +5935,22 @@ void main() {
       );
       await bridge.waitForOp(1);
 
+      bridge.selectionFailure = true;
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(2);
+      bridge.selectionFailure = false;
       controller.dispatch(
         const ReaderViewportChanged(ReaderLayout(width: 520)),
       );
-      await bridge.waitForOp(2);
+      await bridge.waitForOp(3);
 
       expect(controller.model.toolError, contains('could not be restored'));
       expect(bridge.savedReadingStates, isEmpty);
+
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(4);
+      await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
+      expect(bridge.savedReadingStates.single.unit, BigInt.one);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -6319,7 +6328,7 @@ final class _ControlledBridge implements FlutterBridge {
   final List<FlutterAnnotationAssociationSource> associationSources;
   final List<FlutterAnnotation> associatedAnnotations;
   final Object? associationFailure;
-  final bool selectionFailure;
+  bool selectionFailure;
   bool listFailure;
   final bool immediateLists;
   final Completer<List<FlutterAnnotation>>? initialListCompleter;
