@@ -75,6 +75,9 @@ private object DocumentImportManager {
     private val executor = Executors.newFixedThreadPool(MAX_ACQUISITIONS)
     private val cleanupExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val cleanupRunner = CompletionRunner(cleanupExecutor) { command ->
+        mainHandler.post(command)
+    }
     private lateinit var resolver: ContentResolver
     private lateinit var cacheDir: File
     private var initialized = false
@@ -149,10 +152,10 @@ private object DocumentImportManager {
             mainHandler.post { result(true) }
             return
         }
-        cleanupExecutor.execute {
-            val removed = removeResource(token, resource)
-            mainHandler.post { result(removed) }
-        }
+        cleanupRunner.run(
+            work = { removeResource(token, resource) },
+            complete = result,
+        )
     }
 
     fun destroyOwner(owner: Owner) {
@@ -340,17 +343,11 @@ private object DocumentImportManager {
 private object DocumentImportChannel {
     private var activity = WeakReference<MainActivity>(null)
     private var channel: MethodChannel? = null
-    private var pendingSelection: MethodChannel.Result? = null
-    private var awaitingRecreation = false
+    private val picker = HostOperation<MethodChannel.Result>()
 
     @Synchronized
     fun attach(host: MainActivity, flutterEngine: FlutterEngine) {
-        val previous = activity.get()
-        if (previous != null && previous !== host && !awaitingRecreation) {
-            pendingSelection?.error("unavailable", null, null)
-            pendingSelection = null
-        }
-        awaitingRecreation = false
+        picker.attach(host.importHostId)?.error("unavailable", null, null)
         activity = WeakReference(host)
         if (channel == null) {
             channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).also {
@@ -361,13 +358,8 @@ private object DocumentImportChannel {
 
     @Synchronized
     fun detach(host: MainActivity, recreating: Boolean) {
-        if (activity.get() !== host) return
-        activity.clear()
-        awaitingRecreation = recreating
-        if (!recreating) {
-            pendingSelection?.error("unavailable", null, null)
-            pendingSelection = null
-        }
+        picker.detach(host.importHostId, recreating)?.error("unavailable", null, null)
+        if (activity.get() === host) activity.clear()
     }
 
     private val owner: Owner
@@ -437,11 +429,10 @@ private object DocumentImportChannel {
             result.error("unavailable", null, null)
             return
         }
-        if (pendingSelection != null) {
+        if (!picker.start(host.importHostId, result)) {
             result.error("busy", null, null)
             return
         }
-        pendingSelection = result
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
@@ -462,16 +453,13 @@ private object DocumentImportChannel {
         try {
             host.startActivityForResult(intent, PICK_DOCUMENTS)
         } catch (_: RuntimeException) {
-            pendingSelection = null
-            result.error("unavailable", null, null)
+            picker.take(host.importHostId)?.error("unavailable", null, null)
         }
     }
 
     @Synchronized
     fun onActivityResult(host: MainActivity, resultCode: Int, data: Intent?) {
-        if (activity.get() !== host) return
-        val result = pendingSelection ?: return
-        pendingSelection = null
+        val result = picker.take(host.importHostId) ?: return
         if (resultCode != Activity.RESULT_OK || data == null) {
             result.success(mapOf("cancelled" to true))
             return
@@ -495,6 +483,7 @@ private object DocumentImportChannel {
 }
 
 class MainActivity : FlutterActivity() {
+    internal val importHostId = UUID.randomUUID().toString()
 
     override fun provideFlutterEngine(context: Context): FlutterEngine =
         ShosaiFlutterEngine.get(context)
