@@ -78,6 +78,9 @@ private object DocumentImportManager {
     private val cleanupRunner = CompletionRunner(cleanupExecutor) { command ->
         mainHandler.post(command)
     }
+    private val resourceReleaser = ResourceReleaser(ownership, cleanupRunner) { resource ->
+        deleteOwnedSession(resource.file)
+    }
     private lateinit var resolver: ContentResolver
     private lateinit var cacheDir: File
     private var initialized = false
@@ -147,15 +150,7 @@ private object DocumentImportManager {
     }
 
     fun releaseAsync(token: String, result: (Boolean) -> Unit) {
-        val resource = ownership.requestRelease(token)
-        if (resource == null) {
-            mainHandler.post { result(true) }
-            return
-        }
-        cleanupRunner.run(
-            work = { removeResource(token, resource) },
-            complete = result,
-        )
+        resourceReleaser.release(token, result)
     }
 
     fun destroyOwner(owner: Owner) {

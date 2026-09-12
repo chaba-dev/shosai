@@ -26,10 +26,11 @@ class HostOperationTest {
         assertTrue(operation.start("old", "old-result"))
 
         assertEquals("old-result", operation.attach("new"))
+        assertTrue(operation.start("new", "new-result"))
         assertNull(operation.detach("old", recreating = false))
         assertNull(operation.take("old"))
-        assertTrue(operation.start("new", "new-result"))
         assertFalse(operation.start("new", "duplicate"))
         assertEquals("new-result", operation.take("new"))
+        assertNull(operation.take("new"))
     }
 }

@@ -9,33 +9,31 @@ import org.junit.Test
 
 class CompletionRunnerTest {
     @Test
-    fun `release debt precedes off-thread work and completes exactly once afterward`() {
+    fun `resource release publishes debt before off-thread deletion and completes once`() {
         val worker = QueuedExecutor()
         val completion = QueuedExecutor()
         val runner = CompletionRunner(worker, completion)
         val ownership = ResourceOwnership()
-        ownership.restore("token", File("resource"))
-        val resource = ownership.requestRelease("token")!!
+        ownership.register("token", File("resource"), "owner")
         var completions = 0
+        val releaser = ResourceReleaser(ownership, runner) { false }
 
-        runner.run(
-            work = {
-                assertEquals(1, ownership.pendingCount())
-                false
-            },
-            complete = { removed ->
-                assertTrue(!removed)
-                completions += 1
-            },
-        )
+        releaser.release("token") { removed ->
+            assertTrue(!removed)
+            completions += 1
+        }
 
         assertEquals(1, ownership.pendingCount())
         assertEquals(0, completions)
+        assertEquals(1, worker.size)
         worker.runNext()
         assertEquals(0, completions)
+        assertEquals(0, worker.size)
+        assertEquals(1, completion.size)
         completion.runNext()
         assertEquals(1, completions)
-        assertEquals(resource, ownership.requestRelease("token"))
+        assertEquals(0, completion.size)
+        assertEquals(1, ownership.pendingCount())
     }
 }
 
@@ -49,4 +47,7 @@ private class QueuedExecutor : Executor {
     fun runNext() {
         tasks.removeFirst().run()
     }
+
+    val size: Int
+        get() = tasks.size
 }
