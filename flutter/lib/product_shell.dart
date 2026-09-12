@@ -1535,7 +1535,9 @@ class LibraryController implements Listenable {
               settings: message.settings ?? _model.settings,
               error: null,
               failure: LibraryFailure.none,
-              managedFileDeletionPending: message.managedFileDeletionPending,
+              managedFileDeletionPending:
+                  _model.managedFileDeletionPending ||
+                  message.managedFileDeletionPending,
             ),
           );
           if (message.failure == LibraryFailure.import ||

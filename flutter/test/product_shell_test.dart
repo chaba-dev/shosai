@@ -156,6 +156,36 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('successful mutations preserve managed deletion notice', () async {
+    final bridge = _ControlledLibraryBridge(
+      books: [_book(1, 'Book')],
+      removalOutcome: const FlutterLibraryRemoveOutcome(
+        removed: true,
+        managedFileDeletionPending: true,
+      ),
+    );
+    bridge.importReport = FlutterImportReport(
+      imported: BigInt.one,
+      failed: BigInt.zero,
+      cancelled: false,
+      items: const [],
+    );
+    final controller = _libraryController(bridge);
+    controller.dispatch(const LibraryStarted());
+    await _waitUntil(() => controller.model.loaded && !controller.model.busy);
+
+    controller.dispatch(LibraryBookRemovalRequested(_book(1, 'Book')));
+    await _waitUntil(() => bridge.removeCalls == 1 && !controller.model.busy);
+    expect(controller.model.managedFileDeletionPending, isTrue);
+
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.importCalls == 1 && !controller.model.busy);
+    expect(controller.model.managedFileDeletionPending, isTrue);
+
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   testWidgets('library renders content, progress, filters, and opens a book', (
     tester,
   ) async {
@@ -1521,9 +1551,16 @@ class _DisposeSignalState extends State<_DisposeSignal> {
 }
 
 class _ControlledLibraryBridge implements FlutterBridge {
-  _ControlledLibraryBridge({this.books = const []});
+  _ControlledLibraryBridge({
+    this.books = const [],
+    this.removalOutcome = const FlutterLibraryRemoveOutcome(
+      removed: true,
+      managedFileDeletionPending: false,
+    ),
+  });
 
   final List<FlutterLibraryBook> books;
+  final FlutterLibraryRemoveOutcome removalOutcome;
   final Queue<Completer<FlutterLibraryPage>> pages = Queue();
   final List<String> queries = [];
   final List<int> offsets = [];
@@ -1635,10 +1672,7 @@ class _ControlledLibraryBridge implements FlutterBridge {
     required int bookId,
   }) async {
     removeCalls += 1;
-    return const FlutterLibraryRemoveOutcome(
-      removed: true,
-      managedFileDeletionPending: false,
-    );
+    return removalOutcome;
   }
 
   @override
