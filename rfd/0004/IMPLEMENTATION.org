@@ -197,19 +197,77 @@ rather than inferred away.
 :STATUS: IN-PROGRESS
 :END:
 
-- [ ] Build the responsive library, import/open, recent activity, empty/loading,
-  and error states against the shared core API.
-- [ ] Complete PDF, EPUB, and CBZ readers with search, bookmarks, annotations,
-  progress, themes, zoom, continuous/paginated modes, tabs or equivalent document
-  navigation, keyboard shortcuts, and touch interactions.
-- [ ] Integrate platform file/document providers and persist only the minimum
-  permitted device-local locator capability.
-- [ ] Add settings, localization, restoration, diagnostics redaction, and data
-  deletion/export behavior.
+Phase 3 is split into independently reviewable vertical sub-milestones.  A
+sub-milestone may ship without implying parity for the remaining reader,
+platform, data, or retirement work.
+
+** M3.1 — Library and import vertical slice
+:PROPERTIES:
+:STATUS: DONE
+:END:
+
+- [X] Build responsive library, import/open, recent activity, empty/loading, and
+  error states against the shared core API.
+- [X] Support referenced and private managed imports, bounded archive preflight,
+  cover loading, cancellation, and partial-result reporting.
+- [X] Preserve private-copy ownership through removal and disclose durable,
+  deferred managed-file cleanup without making metadata removal ambiguous.
+
+*Exit*: the Flutter library can discover, import, display, open, and remove
+books through coarse core APIs with bounded resource ownership and targeted
+regressions for failure and cancellation paths.
+
+** M3.2 — Reader parity by format
+:PROPERTIES:
+:STATUS: IN-PROGRESS
+:END:
+
+- [X] Establish replacement-safe reader sessions, durable write draining,
+  responsive tool presentation, and reachable PDF navigation geometry.
+- [ ] Complete PDF reader parity for search, bookmarks, annotations, progress,
+  themes, zoom, continuous/paginated modes, document navigation, keyboard
+  shortcuts, and touch interactions.
+- [ ] Complete EPUB reader parity for the same applicable feature matrix.
+- [ ] Complete CBZ reader parity for the same applicable feature matrix.
+
+*Exit*: each format passes its own reader behavior and regression matrix; work
+on one format does not block review of another.
+
+** M3.3 — Platform document-provider lifecycle
+:PROPERTIES:
+:STATUS: IN-PROGRESS
+:END:
+
+- [X] Complete the Android picker/provider lifecycle, including recreation,
+  bounded archive admission, retained capability leases, and deferred cleanup.
+- [ ] Validate the equivalent minimum device-local locator and revocation
+  behavior on each remaining claimed desktop and mobile target.
+
+*Exit*: every claimed target has an explicit provider/capability lifecycle and
+does not infer support from Android or ordinary filesystem paths.
+
+** M3.4 — Settings, restoration, localization, diagnostics, and user data
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
+- [ ] Complete application settings and process restoration outside the reader
+  foundations delivered in M3.2.
+- [ ] Add localization and locale-sensitive presentation.
+- [ ] Add diagnostics redaction and user-data deletion/export behavior.
+
+*Exit*: application-owned configuration and data lifecycle behavior is complete
+and covered independently of reader-format parity.
+
+** M3.5 — Accessibility, visual baselines, and Iced retirement
+:PROPERTIES:
+:STATUS: TODO
+:END:
+
 - [ ] Add golden tests for controlled renderer/font configurations and semantic
   widget/integration tests for responsive states and accessibility.
 - [ ] Compare required behavior against the Iced reference and delete each old
-  implementation only after its replacement passes targeted tests.
+  implementation only after its Flutter replacement passes targeted tests.
 
 *Exit*: Flutter satisfies the agreed desktop feature and regression matrix; the
 Iced binary is no longer needed to operate or test the product.
