@@ -144,4 +144,18 @@ void main() {
       expect(channel.calls.last.$1, 'retryCleanup');
     },
   );
+
+  test('missing native plugin cannot hide Dart-owned cleanup debt', () async {
+    final channel = FakeChannel()
+      ..replies['release'] = MissingPluginException()
+      ..replies['retryCleanup'] = MissingPluginException();
+    final adapter = AndroidDocumentImportAdapter(channel: channel);
+    await expectLater(
+      adapter.release('release-1'),
+      throwsA(isA<MissingPluginException>()),
+    );
+
+    expect(await adapter.retryCleanup(), isTrue);
+    expect(adapter.hasPendingReleases, isTrue);
+  });
 }

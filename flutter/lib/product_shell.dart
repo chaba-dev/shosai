@@ -391,8 +391,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       if (cancelled) break;
     }
     await _discardProviderDocuments(documents);
-    final cleanupPending = await _androidImport.retryCleanup();
-    controller.dispatch(_LibraryCleanupStatusChanged(cleanupPending));
+    controller.dispatch(const LibraryCleanupRetryRequested());
     return FlutterImportReport(
       imported: BigInt.from(imported),
       failed: BigInt.from(failed),
@@ -1319,9 +1318,9 @@ final class _LibraryCoverEffectFinished extends LibraryMessage {
 }
 
 final class _LibraryCleanupStatusChanged extends LibraryMessage {
-  const _LibraryCleanupStatusChanged(this.pending, [this.revision]);
+  const _LibraryCleanupStatusChanged(this.pending, this.revision);
   final bool pending;
-  final int? revision;
+  final int revision;
 }
 
 const _coverCacheByteLimit = 16 * 1024 * 1024;
@@ -1557,10 +1556,7 @@ class LibraryController implements Listenable {
         _disposeBridgeIfIdle();
       case _LibraryCleanupStatusChanged():
         if (_closing) break;
-        if (message.revision == null) {
-          _cleanupRevision += 1;
-          _emit(_model.copyWith(providerCleanupPending: message.pending));
-        } else if (message.revision == _cleanupRevision) {
+        if (message.revision == _cleanupRevision) {
           _emit(_model.copyWith(providerCleanupPending: message.pending));
         }
     }

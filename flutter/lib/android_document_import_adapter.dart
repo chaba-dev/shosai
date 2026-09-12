@@ -198,7 +198,7 @@ final class AndroidDocumentImportAdapter {
     } on PlatformException catch (_) {
       return true;
     } on MissingPluginException catch (_) {
-      return false;
+      return hasPendingReleases;
     }
   }
 

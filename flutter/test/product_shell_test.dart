@@ -125,7 +125,7 @@ void main() {
   });
 
   test('library transitions preserve pending provider cleanup', () async {
-    final bridge = _ControlledLibraryBridge();
+    final bridge = _ControlledLibraryBridge(books: [_book(1, 'Initial book')]);
     final controller = LibraryController(
       bridge: bridge,
       confirmRemoval: (_) async => true,
@@ -140,10 +140,18 @@ void main() {
       () => controller.model.loaded && controller.model.providerCleanupPending,
     );
 
+    final refreshed = Completer<FlutterLibraryPage>();
+    bridge.pages.add(refreshed);
     controller.dispatch(const LibraryQueryChanged('new query'));
-    await _waitUntil(() => controller.model.loaded);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _waitUntil(() => bridge.queries.last == 'new query');
+    refreshed.complete(
+      FlutterLibraryPage(books: [_book(2, 'New result')], hasMore: false),
+    );
+    await _waitUntil(() => !controller.model.busy);
 
     expect(controller.model.providerCleanupPending, isTrue);
+    expect(controller.model.books.single.title, 'New result');
     controller.dispose();
     await bridge.disposed.future;
   });
