@@ -422,10 +422,10 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                         image: widget.image,
                         surface: widget.surface,
                         backgroundColor: pageColors(
-                          Theme.of(context).colorScheme,
+                          ShadTheme.of(context).colorScheme,
                         ).background,
                         foregroundColor: pageColors(
-                          Theme.of(context).colorScheme,
+                          ShadTheme.of(context).colorScheme,
                         ).foreground,
                         recolorImage:
                             widget.model.document?.format ==
@@ -440,10 +440,10 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
                     image: widget.image,
                     surface: widget.surface,
                     backgroundColor: pageColors(
-                      Theme.of(context).colorScheme,
+                      ShadTheme.of(context).colorScheme,
                     ).background,
                     foregroundColor: pageColors(
-                      Theme.of(context).colorScheme,
+                      ShadTheme.of(context).colorScheme,
                     ).foreground,
                     recolorImage:
                         widget.model.document?.format == FlutterBookFormat.epub,

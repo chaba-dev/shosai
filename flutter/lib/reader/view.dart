@@ -134,14 +134,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     required String title,
   }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
-    final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
     final route = ShadDialogRoute<String>(
-      pageBuilder: (context) => Theme(
-        data: readerTheme,
-        child: ShadTheme(
-          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
-          child: _NoteDialog(initialValue: initialValue, title: title),
-        ),
+      pageBuilder: (context) => ShadTheme(
+        data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+        child: _NoteDialog(initialValue: initialValue, title: title),
       ),
       barrierDismissible: true,
       barrierLabel: '',
@@ -168,14 +164,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     AnnotationAssociationPage page,
   ) async {
     final navigator = Navigator.of(context, rootNavigator: true);
-    final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
     final route = ShadDialogRoute<AnnotationAssociationChoice>(
-      pageBuilder: (context) => Theme(
-        data: readerTheme,
-        child: ShadTheme(
-          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
-          child: _AnnotationAssociationDialog(page: page),
-        ),
+      pageBuilder: (context) => ShadTheme(
+        data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+        child: _AnnotationAssociationDialog(page: page),
       ),
       barrierDismissible: true,
       barrierLabel: '',
@@ -264,85 +256,63 @@ class _ReaderScreenState extends State<ReaderScreen>
         !model.busy &&
         model.annotationOperations.isEmpty &&
         !model.relayoutBusy;
-    final theme = _readerTheme(context, widget.initialSettings?.theme);
-    return Theme(
-      data: theme,
-      child: ShadTheme(
-        data: shosaiReaderShadTheme(widget.initialSettings?.theme),
-        child: Scaffold(
-          appBar: AppBar(
-            title: Text(
-              compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
-            ),
-            actions: model.document != null
-                ? [
-                    ShadIconAction(
-                      tooltip: 'Search and bookmarks',
-                      onPressed: () =>
-                          _controller.dispatch(const ReaderToolsToggled()),
-                      icon: const Icon(LucideIcons.search),
-                    ),
-                    if (model.document!.format != FlutterBookFormat.cbz)
-                      ShadIconAction(
-                        tooltip: model.annotationsReady
-                            ? 'Associate highlights from an earlier version…'
-                            : 'Retry loading highlights',
-                        onPressed: associationEnabled
-                            ? () => _controller.dispatch(
-                                model.annotationsReady
-                                    ? const ReaderAnnotationAssociationRequested()
-                                    : const ReaderAnnotationReloadRequested(),
-                              )
-                            : null,
-                        icon: Icon(
-                          model.annotationsReady
-                              ? LucideIcons.link
-                              : LucideIcons.refreshCw,
-                        ),
-                      ),
-                  ]
-                : null,
+    final shadTheme = shosaiReaderShadTheme(widget.initialSettings?.theme);
+    return ShadTheme(
+      data: shadTheme,
+      child: Scaffold(
+        backgroundColor: shadTheme.colorScheme.background,
+        appBar: AppBar(
+          backgroundColor: shadTheme.colorScheme.background,
+          foregroundColor: shadTheme.colorScheme.foreground,
+          title: Text(
+            compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
           ),
-          body: SafeArea(
-            child: _ResponsiveReaderBody(
-              model: model,
-              settings: widget.initialSettings,
-              path: _path.value,
-              pathFieldKey: _pathFieldKey,
-              contentKey: _contentKey,
-              openFocus: _openFocus,
-              open: _open,
-              dispatch: _controller.dispatch,
-              readerFocus: _readerFocus,
-              actionFocus: _actionFocus,
-            ),
+          actions: model.document != null
+              ? [
+                  ShadIconAction(
+                    tooltip: 'Search and bookmarks',
+                    onPressed: () =>
+                        _controller.dispatch(const ReaderToolsToggled()),
+                    icon: const Icon(LucideIcons.search),
+                  ),
+                  if (model.document!.format != FlutterBookFormat.cbz)
+                    ShadIconAction(
+                      tooltip: model.annotationsReady
+                          ? 'Associate highlights from an earlier version…'
+                          : 'Retry loading highlights',
+                      onPressed: associationEnabled
+                          ? () => _controller.dispatch(
+                              model.annotationsReady
+                                  ? const ReaderAnnotationAssociationRequested()
+                                  : const ReaderAnnotationReloadRequested(),
+                            )
+                          : null,
+                      icon: Icon(
+                        model.annotationsReady
+                            ? LucideIcons.link
+                            : LucideIcons.refreshCw,
+                      ),
+                    ),
+                ]
+              : null,
+        ),
+        body: SafeArea(
+          child: _ResponsiveReaderBody(
+            model: model,
+            settings: widget.initialSettings,
+            path: _path.value,
+            pathFieldKey: _pathFieldKey,
+            contentKey: _contentKey,
+            openFocus: _openFocus,
+            open: _open,
+            dispatch: _controller.dispatch,
+            readerFocus: _readerFocus,
+            actionFocus: _actionFocus,
           ),
         ),
       ),
     );
   }
-}
-
-ThemeData _readerTheme(BuildContext context, String? theme) {
-  final parent = Theme.of(context);
-  final brightness = theme == 'dark' ? Brightness.dark : Brightness.light;
-  final seed = theme == 'sepia'
-      ? const Color(0xff8a6338)
-      : parent.colorScheme.primary;
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: seed,
-    brightness: brightness,
-  );
-  return ThemeData(
-    brightness: brightness,
-    colorScheme: colorScheme,
-    useMaterial3: parent.useMaterial3,
-    fontFamily: parent.textTheme.bodyMedium?.fontFamily,
-    fontFamilyFallback: parent.textTheme.bodyMedium?.fontFamilyFallback,
-    scaffoldBackgroundColor: theme == 'sepia'
-        ? const Color(0xfffff4d6)
-        : colorScheme.surface,
-  );
 }
 
 enum _ReaderComposition { compact, medium, expanded }
