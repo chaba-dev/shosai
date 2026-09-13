@@ -150,6 +150,7 @@ fn import_item(path_key: String, book: Book) -> ImportItemDto {
         path_key,
         book: Some(book),
         error: None,
+        warning: None,
     }
 }
 
@@ -164,6 +165,7 @@ pub struct ImportItemDto {
     pub path_key: String,
     pub book: Option<LibraryBookDto>,
     pub error: Option<String>,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -644,6 +646,10 @@ pub struct Bridge {
     #[cfg(test)]
     state_store_initialization_gate: Option<Arc<TestPhaseGate>>,
     #[cfg(test)]
+    selected_import_completion_gate: Option<Arc<TestPhaseGate>>,
+    #[cfg(test)]
+    fail_selected_import_readback: bool,
+    #[cfg(test)]
     annotation_test_hooks: Option<Arc<AnnotationTestHooks>>,
 }
 
@@ -721,6 +727,10 @@ impl Bridge {
             product_read_cancellation_gate: None,
             #[cfg(test)]
             state_store_initialization_gate: None,
+            #[cfg(test)]
+            selected_import_completion_gate: None,
+            #[cfg(test)]
+            fail_selected_import_readback: false,
             #[cfg(test)]
             annotation_test_hooks: None,
         }
@@ -1022,6 +1032,25 @@ impl Bridge {
         cancellation: Cancellation,
     ) -> Result<Vec<ImportItemDto>, BridgeError> {
         check_cancelled(&cancellation)?;
+        self.import_paths_report(path_keys, managed, cancellation)
+            .await
+            .map(|report| report.items)
+    }
+
+    pub async fn import_paths_report(
+        &self,
+        path_keys: Vec<String>,
+        managed: bool,
+        cancellation: Cancellation,
+    ) -> Result<ImportReportDto, BridgeError> {
+        if cancellation.is_cancelled() {
+            return Ok(ImportReportDto {
+                imported: 0,
+                failed: 0,
+                cancelled: true,
+                items: Vec::new(),
+            });
+        }
         let request_slot = try_acquire_slot(
             Arc::clone(&self.admission.request_slots),
             BridgeError::RequestLimit,
@@ -1082,6 +1111,7 @@ impl Bridge {
                         path_key: crate::path_key(failure.path()),
                         book: None,
                         error: Some(failure.error().to_owned()),
+                        warning: None,
                     })
                     .collect::<Vec<_>>();
                 for candidate in discovery.candidates {
@@ -1112,6 +1142,7 @@ impl Bridge {
                                     path_key: candidate_path_key,
                                     book: None,
                                     error: Some(error.to_string()),
+                                    warning: None,
                                 });
                             }
                         }
@@ -1177,7 +1208,7 @@ impl Bridge {
         path_keys: Vec<String>,
         managed: bool,
         cancellation: Cancellation,
-    ) -> Result<Vec<ImportItemDto>, BridgeError> {
+    ) -> Result<ImportReportDto, BridgeError> {
         if path_keys.len() > 256 {
             return Err(BridgeError::InvalidRequest(
                 "at most 256 selected paths may be imported".into(),
@@ -1198,13 +1229,14 @@ impl Bridge {
             .collect::<Result<Vec<_>, _>>()?;
         let library = self.library().await?;
         let mut items = Vec::with_capacity(path_keys.len());
+        let mut imported = 0;
+        let mut failed = 0;
+        let mut cancelled = false;
         for (path_key, path) in path_keys.into_iter().zip(paths) {
             // Once an item has committed, preserve and return that definitive outcome instead of
             // replacing the whole batch with an ambiguous cancellation error.
             if cancellation.is_cancelled() {
-                if items.is_empty() {
-                    return Err(BridgeError::Cancelled);
-                }
+                cancelled = true;
                 break;
             }
             let import_cancellation = ImportCancellation::default();
@@ -1244,34 +1276,61 @@ impl Bridge {
                     importing.await
                 }
             };
-            let result: anyhow::Result<Book> = match completion {
+            let item = match completion {
                 ImportCompletion::Cancelled => {
-                    if items.is_empty() {
-                        return Err(BridgeError::Cancelled);
-                    }
+                    cancelled = true;
                     break;
                 }
-                ImportCompletion::Completed(Ok(imported)) => {
-                    match library.get(imported.book_id()).await {
-                        Ok(Some(book)) => Ok(book),
-                        Ok(None) => Err(anyhow::anyhow!("book not found after import")),
-                        Err(error) => Err(error),
+                ImportCompletion::Completed(Ok(imported_book)) => {
+                    imported += 1;
+                    #[cfg(test)]
+                    if let Some(gate) = &self.selected_import_completion_gate {
+                        gate.pause().await;
+                    }
+
+                    #[cfg(test)]
+                    let readback = if self.fail_selected_import_readback {
+                        Err(anyhow::anyhow!("injected post-import read failure"))
+                    } else {
+                        library.get(imported_book.book_id()).await
+                    };
+                    #[cfg(not(test))]
+                    let readback = library.get(imported_book.book_id()).await;
+
+                    match readback {
+                        Ok(Some(book)) => import_item(path_key, book),
+                        Ok(None) => ImportItemDto {
+                            path_key,
+                            book: None,
+                            error: None,
+                            warning: Some("book metadata unavailable after import".into()),
+                        },
+                        Err(error) => ImportItemDto {
+                            path_key,
+                            book: None,
+                            error: None,
+                            warning: Some(error.to_string()),
+                        },
                     }
                 }
                 ImportCompletion::Completed(Err(failure)) => {
-                    Err(anyhow::anyhow!(failure.error().to_owned()))
+                    failed += 1;
+                    ImportItemDto {
+                        path_key,
+                        book: None,
+                        error: Some(failure.error().to_owned()),
+                        warning: None,
+                    }
                 }
             };
-            items.push(match result {
-                Ok(book) => import_item(path_key, book),
-                Err(error) => ImportItemDto {
-                    path_key,
-                    book: None,
-                    error: Some(error.to_string()),
-                },
-            });
+            items.push(item);
         }
-        Ok(items)
+        Ok(ImportReportDto {
+            imported,
+            failed,
+            cancelled,
+            items,
+        })
     }
 
     pub async fn open_library_book(
@@ -8154,6 +8213,107 @@ mod tests {
         let stored = bridge.list_bookmarks(book_id).await.unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].note.as_deref(), Some("draft"));
+    }
+
+    #[tokio::test]
+    async fn selected_path_import_reports_cancellation_definitively() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_database_path(directory.path().join("missing/state.sqlite"));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let cancellation = Cancellation::new();
+        cancellation.cancel();
+
+        let report = bridge
+            .import_paths_report(vec![crate::path_key(source)], false, cancellation)
+            .await
+            .unwrap();
+
+        assert!(report.cancelled);
+        assert_eq!(report.imported, 0);
+        assert_eq!(report.failed, 0);
+        assert!(report.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn selected_path_import_reports_committed_item_before_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        let gate = Arc::new(TestPhaseGate::default());
+        bridge.selected_import_completion_gate = Some(Arc::clone(&gate));
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+        let cancellation = Cancellation::new();
+        let importing = tokio::spawn({
+            let bridge = bridge.clone();
+            let cancellation = cancellation.clone();
+            let paths = vec![crate::path_key(source), crate::path_key(source)];
+            async move {
+                bridge
+                    .import_paths_report(paths, false, cancellation)
+                    .await
+                    .unwrap()
+            }
+        });
+        gate.wait_until_entered().await;
+        cancellation.cancel();
+        gate.release();
+
+        let report = importing.await.unwrap();
+        assert!(report.cancelled);
+        assert_eq!(report.imported, 1);
+        assert_eq!(report.failed, 0);
+        assert_eq!(report.items.len(), 1);
+        assert!(report.items[0].book.is_some());
+        assert_eq!(
+            bridge
+                .library()
+                .await
+                .unwrap()
+                .list_all()
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_path_import_counts_commit_when_metadata_readback_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bridge = Bridge::with_database_path(directory.path().join("state.sqlite"));
+        bridge.fail_selected_import_readback = true;
+        let source = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/sample.pdf"
+        ));
+
+        let report = bridge
+            .import_paths_report(vec![crate::path_key(source)], false, Cancellation::new())
+            .await
+            .unwrap();
+
+        assert_eq!(report.imported, 1);
+        assert_eq!(report.failed, 0);
+        assert!(!report.cancelled);
+        assert!(report.items[0].book.is_none());
+        assert!(report.items[0].error.is_none());
+        assert!(report.items[0].warning.is_some());
+        assert_eq!(
+            bridge
+                .library()
+                .await
+                .unwrap()
+                .list_all()
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

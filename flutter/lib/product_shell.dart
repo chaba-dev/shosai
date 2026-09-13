@@ -30,7 +30,9 @@ typedef LibraryReaderSaveDrainer = Future<void> Function(int bookId);
 typedef LibrarySettingsEditor =
     Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial);
 typedef LibraryImportAdapterCanceller = void Function();
+typedef LibraryCoverEvicter = void Function(Uint8List bytes);
 void _ignoreImportAdapterCancellation() {}
+void _ignoreCoverEviction(Uint8List _) {}
 
 final class LibraryImportSelection {
   const LibraryImportSelection({
@@ -81,6 +83,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     drainReaderSaves: ReaderController.drainBookReadingStateWrites,
     editSettings: _editSettings,
     cancelImportAdapter: _cancelImportAdapter,
+    evictCover: (bytes) {
+      final provider = MemoryImage(bytes);
+      imageCache.evict(provider, includeLive: true);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => imageCache.evict(provider, includeLive: true),
+      );
+    },
   )..addListener(_changed);
 
   void _changed() {
@@ -323,21 +332,23 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         case AcquiredProviderDocument():
           try {
             try {
-              final importedItems = await bridge.importPaths(
+              final importedReport = await bridge.importPaths(
                 pathKeys: [acquisition.path],
                 managed: true,
                 cancellationId: cancellation,
               );
-              for (final item in importedItems) {
+              imported += importedReport.imported.toInt();
+              failed += importedReport.failed.toInt();
+              for (final item in importedReport.items) {
                 final reviewedItem = FlutterImportItem(
                   pathKey: document.name,
                   book: item.book,
                   error: item.error,
+                  warning: item.warning,
                 );
                 items.add(reviewedItem);
-                if (reviewedItem.book != null) imported += 1;
-                if (reviewedItem.error != null) failed += 1;
               }
+              if (importedReport.cancelled) cancelled = true;
             } on FlutterBridgeError catch (error) {
               if (error.kind == FlutterBridgeErrorKind.cancelled) {
                 cancelled = true;
@@ -767,7 +778,11 @@ class _LibraryCollection extends StatelessWidget {
                     builder: (context, cardConstraints) => Row(
                       children: [
                         if (cardConstraints.maxWidth >= 150) ...[
-                          _BookCover(book: book, loadCover: loadCover),
+                          _BookCover(
+                            book: book,
+                            cover: model.covers[book.bookId],
+                            loadCover: loadCover,
+                          ),
                           const SizedBox(width: 14),
                         ],
                         Expanded(
@@ -827,22 +842,27 @@ class _LibraryCollection extends StatelessWidget {
 }
 
 class _BookCover extends StatelessWidget {
-  const _BookCover({required this.book, required this.loadCover});
+  const _BookCover({
+    required this.book,
+    required this.cover,
+    required this.loadCover,
+  });
 
   final FlutterLibraryBook book;
+  final Uint8List? cover;
   final ValueChanged<int> loadCover;
 
   @override
   Widget build(BuildContext context) {
     final fallback = Icon(_formatIcon(book.format), size: 42);
-    final cover = book.cover;
-    if (cover == null) {
+    final bytes = cover;
+    if (bytes == null) {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => loadCover(book.bookId),
       );
       return fallback;
     }
-    if (cover.isEmpty) return fallback;
+    if (bytes.isEmpty) return fallback;
     return Semantics(
       image: true,
       label: 'Cover of ${book.title}',
@@ -850,7 +870,7 @@ class _BookCover extends StatelessWidget {
         width: 56,
         height: 80,
         child: Image.memory(
-          cover,
+          bytes,
           fit: BoxFit.cover,
           gaplessPlayback: true,
           errorBuilder: (_, _, _) => Center(child: fallback),
@@ -1015,6 +1035,7 @@ Future<FlutterReaderSettings?> _settingsDialog(
 final class LibraryModel {
   const LibraryModel({
     this.books = const [],
+    this.covers = const {},
     this.query = '',
     this.format,
     this.settings,
@@ -1027,6 +1048,7 @@ final class LibraryModel {
   });
 
   final List<FlutterLibraryBook> books;
+  final Map<int, Uint8List> covers;
   final String query;
   final FlutterBookFormat? format;
   final FlutterReaderSettings? settings;
@@ -1040,6 +1062,7 @@ final class LibraryModel {
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
+    Map<int, Uint8List>? covers,
     String? query,
     Object? format = _same,
     Object? settings = _same,
@@ -1051,6 +1074,7 @@ final class LibraryModel {
     LibraryFailure? failure,
   }) => LibraryModel(
     books: books ?? this.books,
+    covers: covers ?? this.covers,
     query: query ?? this.query,
     format: identical(format, _same)
         ? this.format
@@ -1194,6 +1218,12 @@ final class _LibraryCoverLoaded extends LibraryMessage {
   final BigInt cancellation;
 }
 
+final class _LibraryCoverFailed extends LibraryMessage {
+  const _LibraryCoverFailed(this.bookId, this.cancellation);
+  final int bookId;
+  final BigInt cancellation;
+}
+
 final class _LibraryCoverEffectFinished extends LibraryMessage {
   const _LibraryCoverEffectFinished(this.bookId);
   final int bookId;
@@ -1213,13 +1243,15 @@ class LibraryController implements Listenable {
     required LibrarySettingsEditor editSettings,
     LibraryImportAdapterCanceller cancelImportAdapter =
         _ignoreImportAdapterCancellation,
+    LibraryCoverEvicter evictCover = _ignoreCoverEviction,
   }) : _bridge = bridge,
        _confirmRemoval = confirmRemoval,
        _pickImport = pickImport,
        _openBook = openBook,
        _drainReaderSaves = drainReaderSaves,
        _editSettings = editSettings,
-       _cancelImportAdapter = cancelImportAdapter;
+       _cancelImportAdapter = cancelImportAdapter,
+       _evictCover = evictCover;
 
   final FlutterBridge _bridge;
   final LibraryRemovalConfirmer _confirmRemoval;
@@ -1228,6 +1260,7 @@ class LibraryController implements Listenable {
   final LibraryReaderSaveDrainer _drainReaderSaves;
   final LibrarySettingsEditor _editSettings;
   final LibraryImportAdapterCanceller _cancelImportAdapter;
+  final LibraryCoverEvicter _evictCover;
   LibraryModel _model = const LibraryModel();
   final Set<VoidCallback> _listeners = {};
   final Set<BigInt> _cancellations = {};
@@ -1235,6 +1268,8 @@ class LibraryController implements Listenable {
   final Set<BigInt> _loadCancellations = {};
   final Map<int, BigInt> _coverRequests = {};
   final Map<int, Uint8List> _coverCache = {};
+  final Set<int> _coverFailures = {};
+  final Set<int> _coverAttempts = {};
   int _coverCacheBytes = 0;
   Timer? _searchTimer;
   int _loadRevision = 0;
@@ -1260,11 +1295,16 @@ class LibraryController implements Listenable {
         message is! _LibraryReaderClosed &&
         message is! _LibraryEffectFinished &&
         message is! _LibraryCoverLoaded &&
+        message is! _LibraryCoverFailed &&
         message is! _LibraryCoverEffectFinished) {
       return;
     }
     switch (message) {
-      case LibraryStarted() || LibraryRefreshed():
+      case LibraryStarted():
+        _load();
+      case LibraryRefreshed():
+        _coverFailures.clear();
+        _coverAttempts.clear();
         _load();
       case LibraryMoreRequested():
         if (_model.hasMore &&
@@ -1329,9 +1369,9 @@ class LibraryController implements Listenable {
                 message.append
                     ? [
                         ..._model.books,
-                        ...message.page.books.map(_withCachedCover),
+                        ...message.page.books.map(_withoutCover),
                       ]
-                    : message.page.books.map(_withCachedCover).toList(),
+                    : message.page.books.map(_withoutCover).toList(),
               ),
               settings: message.settings ?? _model.settings,
               loaded: true,
@@ -1382,6 +1422,7 @@ class LibraryController implements Listenable {
       case _LibraryCoverLoaded():
         _releaseCancellation(message.cancellation);
         if (!_closing) {
+          _coverFailures.remove(message.bookId);
           final cover = message.cover ?? Uint8List(0);
           final previous = _coverCache.remove(message.bookId);
           _coverCacheBytes -= previous?.length ?? 0;
@@ -1393,19 +1434,13 @@ class LibraryController implements Listenable {
             final oldest = _coverCache.keys.first;
             final removed = _coverCache.remove(oldest)!;
             _coverCacheBytes -= removed.length;
+            _evictCover(removed);
           }
-          _emit(
-            _model.copyWith(
-              books: _model.books
-                  .map(
-                    (book) => book.bookId == message.bookId
-                        ? _withCover(book, cover)
-                        : book,
-                  )
-                  .toList(growable: false),
-            ),
-          );
+          _emit(_model.copyWith(covers: Map.unmodifiable(_coverCache)));
         }
+      case _LibraryCoverFailed():
+        _releaseCancellation(message.cancellation);
+        _coverFailures.add(message.bookId);
       case _LibraryCoverEffectFinished():
         _coverRequests.remove(message.bookId);
         _activeEffects -= 1;
@@ -1424,9 +1459,12 @@ class LibraryController implements Listenable {
     if (_closing ||
         _coverRequests.containsKey(bookId) ||
         _coverCache.containsKey(bookId) ||
+        _coverFailures.contains(bookId) ||
+        _coverAttempts.contains(bookId) ||
         _coverRequests.length >= _coverLoadLimit) {
       return;
     }
+    _coverAttempts.add(bookId);
     late final BigInt cancellation;
     try {
       cancellation = _bridge.createCancellation();
@@ -1444,19 +1482,14 @@ class LibraryController implements Listenable {
         );
         dispatch(_LibraryCoverLoaded(bookId, cover, cancellation));
       } catch (_) {
-        _releaseCancellation(cancellation);
+        dispatch(_LibraryCoverFailed(bookId, cancellation));
       } finally {
         dispatch(_LibraryCoverEffectFinished(bookId));
       }
     }());
   }
 
-  FlutterLibraryBook _withCachedCover(FlutterLibraryBook book) {
-    final cover = _coverCache[book.bookId];
-    return cover == null ? book : _withCover(book, cover);
-  }
-
-  FlutterLibraryBook _withCover(FlutterLibraryBook book, Uint8List cover) =>
+  FlutterLibraryBook _withoutCover(FlutterLibraryBook book) =>
       FlutterLibraryBook(
         bookId: book.bookId,
         title: book.title,
@@ -1464,7 +1497,7 @@ class LibraryController implements Listenable {
         format: book.format,
         pathKey: book.pathKey,
         managed: book.managed,
-        cover: cover,
+        cover: null,
         progress: book.progress,
         dateAdded: book.dateAdded,
         lastRead: book.lastRead,
@@ -1544,14 +1577,7 @@ class LibraryController implements Listenable {
           final report = await runner(_bridge, cancellation);
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          if (report.cancelled) {
-            terminalStatus = report.imported == BigInt.zero
-                ? 'Import cancelled.'
-                : 'Import cancelled after ${report.imported} books.';
-          } else if (report.failed > BigInt.zero) {
-            terminalStatus =
-                'Imported ${report.imported} books; ${report.failed} failed.';
-          }
+          terminalStatus = _importReportStatus(report);
         } else if (selection.directory) {
           final report = await _bridge.importDirectory(
             pathKey: selection.paths.single,
@@ -1560,21 +1586,16 @@ class LibraryController implements Listenable {
           );
           items = report.items;
           refresh = report.imported > BigInt.zero;
-          if (report.cancelled) {
-            terminalStatus = report.imported == BigInt.zero
-                ? 'Import cancelled.'
-                : 'Import cancelled after ${report.imported} books.';
-          } else if (report.failed > BigInt.zero) {
-            terminalStatus =
-                'Imported ${report.imported} books; ${report.failed} failed.';
-          }
+          terminalStatus = _importReportStatus(report);
         } else {
-          items = await _bridge.importPaths(
+          final report = await _bridge.importPaths(
             pathKeys: selection.paths,
             managed: selection.managed,
             cancellationId: cancellation,
           );
-          refresh = items.any((item) => item.book != null);
+          items = report.items;
+          refresh = report.imported > BigInt.zero;
+          terminalStatus = _importReportStatus(report);
         }
         final failure = items.where((item) => item.error != null).firstOrNull;
         dispatch(
@@ -1700,6 +1721,34 @@ class LibraryController implements Listenable {
     return 'The selected book could not be imported.';
   }
 
+  String? _importReportStatus(FlutterImportReport report) {
+    final failure = report.items
+        .where((item) => item.error != null)
+        .firstOrNull;
+    final warning = report.items
+        .where((item) => item.warning != null)
+        .firstOrNull;
+    if (!report.cancelled &&
+        report.failed == BigInt.zero &&
+        failure == null &&
+        warning == null) {
+      return null;
+    }
+    final parts = <String>[];
+    if (report.cancelled) parts.add('Import cancelled.');
+    if (report.imported > BigInt.zero) {
+      parts.add('Imported ${_bookCount(report.imported)}.');
+    }
+    if (report.failed > BigInt.zero) {
+      parts.add('${report.failed} failed.');
+      if (failure != null) parts.add(_safeImportError(failure.error!));
+    }
+    if (warning != null) {
+      parts.add('Some imported book details could not be loaded.');
+    }
+    return parts.join(' ');
+  }
+
   void _releaseCancellation(BigInt cancellation) {
     if (_cancellations.remove(cancellation)) {
       _foregroundCancellations.remove(cancellation);
@@ -1724,6 +1773,12 @@ class LibraryController implements Listenable {
   void dispose() {
     if (_closing) return;
     _closing = true;
+    for (final cover in _coverCache.values) {
+      _evictCover(cover);
+    }
+    _coverCache.clear();
+    _coverCacheBytes = 0;
+    _model = _model.copyWith(covers: const {});
     _adapterRevision += 1;
     _cancelImportAdapter();
     _searchTimer?.cancel();
@@ -1741,3 +1796,6 @@ class LibraryController implements Listenable {
     }
   }
 }
+
+String _bookCount(BigInt count) =>
+    '$count book${count == BigInt.one ? '' : 's'}';

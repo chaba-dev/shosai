@@ -3,6 +3,7 @@
 //! Uses the same SQLite database as the reading state store.
 
 use std::collections::{HashMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -327,6 +328,67 @@ impl BookFormat {
             _ => None,
         }
     }
+}
+
+fn book_format_for_path(path: &Path) -> Result<Option<BookFormat>> {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if let Some(format) = BookFormat::from_extension(&extension) {
+        return Ok(Some(format));
+    }
+
+    let file = std::fs::File::open(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    let size = file.metadata()?.len();
+    let max_input_bytes = EpubLimits::default()
+        .max_input_bytes
+        .max(CbzLimits::default().max_archive_bytes)
+        .max(MAX_PDF_INPUT_BYTES);
+    if size > max_input_bytes {
+        bail!("book exceeds its input byte limit");
+    }
+    let mut signature = [0_u8; 5];
+    let read = (&file).read(&mut signature)?;
+    if read == signature.len() && &signature == b"%PDF-" {
+        return Ok(Some(BookFormat::Pdf));
+    }
+    if read < 4 || &signature[..4] != b"PK\x03\x04" {
+        return Ok(None);
+    }
+
+    let mut archive = zip::ZipArchive::new(file).context("selected ZIP archive is invalid")?;
+    let max_entries = EpubLimits::default()
+        .max_archive_entries
+        .max(CbzLimits::default().max_entries);
+    if archive.len() > max_entries {
+        bail!("book archive has too many entries");
+    }
+    if let Ok(mimetype) = archive.by_name("mimetype") {
+        let mut bytes = Vec::new();
+        mimetype
+            .take(21)
+            .read_to_end(&mut bytes)
+            .context("failed to inspect EPUB media type")?;
+        if bytes == b"application/epub+zip" {
+            return Ok(Some(BookFormat::Epub));
+        }
+    }
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .context("failed to inspect ZIP archive entry")?;
+        let extension = Path::new(entry.name())
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
+        if extension.as_deref().is_some_and(|extension| {
+            matches!(extension, "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp")
+        }) {
+            return Ok(Some(BookFormat::Cbz));
+        }
+    }
+    Ok(None)
 }
 
 impl std::fmt::Display for BookFormat {
@@ -1088,12 +1150,8 @@ impl Library {
         validate_import_path(&path)?;
         let path_str = canonical_path_key(&path);
 
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let format = BookFormat::from_extension(&ext)
-            .with_context(|| format!("unsupported format: .{ext}"))?;
+        let format = book_format_for_path(&path)?
+            .with_context(|| format!("unsupported format: {}", path.display()))?;
         let work_permit = acquire_import_work(cancellation).await?;
         let storage_guard = acquire_managed_storage(cancellation).await?;
         self.ensure_current_managed_dir().await?;
@@ -1274,12 +1332,9 @@ impl Library {
         let source = canonical_path(source);
         validate_import_path(&source)?;
         let source_str = canonical_path_key(&source);
-        let ext = source
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let format = BookFormat::from_extension(&ext)
-            .with_context(|| format!("unsupported format: .{ext}"))?;
+        let format = book_format_for_path(&source)?
+            .with_context(|| format!("unsupported format: {}", source.display()))?;
+        let ext = format.as_str().to_owned();
         let stage_source = source.clone();
         let stage_dir = self.managed_dir.clone();
         let stage_cancellation = cancellation.cloned();
@@ -1480,11 +1535,7 @@ impl Library {
             .await?
             .with_context(|| format!("book {book_id} not found"))?;
         let replacement = canonical_path(replacement);
-        let ext = replacement
-            .extension()
-            .map(|value| value.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if BookFormat::from_extension(&ext) != Some(book.format) {
+        if book_format_for_path(&replacement)? != Some(book.format) {
             bail!("selected file has a different book format");
         }
         let stage_source = replacement.clone();
@@ -3676,22 +3727,38 @@ fn scan_import_candidates(
             continue;
         }
 
-        let extension = path
-            .extension()
-            .map(|extension| extension.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let Some(format) = BookFormat::from_extension(&extension) else {
-            if !recursive
-                && sender
-                    .blocking_send(ScannedImport::Failure(ImportFailure::new(
-                        path,
-                        format!("unsupported format: .{extension}"),
-                    )))
-                    .is_err()
-            {
-                break;
+        let format = match book_format_for_path(&path) {
+            Ok(Some(format)) => format,
+            Ok(None) => {
+                let extension = path
+                    .extension()
+                    .map(|extension| extension.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                if !recursive
+                    && sender
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                            path,
+                            format!("unsupported format: .{extension}"),
+                        )))
+                        .is_err()
+                {
+                    break;
+                }
+                continue;
             }
-            continue;
+            Err(error) => {
+                if !recursive
+                    && sender
+                        .blocking_send(ScannedImport::Failure(ImportFailure::new(
+                            path,
+                            format!("failed to inspect book format: {error:#}"),
+                        )))
+                        .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
         };
         progress.found_file();
         if metadata.len() > format.max_input_bytes() {
@@ -4301,6 +4368,43 @@ fn encode_cover_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn content_detection_admits_extensionless_pdf_and_epub_files() {
+        let directory = tempfile::tempdir().unwrap();
+        for (fixture, expected) in [
+            ("sample.pdf", BookFormat::Pdf),
+            ("sample.epub", BookFormat::Epub),
+        ] {
+            let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(fixture);
+            let selected = directory.path().join(format!("{fixture}.document"));
+            std::fs::copy(source, &selected).unwrap();
+
+            assert_eq!(book_format_for_path(&selected).unwrap(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn content_detection_admits_extensionless_bmp_only_cbz() {
+        let directory = tempfile::tempdir().unwrap();
+        let selected = directory.path().join("comic.document");
+        let file = std::fs::File::create(&selected).unwrap();
+        let mut archive = zip::ZipWriter::new(file);
+        archive
+            .start_file("001.BMP", SimpleFileOptions::default())
+            .unwrap();
+        archive.write_all(b"BM").unwrap();
+        archive.finish().unwrap();
+
+        assert_eq!(
+            book_format_for_path(&selected).unwrap(),
+            Some(BookFormat::Cbz)
+        );
+    }
 
     #[test]
     fn import_failure_intrinsically_discards_oversized_paths() {

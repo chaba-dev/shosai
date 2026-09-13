@@ -50,7 +50,7 @@ abstract class FlutterBridge implements RustOpaqueInterface {
     required BigInt cancellationId,
   });
 
-  Future<List<FlutterImportItem>> importPaths({
+  Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
     required BigInt cancellationId,
@@ -481,11 +481,18 @@ class FlutterImportItem {
   final String pathKey;
   final FlutterLibraryBook? book;
   final String? error;
+  final String? warning;
 
-  const FlutterImportItem({required this.pathKey, this.book, this.error});
+  const FlutterImportItem({
+    required this.pathKey,
+    this.book,
+    this.error,
+    this.warning,
+  });
 
   @override
-  int get hashCode => pathKey.hashCode ^ book.hashCode ^ error.hashCode;
+  int get hashCode =>
+      pathKey.hashCode ^ book.hashCode ^ error.hashCode ^ warning.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -494,7 +501,8 @@ class FlutterImportItem {
           runtimeType == other.runtimeType &&
           pathKey == other.pathKey &&
           book == other.book &&
-          error == other.error;
+          error == other.error &&
+          warning == other.warning;
 }
 
 class FlutterImportReport {
