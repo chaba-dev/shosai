@@ -1890,15 +1890,15 @@ void main() {
     );
     expect(find.textContaining('ambiguous or unavailable'), findsOneWidget);
     expect(tester.takeException(), isNull);
-    final associate = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Associate'),
+    final associate = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Associate'),
     );
     expect(associate.onPressed, isNull);
 
     await tester.ensureVisible(find.text('/tmp/original.epub'));
     await tester.tap(find.text('/tmp/original.epub'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Associate'));
+    await tester.tap(find.widgetWithText(ShadButton, 'Associate'));
     await tester.pumpAndSettle();
 
     expect(bridge.associatedSourceIds, ['source-version']);
@@ -1951,27 +1951,22 @@ void main() {
     expect(find.text('Next'), findsOneWidget);
     await tester.ensureVisible(find.text('Next'));
     final source = find
-        .byType(RadioListTile<FlutterAnnotationAssociationSource>)
+        .byType(ShadRadio<FlutterAnnotationAssociationSource>)
         .last;
     await tester.ensureVisible(source);
     await tester.drag(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(ShadDialog),
         matching: find.byType(SingleChildScrollView),
       ),
       const Offset(0, -100),
     );
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(
-        of: source,
-        matching: find.byType(Radio<FlutterAnnotationAssociationSource>),
-      ),
-    );
+    await tester.tap(source);
     await tester.pump();
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Associate'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Associate'))
           .onPressed,
       isNotNull,
     );

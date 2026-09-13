@@ -198,7 +198,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   final FocusNode _readerFocus = FocusNode(debugLabel: 'reader surface');
   final FocusNode _actionFocus = FocusNode(debugLabel: 'selection actions');
   ShadDialogRoute<String>? _noteDialogRoute;
-  DialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
+  ShadDialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
 
@@ -313,15 +313,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   ) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
-    final route = DialogRoute<AnnotationAssociationChoice>(
-      context: context,
-      builder: (context) => Theme(
+    final route = ShadDialogRoute<AnnotationAssociationChoice>(
+      pageBuilder: (context) => Theme(
         data: readerTheme,
         child: ShadTheme(
           data: shosaiReaderShadTheme(widget.initialSettings?.theme),
           child: _AnnotationAssociationDialog(page: page),
         ),
       ),
+      barrierDismissible: true,
+      barrierLabel: '',
     );
     _associationDialogRoute = route;
     try {
@@ -1553,89 +1554,94 @@ class _AnnotationAssociationDialogState
   FlutterAnnotationAssociationSource? _selected;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    scrollable: true,
-    title: const Text('Associate highlights?'),
-    content: SizedBox(
-      width: 520,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Choose the earlier document version this file replaces. '
-            'Its notes and highlights will be shared with this version. '
-            'Highlights whose location cannot be recovered will remain marked '
-            'as ambiguous or unavailable.',
-          ),
-          const SizedBox(height: 12),
-          RadioGroup<FlutterAnnotationAssociationSource>(
-            groupValue: _selected,
-            onChanged: (value) => setState(() => _selected = value),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: widget.page.sources
+  Widget build(BuildContext context) {
+    final contentWidth = math.min(520.0, MediaQuery.sizeOf(context).width - 96);
+    return ShadDialog(
+      title: const Text('Associate highlights?'),
+      actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
+          ? Axis.vertical
+          : Axis.horizontal,
+      actions: [
+        ShadButton.outline(
+          onPressed: () =>
+              Navigator.pop(context, const AnnotationAssociationCancelled()),
+          child: const Text('Cancel'),
+        ),
+        ShadButton(
+          onPressed: _selected == null
+              ? null
+              : () => Navigator.pop(
+                  context,
+                  AnnotationAssociationSelected(_selected!),
+                ),
+          child: const Text('Associate'),
+        ),
+      ],
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: contentWidth),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Choose the earlier document version this file replaces. '
+              'Its notes and highlights will be shared with this version. '
+              'Highlights whose location cannot be recovered will remain marked '
+              'as ambiguous or unavailable.',
+            ),
+            const SizedBox(height: 12),
+            ShadRadioGroup<FlutterAnnotationAssociationSource>(
+              initialValue: _selected,
+              axis: Axis.vertical,
+              crossAxisAlignment: WrapCrossAlignment.start,
+              onChanged: (value) => setState(() => _selected = value),
+              items: widget.page.sources
                   .map(
-                    (
-                      source,
-                    ) => RadioListTile<FlutterAnnotationAssociationSource>(
-                      value: source,
-                      title: Text(source.localPath),
-                      subtitle: Text(
-                        '${source.liveAnnotations} saved highlight'
-                        '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
-                        '${source.fingerprintAlgorithm} '
-                        '${_fingerprintLabel(source.fingerprint)}',
+                    (source) => SizedBox(
+                      width: contentWidth,
+                      child: ShadRadio<FlutterAnnotationAssociationSource>(
+                        value: source,
+                        label: Text(source.localPath),
+                        sublabel: Text(
+                          '${source.liveAnnotations} saved highlight'
+                          '${source.liveAnnotations == BigInt.one ? '' : 's'} · '
+                          '${source.fingerprintAlgorithm} '
+                          '${_fingerprintLabel(source.fingerprint)}',
+                        ),
                       ),
                     ),
                   )
                   .toList(growable: false),
             ),
-          ),
-          if (widget.page.canGoBack || widget.page.canGoForward) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              alignment: WrapAlignment.end,
-              children: [
-                if (widget.page.canGoBack)
-                  TextButton(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      const AnnotationAssociationPreviousPage(),
+            if (widget.page.canGoBack || widget.page.canGoForward) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                alignment: WrapAlignment.end,
+                children: [
+                  if (widget.page.canGoBack)
+                    ShadButton.ghost(
+                      onPressed: () => Navigator.pop(
+                        context,
+                        const AnnotationAssociationPreviousPage(),
+                      ),
+                      child: const Text('Previous'),
                     ),
-                    child: const Text('Previous'),
-                  ),
-                if (widget.page.canGoForward)
-                  TextButton(
-                    onPressed: () => Navigator.pop(
-                      context,
-                      const AnnotationAssociationNextPage(),
+                  if (widget.page.canGoForward)
+                    ShadButton.ghost(
+                      onPressed: () => Navigator.pop(
+                        context,
+                        const AnnotationAssociationNextPage(),
+                      ),
+                      child: const Text('Next'),
                     ),
-                    child: const Text('Next'),
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () =>
-            Navigator.pop(context, const AnnotationAssociationCancelled()),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: _selected == null
-            ? null
-            : () => Navigator.pop(
-                context,
-                AnnotationAssociationSelected(_selected!),
+                ],
               ),
-        child: const Text('Associate'),
+            ],
+          ],
+        ),
       ),
-    ],
-  );
+    );
+  }
 }
 
 String _fingerprintLabel(Uint8List fingerprint) {
@@ -1846,6 +1852,9 @@ class _NoteDialogState extends State<_NoteDialog> {
   @override
   Widget build(BuildContext context) => ShadDialog(
     title: Text(widget.title),
+    actionsAxis: MediaQuery.textScalerOf(context).scale(1) > 1.3
+        ? Axis.vertical
+        : Axis.horizontal,
     actions: [
       ShadButton.outline(
         onPressed: () => Navigator.pop(context),
@@ -1856,8 +1865,10 @@ class _NoteDialogState extends State<_NoteDialog> {
         child: const Text('Save'),
       ),
     ],
-    child: SizedBox(
-      width: 360,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: math.min(360, MediaQuery.sizeOf(context).width - 96),
+      ),
       child: ShadInput(
         controller: controller,
         autofocus: true,
