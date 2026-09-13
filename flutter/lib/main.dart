@@ -283,7 +283,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       context: context,
       builder: (context) => Theme(
         data: readerTheme,
-        child: _NoteDialog(initialValue: initialValue, title: title),
+        child: ShadTheme(
+          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+          child: _NoteDialog(initialValue: initialValue, title: title),
+        ),
       ),
     );
     _noteDialogRoute = route;
@@ -313,7 +316,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       context: context,
       builder: (context) => Theme(
         data: readerTheme,
-        child: _AnnotationAssociationDialog(page: page),
+        child: ShadTheme(
+          data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+          child: _AnnotationAssociationDialog(page: page),
+        ),
       ),
     );
     _associationDialogRoute = route;
@@ -403,50 +409,53 @@ class _ReaderScreenState extends State<ReaderScreen>
     final theme = _readerTheme(context, widget.initialSettings?.theme);
     return Theme(
       data: theme,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(
-            compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
-          ),
-          actions: model.document != null
-              ? [
-                  IconButton(
-                    tooltip: 'Search and bookmarks',
-                    onPressed: () =>
-                        _controller.dispatch(const ReaderToolsToggled()),
-                    icon: const Icon(Icons.manage_search),
-                  ),
-                  if (model.document!.format != FlutterBookFormat.cbz)
+      child: ShadTheme(
+        data: shosaiReaderShadTheme(widget.initialSettings?.theme),
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text(
+              compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
+            ),
+            actions: model.document != null
+                ? [
                     IconButton(
-                      tooltip: model.annotationsReady
-                          ? 'Associate highlights from an earlier version…'
-                          : 'Retry loading highlights',
-                      onPressed: associationEnabled
-                          ? () => _controller.dispatch(
-                              model.annotationsReady
-                                  ? const ReaderAnnotationAssociationRequested()
-                                  : const ReaderAnnotationReloadRequested(),
-                            )
-                          : null,
-                      icon: Icon(
-                        model.annotationsReady ? Icons.link : Icons.refresh,
-                      ),
+                      tooltip: 'Search and bookmarks',
+                      onPressed: () =>
+                          _controller.dispatch(const ReaderToolsToggled()),
+                      icon: const Icon(Icons.manage_search),
                     ),
-                ]
-              : null,
-        ),
-        body: SafeArea(
-          child: _ResponsiveReaderBody(
-            model: model,
-            settings: widget.initialSettings,
-            path: _path.value,
-            pathFieldKey: _pathFieldKey,
-            contentKey: _contentKey,
-            openFocus: _openFocus,
-            open: _open,
-            dispatch: _controller.dispatch,
-            readerFocus: _readerFocus,
-            actionFocus: _actionFocus,
+                    if (model.document!.format != FlutterBookFormat.cbz)
+                      IconButton(
+                        tooltip: model.annotationsReady
+                            ? 'Associate highlights from an earlier version…'
+                            : 'Retry loading highlights',
+                        onPressed: associationEnabled
+                            ? () => _controller.dispatch(
+                                model.annotationsReady
+                                    ? const ReaderAnnotationAssociationRequested()
+                                    : const ReaderAnnotationReloadRequested(),
+                              )
+                            : null,
+                        icon: Icon(
+                          model.annotationsReady ? Icons.link : Icons.refresh,
+                        ),
+                      ),
+                  ]
+                : null,
+          ),
+          body: SafeArea(
+            child: _ResponsiveReaderBody(
+              model: model,
+              settings: widget.initialSettings,
+              path: _path.value,
+              pathFieldKey: _pathFieldKey,
+              contentKey: _contentKey,
+              openFocus: _openFocus,
+              open: _open,
+              dispatch: _controller.dispatch,
+              readerFocus: _readerFocus,
+              actionFocus: _actionFocus,
+            ),
           ),
         ),
       ),
