@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
-import 'package:shosai_flutter/product_shell.dart';
+import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 void main() {
