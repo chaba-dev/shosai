@@ -22,18 +22,16 @@ void main() {
   testWidgets('application does not publish a desktop window title', (
     tester,
   ) async {
-    late MaterialApp app;
-    await tester.pumpWidget(
-      Builder(
-        builder: (context) {
-          app = const ShosaiApp().build(context) as MaterialApp;
-          return const SizedBox();
-        },
-      ),
-    );
+    final bridge = _FakeBridge();
+    await tester.pumpWidget(ShosaiApp(bridge: bridge));
+    await tester.pump();
 
+    final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.title, isEmpty);
     expect(app.onGenerateTitle, isNull);
+
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
   });
 
   testWidgets('process restoration reopens the persisted document locator', (
