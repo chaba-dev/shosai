@@ -588,7 +588,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('library is empty'), findsOneWidget);
 
-    await tester.enterText(find.byType(SearchBar), 'missing');
+    await tester.enterText(find.byType(ShadInput), 'missing');
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpAndSettle();
     expect(find.text('No books match these filters.'), findsOneWidget);

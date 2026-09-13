@@ -549,37 +549,41 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       appBar: AppBar(
         title: const Text('Shōsai'),
         actions: [
-          IconButton(
-            tooltip: 'Refresh library',
-            onPressed: model.busy
-                ? null
-                : () => controller.dispatch(const LibraryRefreshed()),
-            icon: const Icon(Icons.refresh),
+          Tooltip(
+            message: 'Refresh library',
+            child: ShadIconButton.ghost(
+              onPressed: model.busy
+                  ? null
+                  : () => controller.dispatch(const LibraryRefreshed()),
+              icon: const Icon(LucideIcons.refreshCw),
+            ),
           ),
-          IconButton(
-            tooltip: 'Reader settings',
-            onPressed: model.settings == null
-                ? null
-                : () => controller.dispatch(const LibrarySettingsRequested()),
-            icon: const Icon(Icons.settings_outlined),
+          Tooltip(
+            message: 'Reader settings',
+            child: ShadIconButton.ghost(
+              onPressed: model.settings == null
+                  ? null
+                  : () => controller.dispatch(const LibrarySettingsRequested()),
+              icon: const Icon(LucideIcons.settings),
+            ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: ShadButton(
         onPressed: model.busy
             ? null
             : () => controller.dispatch(const LibraryImportRequested()),
-        icon: const Icon(Icons.add),
-        label: const Text('Add books'),
+        leading: const Icon(LucideIcons.plus),
+        child: const Text('Add books'),
       ),
       body: SafeArea(
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: SearchBar(
-                hintText: 'Search title or author',
-                leading: const Icon(Icons.search),
+              child: ShadInput(
+                placeholder: const Text('Search title or author'),
+                leading: const Icon(LucideIcons.search, size: 16),
                 onChanged: (query) =>
                     controller.dispatch(LibraryQueryChanged(query)),
               ),
@@ -598,13 +602,16 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                       FlutterBookFormat.epub,
                       FlutterBookFormat.cbz,
                     ])
-                      ChoiceChip(
-                        label: Text(
+                      ShadButton.raw(
+                        variant: model.format == filter
+                            ? ShadButtonVariant.primary
+                            : ShadButtonVariant.outline,
+                        size: ShadButtonSize.sm,
+                        onPressed: () =>
+                            controller.dispatch(LibraryFormatChanged(filter)),
+                        child: Text(
                           filter == null ? 'All' : filter.name.toUpperCase(),
                         ),
-                        selected: model.format == filter,
-                        onSelected: (_) =>
-                            controller.dispatch(LibraryFormatChanged(filter)),
                       ),
                   ],
                 ),
@@ -613,61 +620,42 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             if (model.busy)
               Row(
                 children: [
-                  const Expanded(child: LinearProgressIndicator()),
+                  const Expanded(child: ShadProgress(minHeight: 4)),
                   if (controller.canCancel)
-                    IconButton(
-                      tooltip: 'Cancel operation',
-                      onPressed: () => controller.dispatch(
-                        const LibraryOperationCancelled(),
+                    Tooltip(
+                      message: 'Cancel operation',
+                      child: ShadIconButton.ghost(
+                        onPressed: () => controller.dispatch(
+                          const LibraryOperationCancelled(),
+                        ),
+                        icon: const Icon(LucideIcons.x),
                       ),
-                      icon: const Icon(Icons.close),
                     ),
                 ],
               ),
             if (model.providerCleanupPending)
-              MaterialBanner(
-                content: Semantics(
-                  liveRegion: true,
-                  child: const Text(
-                    'Temporary import data could not be removed yet.',
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => controller.dispatch(
-                      const LibraryCleanupRetryRequested(),
-                    ),
-                    child: const Text('Retry cleanup'),
-                  ),
-                ],
+              _LibraryBanner(
+                message: 'Temporary import data could not be removed yet.',
+                actionLabel: 'Retry cleanup',
+                onAction: () =>
+                    controller.dispatch(const LibraryCleanupRetryRequested()),
               ),
             if (model.managedFileDeletionPending)
-              MaterialBanner(
-                content: Semantics(
-                  liveRegion: true,
-                  child: const Text(
+              _LibraryBanner(
+                message:
                     'Book removed. Its private copy will be deleted later.',
-                  ),
+                actionLabel: 'Dismiss',
+                onAction: () => controller.dispatch(
+                  const LibraryManagedDeletionNoticeDismissed(),
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () => controller.dispatch(
-                      const LibraryManagedDeletionNoticeDismissed(),
-                    ),
-                    child: const Text('Dismiss'),
-                  ),
-                ],
               ),
             if (model.displayError case final error?)
-              MaterialBanner(
-                content: Semantics(liveRegion: true, child: Text(error)),
-                actions: [
-                  TextButton(
-                    onPressed: () =>
-                        controller.dispatch(const LibraryRetryRequested()),
-                    child: const Text('Retry'),
-                  ),
-                ],
+              _LibraryBanner(
+                message: error,
+                actionLabel: 'Retry',
+                destructive: true,
+                onAction: () =>
+                    controller.dispatch(const LibraryRetryRequested()),
               ),
             Expanded(
               child: _LibraryCollection(
@@ -684,6 +672,45 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LibraryBanner extends StatelessWidget {
+  const _LibraryBanner({
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+    this.destructive = false,
+  });
+
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final alert = destructive
+        ? ShadAlert.destructive(
+            icon: const Icon(LucideIcons.circleAlert),
+            description: Semantics(liveRegion: true, child: Text(message)),
+            trailing: ShadButton.ghost(
+              onPressed: onAction,
+              child: Text(actionLabel),
+            ),
+          )
+        : ShadAlert(
+            icon: const Icon(LucideIcons.info),
+            description: Semantics(liveRegion: true, child: Text(message)),
+            trailing: ShadButton.ghost(
+              onPressed: onAction,
+              child: Text(actionLabel),
+            ),
+          );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: alert,
     );
   }
 }
