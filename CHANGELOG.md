@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-11
+## [0.1.0] - 2026-09-13
 
 ### 🚀 Features
 
@@ -63,6 +63,7 @@ All notable changes to this project will be documented in this file.
 - Finish phase one state and lifecycle reconciliation (#85)
 - *(accessibility)* Expose selection actions to screen readers (#94)
 - *(reader)* Harden bookmark notes, covers, and provider import (#99)
+- *(flutter)* Harden library and reader foundations (#100)
 
 ### 🚜 Refactor
 
