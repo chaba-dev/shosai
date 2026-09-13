@@ -837,11 +837,14 @@ class _DocumentView extends StatelessWidget {
                 model: model,
                 dispatch: dispatch,
               ),
-              _ReaderTools(
-                document: document,
-                model: model,
-                dispatch: dispatch,
+              Flexible(
+                child: _ReaderTools(
+                  document: document,
+                  model: model,
+                  dispatch: dispatch,
+                ),
               ),
+              _ReaderToolError(model: model),
             ],
           ),
         ),
@@ -1064,17 +1067,12 @@ class _DocumentView extends StatelessWidget {
                                         ),
                                       ),
                                     )
-                                  : _SelectableSurface(
-                                      key: const ValueKey(
-                                        'reader-paginated-presentation',
-                                      ),
+                                  : _ReachableSelectableSurface(
+                                      document: document,
+                                      settings: settings,
                                       surface: surface,
                                       image: page,
                                       model: model,
-                                      fit: _readerFit(
-                                        document.format,
-                                        settings,
-                                      ),
                                       dispatch: dispatch,
                                     ),
                             ),
@@ -1089,6 +1087,7 @@ class _DocumentView extends StatelessWidget {
                                 surface,
                                 model,
                                 constraints.biggest,
+                                _readerFit(document.format, settings),
                               ),
                             ),
                             child: _SelectionActions(
@@ -1175,7 +1174,14 @@ class _DocumentView extends StatelessWidget {
             model: model,
             dispatch: dispatch,
           ),
-          _ReaderTools(document: document, model: model, dispatch: dispatch),
+          Flexible(
+            child: _ReaderTools(
+              document: document,
+              model: model,
+              dispatch: dispatch,
+            ),
+          ),
+          _ReaderToolError(model: model),
         ],
       ),
     );
@@ -1256,133 +1262,167 @@ class _ReaderTools extends StatelessWidget {
         )
         .firstOrNull;
     final locationBookmarked = currentBookmark != null;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (document.format != FlutterBookFormat.cbz)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: TextField(
-              decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search),
-                hintText: 'Search this document',
-                suffixIcon: model.searchBusy
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-              ),
-              textInputAction: TextInputAction.search,
-              onSubmitted: (query) => dispatch(ReaderSearchRequested(query)),
-            ),
-          ),
-        if (model.searchResults.isNotEmpty)
-          SizedBox(
-            height: 52,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: model.searchResults.length,
-              itemBuilder: (context, index) {
-                final result = model.searchResults[index];
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ActionChip(
-                    label: Text(
-                      result.context,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onPressed: () => dispatch(
-                      ReaderUnitRequested(
-                        result.unit.toInt(),
-                        offset: result.offset.toInt(),
-                        length: result.length.toInt(),
-                      ),
-                    ),
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: math.max(1, MediaQuery.sizeOf(context).height * .35),
+      ),
+      child: SingleChildScrollView(
+        key: const ValueKey('reader-tools-scroll'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (document.format != FlutterBookFormat.cbz)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: TextField(
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search),
+                    hintText: 'Search this document',
+                    suffixIcon: model.searchBusy
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : null,
                   ),
-                );
-              },
-            ),
-          ),
-        if (document.bookId != null)
-          SizedBox(
-            height: 48,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: model.bookmarks.length + 1,
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return Row(
-                    children: [
-                      IconButton(
-                        tooltip: locationBookmarked
-                            ? 'Remove bookmark'
-                            : 'Bookmark this location',
-                        onPressed: model.bookmarkBusy
-                            ? null
-                            : () => dispatch(const ReaderBookmarkToggled()),
-                        icon: Icon(
-                          locationBookmarked
-                              ? Icons.bookmark
-                              : Icons.bookmark_border,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (query) =>
+                      dispatch(ReaderSearchRequested(query)),
+                ),
+              ),
+            if (model.searchResults.isNotEmpty)
+              SizedBox(
+                height: 52,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: model.searchResults.length,
+                  itemBuilder: (context, index) {
+                    final result = model.searchResults[index];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ActionChip(
+                        label: Text(
+                          result.context,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        onPressed: () => dispatch(
+                          ReaderUnitRequested(
+                            result.unit.toInt(),
+                            offset: result.offset.toInt(),
+                            length: result.length.toInt(),
+                          ),
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Bookmark with note',
-                        onPressed: model.bookmarkBusy
-                            ? null
-                            : () => dispatch(
-                                ReaderBookmarkNoteRequested(currentBookmark),
-                              ),
-                        icon: const Icon(Icons.bookmark_add_outlined),
-                      ),
-                    ],
-                  );
-                }
-                final bookmark = model.bookmarks[index - 1];
-                return Row(
-                  children: [
-                    TextButton(
-                      onPressed: () => dispatch(
-                        ReaderBookmarkNavigated(
-                          bookmark.unit.toInt(),
-                          offset: bookmark.offset?.toInt(),
+                    );
+                  },
+                ),
+              ),
+            if (document.bookId != null)
+              SizedBox(
+                height: 48,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: model.bookmarks.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return Row(
+                        children: [
+                          IconButton(
+                            tooltip: locationBookmarked
+                                ? 'Remove bookmark'
+                                : 'Bookmark this location',
+                            onPressed: model.bookmarkBusy
+                                ? null
+                                : () => dispatch(const ReaderBookmarkToggled()),
+                            icon: Icon(
+                              locationBookmarked
+                                  ? Icons.bookmark
+                                  : Icons.bookmark_border,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Bookmark with note',
+                            onPressed: model.bookmarkBusy
+                                ? null
+                                : () => dispatch(
+                                    ReaderBookmarkNoteRequested(
+                                      currentBookmark,
+                                    ),
+                                  ),
+                            icon: const Icon(Icons.bookmark_add_outlined),
+                          ),
+                        ],
+                      );
+                    }
+                    final bookmark = model.bookmarks[index - 1];
+                    return Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => dispatch(
+                            ReaderBookmarkNavigated(
+                              bookmark.unit.toInt(),
+                              offset: bookmark.offset?.toInt(),
+                            ),
+                          ),
+                          child: Text(
+                            bookmark.note?.isNotEmpty == true
+                                ? '${bookmark.unit.toInt() + 1}: ${bookmark.note}'
+                                : '${bookmark.unit.toInt() + 1}',
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        bookmark.note?.isNotEmpty == true
-                            ? '${bookmark.unit.toInt() + 1}: ${bookmark.note}'
-                            : '${bookmark.unit.toInt() + 1}',
-                      ),
-                    ),
-                    PopupMenuButton<String>(
-                      tooltip: 'Bookmark actions',
-                      enabled: !model.bookmarkBusy,
-                      onSelected: (action) => dispatch(
-                        action == 'edit'
-                            ? ReaderBookmarkNoteRequested(bookmark)
-                            : ReaderBookmarkDeleted(bookmark.id),
-                      ),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'edit', child: Text('Edit note')),
-                        PopupMenuItem(value: 'delete', child: Text('Delete')),
+                        PopupMenuButton<String>(
+                          tooltip: 'Bookmark actions',
+                          enabled: !model.bookmarkBusy,
+                          onSelected: (action) => dispatch(
+                            action == 'edit'
+                                ? ReaderBookmarkNoteRequested(bookmark)
+                                : ReaderBookmarkDeleted(bookmark.id),
+                          ),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'edit',
+                              child: Text('Edit note'),
+                            ),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Text('Delete'),
+                            ),
+                          ],
+                        ),
                       ],
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-        if (model.toolError case final error?)
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              error,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-      ],
+                    );
+                  },
+                ),
+              ),
+            if (model.toolError case final error?)
+              Text(
+                error,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReaderToolError extends StatelessWidget {
+  const _ReaderToolError({required this.model});
+
+  final ReaderModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = model.persistenceError;
+    if (error == null) return const SizedBox.shrink();
+    return Semantics(
+      liveRegion: true,
+      child: Text(
+        error,
+        key: const ValueKey('reader-tool-error'),
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
     );
   }
 }
@@ -1575,6 +1615,7 @@ Rect _selectionActionTarget(
   FlutterSelectionSurface surface,
   ReaderModel model,
   Size viewport,
+  BoxFit fit,
 ) {
   final first = model.anchor!;
   final second = model.focus!;
@@ -1596,19 +1637,57 @@ Rect _selectionActionTarget(
     selected = selected?.expandToInclude(area) ?? area;
   }
   if (selected == null) return Offset.zero & Size.zero;
-  final fitted = applyBoxFit(
-    BoxFit.contain,
+  final transform = _SurfaceTransform.create(
+    fit,
     Size(surface.width, surface.height),
     viewport,
-  ).destination;
-  final destination = Alignment.center.inscribe(fitted, Offset.zero & viewport);
-  final scale = fitted.width / surface.width;
-  return Rect.fromLTRB(
-    destination.left + selected.left * scale,
-    destination.top + selected.top * scale,
-    destination.left + selected.right * scale,
-    destination.top + selected.bottom * scale,
   );
+  return transform.toDestinationRect(selected);
+}
+
+class _SurfaceTransform {
+  const _SurfaceTransform(this.source, this.destination);
+
+  factory _SurfaceTransform.create(BoxFit fit, Size input, Size output) {
+    final fitted = applyBoxFit(fit, input, output);
+    return _SurfaceTransform(
+      Alignment.center.inscribe(fitted.source, Offset.zero & input),
+      Alignment.center.inscribe(fitted.destination, Offset.zero & output),
+    );
+  }
+
+  final Rect source;
+  final Rect destination;
+
+  double get scaleX => destination.width / source.width;
+  double get scaleY => destination.height / source.height;
+
+  Offset toSource(Offset point, {bool clamp = false}) {
+    final value = Offset(
+      source.left + (point.dx - destination.left) / scaleX,
+      source.top + (point.dy - destination.top) / scaleY,
+    );
+    return clamp
+        ? Offset(
+            value.dx.clamp(source.left, source.right),
+            value.dy.clamp(source.top, source.bottom),
+          )
+        : value;
+  }
+
+  Rect toDestinationRect(Rect rect) => Rect.fromLTRB(
+    destination.left + (rect.left - source.left) * scaleX,
+    destination.top + (rect.top - source.top) * scaleY,
+    destination.left + (rect.right - source.left) * scaleX,
+    destination.top + (rect.bottom - source.top) * scaleY,
+  );
+
+  void apply(Canvas canvas) {
+    canvas.clipRect(destination);
+    canvas.translate(destination.left, destination.top);
+    canvas.scale(scaleX, scaleY);
+    canvas.translate(-source.left, -source.top);
+  }
 }
 
 class _SelectionActionsLayout extends SingleChildLayoutDelegate {
@@ -1700,9 +1779,67 @@ String _colorName(FlutterHighlightColor color) => switch (color) {
   FlutterHighlightColor.purple => 'Purple',
 };
 
+class _ReachableSelectableSurface extends StatelessWidget {
+  const _ReachableSelectableSurface({
+    required this.document,
+    required this.settings,
+    required this.surface,
+    required this.image,
+    required this.model,
+    required this.dispatch,
+  });
+
+  final FlutterDocumentSummary document;
+  final FlutterReaderSettings? settings;
+  final FlutterSelectionSurface surface;
+  final ui.Image? image;
+  final ReaderModel model;
+  final void Function(ReaderMessage) dispatch;
+
+  @override
+  Widget build(BuildContext context) {
+    final fit = _readerFit(document.format, settings);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        Widget content(Size size) => SizedBox.fromSize(
+          size: size,
+          child: _SelectableSurface(
+            surface: surface,
+            image: image,
+            model: model,
+            fit: fit,
+            dispatch: dispatch,
+          ),
+        );
+        if (document.format == FlutterBookFormat.epub ||
+            fit == BoxFit.contain) {
+          return KeyedSubtree(
+            key: const ValueKey('reader-paginated-presentation'),
+            child: content(constraints.biggest),
+          );
+        }
+        final natural = fit == BoxFit.fitWidth
+            ? Size(
+                constraints.maxWidth,
+                constraints.maxWidth * surface.height / surface.width,
+              )
+            : Size(surface.width, surface.height);
+        final reachable = Size(
+          math.max(constraints.maxWidth, natural.width),
+          math.max(constraints.maxHeight, natural.height),
+        );
+        return SingleChildScrollView(
+          key: const ValueKey('reader-paginated-presentation'),
+          scrollDirection: Axis.horizontal,
+          child: SingleChildScrollView(child: content(reachable)),
+        );
+      },
+    );
+  }
+}
+
 class _SelectableSurface extends StatelessWidget {
   const _SelectableSurface({
-    super.key,
     required this.surface,
     required this.image,
     required this.model,
@@ -1720,29 +1857,19 @@ class _SelectableSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final fitted = applyBoxFit(
+        final transform = _SurfaceTransform.create(
           fit,
           Size(surface.width, surface.height),
           constraints.biggest,
-        ).destination;
-        final destination = Alignment.center.inscribe(
-          fitted,
-          Offset.zero & constraints.biggest,
-        );
-        Offset sourcePosition(Offset position) => Offset(
-          ((position.dx - destination.left) * surface.width / destination.width)
-              .clamp(0, surface.width),
-          ((position.dy - destination.top) *
-                  surface.height /
-                  destination.height)
-              .clamp(0, surface.height),
         );
         FlutterSelectionEndpoint? endpoint(
           Offset position, {
           bool nearest = false,
         }) {
-          if (!nearest && !destination.contains(position)) return null;
-          final source = sourcePosition(position);
+          if (!nearest && !transform.destination.contains(position)) {
+            return null;
+          }
+          final source = transform.toSource(position, clamp: nearest);
           for (final endpoint in surface.endpoints) {
             final rect = endpoint.rect;
             if (Rect.fromLTRB(
@@ -1782,7 +1909,7 @@ class _SelectableSurface extends StatelessWidget {
             if (value == null) {
               dispatch(ReaderSelectionPointerPressedOutside(event.pointer));
             } else {
-              final source = sourcePosition(event.localPosition);
+              final source = transform.toSource(event.localPosition);
               dispatch(
                 ReaderSelectionPointerStarted(
                   event.pointer,
@@ -1798,7 +1925,10 @@ class _SelectableSurface extends StatelessWidget {
           onPointerMove: (event) {
             final value = endpoint(event.localPosition, nearest: true);
             if (value != null) {
-              final source = sourcePosition(event.localPosition);
+              final source = transform.toSource(
+                event.localPosition,
+                clamp: true,
+              );
               dispatch(
                 ReaderSelectionPointerMoved(
                   event.pointer,
@@ -1900,15 +2030,9 @@ class PagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final destinationSize = applyBoxFit(fit, source.size, size).destination;
-    final scale = destinationSize.width / source.width;
-    final destination = Alignment.center.inscribe(
-      destinationSize,
-      Offset.zero & size,
-    );
+    final transform = _SurfaceTransform.create(fit, source.size, size);
     canvas.save();
-    canvas.translate(destination.left, destination.top);
-    canvas.scale(scale);
+    transform.apply(canvas);
     if (paintContent) {
       _paintPageContent(
         canvas,
@@ -2028,12 +2152,9 @@ class _PageContentPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final fitted = applyBoxFit(fit, source.size, size).destination;
-    final scale = fitted.width / source.width;
-    final destination = Alignment.center.inscribe(fitted, Offset.zero & size);
+    final transform = _SurfaceTransform.create(fit, source.size, size);
     canvas.save();
-    canvas.translate(destination.left, destination.top);
-    canvas.scale(scale);
+    transform.apply(canvas);
     _paintPageContent(
       canvas,
       source,
