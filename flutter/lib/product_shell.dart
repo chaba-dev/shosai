@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/reader_controller.dart';
+import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 typedef ProductReaderBuilder =
@@ -549,23 +550,19 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       appBar: AppBar(
         title: const Text('Shōsai'),
         actions: [
-          Tooltip(
-            message: 'Refresh library',
-            child: ShadIconButton.ghost(
-              onPressed: model.busy
-                  ? null
-                  : () => controller.dispatch(const LibraryRefreshed()),
-              icon: const Icon(LucideIcons.refreshCw),
-            ),
+          ShadIconAction(
+            tooltip: 'Refresh library',
+            onPressed: model.busy
+                ? null
+                : () => controller.dispatch(const LibraryRefreshed()),
+            icon: const Icon(LucideIcons.refreshCw),
           ),
-          Tooltip(
-            message: 'Reader settings',
-            child: ShadIconButton.ghost(
-              onPressed: model.settings == null
-                  ? null
-                  : () => controller.dispatch(const LibrarySettingsRequested()),
-              icon: const Icon(LucideIcons.settings),
-            ),
+          ShadIconAction(
+            tooltip: 'Reader settings',
+            onPressed: model.settings == null
+                ? null
+                : () => controller.dispatch(const LibrarySettingsRequested()),
+            icon: const Icon(LucideIcons.settings),
           ),
         ],
       ),
@@ -622,14 +619,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 children: [
                   const Expanded(child: ShadProgress(minHeight: 4)),
                   if (controller.canCancel)
-                    Tooltip(
-                      message: 'Cancel operation',
-                      child: ShadIconButton.ghost(
-                        onPressed: () => controller.dispatch(
-                          const LibraryOperationCancelled(),
-                        ),
-                        icon: const Icon(LucideIcons.x),
+                    ShadIconAction(
+                      tooltip: 'Cancel operation',
+                      onPressed: () => controller.dispatch(
+                        const LibraryOperationCancelled(),
                       ),
+                      icon: const Icon(LucideIcons.x),
                     ),
                 ],
               ),
@@ -956,12 +951,10 @@ class _BookActionsMenuState extends State<_BookActionsMenu> {
         ),
       ),
     ),
-    child: Tooltip(
-      message: 'Book actions',
-      child: ShadIconButton.ghost(
-        icon: const Icon(LucideIcons.ellipsis),
-        onPressed: _controller.toggle,
-      ),
+    child: ShadIconAction(
+      tooltip: 'Book actions',
+      icon: const Icon(LucideIcons.ellipsis),
+      onPressed: _controller.toggle,
     ),
   );
 }

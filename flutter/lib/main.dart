@@ -13,6 +13,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -420,32 +421,28 @@ class _ReaderScreenState extends State<ReaderScreen>
             ),
             actions: model.document != null
                 ? [
-                    Tooltip(
-                      message: 'Search and bookmarks',
-                      child: ShadIconButton.ghost(
-                        onPressed: () =>
-                            _controller.dispatch(const ReaderToolsToggled()),
-                        icon: const Icon(LucideIcons.search),
-                      ),
+                    ShadIconAction(
+                      tooltip: 'Search and bookmarks',
+                      onPressed: () =>
+                          _controller.dispatch(const ReaderToolsToggled()),
+                      icon: const Icon(LucideIcons.search),
                     ),
                     if (model.document!.format != FlutterBookFormat.cbz)
-                      Tooltip(
-                        message: model.annotationsReady
+                      ShadIconAction(
+                        tooltip: model.annotationsReady
                             ? 'Associate highlights from an earlier version…'
                             : 'Retry loading highlights',
-                        child: ShadIconButton.ghost(
-                          onPressed: associationEnabled
-                              ? () => _controller.dispatch(
-                                  model.annotationsReady
-                                      ? const ReaderAnnotationAssociationRequested()
-                                      : const ReaderAnnotationReloadRequested(),
-                                )
-                              : null,
-                          icon: Icon(
-                            model.annotationsReady
-                                ? LucideIcons.link
-                                : LucideIcons.refreshCw,
-                          ),
+                        onPressed: associationEnabled
+                            ? () => _controller.dispatch(
+                                model.annotationsReady
+                                    ? const ReaderAnnotationAssociationRequested()
+                                    : const ReaderAnnotationReloadRequested(),
+                              )
+                            : null,
+                        icon: Icon(
+                          model.annotationsReady
+                              ? LucideIcons.link
+                              : LucideIcons.refreshCw,
                         ),
                       ),
                   ]
@@ -1146,7 +1143,7 @@ class _DocumentView extends StatelessWidget {
                                   '${_annotationResolutionSuffix(annotation.resolution)}',
                                 ),
                               ),
-                              _ReaderIconAction(
+                              ShadIconAction(
                                 tooltip: 'Change color',
                                 onPressed:
                                     model.annotationOperations.isNotEmpty ||
@@ -1161,7 +1158,7 @@ class _DocumentView extends StatelessWidget {
                                       ),
                                 icon: const Icon(LucideIcons.palette),
                               ),
-                              _ReaderIconAction(
+                              ShadIconAction(
                                 tooltip: 'Edit note',
                                 onPressed:
                                     model.annotationOperations.isNotEmpty ||
@@ -1174,7 +1171,7 @@ class _DocumentView extends StatelessWidget {
                                       ),
                                 icon: const Icon(LucideIcons.notebookPen),
                               ),
-                              _ReaderIconAction(
+                              ShadIconAction(
                                 tooltip: 'Delete highlight',
                                 onPressed:
                                     model.annotationOperations.isNotEmpty ||
@@ -1243,7 +1240,7 @@ class _ReaderUnitNavigation extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _ReaderIconAction(
+          ShadIconAction(
             tooltip: 'Previous',
             onPressed: model.unit > 0 && !model.relayoutBusy
                 ? () => dispatch(ReaderUnitRequested(model.unit - 1))
@@ -1251,7 +1248,7 @@ class _ReaderUnitNavigation extends StatelessWidget {
             icon: const Icon(LucideIcons.chevronLeft),
           ),
           Text('${model.unit + 1} / ${document.logicalUnitCount}'),
-          _ReaderIconAction(
+          ShadIconAction(
             tooltip: 'Next',
             onPressed:
                 model.unit + 1 < document.logicalUnitCount.toInt() &&
@@ -1358,7 +1355,7 @@ class _ReaderTools extends StatelessWidget {
                     if (index == 0) {
                       return Row(
                         children: [
-                          _ReaderIconAction(
+                          ShadIconAction(
                             tooltip: locationBookmarked
                                 ? 'Remove bookmark'
                                 : 'Bookmark this location',
@@ -1371,7 +1368,7 @@ class _ReaderTools extends StatelessWidget {
                                   : LucideIcons.bookmark,
                             ),
                           ),
-                          _ReaderIconAction(
+                          ShadIconAction(
                             tooltip: 'Bookmark with note',
                             onPressed: model.bookmarkBusy
                                 ? null
@@ -1454,24 +1451,6 @@ class _ReaderToolError extends StatelessWidget {
   }
 }
 
-class _ReaderIconAction extends StatelessWidget {
-  const _ReaderIconAction({
-    required this.tooltip,
-    required this.onPressed,
-    required this.icon,
-  });
-
-  final String tooltip;
-  final VoidCallback? onPressed;
-  final Widget icon;
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip,
-    child: ShadIconButton.ghost(onPressed: onPressed, icon: icon),
-  );
-}
-
 class _BookmarkActionsMenu extends StatefulWidget {
   const _BookmarkActionsMenu({
     required this.enabled,
@@ -1529,12 +1508,10 @@ class _BookmarkActionsMenuState extends State<_BookmarkActionsMenu> {
         ],
       ),
     ),
-    child: Tooltip(
-      message: 'Bookmark actions',
-      child: ShadIconButton.ghost(
-        onPressed: widget.enabled ? _controller.toggle : null,
-        icon: const Icon(LucideIcons.ellipsis),
-      ),
+    child: ShadIconAction(
+      tooltip: 'Bookmark actions',
+      onPressed: widget.enabled ? _controller.toggle : null,
+      icon: const Icon(LucideIcons.ellipsis),
     ),
   );
 }
