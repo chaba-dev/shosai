@@ -2511,6 +2511,117 @@ void main() {
     );
   });
 
+  testWidgets(
+    'fit-width PDF maps pointer input on a scrolled asymmetric page',
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final bridge = _ControlledBridge(
+        format: FlutterBookFormat.pdf,
+        immediateLists: true,
+      );
+      FlutterSelectionSurface asymmetricSurface(int id) =>
+          FlutterSelectionSurface(
+            handle: FlutterSelectionHandle(
+              registry: BigInt.one,
+              id: BigInt.from(id),
+            ),
+            width: 200,
+            height: 600,
+            text: 'lower-page text',
+            copyEligible: true,
+            endpoints: [
+              FlutterSelectionEndpoint(
+                offset: BigInt.one,
+                rangeStart: BigInt.one,
+                rangeEnd: BigInt.from(2),
+                rect: const FlutterSelectionRect(
+                  left: 20,
+                  top: 500,
+                  right: 40,
+                  bottom: 520,
+                ),
+              ),
+              FlutterSelectionEndpoint(
+                offset: BigInt.from(2),
+                rangeStart: BigInt.from(2),
+                rangeEnd: BigInt.from(3),
+                rect: const FlutterSelectionRect(
+                  left: 70,
+                  top: 540,
+                  right: 90,
+                  bottom: 560,
+                ),
+              ),
+            ],
+            graphemeBoundaries: Uint32List.fromList([0, 1, 2, 3]),
+            wordBoundaries: Uint32List.fromList([0, 3]),
+            visualLines: const [],
+          );
+      bridge.selectionCompleters
+        ..add(
+          Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(40)),
+        )
+        ..add(
+          Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(41)),
+        );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ReaderScreen(
+            bridge: bridge,
+            initialPath: '/books/book.pdf',
+            initialSettings: const FlutterReaderSettings(
+              continuous: false,
+              theme: 'light',
+              epubFontSize: 18,
+              epubLineSpacing: 1.5,
+              pdfZoom: -1,
+            ),
+            decoder: (pixels, {required width, required height}) =>
+                _testImage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final pagePaint = find.byWidgetPredicate(
+        (widget) => widget is CustomPaint && widget.painter is PagePainter,
+      );
+      expect(tester.getSize(pagePaint).height, greaterThan(900));
+      final verticalScroll = find.descendant(
+        of: find.byKey(const ValueKey('reader-paginated-presentation')),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is Scrollable &&
+              widget.axisDirection == AxisDirection.down,
+        ),
+      );
+      expect(verticalScroll, findsOneWidget);
+      final position = tester.state<ScrollableState>(verticalScroll).position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pump();
+
+      final pageTopLeft = tester.getTopLeft(pagePaint);
+      final pageSize = tester.getSize(pagePaint);
+      final endpointCenter =
+          pageTopLeft +
+          Offset(pageSize.width * 30 / 200, pageSize.height * 510 / 600);
+      expect(endpointCenter.dy, inInclusiveRange(0, 600));
+      final dragTarget =
+          pageTopLeft +
+          Offset(pageSize.width * 80 / 200, pageSize.height * 550 / 600);
+      final gesture = await tester.startGesture(endpointCenter);
+      await gesture.moveTo(dragTarget);
+      await gesture.up();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await bridge.disposed.future;
+    },
+  );
+
   testWidgets('reader applies the persisted dark theme', (tester) async {
     final bridge = _ControlledBridge(immediateLists: true);
     await tester.pumpWidget(
@@ -5984,6 +6095,30 @@ void main() {
       2,
     ]);
     expect(controller.model.toolError, isNull);
+    expect(controller.model.persistenceError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('reading-state save failure is exposed outside tool chrome', () async {
+    final bridge = _ControlledBridge(
+      bookId: 7,
+      logicalUnitCount: 2,
+      immediateLists: true,
+    );
+    final save = Completer<void>();
+    bridge.readingStateCompleters.add(save);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+
+    controller.dispatch(const ReaderUnitRequested(1));
+    await bridge.waitForOp(2);
+    await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
+    save.completeError(StateError('commit failed'));
+    await controller.drainReadingStateWrites(7);
+
+    expect(controller.model.persistenceError, contains('commit failed'));
+    expect(controller.model.toolsVisible, isFalse);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -6013,6 +6148,11 @@ void main() {
       await bridge.waitForOp(3);
 
       expect(controller.model.toolError, contains('could not be restored'));
+      expect(
+        controller.model.persistenceError,
+        contains('could not be restored'),
+      );
+      expect(controller.model.toolsVisible, isFalse);
       expect(bridge.savedReadingStates, isEmpty);
 
       controller.dispatch(const ReaderUnitRequested(1));
@@ -6133,6 +6273,37 @@ void main() {
       await Future.wait([
         newerBridge.disposed.future,
         olderBridge.disposed.future,
+      ]);
+    },
+  );
+
+  test(
+    'book drain blocks reopen until an accepted bookmark commit finishes',
+    () async {
+      final olderBridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final commit = Completer<FlutterBookmark?>();
+      olderBridge.bookmarkToggleCompleters.add(commit);
+      final older = _epubController(olderBridge);
+      older.dispatch(const ReaderOpenRequested('/books/book.epub', bookId: 7));
+      await olderBridge.waitForOp(1);
+      older.dispatch(const ReaderBookmarkToggled());
+      await _waitUntil(() => olderBridge.toggledBookmarkOffsets.isNotEmpty);
+      older.dispose();
+
+      final newerBridge = _ControlledBridge(bookId: 7, immediateLists: true);
+      final newer = _epubController(newerBridge);
+      newer.dispatch(const ReaderOpenRequested('/books/book.epub', bookId: 7));
+      await Future<void>.delayed(Duration.zero);
+      expect(newerBridge.loadReadingStateCalls, 0);
+
+      commit.complete(_bookmark(11));
+      await newerBridge.waitForOp(1);
+      expect(newerBridge.loadReadingStateCalls, 1);
+
+      newer.dispose();
+      await Future.wait([
+        olderBridge.disposed.future,
+        newerBridge.disposed.future,
       ]);
     },
   );
