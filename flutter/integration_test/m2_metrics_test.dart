@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
@@ -167,9 +168,9 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: uiBridge)));
     await tester.pumpAndSettle();
-    tester.widget<TextField>(find.byType(TextField)).controller!.text = fixture;
+    tester.widget<ShadInput>(find.byType(ShadInput)).controller!.text = fixture;
     await tester.pump();
-    await tester.tap(find.byType(FilledButton));
+    await tester.tap(find.widgetWithText(ShadButton, 'Open document'));
     await tester.pump();
     await _pumpUntilFound(
       tester,
@@ -307,9 +308,9 @@ Future<void> _exerciseRenderedPersistence(
   final bridge = await createApplicationBridge(databaseName: databaseName);
   await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
   await tester.pumpAndSettle();
-  tester.widget<TextField>(find.byType(TextField)).controller!.text =
+  tester.widget<ShadInput>(find.byType(ShadInput)).controller!.text =
       request.pathKey;
-  await tester.tap(find.byType(FilledButton));
+  await tester.tap(find.widgetWithText(ShadButton, 'Open document'));
   await tester.pump();
   await _pumpUntilFound(
     tester,
@@ -345,7 +346,7 @@ Future<void> _exerciseRenderedPersistence(
   await gesture.moveTo(position(painter.surface.endpoints.last));
   await gesture.up();
   await tester.pump();
-  final yellowAction = find.widgetWithText(FilledButton, 'Yellow');
+  final yellowAction = find.widgetWithText(ShadButton, 'Yellow');
   await _pumpUntilEnabledButton(tester, yellowAction);
   await tester.tap(yellowAction);
   await _pumpUntilFound(tester, find.textContaining('Highlight 1'));
@@ -470,7 +471,7 @@ Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
 Future<void> _pumpUntilEnabledButton(WidgetTester tester, Finder finder) async {
   for (var attempt = 0; attempt < 300; attempt += 1) {
     await tester.pump(const Duration(milliseconds: 16));
-    final buttons = tester.widgetList<FilledButton>(finder);
+    final buttons = tester.widgetList<ShadButton>(finder);
     if (buttons.any((button) => button.onPressed != null)) return;
   }
   fail('reader action did not become enabled');
