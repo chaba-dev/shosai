@@ -12,6 +12,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -129,11 +130,11 @@ class ShosaiApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ShadApp.custom(
-      theme: _shadTheme(Brightness.light),
-      darkTheme: _shadTheme(Brightness.dark),
+      theme: shosaiShadTheme(Brightness.light),
+      darkTheme: shosaiShadTheme(Brightness.dark),
       appBuilder: (context) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: Theme.of(context),
+        theme: shosaiMaterialTheme(context),
         localizationsDelegates: const [
           GlobalShadLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
@@ -159,15 +160,6 @@ class ShosaiApp extends StatelessWidget {
       ),
     );
   }
-}
-
-ShadThemeData _shadTheme(Brightness brightness) {
-  final colorScheme = ShadColorScheme.fromName('stone', brightness: brightness);
-  return ShadThemeData(
-    brightness: brightness,
-    colorScheme: colorScheme,
-    textTheme: ShadTextTheme(family: 'Inter'),
-  );
 }
 
 class ReaderScreen extends StatefulWidget {

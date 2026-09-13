@@ -1,0 +1,26 @@
+import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
+
+const shosaiInterfaceFontFamily = 'Inter';
+const shosaiInterfaceFontFallback = ['Noto Sans JP'];
+
+ShadThemeData shosaiShadTheme(Brightness brightness) {
+  final colorScheme = ShadColorScheme.fromName('stone', brightness: brightness);
+  return ShadThemeData(
+    brightness: brightness,
+    colorScheme: colorScheme,
+    textTheme: ShadTextTheme(
+      family: shosaiInterfaceFontFamily,
+    ).apply(fontFamilyFallback: shosaiInterfaceFontFallback),
+  );
+}
+
+ThemeData shosaiMaterialTheme(BuildContext context) {
+  final theme = Theme.of(context);
+  return theme.copyWith(
+    textTheme: theme.textTheme.apply(
+      fontFamily: shosaiInterfaceFontFamily,
+      fontFamilyFallback: shosaiInterfaceFontFallback,
+    ),
+  );
+}
