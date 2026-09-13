@@ -5427,6 +5427,7 @@ dependencies = [
  "brotli-decompressor",
  "bytes",
  "cosmic-text",
+ "crc32fast",
  "cssparser 0.33.0",
  "flate2",
  "fontdb",

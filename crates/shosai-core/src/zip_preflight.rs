@@ -10,6 +10,9 @@ pub(crate) struct ZipPreflight {
     pub(crate) declared_uncompressed_bytes: u64,
     pub(crate) central_directory_bytes: usize,
     pub(crate) copied_filename_ceiling: usize,
+    pub(crate) has_epub_mimetype: bool,
+    pub(crate) has_epub_container: bool,
+    pub(crate) has_comic_image: bool,
 }
 
 pub(crate) fn preflight<R: Read + Seek>(
@@ -115,6 +118,10 @@ pub(crate) fn preflight<R: Read + Seek>(
     reader.seek(SeekFrom::Start(central_offset))?;
     let mut declared = 0_u64;
     let mut copied_filename_ceiling = 0_usize;
+    let mut has_epub_mimetype = false;
+    let mut has_epub_container = false;
+    let mut has_comic_image = false;
+    let mut mimetype_entry = None;
     for _ in 0..entries {
         check_cancelled(is_cancelled)?;
         let mut header = [0; 46];
@@ -138,16 +145,34 @@ pub(crate) fn preflight<R: Read + Seek>(
             .context("ZIP entry metadata overflowed")?;
         let mut variable = vec![0; variable_len];
         read_exact_cancellable(&mut reader, &mut variable, is_cancelled)?;
-        let size = effective_uncompressed_size(
+        let raw_name = &variable[..name_len];
+        let name = effective_name(raw_name, &variable[name_len..name_len + extra_len])?;
+        let (uncompressed_size, compressed_size, local_offset) = effective_entry_sizes_and_offset(
             le32(&header, 24).unwrap(),
+            le32(&header, 20).unwrap(),
+            le32(&header, 42).unwrap(),
             &variable[name_len..name_len + extra_len],
         )?;
+        if name == b"mimetype" {
+            mimetype_entry = Some((
+                le16(&header, 8).unwrap(),
+                le16(&header, 10).unwrap(),
+                compressed_size,
+                uncompressed_size,
+                local_offset,
+            ));
+        }
+        has_epub_container |= name == b"META-INF/container.xml";
+        has_comic_image |= comic_image_name(&name);
         declared = declared
-            .checked_add(size)
+            .checked_add(uncompressed_size)
             .context("ZIP declared size overflowed")?;
     }
     if reader.stream_position()? != central_end {
         bail!("ZIP central-directory size does not match its entries");
+    }
+    if let Some(entry) = mimetype_entry {
+        has_epub_mimetype = epub_mimetype_matches(&mut reader, entry, is_cancelled)?;
     }
     Ok(ZipPreflight {
         entries: usize::try_from(entries).context("ZIP entry count cannot be represented")?,
@@ -155,6 +180,83 @@ pub(crate) fn preflight<R: Read + Seek>(
         central_directory_bytes: usize::try_from(central_size)
             .context("ZIP central-directory size cannot be represented")?,
         copied_filename_ceiling,
+        has_epub_mimetype,
+        has_epub_container,
+        has_comic_image,
+    })
+}
+
+fn effective_name(raw_name: &[u8], extra: &[u8]) -> Result<Vec<u8>> {
+    let mut name = raw_name.to_vec();
+    let mut at = 0_usize;
+    while at < extra.len() {
+        let id = le16(extra, at).context("malformed ZIP extra field")?;
+        let len = usize::from(le16(extra, at + 2).context("malformed ZIP extra field")?);
+        let value = extra
+            .get(
+                at + 4
+                    ..at.checked_add(4 + len)
+                        .context("ZIP extra field overflowed")?,
+            )
+            .context("truncated ZIP extra field")?;
+        if id == 0x7075 {
+            let version = value.first().context("Unicode path field is empty")?;
+            if *version != 1 || value.len() < 5 {
+                bail!("invalid Unicode path field");
+            }
+            let expected = le32(value, 1).unwrap();
+            if crc32fast::hash(&name) != expected {
+                bail!("Unicode path checksum does not match its filename");
+            }
+            std::str::from_utf8(&value[5..]).context("Unicode path is not UTF-8")?;
+            name = value[5..].to_vec();
+        }
+        at = at
+            .checked_add(4 + len)
+            .context("ZIP extra field overflowed")?;
+    }
+    Ok(name)
+}
+
+fn epub_mimetype_matches<R: Read + Seek>(
+    reader: &mut R,
+    (flags, method, compressed_size, uncompressed_size, offset): (u16, u16, u64, u64, u64),
+    cancelled: Option<&dyn Fn() -> bool>,
+) -> Result<bool> {
+    const MIME: &[u8] = b"application/epub+zip";
+    if flags & 1 != 0
+        || method != 0
+        || compressed_size != MIME.len() as u64
+        || uncompressed_size != MIME.len() as u64
+    {
+        return Ok(false);
+    }
+    reader.seek(SeekFrom::Start(offset))?;
+    let mut header = [0_u8; 30];
+    read_exact_cancellable(reader, &mut header, cancelled)?;
+    if &header[..4] != b"PK\x03\x04" || le16(&header, 8) != Some(0) {
+        return Ok(false);
+    }
+    let variable = u64::from(le16(&header, 26).unwrap()) + u64::from(le16(&header, 28).unwrap());
+    reader.seek(SeekFrom::Current(variable as i64))?;
+    let mut value = [0_u8; MIME.len()];
+    read_exact_cancellable(reader, &mut value, cancelled)?;
+    Ok(value == MIME)
+}
+
+fn comic_image_name(name: &[u8]) -> bool {
+    [
+        b".jpg".as_slice(),
+        b".jpeg",
+        b".png",
+        b".gif",
+        b".webp",
+        b".bmp",
+    ]
+    .iter()
+    .any(|extension| {
+        name.len() >= extension.len()
+            && name[name.len() - extension.len()..].eq_ignore_ascii_case(extension)
     })
 }
 
@@ -263,9 +365,18 @@ fn le32(data: &[u8], at: usize) -> Option<u32> {
 fn le64(data: &[u8], at: usize) -> Option<u64> {
     Some(u64::from_le_bytes(data.get(at..at + 8)?.try_into().ok()?))
 }
-fn effective_uncompressed_size(declared: u32, extra: &[u8]) -> Result<u64> {
+fn effective_entry_sizes_and_offset(
+    uncompressed32: u32,
+    compressed32: u32,
+    offset32: u32,
+    extra: &[u8],
+) -> Result<(u64, u64, u64)> {
     let mut at = 0_usize;
-    let mut zip64_size = None;
+    let mut values = (
+        u64::from(uncompressed32),
+        u64::from(compressed32),
+        u64::from(offset32),
+    );
     let mut saw_zip64 = false;
     while at.checked_add(4).is_some_and(|end| end <= extra.len()) {
         let id = le16(extra, at).context("malformed ZIP extra field")?;
@@ -282,12 +393,21 @@ fn effective_uncompressed_size(declared: u32, extra: &[u8]) -> Result<u64> {
                 bail!("duplicate ZIP64 extended-information field");
             }
             saw_zip64 = true;
-            if len >= 24 || declared == u32::MAX {
-                let value = le64(value, 0).context("ZIP64 entry size is missing")?;
-                if declared != u32::MAX && value != u64::from(declared) {
-                    bail!("ZIP32 and ZIP64 entry sizes disagree");
+            let mut cursor = 0;
+            for (declared, effective, label) in [
+                (uncompressed32, &mut values.0, "uncompressed size"),
+                (compressed32, &mut values.1, "compressed size"),
+                (offset32, &mut values.2, "local-header offset"),
+            ] {
+                if len >= 24 || declared == u32::MAX {
+                    let replacement =
+                        le64(value, cursor).with_context(|| format!("ZIP64 {label} is missing"))?;
+                    if declared != u32::MAX && replacement != u64::from(declared) {
+                        bail!("ZIP32 and ZIP64 {label} disagree");
+                    }
+                    *effective = replacement;
+                    cursor += 8;
                 }
-                zip64_size = Some(value);
             }
         }
         at = at
@@ -297,16 +417,22 @@ fn effective_uncompressed_size(declared: u32, extra: &[u8]) -> Result<u64> {
     if at != extra.len() {
         bail!("malformed ZIP extra field");
     }
-    if declared == u32::MAX {
-        zip64_size.context("ZIP64 entry size is missing")
-    } else {
-        Ok(u64::from(declared))
+    for (declared, label) in [
+        (uncompressed32, "uncompressed size"),
+        (compressed32, "compressed size"),
+        (offset32, "local-header offset"),
+    ] {
+        if declared == u32::MAX && !saw_zip64 {
+            bail!("ZIP64 {label} is missing");
+        }
     }
+    Ok(values)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::io::{Cursor, Write};
     use zip::write::SimpleFileOptions;
 
@@ -319,6 +445,51 @@ mod tests {
         writer.finish().unwrap().into_inner()
     }
 
+    fn named_archive(names: &[&str]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for name in names {
+            writer
+                .start_file(*name, SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"data").unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn zip64_mimetype_archive(extra_values: &[u64], raw: (u32, u32, u32)) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("mimetype", stored).unwrap();
+        writer.write_all(b"application/epub+zip").unwrap();
+        writer.start_file("META-INF/container.xml", stored).unwrap();
+        writer.write_all(b"container").unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let central = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .unwrap();
+        bytes[central + 20..central + 24].copy_from_slice(&raw.0.to_le_bytes());
+        bytes[central + 24..central + 28].copy_from_slice(&raw.1.to_le_bytes());
+        bytes[central + 42..central + 46].copy_from_slice(&raw.2.to_le_bytes());
+        let name_len = usize::from(le16(&bytes, central + 28).unwrap());
+        let extra = central + 46 + name_len;
+        let mut field = Vec::new();
+        field.extend_from_slice(&1_u16.to_le_bytes());
+        field.extend_from_slice(&(extra_values.len() as u16 * 8).to_le_bytes());
+        for (index, value) in extra_values.iter().enumerate() {
+            debug_assert_eq!(index * 8 + 4, field.len());
+            field.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.splice(extra..extra, field.iter().copied());
+        bytes[central + 30..central + 32]
+            .copy_from_slice(&((extra_values.len() * 8 + 4) as u16).to_le_bytes());
+        let eocd = bytes.len() - 22;
+        let central_size = le32(&bytes, eocd + 12).unwrap() + extra_values.len() as u32 * 8 + 4;
+        bytes[eocd + 12..eocd + 16].copy_from_slice(&central_size.to_le_bytes());
+        bytes
+    }
+
     #[test]
     fn preflight_is_cancellable_before_directory_work() {
         let error = preflight(Cursor::new(archive(b"page")), 10, Some(&|| true)).unwrap_err();
@@ -326,9 +497,74 @@ mod tests {
     }
 
     #[test]
+    fn preflight_observes_cancellation_after_inspection_starts() {
+        let checks = Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() > 3
+        };
+
+        let error = preflight(
+            Cursor::new(named_archive(&["one", "two", "three"])),
+            10,
+            Some(&cancelled),
+        )
+        .unwrap_err();
+
+        assert!(checks.get() > 3);
+        assert!(error.to_string().contains("cancelled"));
+    }
+
+    #[test]
+    fn preflight_requires_the_epub_mimetype_value_and_classifies_comic_names() {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer.start_file("mimetype", stored).unwrap();
+        writer.write_all(b"application/not-epub").unwrap();
+        writer.start_file("META-INF/container.xml", stored).unwrap();
+        writer.write_all(b"data").unwrap();
+        let epub = preflight(Cursor::new(writer.finish().unwrap().into_inner()), 10, None).unwrap();
+        assert!(!epub.has_epub_mimetype);
+        assert!(epub.has_epub_container);
+        assert!(!epub.has_comic_image);
+
+        let comic = preflight(Cursor::new(named_archive(&["pages/001.BMP"])), 10, None).unwrap();
+        assert!(comic.has_comic_image);
+        assert!(!comic.has_epub_mimetype);
+    }
+
+    #[test]
+    fn unicode_path_fields_use_the_consumers_effective_name() {
+        let raw = b"page";
+        let unicode = b"pages/001.jpg";
+        let mut extra = Vec::new();
+        extra.extend_from_slice(&0x7075_u16.to_le_bytes());
+        extra.extend_from_slice(&(5_u16 + unicode.len() as u16).to_le_bytes());
+        extra.push(1);
+        extra.extend_from_slice(&crc32fast::hash(raw).to_le_bytes());
+        extra.extend_from_slice(unicode);
+
+        assert_eq!(effective_name(raw, &extra).unwrap(), unicode);
+        assert!(comic_image_name(&effective_name(raw, &extra).unwrap()));
+    }
+
+    #[test]
     fn payload_eocd_false_candidates_do_not_trigger_prefix_rescans() {
-        let payload = b"PK\x05\x06".repeat(100_000);
-        let bytes = archive(&payload);
+        let mut false_footer = [0_u8; 22];
+        false_footer[..4].copy_from_slice(b"PK\x05\x06");
+        false_footer[4..6].copy_from_slice(&1_u16.to_le_bytes());
+        let payload = false_footer.repeat(100_000);
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "page.bin",
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored),
+            )
+            .unwrap();
+        writer.write_all(&payload).unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let byte_len = bytes.len();
         struct CountingReader {
             inner: Cursor<Vec<u8>>,
             read: usize,
@@ -351,9 +587,9 @@ mod tests {
         };
         preflight(&mut reader, 10, None).unwrap();
         assert!(
-            reader.read < 200_000,
-            "preflight read {} bytes",
-            reader.read
+            reader.read < byte_len * 2 + 200_000,
+            "preflight read {} bytes from a {byte_len}-byte archive",
+            reader.read,
         );
     }
 
@@ -414,13 +650,57 @@ mod tests {
         conflicting.extend_from_slice(&24_u16.to_le_bytes());
         conflicting.extend_from_slice(&9_u64.to_le_bytes());
         conflicting.extend_from_slice(&[0; 16]);
-        assert!(effective_uncompressed_size(7, &conflicting).is_err());
+        assert!(effective_entry_sizes_and_offset(7, 0, 0, &conflicting).is_err());
 
         let mut duplicate = conflicting;
         duplicate[4..12].copy_from_slice(&7_u64.to_le_bytes());
         duplicate.extend_from_slice(&1_u16.to_le_bytes());
         duplicate.extend_from_slice(&8_u16.to_le_bytes());
         duplicate.extend_from_slice(&7_u64.to_le_bytes());
-        assert!(effective_uncompressed_size(7, &duplicate).is_err());
+        assert!(effective_entry_sizes_and_offset(7, 0, 0, &duplicate).is_err());
+    }
+
+    #[test]
+    fn zip64_entry_fields_resolve_sentinels_and_reject_decoy_offsets() {
+        let mut sentinel = Vec::new();
+        sentinel.extend_from_slice(&1_u16.to_le_bytes());
+        sentinel.extend_from_slice(&24_u16.to_le_bytes());
+        sentinel.extend_from_slice(&20_u64.to_le_bytes());
+        sentinel.extend_from_slice(&20_u64.to_le_bytes());
+        sentinel.extend_from_slice(&42_u64.to_le_bytes());
+        assert_eq!(
+            effective_entry_sizes_and_offset(u32::MAX, u32::MAX, u32::MAX, &sentinel).unwrap(),
+            (20, 20, 42),
+        );
+
+        assert!(effective_entry_sizes_and_offset(20, 20, 41, &sentinel).is_err());
+    }
+
+    #[test]
+    fn preflight_and_zip_consumer_agree_on_zip64_mimetype_entries() {
+        let sentinel = zip64_mimetype_archive(&[20, 20, 0], (u32::MAX, u32::MAX, u32::MAX));
+        let admitted = preflight(Cursor::new(&sentinel), 10, None).unwrap();
+        assert!(admitted.has_epub_mimetype);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&sentinel)).unwrap();
+        let mut value = String::new();
+        archive
+            .by_name("mimetype")
+            .unwrap()
+            .read_to_string(&mut value)
+            .unwrap();
+        assert_eq!(value, "application/epub+zip");
+
+        let short = zip64_mimetype_archive(&[20], (20, u32::MAX, 0));
+        assert!(
+            preflight(Cursor::new(short), 10, None)
+                .unwrap()
+                .has_epub_mimetype
+        );
+    }
+
+    #[test]
+    fn preflight_rejects_a_zip64_offset_that_overrides_a_zip32_decoy() {
+        let decoy = zip64_mimetype_archive(&[20, 20, 0], (20, 20, 1));
+        assert!(preflight(Cursor::new(decoy), 10, None).is_err());
     }
 }
