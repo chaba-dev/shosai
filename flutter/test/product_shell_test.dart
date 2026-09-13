@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -28,7 +29,7 @@ void main() {
     addTearDown(tester.view.reset);
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
           useMaterial3: true,
@@ -60,7 +61,7 @@ void main() {
     final bridge = _LibraryBridge();
     final channel = _CleanupChannel([1, 0]);
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
           useMaterial3: true,
@@ -192,7 +193,7 @@ void main() {
     final bridge = _LibraryBridge();
     FlutterLibraryBook? opened;
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, book, _, _, _, _) {
@@ -233,7 +234,7 @@ void main() {
       ],
     );
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -263,7 +264,7 @@ void main() {
       books: [_book(7, 'Covered')],
     );
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -294,7 +295,7 @@ void main() {
     final covers = [first, ...List.generate(9, (_) => Completer<Uint8List?>())];
     bridge.coverCompleters.addAll(covers);
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -387,7 +388,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -437,7 +438,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -473,7 +474,7 @@ void main() {
     final bridge = _LibraryBridge();
     final disposed = Completer<void>();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => _DisposeSignal(
@@ -509,7 +510,7 @@ void main() {
   ) async {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) =>
@@ -532,7 +533,7 @@ void main() {
   ) async {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         restorationScopeId: 'app',
         home: ProductShell(
           bridgeFactory: () => bridge,
@@ -568,7 +569,7 @@ void main() {
   ) async {
     final bridge = _LibraryBridge(books: const []);
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -589,7 +590,7 @@ void main() {
   ) async {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -631,7 +632,7 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -657,7 +658,7 @@ void main() {
       await tester.pumpWidget(
         MediaQuery(
           data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-          child: MaterialApp(
+          child: _libraryApp(
             home: ProductShell(
               bridgeFactory: () => bridge,
               readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1214,7 +1215,7 @@ void main() {
   testWidgets('managed removal requires confirmation', (tester) async {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1246,7 +1247,7 @@ void main() {
       ),
     );
     await tester.pumpWidget(
-      MaterialApp(
+      _libraryApp(
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
           useMaterial3: true,
@@ -1302,7 +1303,7 @@ void main() {
     await tester.pumpWidget(
       MediaQuery(
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-        child: MaterialApp(
+        child: _libraryApp(
           theme: ThemeData(
             fontFamily: 'Inter',
             fontFamilyFallback: const ['Noto Sans JP'],
@@ -1344,7 +1345,7 @@ void main() {
         await tester.pumpWidget(
           MediaQuery(
             data: const MediaQueryData(textScaler: TextScaler.linear(2)),
-            child: MaterialApp(
+            child: _libraryApp(
               home: ProductShell(
                 bridgeFactory: () => bridge,
                 readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1707,3 +1708,19 @@ class _ControlledLibraryBridge implements FlutterBridge {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
+
+Widget _libraryApp({
+  ThemeData? theme,
+  String? restorationScopeId,
+  required Widget home,
+}) => ShadTheme(
+  data: ShadThemeData(
+    brightness: Brightness.light,
+    colorScheme: const ShadStoneColorScheme.light(),
+  ),
+  child: MaterialApp(
+    theme: theme,
+    restorationScopeId: restorationScopeId,
+    home: home,
+  ),
+);
