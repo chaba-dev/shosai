@@ -28,6 +28,7 @@ export 'package:shosai_flutter/reader_controller.dart'
         PageDecoder,
         NoteEditorCanceller,
         ReaderController,
+        ReaderPersistenceException,
         ReaderAnnotationAssociationRequested,
         ReaderAnnotationReloadRequested,
         ReaderAnnotationDeleted,
@@ -837,14 +838,16 @@ class _DocumentView extends StatelessWidget {
                 model: model,
                 dispatch: dispatch,
               ),
-              Flexible(
-                child: _ReaderTools(
-                  document: document,
-                  model: model,
-                  dispatch: dispatch,
+              if (model.toolsVisible)
+                Flexible(
+                  child: _ReaderTools(
+                    document: document,
+                    model: model,
+                    dispatch: dispatch,
+                  ),
                 ),
-              ),
-              _ReaderToolError(model: model),
+              if (model.persistenceError != null)
+                Flexible(child: _ReaderToolError(model: model)),
             ],
           ),
         ),
@@ -1045,36 +1048,24 @@ class _DocumentView extends StatelessWidget {
                                   child: child,
                                 ),
                               ),
-                              child: settings?.continuous == true
-                                  ? SingleChildScrollView(
-                                      key: const ValueKey(
-                                        'reader-continuous-presentation',
-                                      ),
-                                      child: SizedBox(
-                                        height: math.max(
-                                          constraints.maxHeight,
-                                          surface.height,
-                                        ),
-                                        child: _SelectableSurface(
-                                          surface: surface,
-                                          image: page,
-                                          model: model,
-                                          fit: _readerFit(
-                                            document.format,
-                                            settings,
-                                          ),
-                                          dispatch: dispatch,
-                                        ),
-                                      ),
-                                    )
-                                  : _ReachableSelectableSurface(
-                                      document: document,
-                                      settings: settings,
-                                      surface: surface,
-                                      image: page,
-                                      model: model,
-                                      dispatch: dispatch,
-                                    ),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                excludeFromSemantics: true,
+                                onTap: readerFocus.requestFocus,
+                                child: _ReachableSelectableSurface(
+                                  presentationKey: ValueKey(
+                                    settings?.continuous == true
+                                        ? 'reader-continuous-presentation'
+                                        : 'reader-paginated-presentation',
+                                  ),
+                                  document: document,
+                                  settings: settings,
+                                  surface: surface,
+                                  image: page,
+                                  model: model,
+                                  dispatch: dispatch,
+                                ),
+                              ),
                             ),
                           ),
                         ),
@@ -1083,12 +1074,23 @@ class _DocumentView extends StatelessWidget {
                         Positioned.fill(
                           child: CustomSingleChildLayout(
                             delegate: _SelectionActionsLayout(
-                              target: _selectionActionTarget(
-                                surface,
-                                model,
-                                constraints.biggest,
-                                _readerFit(document.format, settings),
-                              ),
+                              target:
+                                  _readerFit(document.format, settings) ==
+                                      BoxFit.contain
+                                  ? _selectionActionTarget(
+                                      surface,
+                                      model,
+                                      constraints.biggest,
+                                      BoxFit.contain,
+                                    )
+                                  : Rect.fromCenter(
+                                      center: Offset(
+                                        constraints.maxWidth / 2,
+                                        0,
+                                      ),
+                                      width: 0,
+                                      height: 0,
+                                    ),
                             ),
                             child: _SelectionActions(
                               model: model,
@@ -1174,14 +1176,16 @@ class _DocumentView extends StatelessWidget {
             model: model,
             dispatch: dispatch,
           ),
-          Flexible(
-            child: _ReaderTools(
-              document: document,
-              model: model,
-              dispatch: dispatch,
+          if (model.toolsVisible)
+            Flexible(
+              child: _ReaderTools(
+                document: document,
+                model: model,
+                dispatch: dispatch,
+              ),
             ),
-          ),
-          _ReaderToolError(model: model),
+          if (model.persistenceError != null)
+            Flexible(child: _ReaderToolError(model: model)),
         ],
       ),
     );
@@ -1396,9 +1400,12 @@ class _ReaderTools extends StatelessWidget {
                 ),
               ),
             if (model.toolError case final error?)
-              Text(
-                error,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  error,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
               ),
           ],
         ),
@@ -1416,12 +1423,14 @@ class _ReaderToolError extends StatelessWidget {
   Widget build(BuildContext context) {
     final error = model.persistenceError;
     if (error == null) return const SizedBox.shrink();
-    return Semantics(
-      liveRegion: true,
-      child: Text(
-        error,
-        key: const ValueKey('reader-tool-error'),
-        style: TextStyle(color: Theme.of(context).colorScheme.error),
+    return SingleChildScrollView(
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          error,
+          key: const ValueKey('reader-tool-error'),
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
       ),
     );
   }
@@ -1710,7 +1719,7 @@ class _SelectionActionsLayout extends SingleChildLayoutDelegate {
     final above = target.top - childSize.height - _gap;
     final below = target.bottom + _gap;
     final maxTop = math.max(_gap, size.height - childSize.height - _gap);
-    final top = above >= _gap ? above : below.clamp(_gap, maxTop);
+    final top = (above >= _gap ? above : below).clamp(_gap, maxTop);
     return Offset(left, top);
   }
 
@@ -1781,6 +1790,7 @@ String _colorName(FlutterHighlightColor color) => switch (color) {
 
 class _ReachableSelectableSurface extends StatelessWidget {
   const _ReachableSelectableSurface({
+    required this.presentationKey,
     required this.document,
     required this.settings,
     required this.surface,
@@ -1789,6 +1799,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
     required this.dispatch,
   });
 
+  final Key presentationKey;
   final FlutterDocumentSummary document;
   final FlutterReaderSettings? settings;
   final FlutterSelectionSurface surface;
@@ -1804,6 +1815,12 @@ class _ReachableSelectableSurface extends StatelessWidget {
         Widget content(Size size) => SizedBox.fromSize(
           size: size,
           child: _SelectableSurface(
+            key: ValueKey((
+              model.generation,
+              model.unit,
+              surface.handle.registry,
+              surface.handle.id,
+            )),
             surface: surface,
             image: image,
             model: model,
@@ -1811,10 +1828,27 @@ class _ReachableSelectableSurface extends StatelessWidget {
             dispatch: dispatch,
           ),
         );
+        if (document.format == FlutterBookFormat.epub &&
+            settings?.continuous == true) {
+          return KeyedSubtree(
+            key: presentationKey,
+            child: SingleChildScrollView(
+              key: ValueKey(
+                'reader-vertical-scroll-${model.generation}-${model.unit}',
+              ),
+              child: content(
+                Size(
+                  constraints.maxWidth,
+                  math.max(constraints.maxHeight, surface.height),
+                ),
+              ),
+            ),
+          );
+        }
         if (document.format == FlutterBookFormat.epub ||
             fit == BoxFit.contain) {
           return KeyedSubtree(
-            key: const ValueKey('reader-paginated-presentation'),
+            key: presentationKey,
             child: content(constraints.biggest),
           );
         }
@@ -1828,18 +1862,33 @@ class _ReachableSelectableSurface extends StatelessWidget {
           math.max(constraints.maxWidth, natural.width),
           math.max(constraints.maxHeight, natural.height),
         );
-        return SingleChildScrollView(
-          key: const ValueKey('reader-paginated-presentation'),
-          scrollDirection: Axis.horizontal,
-          child: SingleChildScrollView(child: content(reachable)),
+        final vertical = SingleChildScrollView(
+          key: ValueKey(
+            'reader-vertical-scroll-${model.generation}-${model.unit}',
+          ),
+          child: content(reachable),
+        );
+        if (fit == BoxFit.fitWidth) {
+          return KeyedSubtree(key: presentationKey, child: vertical);
+        }
+        return KeyedSubtree(
+          key: presentationKey,
+          child: SingleChildScrollView(
+            key: ValueKey(
+              'reader-horizontal-scroll-${model.generation}-${model.unit}',
+            ),
+            scrollDirection: Axis.horizontal,
+            child: vertical,
+          ),
         );
       },
     );
   }
 }
 
-class _SelectableSurface extends StatelessWidget {
+class _SelectableSurface extends StatefulWidget {
   const _SelectableSurface({
+    super.key,
     required this.surface,
     required this.image,
     required this.model,
@@ -1854,12 +1903,19 @@ class _SelectableSurface extends StatelessWidget {
   final void Function(ReaderMessage) dispatch;
 
   @override
+  State<_SelectableSurface> createState() => _SelectableSurfaceState();
+}
+
+class _SelectableSurfaceState extends State<_SelectableSurface> {
+  int? _touchPointer;
+
+  @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final transform = _SurfaceTransform.create(
-          fit,
-          Size(surface.width, surface.height),
+          widget.fit,
+          Size(widget.surface.width, widget.surface.height),
           constraints.biggest,
         );
         FlutterSelectionEndpoint? endpoint(
@@ -1870,7 +1926,7 @@ class _SelectableSurface extends StatelessWidget {
             return null;
           }
           final source = transform.toSource(position, clamp: nearest);
-          for (final endpoint in surface.endpoints) {
+          for (final endpoint in widget.surface.endpoints) {
             final rect = endpoint.rect;
             if (Rect.fromLTRB(
               rect.left,
@@ -1881,10 +1937,10 @@ class _SelectableSurface extends StatelessWidget {
               return endpoint;
             }
           }
-          if (!nearest || surface.endpoints.isEmpty) return null;
+          if (!nearest || widget.surface.endpoints.isEmpty) return null;
           FlutterSelectionEndpoint? closest;
           double? distance;
-          for (final endpoint in surface.endpoints) {
+          for (final endpoint in widget.surface.endpoints) {
             final rect = endpoint.rect;
             final dx = source.dx.clamp(rect.left, rect.right) - source.dx;
             final dy = source.dy.clamp(rect.top, rect.bottom) - source.dy;
@@ -1901,16 +1957,22 @@ class _SelectableSurface extends StatelessWidget {
           key: const ValueKey('reader-selection-surface'),
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
+            if (event.kind == ui.PointerDeviceKind.touch) {
+              _touchPointer ??= event.pointer;
+              return;
+            }
             final primary =
                 event.kind != ui.PointerDeviceKind.mouse ||
                 (event.buttons & 1) != 0;
             if (!primary) return;
             final value = endpoint(event.localPosition);
             if (value == null) {
-              dispatch(ReaderSelectionPointerPressedOutside(event.pointer));
+              widget.dispatch(
+                ReaderSelectionPointerPressedOutside(event.pointer),
+              );
             } else {
               final source = transform.toSource(event.localPosition);
-              dispatch(
+              widget.dispatch(
                 ReaderSelectionPointerStarted(
                   event.pointer,
                   value.offset.toInt(),
@@ -1923,13 +1985,14 @@ class _SelectableSurface extends StatelessWidget {
             }
           },
           onPointerMove: (event) {
+            if (event.kind == ui.PointerDeviceKind.touch) return;
             final value = endpoint(event.localPosition, nearest: true);
             if (value != null) {
               final source = transform.toSource(
                 event.localPosition,
                 clamp: true,
               );
-              dispatch(
+              widget.dispatch(
                 ReaderSelectionPointerMoved(
                   event.pointer,
                   value.offset.toInt(),
@@ -1939,58 +2002,117 @@ class _SelectableSurface extends StatelessWidget {
               );
             }
           },
-          onPointerUp: (event) =>
-              dispatch(ReaderSelectionPointerEnded(event.pointer)),
-          onPointerCancel: (event) =>
-              dispatch(ReaderSelectionPointerCancelled(event.pointer)),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              RepaintBoundary(
-                key: const ValueKey('reader-page-paint'),
-                child: KeyedSubtree(
-                  key: ValueKey('reader-fit-${fit.name}'),
-                  child: CustomPaint(
-                    painter: _PageContentPainter(
-                      image: image,
-                      surface: surface,
-                      backgroundColor: pageColors(
-                        Theme.of(context).colorScheme,
-                      ).background,
-                      foregroundColor: pageColors(
-                        Theme.of(context).colorScheme,
-                      ).foreground,
-                      recolorImage:
-                          model.document?.format == FlutterBookFormat.epub,
-                      fit: fit,
+          onPointerUp: (event) {
+            if (event.kind != ui.PointerDeviceKind.touch) {
+              widget.dispatch(ReaderSelectionPointerEnded(event.pointer));
+            }
+          },
+          onPointerCancel: (event) {
+            if (event.kind != ui.PointerDeviceKind.touch ||
+                _touchPointer == event.pointer) {
+              widget.dispatch(ReaderSelectionPointerCancelled(event.pointer));
+            }
+            if (_touchPointer == event.pointer) _touchPointer = null;
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onLongPressStart: (details) {
+              final pointer = _touchPointer;
+              final value = endpoint(details.localPosition);
+              if (pointer == null || value == null) return;
+              final source = transform.toSource(details.localPosition);
+              widget.dispatch(
+                ReaderSelectionPointerStarted(
+                  pointer,
+                  value.offset.toInt(),
+                  rangeStart: value.rangeStart.toInt(),
+                  rangeEnd: value.rangeEnd.toInt(),
+                  x: source.dx,
+                  y: source.dy,
+                ),
+              );
+            },
+            onLongPressMoveUpdate: (details) {
+              final pointer = _touchPointer;
+              final value = endpoint(details.localPosition, nearest: true);
+              if (pointer == null || value == null) return;
+              final source = transform.toSource(
+                details.localPosition,
+                clamp: true,
+              );
+              widget.dispatch(
+                ReaderSelectionPointerMoved(
+                  pointer,
+                  value.offset.toInt(),
+                  x: source.dx,
+                  y: source.dy,
+                ),
+              );
+            },
+            onLongPressEnd: (_) {
+              final pointer = _touchPointer;
+              if (pointer != null) {
+                widget.dispatch(ReaderSelectionPointerEnded(pointer));
+              }
+              _touchPointer = null;
+            },
+            onLongPressCancel: () {
+              final pointer = _touchPointer;
+              if (pointer != null) {
+                widget.dispatch(ReaderSelectionPointerCancelled(pointer));
+              }
+              _touchPointer = null;
+            },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                RepaintBoundary(
+                  key: const ValueKey('reader-page-paint'),
+                  child: KeyedSubtree(
+                    key: ValueKey('reader-fit-${widget.fit.name}'),
+                    child: CustomPaint(
+                      painter: _PageContentPainter(
+                        image: widget.image,
+                        surface: widget.surface,
+                        backgroundColor: pageColors(
+                          Theme.of(context).colorScheme,
+                        ).background,
+                        foregroundColor: pageColors(
+                          Theme.of(context).colorScheme,
+                        ).foreground,
+                        recolorImage:
+                            widget.model.document?.format ==
+                            FlutterBookFormat.epub,
+                        fit: widget.fit,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              CustomPaint(
-                painter: PagePainter(
-                  image: image,
-                  surface: surface,
-                  backgroundColor: pageColors(
-                    Theme.of(context).colorScheme,
-                  ).background,
-                  foregroundColor: pageColors(
-                    Theme.of(context).colorScheme,
-                  ).foreground,
-                  recolorImage:
-                      model.document?.format == FlutterBookFormat.epub,
-                  fit: fit,
-                  anchor: model.anchor,
-                  focus: model.focus,
-                  savedSelections: model.savedSelections,
-                  annotations: model.annotations
-                      .where((item) => item.unit.toInt() == model.unit)
-                      .toList(growable: false),
-                  currentUnit: model.unit,
-                  paintContent: false,
+                CustomPaint(
+                  painter: PagePainter(
+                    image: widget.image,
+                    surface: widget.surface,
+                    backgroundColor: pageColors(
+                      Theme.of(context).colorScheme,
+                    ).background,
+                    foregroundColor: pageColors(
+                      Theme.of(context).colorScheme,
+                    ).foreground,
+                    recolorImage:
+                        widget.model.document?.format == FlutterBookFormat.epub,
+                    fit: widget.fit,
+                    anchor: widget.model.anchor,
+                    focus: widget.model.focus,
+                    savedSelections: widget.model.savedSelections,
+                    annotations: widget.model.annotations
+                        .where((item) => item.unit.toInt() == widget.model.unit)
+                        .toList(growable: false),
+                    currentUnit: widget.model.unit,
+                    paintContent: false,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },

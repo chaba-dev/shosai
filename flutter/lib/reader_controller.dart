@@ -82,6 +82,15 @@ final class _BookWriteDrain {
   }
 }
 
+final class ReaderPersistenceException implements Exception {
+  const ReaderPersistenceException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 final class _RelayoutIntent {
   const _RelayoutIntent({
     required this.unit,
@@ -517,10 +526,16 @@ final class _ReaderBookmarksCompleted extends ReaderMessage {
 }
 
 final class _ReaderBookmarksFailed extends ReaderMessage {
-  const _ReaderBookmarksFailed(this.generation, this.revision, this.error);
+  const _ReaderBookmarksFailed(
+    this.generation,
+    this.revision,
+    this.error, {
+    this.persistence = false,
+  });
   final int generation;
   final int revision;
   final String error;
+  final bool persistence;
 }
 
 final class _ReaderBookmarkFinished extends ReaderMessage {
@@ -844,6 +859,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     required this.layout,
     required this.restoredLayout,
     required this.restorationFailed,
+    this.restorationError,
     this.offset,
     this.toolError,
   });
@@ -855,6 +871,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final ReaderLayout layout;
   final bool restoredLayout;
   final bool restorationFailed;
+  final String? restorationError;
   final int? offset;
   final String? toolError;
 }
@@ -1108,6 +1125,7 @@ final class ReaderController implements Listenable {
   int? _recoveryBookId;
   static final Map<int, _ReadingStateSaveQueue> _bookReadingStateSaves = {};
   static final Map<int, _BookWriteDrain> _bookWrites = {};
+  static final Map<int, Map<String, String>> _bookWriteFailures = {};
   bool _suspended = false;
   bool _releaseForRecovery = false;
   bool _reopenForRecovery = false;
@@ -1121,8 +1139,13 @@ final class ReaderController implements Listenable {
   ReaderModel get model => _model;
 
   /// Completes after every accepted durable write for [bookId] in-process.
-  static Future<void> drainBookWrites(int bookId) =>
-      _bookWrites[bookId]?.drained.future ?? Future<void>.value();
+  static Future<void> drainBookWrites(int bookId) async {
+    await (_bookWrites[bookId]?.drained.future ?? Future<void>.value());
+    final failures = _bookWriteFailures.remove(bookId)?.values.toList();
+    if (failures != null && failures.isNotEmpty) {
+      throw ReaderPersistenceException(failures.join(' '));
+    }
+  }
 
   @Deprecated(
     'Use drainBookWrites; it also includes bookmarks and annotations.',
@@ -1136,7 +1159,21 @@ final class ReaderController implements Listenable {
     _bookWrites.putIfAbsent(bookId, _BookWriteDrain.new).begin();
   }
 
-  static void _finishBookWrite(int bookId) {
+  static void _finishBookWrite(
+    int bookId, {
+    String? failureKind,
+    String? error,
+    bool succeeded = false,
+  }) {
+    if (failureKind != null && error != null) {
+      _bookWriteFailures.putIfAbsent(bookId, () => {})[failureKind] = error;
+    } else if (failureKind != null && succeeded) {
+      final failures = _bookWriteFailures[bookId];
+      if (failures != null) {
+        failures.remove(failureKind);
+        if (failures.isEmpty) _bookWriteFailures.remove(bookId);
+      }
+    }
     final drain = _bookWrites[bookId];
     if (drain != null && drain.finish()) _bookWrites.remove(bookId);
   }
@@ -1242,7 +1279,16 @@ final class ReaderController implements Listenable {
       case _ReaderBookmarksFailed():
         if (_isCurrent(message.generation) &&
             message.revision == _bookmarkRevision) {
-          _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
+          final error = message.persistence
+              ? 'Bookmark changes were not saved: ${message.error}'
+              : message.error;
+          _emit(
+            _model.copyWith(
+              bookmarkBusy: false,
+              toolError: error,
+              persistenceError: message.persistence ? error : _unchanged,
+            ),
+          );
         }
       case _ReaderBookmarkFinished():
         if (_bookmarkMutationCancellation == message.cancellation) {
@@ -1265,19 +1311,29 @@ final class ReaderController implements Listenable {
             message.revision == _readingStateSaveRevision &&
             !_closing) {
           final error = 'Reading position was not saved: ${message.error}';
+          final ownsPersistenceError =
+              _model.persistenceError == null ||
+              _model.persistenceError == _readingStateSaveError;
           _readingStateSaveError = error;
-          _emit(_model.copyWith(toolError: error, persistenceError: error));
+          _emit(
+            _model.copyWith(
+              toolError: error,
+              persistenceError: ownsPersistenceError ? error : _unchanged,
+            ),
+          );
         }
       case _ReaderReadingStateSaveSucceeded():
         if (_isCurrent(message.generation) &&
             message.revision == _readingStateSaveRevision &&
             _readingStateSaveError != null) {
           final ownsToolError = _model.toolError == _readingStateSaveError;
+          final ownsPersistenceError =
+              _model.persistenceError == _readingStateSaveError;
           _readingStateSaveError = null;
           _emit(
             _model.copyWith(
               toolError: ownsToolError ? null : _unchanged,
-              persistenceError: null,
+              persistenceError: ownsPersistenceError ? null : _unchanged,
             ),
           );
         }
@@ -1635,6 +1691,7 @@ final class ReaderController implements Listenable {
   ) async {
     FlutterDocumentSummary? opened;
     try {
+      if (bookId != null) await drainBookWrites(bookId);
       opened = bookId == null
           ? await _bridge.openDocument(
               request: FlutterOpenRequest(localId: path, pathKey: path),
@@ -1647,17 +1704,17 @@ final class ReaderController implements Listenable {
       final document = opened;
       FlutterReadingState? restored;
       String? toolError;
+      String? restorationError;
       var restorationFailed = false;
       if (bookId != null) {
         try {
-          await drainBookWrites(bookId);
           restored = await _bridge.loadReadingState(
             bookId: bookId,
             cancellationId: cancellation,
           );
         } catch (error) {
           restorationFailed = true;
-          toolError = 'Reading position could not be restored: $error';
+          restorationError = 'Reading position could not be restored: $error';
         }
       }
       final unit = (restored?.unit.toInt() ?? 0).clamp(
@@ -1692,6 +1749,7 @@ final class ReaderController implements Listenable {
           layout: restoredLayout,
           restoredLayout: restored != null,
           restorationFailed: restorationFailed,
+          restorationError: restorationError,
           offset: restored?.offset?.toInt(),
           toolError: toolError,
         ),
@@ -1875,7 +1933,7 @@ final class ReaderController implements Listenable {
         anchor: message.offset,
         focus: message.offset,
         toolError: message.toolError,
-        persistenceError: message.restorationFailed ? message.toolError : null,
+        persistenceError: message.restorationError,
       ),
     );
   }
@@ -2246,19 +2304,34 @@ final class ReaderController implements Listenable {
     _beginBookWrite(bookId);
     _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     unawaited(() async {
+      String? writeError;
+      var mutationCommitted = false;
       try {
         await mutation();
+        mutationCommitted = true;
         final items = await _bridge.listBookmarks(
           bookId: bookId,
           cancellationId: cancellation,
         );
         dispatch(_ReaderBookmarksCompleted(generation, revision, items));
       } catch (error) {
+        if (!mutationCommitted) writeError = error.toString();
         dispatch(
-          _ReaderBookmarksFailed(generation, revision, error.toString()),
+          _ReaderBookmarksFailed(
+            generation,
+            revision,
+            error.toString(),
+            persistence: !mutationCommitted,
+          ),
         );
       } finally {
-        _finishBookWrite(bookId);
+        _finishBookWrite(
+          bookId,
+          failureKind: 'bookmark',
+          error: writeError == null
+              ? null
+              : 'Bookmark changes were not saved: $writeError',
+        );
         dispatch(_ReaderBookmarkFinished(cancellation));
       }
     }());
@@ -2484,6 +2557,7 @@ final class ReaderController implements Listenable {
     queue.add(
       _QueuedReadingStateSave(
         run: () async {
+          String? writeError;
           try {
             await _bridge.saveReadingState(
               bookId: bookId,
@@ -2492,15 +2566,19 @@ final class ReaderController implements Listenable {
             );
             dispatch(_ReaderReadingStateSaveSucceeded(generation, revision));
           } catch (error) {
+            writeError = error.toString();
             dispatch(
-              _ReaderReadingStateSaveFailed(
-                generation,
-                revision,
-                error.toString(),
-              ),
+              _ReaderReadingStateSaveFailed(generation, revision, writeError),
             );
           } finally {
-            _finishBookWrite(bookId);
+            _finishBookWrite(
+              bookId,
+              failureKind: 'reading-state',
+              error: writeError == null
+                  ? null
+                  : 'Reading position was not saved: $writeError',
+              succeeded: writeError == null,
+            );
             dispatch(const _ReaderReadingStateSaveFinished());
           }
         },
@@ -2910,6 +2988,7 @@ final class ReaderController implements Listenable {
     );
     unawaited(() async {
       var succeeded = false;
+      String? writeError;
       try {
         final created = await _bridge.createAnnotation(
           document: document.handle,
@@ -2933,6 +3012,7 @@ final class ReaderController implements Listenable {
           ),
         );
       } catch (error) {
+        writeError = error.toString();
         dispatch(
           _ReaderAnnotationsChanged(
             generation,
@@ -2940,11 +3020,22 @@ final class ReaderController implements Listenable {
             operationId,
             selectionRevision,
             null,
-            error.toString(),
+            writeError,
           ),
         );
       } finally {
-        if (bookId != null) _finishBookWrite(bookId);
+        if (bookId != null) {
+          final wasCancelled = _cancelledSelectionCreates.contains(
+            selectionRevision,
+          );
+          _finishBookWrite(
+            bookId,
+            failureKind: 'annotations',
+            error: writeError == null || wasCancelled
+                ? null
+                : 'Highlight changes were not saved: $writeError',
+          );
+        }
         dispatch(
           _ReaderAnnotationCreateFinished(cancellation, succeeded: succeeded),
         );
@@ -2979,6 +3070,7 @@ final class ReaderController implements Listenable {
     }
     final generation = _model.generation;
     late final BigInt cancellation;
+    String? writeError;
     try {
       cancellation = _bridge.createCancellation();
     } on FlutterBridgeError catch (error) {
@@ -3024,6 +3116,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } catch (error) {
+      writeError = error.toString();
       dispatch(
         _ReaderAnnotationsChanged(
           generation,
@@ -3031,11 +3124,19 @@ final class ReaderController implements Listenable {
           operationId,
           null,
           null,
-          error.toString(),
+          writeError,
         ),
       );
     } finally {
-      if (bookId != null) _finishBookWrite(bookId);
+      if (bookId != null) {
+        _finishBookWrite(
+          bookId,
+          failureKind: 'annotations',
+          error: writeError == null
+              ? null
+              : 'Highlight changes were not saved: $writeError',
+        );
+      }
       _annotationCancellations.remove(cancellation);
       _bridge.releaseCancellation(id: cancellation);
       dispatch(const _ReaderAnnotationOperationFinished());
@@ -3096,6 +3197,7 @@ final class ReaderController implements Listenable {
         annotationError: null,
       ),
     );
+    String? writeError;
     try {
       final changed = await _bridge.deleteAnnotation(
         document: document.handle,
@@ -3114,6 +3216,7 @@ final class ReaderController implements Listenable {
         ),
       );
     } catch (error) {
+      writeError = error.toString();
       dispatch(
         _ReaderAnnotationsChanged(
           generation,
@@ -3121,11 +3224,19 @@ final class ReaderController implements Listenable {
           operationId,
           null,
           null,
-          error.toString(),
+          writeError,
         ),
       );
     } finally {
-      if (bookId != null) _finishBookWrite(bookId);
+      if (bookId != null) {
+        _finishBookWrite(
+          bookId,
+          failureKind: 'annotations',
+          error: writeError == null
+              ? null
+              : 'Highlight changes were not saved: $writeError',
+        );
+      }
       dispatch(const _ReaderAnnotationOperationFinished());
     }
   }
@@ -3224,6 +3335,10 @@ final class ReaderController implements Listenable {
       );
     }
     if (operation == null) return;
+    final mutatesAnnotations =
+        operation.startsWith('create:') ||
+        operation.startsWith('update:') ||
+        operation.startsWith('delete:');
     final createsSelection = operation.startsWith('create:');
     final ownsSelection =
         createsSelection && message.selectionRevision == _selectionRevision;
@@ -3250,6 +3365,10 @@ final class ReaderController implements Listenable {
             ? createsSelection
                   ? 'An earlier highlight could not be saved: ${message.error}'
                   : message.error
+            : _unchanged,
+        persistenceError:
+            mutatesAnnotations && message.error != null && !wasCancelled
+            ? 'Highlight changes were not saved: ${message.error}'
             : _unchanged,
       ),
     );
@@ -3544,6 +3663,9 @@ final class ReaderController implements Listenable {
     _ReaderAssociationSourcesLoaded sources,
     FlutterAnnotationAssociationSource selected,
   ) async {
+    final bookId = sources.document.bookId;
+    if (bookId != null) _beginBookWrite(bookId);
+    String? writeError;
     try {
       final outcome = await _bridge.associateAnnotationVersion(
         sourceVersionId: selected.versionId,
@@ -3552,9 +3674,26 @@ final class ReaderController implements Listenable {
       );
       dispatch(_ReaderAssociationPersisted(sources: sources, outcome: outcome));
     } catch (error) {
-      dispatch(
-        _ReaderAssociationFinished(sources: sources, error: error.toString()),
-      );
+      writeError = error.toString();
+      if (_isCurrentAssociation(sources)) {
+        _emit(
+          _model.copyWith(
+            persistenceError:
+                'Highlight association was not saved: $writeError',
+          ),
+        );
+      }
+      dispatch(_ReaderAssociationFinished(sources: sources, error: writeError));
+    } finally {
+      if (bookId != null) {
+        _finishBookWrite(
+          bookId,
+          failureKind: 'association',
+          error: writeError == null
+              ? null
+              : 'Highlight association was not saved: $writeError',
+        );
+      }
     }
   }
 
