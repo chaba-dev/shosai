@@ -218,7 +218,7 @@ abstract class RustLibApi extends BaseApi {
     required FlutterSelectionHandle handle,
   });
 
-  Future<bool> crateApiFlutterBridgeRemoveLibraryBook({
+  Future<FlutterLibraryRemoveOutcome> crateApiFlutterBridgeRemoveLibraryBook({
     required FlutterBridge that,
     required PlatformInt64 bookId,
   });
@@ -1266,7 +1266,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateApiFlutterBridgeRemoveLibraryBook({
+  Future<FlutterLibraryRemoveOutcome> crateApiFlutterBridgeRemoveLibraryBook({
     required FlutterBridge that,
     required PlatformInt64 bookId,
   }) {
@@ -1285,7 +1285,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: DcoCodec(
-          decodeSuccessData: dco_decode_bool,
+          decodeSuccessData: dco_decode_flutter_library_remove_outcome,
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeRemoveLibraryBookConstMeta,
@@ -2215,6 +2215,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  FlutterLibraryRemoveOutcome dco_decode_flutter_library_remove_outcome(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return FlutterLibraryRemoveOutcome(
+      removed: dco_decode_bool(arr[0]),
+      managedFileDeletionPending: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
   FlutterOpenRequest dco_decode_flutter_open_request(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3037,6 +3051,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_books = sse_decode_list_flutter_library_book(deserializer);
     var var_hasMore = sse_decode_bool(deserializer);
     return FlutterLibraryPage(books: var_books, hasMore: var_hasMore);
+  }
+
+  @protected
+  FlutterLibraryRemoveOutcome sse_decode_flutter_library_remove_outcome(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_removed = sse_decode_bool(deserializer);
+    var var_managedFileDeletionPending = sse_decode_bool(deserializer);
+    return FlutterLibraryRemoveOutcome(
+      removed: var_removed,
+      managedFileDeletionPending: var_managedFileDeletionPending,
+    );
   }
 
   @protected
@@ -4087,6 +4114,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_flutter_library_remove_outcome(
+    FlutterLibraryRemoveOutcome self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.removed, serializer);
+    sse_encode_bool(self.managedFileDeletionPending, serializer);
+  }
+
+  @protected
   void sse_encode_flutter_open_request(
     FlutterOpenRequest self,
     SseSerializer serializer,
@@ -4761,10 +4798,12 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
       .api
       .crateApiFlutterBridgeReleaseSelection(that: this, handle: handle);
 
-  Future<bool> removeLibraryBook({required PlatformInt64 bookId}) => RustLib
-      .instance
-      .api
-      .crateApiFlutterBridgeRemoveLibraryBook(that: this, bookId: bookId);
+  Future<FlutterLibraryRemoveOutcome> removeLibraryBook({
+    required PlatformInt64 bookId,
+  }) => RustLib.instance.api.crateApiFlutterBridgeRemoveLibraryBook(
+    that: this,
+    bookId: bookId,
+  );
 
   Future<FlutterRenderedBuffer> renderPage({
     required FlutterDocumentHandle document,

@@ -2325,6 +2325,18 @@ impl SseDecode for crate::api::FlutterLibraryPage {
     }
 }
 
+impl SseDecode for crate::api::FlutterLibraryRemoveOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_removed = <bool>::sse_decode(deserializer);
+        let mut var_managedFileDeletionPending = <bool>::sse_decode(deserializer);
+        return crate::api::FlutterLibraryRemoveOutcome {
+            removed: var_removed,
+            managed_file_deletion_pending: var_managedFileDeletionPending,
+        };
+    }
+}
+
 impl SseDecode for crate::api::FlutterOpenRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3298,6 +3310,29 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterLibraryPage>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::FlutterLibraryRemoveOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.removed.into_into_dart().into_dart(),
+            self.managed_file_deletion_pending
+                .into_into_dart()
+                .into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::FlutterLibraryRemoveOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::FlutterLibraryRemoveOutcome>
+    for crate::api::FlutterLibraryRemoveOutcome
+{
+    fn into_into_dart(self) -> crate::api::FlutterLibraryRemoveOutcome {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::FlutterOpenRequest {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3824,6 +3859,14 @@ impl SseEncode for crate::api::FlutterLibraryPage {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::api::FlutterLibraryBook>>::sse_encode(self.books, serializer);
         <bool>::sse_encode(self.has_more, serializer);
+    }
+}
+
+impl SseEncode for crate::api::FlutterLibraryRemoveOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.removed, serializer);
+        <bool>::sse_encode(self.managed_file_deletion_pending, serializer);
     }
 }
 
@@ -4535,6 +4578,17 @@ mod io {
             }
         }
     }
+    impl CstDecode<crate::api::FlutterLibraryRemoveOutcome>
+        for wire_cst_flutter_library_remove_outcome
+    {
+        // Codec=Cst (C-struct based), see doc to use other codecs
+        fn cst_decode(self) -> crate::api::FlutterLibraryRemoveOutcome {
+            crate::api::FlutterLibraryRemoveOutcome {
+                removed: self.removed.cst_decode(),
+                managed_file_deletion_pending: self.managed_file_deletion_pending.cst_decode(),
+            }
+        }
+    }
     impl CstDecode<crate::api::FlutterOpenRequest> for wire_cst_flutter_open_request {
         // Codec=Cst (C-struct based), see doc to use other codecs
         fn cst_decode(self) -> crate::api::FlutterOpenRequest {
@@ -4995,6 +5049,19 @@ mod io {
         }
     }
     impl Default for wire_cst_flutter_library_page {
+        fn default() -> Self {
+            Self::new_with_null_ptr()
+        }
+    }
+    impl NewWithNullPtr for wire_cst_flutter_library_remove_outcome {
+        fn new_with_null_ptr() -> Self {
+            Self {
+                removed: Default::default(),
+                managed_file_deletion_pending: Default::default(),
+            }
+        }
+    }
+    impl Default for wire_cst_flutter_library_remove_outcome {
         fn default() -> Self {
             Self::new_with_null_ptr()
         }
@@ -6037,6 +6104,12 @@ mod io {
     pub struct wire_cst_flutter_library_page {
         books: *mut wire_cst_list_flutter_library_book,
         has_more: bool,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct wire_cst_flutter_library_remove_outcome {
+        removed: bool,
+        managed_file_deletion_pending: bool,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]

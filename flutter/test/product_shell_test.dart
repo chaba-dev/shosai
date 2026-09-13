@@ -156,6 +156,36 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('successful mutations preserve managed deletion notice', () async {
+    final bridge = _ControlledLibraryBridge(
+      books: [_book(1, 'Book')],
+      removalOutcome: const FlutterLibraryRemoveOutcome(
+        removed: true,
+        managedFileDeletionPending: true,
+      ),
+    );
+    bridge.importReport = FlutterImportReport(
+      imported: BigInt.one,
+      failed: BigInt.zero,
+      cancelled: false,
+      items: const [],
+    );
+    final controller = _libraryController(bridge);
+    controller.dispatch(const LibraryStarted());
+    await _waitUntil(() => controller.model.loaded && !controller.model.busy);
+
+    controller.dispatch(LibraryBookRemovalRequested(_book(1, 'Book')));
+    await _waitUntil(() => bridge.removeCalls == 1 && !controller.model.busy);
+    expect(controller.model.managedFileDeletionPending, isTrue);
+
+    controller.dispatch(const LibraryImportRequested());
+    await _waitUntil(() => bridge.importCalls == 1 && !controller.model.busy);
+    expect(controller.model.managedFileDeletionPending, isTrue);
+
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   testWidgets('library renders content, progress, filters, and opens a book', (
     tester,
   ) async {
@@ -1203,6 +1233,65 @@ void main() {
     expect(bridge.removeCalls, 0);
   });
 
+  testWidgets('managed deletion debt is disclosed without a retry action', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final bridge = _LibraryBridge(
+      removalOutcome: const FlutterLibraryRemoveOutcome(
+        removed: true,
+        managedFileDeletionPending: true,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
+          useMaterial3: true,
+          fontFamily: 'Inter',
+        ),
+        home: ProductShell(
+          bridgeFactory: () => bridge,
+          readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Book actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove and delete copy'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Remove and delete'));
+    await _waitUntil(() => bridge.removeCalls == 1);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.text('Book removed. Its private copy will be deleted later.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsNothing);
+    expect(bridge.removeCalls, 1);
+    if (Platform.isLinux) {
+      await expectLater(
+        find.byType(ProductShell),
+        matchesGoldenFile('goldens/library-managed-deletion-pending.png'),
+      );
+    }
+
+    await tester.tap(find.text('Dismiss'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Book removed. Its private copy will be deleted later.'),
+      findsNothing,
+    );
+    expect(bridge.removeCalls, 1);
+  });
+
   testWidgets('compact Japanese library supports 200 percent text', (
     tester,
   ) async {
@@ -1345,11 +1434,16 @@ class _LibraryBridge implements FlutterBridge {
       pdfZoom: 0,
     ),
     this.covers = const {},
+    this.removalOutcome = const FlutterLibraryRemoveOutcome(
+      removed: true,
+      managedFileDeletionPending: false,
+    ),
   });
 
   final List<FlutterLibraryBook> books;
   final FlutterReaderSettings settings;
   final Map<int, Uint8List> covers;
+  final FlutterLibraryRemoveOutcome removalOutcome;
   final List<int> coverRequests = [];
   final Queue<Completer<Uint8List?>> coverCompleters = Queue();
   FlutterBookFormat? lastFormat;
@@ -1414,9 +1508,11 @@ class _LibraryBridge implements FlutterBridge {
   }
 
   @override
-  Future<bool> removeLibraryBook({required int bookId}) async {
+  Future<FlutterLibraryRemoveOutcome> removeLibraryBook({
+    required int bookId,
+  }) async {
     removeCalls += 1;
-    return true;
+    return removalOutcome;
   }
 
   @override
@@ -1455,9 +1551,16 @@ class _DisposeSignalState extends State<_DisposeSignal> {
 }
 
 class _ControlledLibraryBridge implements FlutterBridge {
-  _ControlledLibraryBridge({this.books = const []});
+  _ControlledLibraryBridge({
+    this.books = const [],
+    this.removalOutcome = const FlutterLibraryRemoveOutcome(
+      removed: true,
+      managedFileDeletionPending: false,
+    ),
+  });
 
   final List<FlutterLibraryBook> books;
+  final FlutterLibraryRemoveOutcome removalOutcome;
   final Queue<Completer<FlutterLibraryPage>> pages = Queue();
   final List<String> queries = [];
   final List<int> offsets = [];
@@ -1565,9 +1668,11 @@ class _ControlledLibraryBridge implements FlutterBridge {
   }
 
   @override
-  Future<bool> removeLibraryBook({required int bookId}) async {
+  Future<FlutterLibraryRemoveOutcome> removeLibraryBook({
+    required int bookId,
+  }) async {
     removeCalls += 1;
-    return true;
+    return removalOutcome;
   }
 
   @override

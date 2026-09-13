@@ -1873,6 +1873,218 @@ async fn removing_a_managed_book_deletes_its_private_copy() {
 }
 
 #[tokio::test]
+async fn failed_managed_unlink_is_reported_and_durably_retried() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = library.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&book.file_path);
+    std::fs::remove_file(&managed_path).unwrap();
+    std::fs::create_dir(&managed_path).unwrap();
+    std::fs::write(managed_path.join("blocker"), b"block deletion").unwrap();
+
+    let outcome = library.remove_with_outcome(book.id).await.unwrap();
+    assert!(outcome.managed_file_deletion_pending);
+    assert!(library.get(book.id).await.unwrap().is_none());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Simulate restart, then make the quarantined entry deletable before the
+    // startup retry hook runs.
+    let debt_path: String = sqlx::query_scalar("SELECT file_path FROM managed_file_deletion_debt")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    let debt_path = PathBuf::from(debt_path);
+    std::fs::remove_file(debt_path.join("blocker")).unwrap();
+    std::fs::remove_dir(&debt_path).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &debt_path).unwrap();
+    let restarted_store = ReadingStateStore::open_at_async(&dir.path().join("shosai.db"))
+        .await
+        .unwrap();
+    let restarted = Library::new(
+        restarted_store.pool().clone(),
+        restarted_store.managed_books_dir(),
+    );
+    let report = restarted.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.cleared, 1);
+    assert_eq!(report.pending, 0);
+    assert!(!managed_path.exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+            .fetch_one(restarted_store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn post_commit_debt_cleanup_failure_is_a_successful_pending_removal() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = library.import_managed_file(&source).await.unwrap();
+    sqlx::query(
+        "CREATE TRIGGER reject_debt_cleanup BEFORE DELETE ON managed_file_deletion_debt
+         BEGIN SELECT RAISE(FAIL, 'blocked'); END",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    let outcome = library.remove_with_outcome(book.id).await.unwrap();
+
+    assert!(outcome.managed_file_deletion_pending);
+    assert!(library.get(book.id).await.unwrap().is_none());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn managed_deletion_unlinks_symlinks_without_following_them() {
+    use std::os::unix::fs::symlink;
+
+    for dangling in [false, true] {
+        let (library, store, dir) = temp_library().await;
+        let source = dir.path().join("source.epub");
+        std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+        let book = library.import_managed_file(&source).await.unwrap();
+        let managed_path = PathBuf::from(&book.file_path);
+        let outside = dir.path().join("outside.epub");
+        std::fs::rename(&managed_path, &outside).unwrap();
+        if dangling {
+            symlink(dir.path().join("missing.epub"), &managed_path).unwrap();
+        } else {
+            symlink(&outside, &managed_path).unwrap();
+        }
+
+        let outcome = library.remove_with_outcome(book.id).await.unwrap();
+        assert!(!outcome.managed_file_deletion_pending);
+        assert!(std::fs::symlink_metadata(&managed_path).is_err());
+        assert!(outside.exists());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM managed_file_deletion_debt")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_debt_insertion_rolls_back_book_and_keeps_managed_file() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let book = library.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&book.file_path);
+    let reading = FileReadingState {
+        page: 7,
+        location_offset: Some(11),
+        zoom: 1.25,
+    };
+    store.set_for_book_async(book.id, &reading).await.unwrap();
+    sqlx::query(
+        "CREATE TRIGGER reject_debt_insert BEFORE INSERT ON managed_file_deletion_debt
+         BEGIN SELECT RAISE(FAIL, 'blocked'); END",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    assert!(library.remove_with_outcome(book.id).await.is_err());
+    assert!(library.get(book.id).await.unwrap().is_some());
+    let retained = store.get_for_book_async(book.id).await.unwrap().unwrap();
+    assert_eq!(retained.page, reading.page);
+    assert_eq!(retained.location_offset, reading.location_offset);
+    assert_eq!(retained.zoom, reading.zoom);
+    assert!(managed_path.exists());
+}
+
+#[tokio::test]
+async fn deletion_retry_rotates_past_a_full_batch_of_blocked_debts() {
+    let (library, store, _dir) = temp_library().await;
+    std::fs::create_dir_all(library.managed_dir()).unwrap();
+    let managed_dir = shosai_core::canonical_path_key(library.managed_dir());
+    for index in 0..101 {
+        let path = library.managed_dir().join(format!("debt-{index:03}.epub"));
+        if index < 100 {
+            std::fs::create_dir(&path).unwrap();
+        } else {
+            std::fs::write(&path, b"last").unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO managed_file_deletion_debt (file_path, managed_dir) VALUES (?, ?)",
+        )
+        .bind(shosai_core::canonical_path_key(&path))
+        .bind(&managed_dir)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    }
+
+    let first = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(first.pending, 100);
+    let second = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(second.cleared, 1);
+    assert!(!library.managed_dir().join("debt-100.epub").exists());
+}
+
+#[tokio::test]
+async fn managed_deletion_debt_never_unlinks_a_shared_path() {
+    let (library, store, dir) = temp_library().await;
+    let source = dir.path().join("source.epub");
+    std::fs::copy(fixture_path("sample.epub"), &source).unwrap();
+    let managed = library.import_managed_file(&source).await.unwrap();
+    let managed_path = PathBuf::from(&managed.file_path);
+    std::fs::remove_file(&managed_path).unwrap();
+    std::fs::create_dir(&managed_path).unwrap();
+    std::fs::write(managed_path.join("blocker"), b"block deletion").unwrap();
+
+    let outcome = library.remove_with_outcome(managed.id).await.unwrap();
+    assert!(outcome.managed_file_deletion_pending);
+    let debt_path: String = sqlx::query_scalar("SELECT file_path FROM managed_file_deletion_debt")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    let debt_file = PathBuf::from(&debt_path);
+    std::fs::remove_file(debt_file.join("blocker")).unwrap();
+    std::fs::remove_dir(&debt_file).unwrap();
+    std::fs::copy(fixture_path("sample.epub"), &debt_file).unwrap();
+    let shared_id: i64 = sqlx::query_scalar(
+        "INSERT INTO books (title, format, file_path, storage_kind)
+         VALUES ('Shared', 'epub', ?, 'referenced') RETURNING id",
+    )
+    .bind(&debt_path)
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+
+    assert!(debt_file.exists());
+    let report = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.pending, 1);
+    assert!(debt_file.exists());
+
+    library.remove(shared_id).await.unwrap();
+    let report = library.retry_managed_file_deletions().await.unwrap();
+    assert_eq!(report.cleared, 1);
+    assert!(!debt_file.exists());
+}
+
+#[tokio::test]
 async fn removing_a_referenced_book_never_deletes_the_original() {
     let (lib, _, dir) = temp_library().await;
     let source = dir.path().join("source.epub");
