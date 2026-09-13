@@ -418,26 +418,32 @@ class _ReaderScreenState extends State<ReaderScreen>
             ),
             actions: model.document != null
                 ? [
-                    IconButton(
-                      tooltip: 'Search and bookmarks',
-                      onPressed: () =>
-                          _controller.dispatch(const ReaderToolsToggled()),
-                      icon: const Icon(Icons.manage_search),
+                    Tooltip(
+                      message: 'Search and bookmarks',
+                      child: ShadIconButton.ghost(
+                        onPressed: () =>
+                            _controller.dispatch(const ReaderToolsToggled()),
+                        icon: const Icon(LucideIcons.search),
+                      ),
                     ),
                     if (model.document!.format != FlutterBookFormat.cbz)
-                      IconButton(
-                        tooltip: model.annotationsReady
+                      Tooltip(
+                        message: model.annotationsReady
                             ? 'Associate highlights from an earlier version…'
                             : 'Retry loading highlights',
-                        onPressed: associationEnabled
-                            ? () => _controller.dispatch(
-                                model.annotationsReady
-                                    ? const ReaderAnnotationAssociationRequested()
-                                    : const ReaderAnnotationReloadRequested(),
-                              )
-                            : null,
-                        icon: Icon(
-                          model.annotationsReady ? Icons.link : Icons.refresh,
+                        child: ShadIconButton.ghost(
+                          onPressed: associationEnabled
+                              ? () => _controller.dispatch(
+                                  model.annotationsReady
+                                      ? const ReaderAnnotationAssociationRequested()
+                                      : const ReaderAnnotationReloadRequested(),
+                                )
+                              : null,
+                          icon: Icon(
+                            model.annotationsReady
+                                ? LucideIcons.link
+                                : LucideIcons.refreshCw,
+                          ),
                         ),
                       ),
                   ]
@@ -592,23 +598,25 @@ class _ReaderControls extends StatelessWidget {
     final field = Semantics(
       textField: true,
       label: 'Document path',
-      child: TextField(
+      child: ShadInput(
         key: pathFieldKey,
         controller: path,
         enabled: !model.busy,
         onSubmitted: (_) => open(),
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          hintText: '/path/to/book.pdf',
-          labelText: 'PDF, EPUB, or CBZ path',
-        ),
+        placeholder: const Text('/path/to/book.pdf'),
       ),
     );
-    final button = FilledButton.icon(
+    final button = ShadButton(
       focusNode: openFocus,
       onPressed: model.busy ? null : open,
-      icon: const Icon(Icons.menu_book),
-      label: Text(model.busy ? 'Opening…' : 'Open document'),
+      leading: const Icon(LucideIcons.bookOpen),
+      child: Flexible(
+        child: Text(
+          model.busy ? 'Opening…' : 'Open document',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -632,7 +640,9 @@ class _ReaderControls extends StatelessWidget {
             liveRegion: true,
             child: Text(
               model.error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              style: TextStyle(
+                color: ShadTheme.of(context).colorScheme.destructive,
+              ),
             ),
           ),
         ],
@@ -657,7 +667,7 @@ class _ReaderControls extends StatelessWidget {
                   : 'Highlights unavailable: ${model.annotationError}',
             ),
           ),
-        if (model.relayoutBusy) const LinearProgressIndicator(),
+        if (model.relayoutBusy) const ShadProgress(minHeight: 4),
       ],
     );
   }
