@@ -1165,11 +1165,11 @@ final class ReaderController implements Listenable {
     String? error,
     bool succeeded = false,
   }) {
-    if (failureKind != null) {
-      final failures = _bookWriteFailures.putIfAbsent(bookId, () => {});
-      if (error != null) {
-        failures[failureKind] = error;
-      } else if (succeeded) {
+    if (failureKind != null && error != null) {
+      _bookWriteFailures.putIfAbsent(bookId, () => {})[failureKind] = error;
+    } else if (failureKind != null && succeeded) {
+      final failures = _bookWriteFailures[bookId];
+      if (failures != null) {
         failures.remove(failureKind);
         if (failures.isEmpty) _bookWriteFailures.remove(bookId);
       }
@@ -1311,19 +1311,29 @@ final class ReaderController implements Listenable {
             message.revision == _readingStateSaveRevision &&
             !_closing) {
           final error = 'Reading position was not saved: ${message.error}';
+          final ownsPersistenceError =
+              _model.persistenceError == null ||
+              _model.persistenceError == _readingStateSaveError;
           _readingStateSaveError = error;
-          _emit(_model.copyWith(toolError: error, persistenceError: error));
+          _emit(
+            _model.copyWith(
+              toolError: error,
+              persistenceError: ownsPersistenceError ? error : _unchanged,
+            ),
+          );
         }
       case _ReaderReadingStateSaveSucceeded():
         if (_isCurrent(message.generation) &&
             message.revision == _readingStateSaveRevision &&
             _readingStateSaveError != null) {
           final ownsToolError = _model.toolError == _readingStateSaveError;
+          final ownsPersistenceError =
+              _model.persistenceError == _readingStateSaveError;
           _readingStateSaveError = null;
           _emit(
             _model.copyWith(
               toolError: ownsToolError ? null : _unchanged,
-              persistenceError: null,
+              persistenceError: ownsPersistenceError ? null : _unchanged,
             ),
           );
         }
@@ -2321,7 +2331,6 @@ final class ReaderController implements Listenable {
           error: writeError == null
               ? null
               : 'Bookmark changes were not saved: $writeError',
-          succeeded: mutationCommitted,
         );
         dispatch(_ReaderBookmarkFinished(cancellation));
       }
@@ -3016,13 +3025,15 @@ final class ReaderController implements Listenable {
         );
       } finally {
         if (bookId != null) {
+          final wasCancelled = _cancelledSelectionCreates.contains(
+            selectionRevision,
+          );
           _finishBookWrite(
             bookId,
             failureKind: 'annotations',
-            error: writeError == null
+            error: writeError == null || wasCancelled
                 ? null
                 : 'Highlight changes were not saved: $writeError',
-            succeeded: writeError == null,
           );
         }
         dispatch(
@@ -3124,7 +3135,6 @@ final class ReaderController implements Listenable {
           error: writeError == null
               ? null
               : 'Highlight changes were not saved: $writeError',
-          succeeded: writeError == null,
         );
       }
       _annotationCancellations.remove(cancellation);
@@ -3225,7 +3235,6 @@ final class ReaderController implements Listenable {
           error: writeError == null
               ? null
               : 'Highlight changes were not saved: $writeError',
-          succeeded: writeError == null,
         );
       }
       dispatch(const _ReaderAnnotationOperationFinished());
@@ -3357,7 +3366,8 @@ final class ReaderController implements Listenable {
                   ? 'An earlier highlight could not be saved: ${message.error}'
                   : message.error
             : _unchanged,
-        persistenceError: mutatesAnnotations && message.error != null
+        persistenceError:
+            mutatesAnnotations && message.error != null && !wasCancelled
             ? 'Highlight changes were not saved: ${message.error}'
             : _unchanged,
       ),
@@ -3682,7 +3692,6 @@ final class ReaderController implements Listenable {
           error: writeError == null
               ? null
               : 'Highlight association was not saved: $writeError',
-          succeeded: writeError == null,
         );
       }
     }

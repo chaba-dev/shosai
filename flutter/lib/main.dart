@@ -838,12 +838,16 @@ class _DocumentView extends StatelessWidget {
                 model: model,
                 dispatch: dispatch,
               ),
-              _ReaderTools(
-                document: document,
-                model: model,
-                dispatch: dispatch,
-              ),
-              Flexible(child: _ReaderToolError(model: model)),
+              if (model.toolsVisible)
+                Flexible(
+                  child: _ReaderTools(
+                    document: document,
+                    model: model,
+                    dispatch: dispatch,
+                  ),
+                ),
+              if (model.persistenceError != null)
+                Flexible(child: _ReaderToolError(model: model)),
             ],
           ),
         ),
@@ -1172,8 +1176,16 @@ class _DocumentView extends StatelessWidget {
             model: model,
             dispatch: dispatch,
           ),
-          _ReaderTools(document: document, model: model, dispatch: dispatch),
-          Flexible(child: _ReaderToolError(model: model)),
+          if (model.toolsVisible)
+            Flexible(
+              child: _ReaderTools(
+                document: document,
+                model: model,
+                dispatch: dispatch,
+              ),
+            ),
+          if (model.persistenceError != null)
+            Flexible(child: _ReaderToolError(model: model)),
         ],
       ),
     );
@@ -1803,6 +1815,12 @@ class _ReachableSelectableSurface extends StatelessWidget {
         Widget content(Size size) => SizedBox.fromSize(
           size: size,
           child: _SelectableSurface(
+            key: ValueKey((
+              model.generation,
+              model.unit,
+              surface.handle.registry,
+              surface.handle.id,
+            )),
             surface: surface,
             image: image,
             model: model,
@@ -1810,6 +1828,23 @@ class _ReachableSelectableSurface extends StatelessWidget {
             dispatch: dispatch,
           ),
         );
+        if (document.format == FlutterBookFormat.epub &&
+            settings?.continuous == true) {
+          return KeyedSubtree(
+            key: presentationKey,
+            child: SingleChildScrollView(
+              key: ValueKey(
+                'reader-vertical-scroll-${model.generation}-${model.unit}',
+              ),
+              child: content(
+                Size(
+                  constraints.maxWidth,
+                  math.max(constraints.maxHeight, surface.height),
+                ),
+              ),
+            ),
+          );
+        }
         if (document.format == FlutterBookFormat.epub ||
             fit == BoxFit.contain) {
           return KeyedSubtree(
@@ -1853,6 +1888,7 @@ class _ReachableSelectableSurface extends StatelessWidget {
 
 class _SelectableSurface extends StatefulWidget {
   const _SelectableSurface({
+    super.key,
     required this.surface,
     required this.image,
     required this.model,
@@ -1922,7 +1958,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
           behavior: HitTestBehavior.opaque,
           onPointerDown: (event) {
             if (event.kind == ui.PointerDeviceKind.touch) {
-              _touchPointer = event.pointer;
+              _touchPointer ??= event.pointer;
               return;
             }
             final primary =
@@ -1972,7 +2008,8 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
             }
           },
           onPointerCancel: (event) {
-            if (event.kind != ui.PointerDeviceKind.touch) {
+            if (event.kind != ui.PointerDeviceKind.touch ||
+                _touchPointer == event.pointer) {
               widget.dispatch(ReaderSelectionPointerCancelled(event.pointer));
             }
             if (_touchPointer == event.pointer) _touchPointer = null;
