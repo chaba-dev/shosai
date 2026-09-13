@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -819,80 +820,67 @@ class _LibraryCollection extends StatelessWidget {
           itemCount: model.books.length + (model.hasMore ? 1 : 0),
           itemBuilder: (context, index) {
             if (index == model.books.length) {
-              return Card(
+              return ShadCard(
+                padding: const EdgeInsets.all(8),
                 child: Center(
-                  child: TextButton.icon(
+                  child: ShadButton.outline(
                     onPressed: model.busy ? null : loadMore,
-                    icon: const Icon(Icons.expand_more),
-                    label: const Text('Load more books'),
+                    trailing: const Icon(LucideIcons.chevronDown),
+                    child: const Text('Load more books'),
                   ),
                 ),
               );
             }
             final book = model.books[index];
-            return Card(
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
+            return ShadCard(
+              padding: const EdgeInsets.all(14),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => openBook(book),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: LayoutBuilder(
-                    builder: (context, cardConstraints) => Row(
-                      children: [
-                        if (cardConstraints.maxWidth >= 150) ...[
-                          _BookCover(
-                            book: book,
-                            cover: model.covers[book.bookId],
-                            demandRevision: model.coverRevision,
-                            loadCover: loadCover,
-                          ),
-                          const SizedBox(width: 14),
-                        ],
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                book.title,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              if (book.author case final author?)
-                                Text(
-                                  author,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              const SizedBox(height: 8),
-                              LinearProgressIndicator(value: book.progress),
-                              Text(
-                                book.lastRead == null
-                                    ? '${(book.progress * 100).round()}% read'
-                                    : 'Continue reading · ${(book.progress * 100).round()}%',
-                              ),
-                            ],
-                          ),
+                child: LayoutBuilder(
+                  builder: (context, cardConstraints) => Row(
+                    children: [
+                      if (cardConstraints.maxWidth >= 150) ...[
+                        _BookCover(
+                          book: book,
+                          cover: model.covers[book.bookId],
+                          demandRevision: model.coverRevision,
+                          loadCover: loadCover,
                         ),
-                        PopupMenuButton<String>(
-                          tooltip: 'Book actions',
-                          onSelected: (action) {
-                            if (action == 'remove') removeBook(book);
-                          },
-                          itemBuilder: (_) => [
-                            PopupMenuItem(
-                              value: 'remove',
-                              child: Text(
-                                book.managed
-                                    ? 'Remove and delete copy'
-                                    : 'Remove from library',
+                        const SizedBox(width: 14),
+                      ],
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              book.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            if (book.author case final author?)
+                              Text(
+                                author,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
+                            const SizedBox(height: 8),
+                            ShadProgress(value: book.progress, minHeight: 8),
+                            Text(
+                              book.lastRead == null
+                                  ? '${(book.progress * 100).round()}% read'
+                                  : 'Continue reading · ${(book.progress * 100).round()}%',
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                      _BookActionsMenu(
+                        managed: book.managed,
+                        onRemove: () => removeBook(book),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -902,6 +890,52 @@ class _LibraryCollection extends StatelessWidget {
       },
     );
   }
+}
+
+class _BookActionsMenu extends StatefulWidget {
+  const _BookActionsMenu({required this.managed, required this.onRemove});
+
+  final bool managed;
+  final VoidCallback onRemove;
+
+  @override
+  State<_BookActionsMenu> createState() => _BookActionsMenuState();
+}
+
+class _BookActionsMenuState extends State<_BookActionsMenu> {
+  final ShadPopoverController _controller = ShadPopoverController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ShadPopover(
+    controller: _controller,
+    popover: (context) => Padding(
+      padding: const EdgeInsets.all(4),
+      child: ShadButton.ghost(
+        width: double.infinity,
+        mainAxisAlignment: MainAxisAlignment.start,
+        onPressed: () {
+          _controller.hide();
+          widget.onRemove();
+        },
+        child: Text(
+          widget.managed ? 'Remove and delete copy' : 'Remove from library',
+        ),
+      ),
+    ),
+    child: Tooltip(
+      message: 'Book actions',
+      child: ShadIconButton.ghost(
+        icon: const Icon(LucideIcons.ellipsis),
+        onPressed: _controller.toggle,
+      ),
+    ),
+  );
 }
 
 class _BookCover extends StatefulWidget {
@@ -957,6 +991,7 @@ class _BookCoverState extends State<_BookCover> {
     }
     if (bytes.isEmpty) return fallback;
     return Semantics(
+      container: true,
       image: true,
       label: 'Cover of ${widget.book.title}',
       child: SizedBox(

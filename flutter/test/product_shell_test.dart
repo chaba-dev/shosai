@@ -20,7 +20,16 @@ void main() {
       ..addFont(rootBundle.load('../assets/fonts/NotoSansJP-Variable.ttf'));
     final materialIcons = FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
-    await Future.wait([inter.load(), noto.load(), materialIcons.load()]);
+    final lucide = FontLoader('packages/lucide_icons_flutter/Lucide')
+      ..addFont(
+        rootBundle.load('packages/lucide_icons_flutter/assets/lucide.ttf'),
+      );
+    await Future.wait([
+      inter.load(),
+      noto.load(),
+      materialIcons.load(),
+      lucide.load(),
+    ]);
   });
 
   testWidgets('expanded library golden', (tester) async {
