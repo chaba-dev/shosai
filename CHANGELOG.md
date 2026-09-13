@@ -65,6 +65,7 @@ All notable changes to this project will be documented in this file.
 - *(accessibility)* Expose selection actions to screen readers (#94)
 - *(reader)* Harden bookmark notes, covers, and provider import (#99)
 - *(flutter)* Harden library and reader foundations (#100)
+- *(reader)* Align persistence and PDF geometry (#102)
 
 ### 🚜 Refactor
 
