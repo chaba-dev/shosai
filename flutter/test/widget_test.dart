@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/main.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
@@ -50,7 +51,7 @@ void main() {
         home: ReaderScreen(bridgeFactory: bridgeFactory),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     expect(bridges, hasLength(1));
@@ -63,7 +64,7 @@ void main() {
     expect(bridges.last.openRequests, hasLength(1));
     expect(bridges.last.openRequests.single.pathKey, '/tmp/book.epub');
     expect(
-      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      tester.widget<ShadInput>(find.byType(ShadInput)).controller!.text,
       '/tmp/book.epub',
     );
 
@@ -403,7 +404,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.cbz');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.cbz');
     await tester.tap(find.text('Open document'));
     await bridge.renderStarted.future;
     bridge.renderCompleter.complete(
@@ -427,7 +428,7 @@ void main() {
   ) async {
     final bridge = _FakeBridge();
     await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pump();
 
@@ -464,7 +465,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.cbz');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.cbz');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     await bridge.renderStarted.future;
@@ -499,7 +500,7 @@ void main() {
   ) async {
     final bridge = _FakeBridge();
     await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
-    await tester.enterText(find.byType(TextField), '/tmp/book.pdf');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pump();
 
@@ -534,7 +535,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.pdf');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     await bridge.renderStarted.future;
@@ -685,7 +686,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await bridge.operationFinished.future;
     await tester.pump();
@@ -699,7 +700,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     bridge.missingSelectionRaster = false;
-    await tester.enterText(find.byType(TextField), '/tmp/retry.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/retry.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     expect(bridge.selectionLayouts.last.scale, originalScale);
@@ -1130,7 +1131,7 @@ void main() {
         home: ReaderScreen(bridge: bridge, decoder: firstDecoder),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.pdf');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     bridge.completeOpen(FlutterBookFormat.pdf);
@@ -1873,7 +1874,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/changed.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
@@ -1889,15 +1890,15 @@ void main() {
     );
     expect(find.textContaining('ambiguous or unavailable'), findsOneWidget);
     expect(tester.takeException(), isNull);
-    final associate = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Associate'),
+    final associate = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Associate'),
     );
     expect(associate.onPressed, isNull);
 
     await tester.ensureVisible(find.text('/tmp/original.epub'));
     await tester.tap(find.text('/tmp/original.epub'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, 'Associate'));
+    await tester.tap(find.widgetWithText(ShadButton, 'Associate'));
     await tester.pumpAndSettle();
 
     expect(bridge.associatedSourceIds, ['source-version']);
@@ -1934,7 +1935,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/changed.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.tap(
@@ -1950,27 +1951,22 @@ void main() {
     expect(find.text('Next'), findsOneWidget);
     await tester.ensureVisible(find.text('Next'));
     final source = find
-        .byType(RadioListTile<FlutterAnnotationAssociationSource>)
+        .byType(ShadRadio<FlutterAnnotationAssociationSource>)
         .last;
     await tester.ensureVisible(source);
     await tester.drag(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(ShadDialog),
         matching: find.byType(SingleChildScrollView),
       ),
       const Offset(0, -100),
     );
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(
-        of: source,
-        matching: find.byType(Radio<FlutterAnnotationAssociationSource>),
-      ),
-    );
+    await tester.tap(source);
     await tester.pump();
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Associate'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Associate'))
           .onPressed,
       isNotNull,
     );
@@ -3770,7 +3766,7 @@ void main() {
   ) async {
     final bridge = _FakeBridge();
     await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pump();
     expect(bridge.openRequests, hasLength(1));
@@ -4065,7 +4061,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/a.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     bridge.updateCompleter = Completer<bool>();
@@ -4073,16 +4069,16 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.palette_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.note_alt_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
           )
           .onPressed,
       isNull,
@@ -4099,24 +4095,24 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.palette_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.note_alt_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.delete_outline),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.trash2),
           )
           .onPressed,
       isNull,
@@ -4140,7 +4136,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/a.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final displayedScale = tester.view.devicePixelRatio;
@@ -4151,14 +4147,14 @@ void main() {
     tester.view.devicePixelRatio = displayedScale == 2 ? 3 : 2;
     await tester.pump();
     await tester.pump();
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byType(ShadProgress), findsOneWidget);
     final pendingCancellation = bridge.createdCancellations.last;
 
     tester.view.devicePixelRatio = displayedScale;
     await tester.pump();
     await tester.pump();
     expect(bridge.cancelled, contains(pendingCancellation));
-    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.byType(ShadProgress), findsNothing);
 
     pending.complete(_surface(BigInt.from(30), raster: true));
     await tester.pumpAndSettle();
@@ -4183,7 +4179,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/a.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final selectionCalls = bridge.selectionCalls;
@@ -4223,7 +4219,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/a.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
       final displayedScale = tester.view.devicePixelRatio;
@@ -4265,7 +4261,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/a.pdf');
+      await tester.enterText(find.byType(ShadInput), '/tmp/a.pdf');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
       if (failure == 'selection') {
@@ -4302,7 +4298,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/a.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/a.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Edit note'));
@@ -4329,7 +4325,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/color.pdf');
+    await tester.enterText(find.byType(ShadInput), '/tmp/color.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
@@ -4382,7 +4378,7 @@ void main() {
 
       await tester.pumpWidget(app());
       await tester.pump();
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
       expect(
@@ -4458,7 +4454,7 @@ void main() {
       find.byKey(const ValueKey('reader-composition-compact')),
       findsOneWidget,
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     expect(bridge.selectionLayouts.last.width, 342);
@@ -4522,7 +4518,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
@@ -4554,7 +4550,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.byType(TextField));
+    await tester.tap(find.byType(ShadInput));
     await tester.pump();
     tester.testTextInput.enterText('/tmp/part');
     await tester.pump();
@@ -4571,7 +4567,7 @@ void main() {
     expect(editable.widget.focusNode.hasFocus, isTrue);
     expect(tester.testTextInput.isVisible, isTrue);
     expect(
-      tester.widget<TextField>(find.byType(TextField)).controller!.selection,
+      tester.widget<ShadInput>(find.byType(ShadInput)).controller!.selection,
       const TextSelection.collapsed(offset: 9),
     );
 
@@ -4585,7 +4581,7 @@ void main() {
     tester.testTextInput.enterText('/tmp/part-two');
     await tester.pump();
     expect(
-      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      tester.widget<ShadInput>(find.byType(ShadInput)).controller!.text,
       '/tmp/part-two',
     );
 
@@ -4609,11 +4605,11 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await tester.pump();
     final openFocus = tester
-        .widget<FilledButton>(find.byType(FilledButton))
+        .widget<ShadButton>(find.widgetWithText(ShadButton, 'Open document'))
         .focusNode!;
     expect(FocusManager.instance.primaryFocus, same(openFocus));
 
@@ -4655,7 +4651,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(-600, 0));
@@ -4696,10 +4692,10 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    final highlight = find.widgetWithText(TextButton, 'Highlight 1');
+    final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
     for (var tabs = 0; tabs < 10; tabs += 1) {
       final focus = FocusManager.instance.primaryFocus;
       if (focus != null && focus.rect.overlaps(tester.getRect(highlight))) {
@@ -4746,7 +4742,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
 
@@ -4864,7 +4860,7 @@ void main() {
       expect(status.label, 'No text selected');
       expect(status.flagsCollection.isLiveRegion, isTrue);
 
-      await tester.tap(find.byType(TextField));
+      await tester.tap(find.byType(ShadInput));
       await tester.pump();
       expect(focusDecoration().border, isNull);
 
@@ -4900,7 +4896,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
 
@@ -4917,7 +4913,7 @@ void main() {
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
       expect(
         tester
-            .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+            .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
             .focusNode!
             .hasFocus,
         isTrue,
@@ -4968,7 +4964,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/empty.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/empty.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
 
@@ -5005,7 +5001,7 @@ void main() {
           ),
         ),
       );
-      await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+      await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
 
@@ -5126,7 +5122,7 @@ void main() {
             ),
           ),
         );
-        await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+        await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
         await tester.tap(find.text('Open document'));
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Change color'));
@@ -5191,7 +5187,7 @@ void main() {
               ),
             ),
           );
-          await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+          await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
 
@@ -5231,8 +5227,8 @@ void main() {
           final addNote = tester.getSemantics(find.text('Add note'));
           addNote.owner!.performAction(addNote.id, ui.SemanticsAction.tap);
           await tester.pumpAndSettle();
-          expect(find.byType(AlertDialog), findsOneWidget);
-          Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+          expect(find.byType(ShadDialog), findsOneWidget);
+          Navigator.of(tester.element(find.byType(ShadDialog))).pop();
           await tester.pumpAndSettle();
 
           final yellow = tester.getSemantics(find.text('Yellow'));
@@ -5277,7 +5273,7 @@ void main() {
               ),
             ),
           );
-          await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+          await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
           final statusFinder = find.byKey(
@@ -5353,7 +5349,7 @@ void main() {
               ),
             ),
           );
-          await tester.enterText(find.byType(TextField), '/tmp/book');
+          await tester.enterText(find.byType(ShadInput), '/tmp/book');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
 
@@ -5413,7 +5409,7 @@ void main() {
           expect(painter().savedSelections.single.start, 1);
           expect(painter().savedSelections.single.end, 8);
 
-          await tester.enterText(find.byType(TextField), '/tmp/book');
+          await tester.enterText(find.byType(ShadInput), '/tmp/book');
           await tester.tap(find.text('Open document'));
           await tester.pumpAndSettle();
           expect(find.text('Highlight 1'), findsOneWidget);
@@ -5449,7 +5445,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -5503,7 +5499,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('reader-selection-surface')));
@@ -5540,7 +5536,7 @@ void main() {
     expect(find.text('Yellow'), findsOneWidget);
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
           .focusNode!
           .hasFocus,
       isTrue,
@@ -5607,7 +5603,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.pdf');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -5628,8 +5624,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
 
-    final cancel = tester.widget<TextButton>(
-      find.widgetWithText(TextButton, 'Cancel'),
+    final cancel = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Cancel'),
     );
     expect(
       cancel.focusNode!.hasFocus,
@@ -5639,13 +5635,13 @@ void main() {
     );
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yellow'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Yellow'))
           .onPressed,
       isNull,
     );
@@ -5666,7 +5662,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -5714,7 +5710,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book.epub');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -5796,7 +5792,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
@@ -5856,7 +5852,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -5873,7 +5869,7 @@ void main() {
 
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Remember this');
+    await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -5900,7 +5896,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final rect = tester.getRect(
@@ -5917,7 +5913,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Remember this');
+    await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
     await _waitUntil(() => bridge.createCalls == 1);
 
@@ -5970,12 +5966,12 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Updated note');
+    await tester.enterText(find.byType(ShadInput).last, 'Updated note');
     await tester.tap(find.text('Save'));
     await _waitUntil(() => bridge.updateCalls == 1);
 
@@ -6020,7 +6016,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     final surface = find.byKey(const ValueKey('reader-selection-surface'));
@@ -6036,7 +6032,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Unsaved draft');
+    await tester.enterText(find.byType(ShadInput).last, 'Unsaved draft');
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
@@ -6075,7 +6071,7 @@ void main() {
         ),
       ),
     );
-    await tester.enterText(find.byType(TextField), '/tmp/book');
+    await tester.enterText(find.byType(ShadInput), '/tmp/book');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Edit note'));
