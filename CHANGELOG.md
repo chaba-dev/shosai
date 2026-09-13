@@ -75,6 +75,7 @@ All notable changes to this project will be documented in this file.
 
 - *(epub)* Isolate view construction (#61)
 - *(core)* Extract platform-neutral reader foundations (#78)
+- *(flutter)* Organize the frontend into Elm modules mirroring Iced (#108)
 
 ### 📚 Documentation
 
