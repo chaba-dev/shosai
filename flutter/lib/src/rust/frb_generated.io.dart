@@ -167,6 +167,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FlutterLibraryPage dco_decode_flutter_library_page(dynamic raw);
 
   @protected
+  FlutterLibraryRemoveOutcome dco_decode_flutter_library_remove_outcome(
+    dynamic raw,
+  );
+
+  @protected
   FlutterOpenRequest dco_decode_flutter_open_request(dynamic raw);
 
   @protected
@@ -496,6 +501,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FlutterLibraryPage sse_decode_flutter_library_page(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FlutterLibraryRemoveOutcome sse_decode_flutter_library_remove_outcome(
     SseDeserializer deserializer,
   );
 
@@ -1331,6 +1341,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   }
 
   @protected
+  void cst_api_fill_to_wire_flutter_library_remove_outcome(
+    FlutterLibraryRemoveOutcome apiObj,
+    wire_cst_flutter_library_remove_outcome wireObj,
+  ) {
+    wireObj.removed = cst_encode_bool(apiObj.removed);
+    wireObj.managed_file_deletion_pending = cst_encode_bool(
+      apiObj.managedFileDeletionPending,
+    );
+  }
+
+  @protected
   void cst_api_fill_to_wire_flutter_open_request(
     FlutterOpenRequest apiObj,
     wire_cst_flutter_open_request wireObj,
@@ -1744,6 +1765,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_flutter_library_page(
     FlutterLibraryPage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_flutter_library_remove_outcome(
+    FlutterLibraryRemoveOutcome self,
     SseSerializer serializer,
   );
 
@@ -4124,4 +4151,12 @@ final class wire_cst_flutter_library_page extends ffi.Struct {
 
   @ffi.Bool()
   external bool has_more;
+}
+
+final class wire_cst_flutter_library_remove_outcome extends ffi.Struct {
+  @ffi.Bool()
+  external bool removed;
+
+  @ffi.Bool()
+  external bool managed_file_deletion_pending;
 }

@@ -246,6 +246,12 @@ pub struct FlutterLibraryPage {
     pub books: Vec<FlutterLibraryBook>,
     pub has_more: bool,
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct FlutterLibraryRemoveOutcome {
+    pub removed: bool,
+    pub managed_file_deletion_pending: bool,
+}
 #[derive(Debug, Clone)]
 pub struct FlutterImportItem {
     pub path_key: String,
@@ -918,10 +924,17 @@ impl FlutterBridge {
             .await
             .map_err(Into::into)
     }
-    pub async fn remove_library_book(&self, book_id: i64) -> Result<bool, FlutterBridgeError> {
+    pub async fn remove_library_book(
+        &self,
+        book_id: i64,
+    ) -> Result<FlutterLibraryRemoveOutcome, FlutterBridgeError> {
         self.bridge
             .remove_library_book(book_id)
             .await
+            .map(|outcome| FlutterLibraryRemoveOutcome {
+                removed: outcome.removed,
+                managed_file_deletion_pending: outcome.managed_file_deletion_pending,
+            })
             .map_err(Into::into)
     }
 

@@ -49,6 +49,22 @@ const SQLITE_ID_CHUNK_SIZE: usize = 500;
 const MAX_LIBRARY_TIMESTAMP_BYTES: usize = 64;
 const LIBRARY_QUERY_PROGRESS_INTERVAL: usize = 1_000;
 const MAX_LIBRARY_QUERY_WORK: usize = 10_000_000;
+const MANAGED_DELETION_RETRY_BATCH_SIZE: i64 = 100;
+
+/// Result of removing a library entry and, for managed books, its private file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryRemoveOutcome {
+    pub detached_path: Option<PathBuf>,
+    /// The entry was removed, but deleting its managed file must be retried.
+    pub managed_file_deletion_pending: bool,
+}
+
+/// Summary of a bounded managed-file deletion retry pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ManagedDeletionRetryReport {
+    pub cleared: u32,
+    pub pending: u32,
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("library query cancelled")]
@@ -2357,9 +2373,18 @@ impl Library {
         Ok(())
     }
 
-    /// Remove a book from the library and delete its private managed copy, if any.
+    /// Remove a book, retaining the legacy detached-path return value.
     pub async fn remove(&self, book_id: i64) -> Result<Option<PathBuf>> {
-        let _storage_guard = acquire_managed_storage(None).await?;
+        Ok(self.remove_with_outcome(book_id).await?.detached_path)
+    }
+
+    /// Remove a book and report when its private managed copy is pending deletion.
+    ///
+    /// Managed storage is owned by one Shosai process. SQLite makes the metadata
+    /// transaction durable, but callers must not open the same database and
+    /// managed directory concurrently from independent processes.
+    pub async fn remove_with_outcome(&self, book_id: i64) -> Result<LibraryRemoveOutcome> {
+        let storage_guard = acquire_managed_storage(None).await?;
         self.ensure_current_managed_dir().await?;
         let book = self.get(book_id).await?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
@@ -2393,18 +2418,44 @@ impl Library {
             .await
             .context("failed to detach book reading state")?;
         AnnotationStore::bind_book_annotations_before_detach(&mut transaction, book_id).await?;
+        if let Some(book) = &book
+            && book.storage_kind == StorageKind::Managed
+        {
+            let managed_dir = canonical_path_key(&self.managed_dir);
+            validate_import_path(&path_from_key(&managed_dir))?;
+            sqlx::query(
+                "INSERT INTO managed_file_deletion_debt (file_path, managed_dir) VALUES (?, ?)
+                 ON CONFLICT(file_path) DO UPDATE SET managed_dir = excluded.managed_dir",
+            )
+            .bind(&book.file_path)
+            .bind(managed_dir)
+            .execute(&mut *transaction)
+            .await
+            .context("failed to record managed file deletion")?;
+        }
         sqlx::query("DELETE FROM books WHERE id = ?")
             .bind(book_id)
             .execute(&mut *transaction)
             .await
             .context("failed to remove book")?;
         transaction.commit().await?;
-        if let Some(book) = book
+        drop(storage_guard);
+        let managed_file_deletion_pending = if let Some(book) = book
             && book.storage_kind == StorageKind::Managed
         {
-            self.remove_unreferenced_managed_file(&book.file_path).await;
-        }
-        Ok(detached_path.map(|path| path_from_key(&path)))
+            // The transaction is committed. Cleanup can no longer turn this
+            // successful removal into an ambiguous error.
+            !matches!(
+                self.remove_unreferenced_managed_file(&book.file_path).await,
+                Ok(true)
+            )
+        } else {
+            false
+        };
+        Ok(LibraryRemoveOutcome {
+            detached_path: detached_path.map(|path| path_from_key(&path)),
+            managed_file_deletion_pending,
+        })
     }
 
     /// Get a book by stable ID.
@@ -2605,27 +2656,136 @@ impl Library {
         opened.map(|opened| (opened, guards))
     }
 
-    async fn remove_unreferenced_managed_file(&self, file_path: &str) {
+    /// Retry a bounded batch of durable managed-file deletion debt.
+    pub async fn retry_managed_file_deletions(&self) -> Result<ManagedDeletionRetryReport> {
+        self.retry_managed_file_deletions_inner().await
+    }
+
+    async fn retry_managed_file_deletions_inner(&self) -> Result<ManagedDeletionRetryReport> {
+        let paths: Vec<String> = sqlx::query_scalar(
+            "SELECT file_path FROM managed_file_deletion_debt
+             ORDER BY retry_count, created_at, file_path LIMIT ?",
+        )
+        .bind(MANAGED_DELETION_RETRY_BATCH_SIZE)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to load managed file deletion debt")?;
+        let mut report = ManagedDeletionRetryReport::default();
+        for path in paths {
+            sqlx::query(
+                "UPDATE managed_file_deletion_debt
+                 SET retry_count = retry_count + 1 WHERE file_path = ?",
+            )
+            .bind(&path)
+            .execute(&self.pool)
+            .await
+            .context("failed to schedule managed file deletion retry")?;
+            if self.remove_unreferenced_managed_file(&path).await? {
+                report.cleared += 1;
+            } else {
+                report.pending += 1;
+            }
+        }
+        Ok(report)
+    }
+
+    /// Returns true when the debt is cleared (deleted, absent, or referenced again).
+    async fn remove_unreferenced_managed_file(&self, file_path: &str) -> Result<bool> {
+        let storage_guard = acquire_managed_storage(None).await?;
         let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM books WHERE file_path = ?")
             .bind(file_path)
             .fetch_one(&self.pool)
-            .await
-            .unwrap_or(1);
+            .await?;
         if remaining != 0 {
-            return;
+            return Ok(false);
         }
-        let path = path_from_key(file_path);
-        let Ok(managed_dir) = self.managed_dir.canonicalize() else {
-            return;
+        let recorded_path = path_from_key(file_path);
+        let managed_dir: Option<String> = sqlx::query_scalar(
+            "SELECT managed_dir FROM managed_file_deletion_debt WHERE file_path = ?",
+        )
+        .bind(file_path)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(managed_dir) = managed_dir else {
+            return Ok(true);
         };
-        let Ok(path) = path.canonicalize() else {
-            return;
+        let managed_dir = path_from_key(&managed_dir);
+        let canonical_dir = match managed_dir.canonicalize() {
+            Ok(path) => path,
+            Err(_) => return Ok(false),
         };
-        if path.parent() == Some(managed_dir.as_path())
-            && let Err(error) = std::fs::remove_file(&path)
+        let Some(name) = recorded_path.file_name() else {
+            return Ok(false);
+        };
+        if recorded_path
+            .parent()
+            .and_then(|parent| parent.canonicalize().ok())
+            .as_deref()
+            != Some(canonical_dir.as_path())
         {
-            eprintln!("warning: failed to remove managed book: {error}");
+            return Ok(false);
         }
+        let source = canonical_dir.join(name);
+        // Rename the directory entry, rather than its canonical target. This
+        // quarantines dangling symlinks and never follows an outside symlink.
+        let quarantine = canonical_dir.join(format!(
+            ".shosai-delete-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let rename = tokio::task::spawn_blocking(move || {
+            std::fs::rename(source, &quarantine).map(|_| quarantine)
+        })
+        .await
+        .context("managed file quarantine worker failed")?;
+        let quarantine = match rename {
+            Ok(path) => Some(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(_) => return Ok(false),
+        };
+        let debt_path = if let Some(path) = &quarantine {
+            let quarantine_key = canonical_path_key(path);
+            if let Err(error) = sqlx::query(
+                "UPDATE managed_file_deletion_debt SET file_path = ? WHERE file_path = ?",
+            )
+            .bind(&quarantine_key)
+            .bind(file_path)
+            .execute(&self.pool)
+            .await
+            {
+                let quarantine = path.clone();
+                let restore_path = recorded_path;
+                let _ =
+                    tokio::task::spawn_blocking(move || std::fs::rename(quarantine, restore_path))
+                        .await;
+                return Err(error.into());
+            }
+            quarantine_key
+        } else {
+            file_path.to_owned()
+        };
+        drop(storage_guard);
+        if let Some(path) = quarantine {
+            let removed = tokio::task::spawn_blocking({
+                let path = path.clone();
+                move || std::fs::remove_file(path)
+            })
+            .await;
+            let removed = match removed {
+                Ok(Ok(())) => true,
+                Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => true,
+                _ => false,
+            };
+            if !removed {
+                eprintln!("warning: managed book deletion remains pending");
+                return Ok(false);
+            }
+        }
+        sqlx::query("DELETE FROM managed_file_deletion_debt WHERE file_path = ?")
+            .bind(debt_path)
+            .execute(&self.pool)
+            .await?;
+        Ok(true)
     }
 }
 
