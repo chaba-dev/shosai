@@ -67,6 +67,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Harden library and reader foundations (#100)
 - *(reader)* Align persistence and PDF geometry (#102)
 - *(library)* Persist managed deletion debt (#103)
+- *(reader)* Surface durable writes and reachable content (#104)
 
 ### 🚜 Refactor
 
