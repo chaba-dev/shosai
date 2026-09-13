@@ -66,6 +66,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Harden bookmark notes, covers, and provider import (#99)
 - *(flutter)* Harden library and reader foundations (#100)
 - *(reader)* Align persistence and PDF geometry (#102)
+- *(library)* Persist managed deletion debt (#103)
 
 ### 🚜 Refactor
 
