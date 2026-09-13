@@ -197,7 +197,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   final FocusNode _openFocus = FocusNode(debugLabel: 'open document');
   final FocusNode _readerFocus = FocusNode(debugLabel: 'reader surface');
   final FocusNode _actionFocus = FocusNode(debugLabel: 'selection actions');
-  DialogRoute<String>? _noteDialogRoute;
+  ShadDialogRoute<String>? _noteDialogRoute;
   DialogRoute<AnnotationAssociationChoice>? _associationDialogRoute;
   late final ReaderController _controller;
   bool _controllerInitialized = false;
@@ -279,15 +279,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   }) async {
     final navigator = Navigator.of(context, rootNavigator: true);
     final readerTheme = _readerTheme(context, widget.initialSettings?.theme);
-    final route = DialogRoute<String>(
-      context: context,
-      builder: (context) => Theme(
+    final route = ShadDialogRoute<String>(
+      pageBuilder: (context) => Theme(
         data: readerTheme,
         child: ShadTheme(
           data: shosaiReaderShadTheme(widget.initialSettings?.theme),
           child: _NoteDialog(initialValue: initialValue, title: title),
         ),
       ),
+      barrierDismissible: true,
+      barrierLabel: '',
     );
     _noteDialogRoute = route;
     try {
@@ -1843,19 +1844,27 @@ class _NoteDialogState extends State<_NoteDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => ShadDialog(
     title: Text(widget.title),
-    content: TextField(controller: controller, autofocus: true),
     actions: [
-      TextButton(
+      ShadButton.outline(
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(
+      ShadButton(
         onPressed: () => Navigator.pop(context, controller.text),
         child: const Text('Save'),
       ),
     ],
+    child: SizedBox(
+      width: 360,
+      child: ShadInput(
+        controller: controller,
+        autofocus: true,
+        minLines: 3,
+        maxLines: 6,
+      ),
+    ),
   );
 }
 

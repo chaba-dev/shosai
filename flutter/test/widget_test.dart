@@ -5232,8 +5232,8 @@ void main() {
           final addNote = tester.getSemantics(find.text('Add note'));
           addNote.owner!.performAction(addNote.id, ui.SemanticsAction.tap);
           await tester.pumpAndSettle();
-          expect(find.byType(AlertDialog), findsOneWidget);
-          Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+          expect(find.byType(ShadDialog), findsOneWidget);
+          Navigator.of(tester.element(find.byType(ShadDialog))).pop();
           await tester.pumpAndSettle();
 
           final yellow = tester.getSemantics(find.text('Yellow'));
@@ -5874,7 +5874,7 @@ void main() {
 
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Remember this');
+    await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -5918,7 +5918,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Remember this');
+    await tester.enterText(find.byType(ShadInput).last, 'Remember this');
     await tester.tap(find.text('Save'));
     await _waitUntil(() => bridge.createCalls == 1);
 
@@ -5976,7 +5976,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Edit note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Updated note');
+    await tester.enterText(find.byType(ShadInput).last, 'Updated note');
     await tester.tap(find.text('Save'));
     await _waitUntil(() => bridge.updateCalls == 1);
 
@@ -6037,7 +6037,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('Add note'));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, 'Unsaved draft');
+    await tester.enterText(find.byType(ShadInput).last, 'Unsaved draft');
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
