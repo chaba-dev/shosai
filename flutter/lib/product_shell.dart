@@ -200,13 +200,13 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     }
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       await _showOwnedDialog<void>(
-        (context) => AlertDialog(
+        (context) => ShadDialog(
           title: const Text('Import unavailable'),
-          content: const Text(
+          description: const Text(
             'Document-provider import has not yet been validated on iOS.',
           ),
           actions: [
-            TextButton(
+            ShadButton.outline(
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
             ),
@@ -216,26 +216,26 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
       return null;
     }
     final directory = await _showOwnedDialog<bool>(
-      (context) => SimpleDialog(
+      (context) => ShadDialog(
         title: const Text('Add books'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, false),
-            child: const ListTile(
-              leading: Icon(Icons.file_open_outlined),
-              title: Text('Choose files'),
-              subtitle: Text('Select one or more PDF, EPUB, or CBZ files'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _DialogActionTile(
+              icon: LucideIcons.file,
+              title: 'Choose files',
+              subtitle: 'Select one or more PDF, EPUB, or CBZ files',
+              onPressed: () => Navigator.pop(context, false),
             ),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.pop(context, true),
-            child: const ListTile(
-              leading: Icon(Icons.folder_open_outlined),
-              title: Text('Choose a folder'),
-              subtitle: Text('Find supported books in all subfolders'),
+            _DialogActionTile(
+              icon: LucideIcons.folder,
+              title: 'Choose a folder',
+              subtitle: 'Find supported books in all subfolders',
+              onPressed: () => Navigator.pop(context, true),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
     if (directory == null || !mounted) return null;
@@ -428,61 +428,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     var managed = true;
     return _showOwnedDialog<LibraryImportSelection>(
       (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          scrollable: true,
+        builder: (context, setState) => ShadDialog(
           title: Text(directory ? 'Review folder import' : 'Review books'),
-          content: SizedBox(
-            width: 480,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 240),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: paths.length,
-                    itemBuilder: (_, index) => ListTile(
-                      leading: Icon(
-                        directory
-                            ? Icons.folder_outlined
-                            : Icons.description_outlined,
-                      ),
-                      title: Text(
-                        paths[index],
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ),
-                if (managedOnly)
-                  const ListTile(
-                    leading: Icon(Icons.lock_outline),
-                    title: Text('Copy into managed storage'),
-                    subtitle: Text(
-                      'Android provider documents are copied, then temporary access is released.',
-                    ),
-                  )
-                else
-                  SwitchListTile(
-                    title: const Text('Copy into managed storage'),
-                    subtitle: Text(
-                      managed
-                          ? 'Shōsai keeps a private copy available to the reader.'
-                          : 'Keep books in their selected locations.',
-                    ),
-                    value: managed,
-                    onChanged: (value) => setState(() => managed = value),
-                  ),
-              ],
-            ),
-          ),
           actions: [
-            TextButton(
+            ShadButton.outline(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
-            FilledButton(
+            ShadButton(
               onPressed: () => Navigator.pop(
                 context,
                 LibraryImportSelection(
@@ -494,6 +447,55 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
               child: const Text('Import'),
             ),
           ],
+          child: SizedBox(
+            width: 480,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: paths.length,
+                    itemBuilder: (_, index) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        children: [
+                          Icon(
+                            directory
+                                ? LucideIcons.folder
+                                : LucideIcons.fileText,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              paths[index],
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _SettingSwitch(
+                  title: 'Copy into managed storage',
+                  subtitle: managedOnly
+                      ? 'Android provider documents are copied, then temporary access is released.'
+                      : managed
+                      ? 'Shōsai keeps a private copy available to the reader.'
+                      : 'Keep books in their selected locations.',
+                  value: managed,
+                  onChanged: managedOnly
+                      ? null
+                      : (value) => setState(() => managed = value),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -505,9 +507,8 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   Future<T?> _showOwnedDialog<T>(WidgetBuilder builder) async {
     if (!mounted) return null;
     final navigator = Navigator.of(context);
-    final route = DialogRoute<T>(
-      context: context,
-      builder: builder,
+    final route = ShadDialogRoute<T>(
+      pageBuilder: builder,
       barrierDismissible: true,
     );
     _dialogRoutes.add(route);
@@ -521,17 +522,17 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   Future<bool> _confirmRemoval(FlutterLibraryBook book) async {
     if (!book.managed) return true;
     return await _showOwnedDialog<bool>(
-          (context) => AlertDialog(
+          (context) => ShadDialog.alert(
             title: const Text('Delete managed copy?'),
-            content: Text(
+            description: Text(
               '“${book.title}” will be removed from the library and its managed file will be deleted.',
             ),
             actions: [
-              TextButton(
+              ShadButton.outline(
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('Cancel'),
               ),
-              FilledButton(
+              ShadButton.destructive(
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('Remove and delete'),
               ),
@@ -1022,38 +1023,58 @@ Future<FlutterReaderSettings?> _settingsDialog(
   var value = initial;
   final result = await showOwnedDialog<FlutterReaderSettings>(
     (context) => StatefulBuilder(
-      builder: (context, setState) => AlertDialog(
+      builder: (context, setState) => ShadDialog(
         title: const Text('Reader settings'),
-        content: SizedBox(
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.pop(context, value),
+            child: const Text('Save'),
+          ),
+        ],
+        child: SizedBox(
           width: 360,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                DropdownButtonFormField<String>(
-                  initialValue: value.theme,
-                  decoration: const InputDecoration(labelText: 'Reader theme'),
-                  items: const [
-                    DropdownMenuItem(value: 'light', child: Text('Light')),
-                    DropdownMenuItem(value: 'sepia', child: Text('Sepia')),
-                    DropdownMenuItem(value: 'dark', child: Text('Dark')),
-                  ],
-                  onChanged: (theme) {
-                    if (theme != null) {
-                      setState(
-                        () => value = FlutterReaderSettings(
-                          continuous: value.continuous,
-                          theme: theme,
-                          epubFontSize: value.epubFontSize,
-                          epubLineSpacing: value.epubLineSpacing,
-                          pdfZoom: value.pdfZoom,
-                        ),
-                      );
-                    }
-                  },
+                _SettingField(
+                  label: 'Reader theme',
+                  child: ShadSelect<String>(
+                    initialValue: value.theme,
+                    options: const [
+                      ShadOption(value: 'light', child: Text('Light')),
+                      ShadOption(value: 'sepia', child: Text('Sepia')),
+                      ShadOption(value: 'dark', child: Text('Dark')),
+                    ],
+                    selectedOptionBuilder: (context, theme) =>
+                        Text(switch (theme) {
+                          'light' => 'Light',
+                          'sepia' => 'Sepia',
+                          'dark' => 'Dark',
+                          _ => theme,
+                        }),
+                    onChanged: (theme) {
+                      if (theme != null) {
+                        setState(
+                          () => value = FlutterReaderSettings(
+                            continuous: value.continuous,
+                            theme: theme,
+                            epubFontSize: value.epubFontSize,
+                            epubLineSpacing: value.epubLineSpacing,
+                            pdfZoom: value.pdfZoom,
+                          ),
+                        );
+                      }
+                    },
+                  ),
                 ),
-                SwitchListTile(
-                  title: const Text('Continuous reading'),
+                _SettingSwitch(
+                  title: 'Continuous reading',
                   value: value.continuous,
                   onChanged: (continuous) => setState(
                     () => value = FlutterReaderSettings(
@@ -1065,13 +1086,13 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     ),
                   ),
                 ),
-                ListTile(
-                  title: const Text('EPUB text size'),
-                  subtitle: Slider(
+                _SettingField(
+                  label: 'EPUB text size',
+                  child: ShadSlider(
                     min: 12,
                     max: 32,
                     divisions: 10,
-                    value: value.epubFontSize.clamp(12, 32),
+                    initialValue: value.epubFontSize.clamp(12, 32),
                     label: value.epubFontSize.round().toString(),
                     onChanged: (fontSize) => setState(
                       () => value = FlutterReaderSettings(
@@ -1084,13 +1105,13 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     ),
                   ),
                 ),
-                ListTile(
-                  title: const Text('EPUB line spacing'),
-                  subtitle: Slider(
+                _SettingField(
+                  label: 'EPUB line spacing',
+                  child: ShadSlider(
                     min: 1,
                     max: 3,
                     divisions: 8,
-                    value: value.epubLineSpacing.clamp(1, 3),
+                    initialValue: value.epubLineSpacing.clamp(1, 3),
                     label: value.epubLineSpacing.toStringAsFixed(2),
                     onChanged: (lineSpacing) => setState(
                       () => value = FlutterReaderSettings(
@@ -1103,61 +1124,181 @@ Future<FlutterReaderSettings?> _settingsDialog(
                     ),
                   ),
                 ),
-                DropdownButtonFormField<double>(
-                  initialValue: value.pdfZoom,
-                  decoration: const InputDecoration(labelText: 'PDF zoom'),
-                  items: [
-                    const DropdownMenuItem(value: 0, child: Text('Fit page')),
-                    const DropdownMenuItem(value: -1, child: Text('Fit width')),
-                    const DropdownMenuItem(value: 1, child: Text('100%')),
-                    const DropdownMenuItem(value: 1.5, child: Text('150%')),
-                    const DropdownMenuItem(value: 2, child: Text('200%')),
-                    if (!const [
-                      0.0,
-                      -1.0,
-                      1.0,
-                      1.5,
-                      2.0,
-                    ].contains(value.pdfZoom))
-                      DropdownMenuItem(
-                        value: value.pdfZoom,
-                        child: Text(
-                          '${(value.pdfZoom * 100).round()}% (custom)',
+                _SettingField(
+                  label: 'PDF zoom',
+                  child: ShadSelect<double>(
+                    initialValue: value.pdfZoom,
+                    options: [
+                      const ShadOption(value: 0, child: Text('Fit page')),
+                      const ShadOption(value: -1, child: Text('Fit width')),
+                      const ShadOption(value: 1, child: Text('100%')),
+                      const ShadOption(value: 1.5, child: Text('150%')),
+                      const ShadOption(value: 2, child: Text('200%')),
+                      if (!const [
+                        0.0,
+                        -1.0,
+                        1.0,
+                        1.5,
+                        2.0,
+                      ].contains(value.pdfZoom))
+                        ShadOption(
+                          value: value.pdfZoom,
+                          child: Text(
+                            '${(value.pdfZoom * 100).round()}% (custom)',
+                          ),
                         ),
-                      ),
-                  ],
-                  onChanged: (pdfZoom) {
-                    if (pdfZoom != null) {
-                      setState(
-                        () => value = FlutterReaderSettings(
-                          continuous: value.continuous,
-                          theme: value.theme,
-                          epubFontSize: value.epubFontSize,
-                          epubLineSpacing: value.epubLineSpacing,
-                          pdfZoom: pdfZoom,
-                        ),
-                      );
-                    }
-                  },
+                    ],
+                    selectedOptionBuilder: (context, pdfZoom) =>
+                        Text(_pdfZoomLabel(pdfZoom)),
+                    onChanged: (pdfZoom) {
+                      if (pdfZoom != null) {
+                        setState(
+                          () => value = FlutterReaderSettings(
+                            continuous: value.continuous,
+                            theme: value.theme,
+                            epubFontSize: value.epubFontSize,
+                            epubLineSpacing: value.epubLineSpacing,
+                            pdfZoom: pdfZoom,
+                          ),
+                        );
+                      }
+                    },
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, value),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     ),
   );
   return result;
+}
+
+String _pdfZoomLabel(double pdfZoom) => switch (pdfZoom) {
+  0 => 'Fit page',
+  -1 => 'Fit width',
+  1 => '100%',
+  1.5 => '150%',
+  2 => '200%',
+  _ => '${(pdfZoom * 100).round()}% (custom)',
+};
+
+class _SettingField extends StatelessWidget {
+  const _SettingField({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: ShadTheme.of(context).textTheme.small),
+        const SizedBox(height: 8),
+        child,
+      ],
+    ),
+  );
+}
+
+class _SettingSwitch extends StatelessWidget {
+  const _SettingSwitch({
+    required this.title,
+    this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onChanged == null ? null : () => onChanged!(!value),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: theme.textTheme.muted.fallback(
+                        color: theme.colorScheme.mutedForeground,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ShadSwitch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class _DialogActionTile extends StatelessWidget {
+  const _DialogActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = ShadTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: ShadButton.ghost(
+        width: double.infinity,
+        mainAxisAlignment: MainAxisAlignment.start,
+        onPressed: onPressed,
+        child: Row(
+          children: [
+            Icon(icon),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.muted.fallback(
+                      color: theme.colorScheme.mutedForeground,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 final class LibraryModel {

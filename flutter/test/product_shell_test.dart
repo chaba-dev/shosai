@@ -616,13 +616,21 @@ void main() {
     expect(find.text('EPUB line spacing'), findsOneWidget);
     expect(find.text('PDF zoom'), findsOneWidget);
 
+    Future<void> settlePopover() async {
+      for (var i = 0; i < 12; i += 1) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
     await tester.tap(find.text('Light'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await settlePopover();
     await tester.tap(find.text('Dark').last);
-    await tester.pump(const Duration(milliseconds: 300));
+    await settlePopover();
     await tester.tap(find.text('Continuous reading'));
+    await tester.pump();
     await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await settlePopover();
 
     expect(bridge.savedSettings?.theme, 'dark');
     expect(bridge.savedSettings?.continuous, isTrue);
