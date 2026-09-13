@@ -43,6 +43,7 @@ All notable changes to this project will be documented in this file.
 - *(library)* Display recent books and add reviewed import workflows (#96)
 - *(settings)* Add reader modes, themes, and review hardening (#97)
 - *(android)* Add managed document provider import and reading modes (#98)
+- *(android)* Harden document provider lifecycle (#101)
 
 ### 🐛 Bug Fixes
 
