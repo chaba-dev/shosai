@@ -7,9 +7,12 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:path_provider/path_provider.dart';
+import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/reader_controller.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -126,41 +129,35 @@ class ShosaiApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xff745b3e),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-        fontFamily: 'Inter',
-        fontFamilyFallback: const ['Noto Sans JP'],
+    return ShadApp.custom(
+      theme: shosaiShadTheme(Brightness.light),
+      darkTheme: shosaiShadTheme(Brightness.dark),
+      appBuilder: (context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: shosaiMaterialTheme(context),
+        localizationsDelegates: const [
+          GlobalShadLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+        ],
+        builder: (context, child) => ShadAppBuilder(child: child!),
+        restorationScopeId: 'shosai',
+        home: productBridgeFactory == null
+            ? ReaderScreen(bridge: bridge)
+            : ProductShell(
+                bridgeFactory: productBridgeFactory!,
+                readerBuilder:
+                    (bridge, book, settings, path, bookId, locatorChanged) =>
+                        ReaderScreen(
+                          bridge: bridge,
+                          initialPath: path,
+                          initialBookId: bookId,
+                          initialSettings: settings,
+                          onLocatorChanged: locatorChanged,
+                        ),
+              ),
       ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xffc5a57c),
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-        fontFamily: 'Inter',
-        fontFamilyFallback: const ['Noto Sans JP'],
-      ),
-      restorationScopeId: 'shosai',
-      home: productBridgeFactory == null
-          ? ReaderScreen(bridge: bridge)
-          : ProductShell(
-              bridgeFactory: productBridgeFactory!,
-              readerBuilder:
-                  (bridge, book, settings, path, bookId, locatorChanged) =>
-                      ReaderScreen(
-                        bridge: bridge,
-                        initialPath: path,
-                        initialBookId: bookId,
-                        initialSettings: settings,
-                        onLocatorChanged: locatorChanged,
-                      ),
-            ),
     );
   }
 }
