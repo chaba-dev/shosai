@@ -4918,7 +4918,7 @@ void main() {
       expect(find.byKey(const ValueKey('selection-actions')), findsOneWidget);
       expect(
         tester
-            .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+            .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
             .focusNode!
             .hasFocus,
         isTrue,
@@ -5541,7 +5541,7 @@ void main() {
     expect(find.text('Yellow'), findsOneWidget);
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
           .focusNode!
           .hasFocus,
       isTrue,
@@ -5629,8 +5629,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
 
-    final cancel = tester.widget<TextButton>(
-      find.widgetWithText(TextButton, 'Cancel'),
+    final cancel = tester.widget<ShadButton>(
+      find.widgetWithText(ShadButton, 'Cancel'),
     );
     expect(
       cancel.focusNode!.hasFocus,
@@ -5640,13 +5640,13 @@ void main() {
     );
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Copy'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Copy'))
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yellow'))
+          .widget<ShadButton>(find.widgetWithText(ShadButton, 'Yellow'))
           .onPressed,
       isNull,
     );

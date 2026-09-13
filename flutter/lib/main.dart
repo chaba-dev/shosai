@@ -1667,53 +1667,48 @@ class _SelectionActions extends StatelessWidget {
       key: const ValueKey('selection-actions'),
       label: 'Selection actions',
       container: true,
-      child: Material(
-        elevation: 4,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: SingleChildScrollView(
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                TextButton(
-                  focusNode: copyEnabled ? focusNode : null,
-                  onPressed: !copyEnabled
-                      ? null
-                      : () => dispatch(const ReaderSelectionCopyRequested()),
-                  child: const Text('Copy'),
-                ),
-                for (final color in FlutterHighlightColor.values)
-                  FilledButton(
-                    focusNode:
-                        !copyEnabled &&
-                            persistenceEnabled &&
-                            color == FlutterHighlightColor.yellow
-                        ? focusNode
-                        : null,
-                    onPressed: !persistenceEnabled
-                        ? null
-                        : () =>
-                              dispatch(ReaderSelectionCommitted(color: color)),
-                    child: Text(_colorName(color)),
-                  ),
-                TextButton(
-                  onPressed: !persistenceEnabled
-                      ? null
-                      : () => dispatch(const ReaderSelectionNoteRequested()),
-                  child: const Text('Add note'),
-                ),
-                TextButton(
-                  focusNode: !copyEnabled && !persistenceEnabled
+      child: ShadCard(
+        padding: const EdgeInsets.all(8),
+        child: SingleChildScrollView(
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ShadButton.ghost(
+                focusNode: copyEnabled ? focusNode : null,
+                onPressed: !copyEnabled
+                    ? null
+                    : () => dispatch(const ReaderSelectionCopyRequested()),
+                child: const Text('Copy'),
+              ),
+              for (final color in FlutterHighlightColor.values)
+                ShadButton(
+                  focusNode:
+                      !copyEnabled &&
+                          persistenceEnabled &&
+                          color == FlutterHighlightColor.yellow
                       ? focusNode
                       : null,
-                  onPressed: () => dispatch(const ReaderSelectionCancelled()),
-                  child: const Text('Cancel'),
+                  onPressed: !persistenceEnabled
+                      ? null
+                      : () => dispatch(ReaderSelectionCommitted(color: color)),
+                  child: Text(_colorName(color)),
                 ),
-              ],
-            ),
+              ShadButton.ghost(
+                onPressed: !persistenceEnabled
+                    ? null
+                    : () => dispatch(const ReaderSelectionNoteRequested()),
+                child: const Text('Add note'),
+              ),
+              ShadButton.ghost(
+                focusNode: !copyEnabled && !persistenceEnabled
+                    ? focusNode
+                    : null,
+                onPressed: () => dispatch(const ReaderSelectionCancelled()),
+                child: const Text('Cancel'),
+              ),
+            ],
           ),
         ),
       ),
