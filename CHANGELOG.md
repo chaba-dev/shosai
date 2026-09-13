@@ -45,6 +45,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Add managed document provider import and reading modes (#98)
 - *(android)* Harden document provider lifecycle (#101)
 - *(flutter)* Adopt flutter-shadcn-ui for the library shell (#106)
+- *(flutter)* Adopt flutter-shadcn-ui for the reader (#107)
 
 ### 🐛 Bug Fixes
 
