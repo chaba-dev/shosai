@@ -602,14 +602,14 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ],
               ),
             if (model.providerCleanupPending)
-              _LibraryBanner(
+              LibraryBanner(
                 message: 'Temporary import data could not be removed yet.',
                 actionLabel: 'Retry cleanup',
                 onAction: () =>
                     controller.dispatch(const LibraryCleanupRetryRequested()),
               ),
             if (model.managedFileDeletionPending)
-              _LibraryBanner(
+              LibraryBanner(
                 message:
                     'Book removed. Its private copy will be deleted later.',
                 actionLabel: 'Dismiss',
@@ -618,7 +618,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                 ),
               ),
             if (model.displayError case final error?)
-              _LibraryBanner(
+              LibraryBanner(
                 message: error,
                 actionLabel: 'Retry',
                 destructive: true,
@@ -626,7 +626,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                     controller.dispatch(const LibraryRetryRequested()),
               ),
             Expanded(
-              child: _LibraryCollection(
+              child: LibraryCollection(
                 model: model,
                 openBook: (book) =>
                     controller.dispatch(LibraryBookOpened(book)),
@@ -644,8 +644,9 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   }
 }
 
-class _LibraryBanner extends StatelessWidget {
-  const _LibraryBanner({
+class LibraryBanner extends StatelessWidget {
+  const LibraryBanner({
+    super.key,
     required this.message,
     required this.actionLabel,
     required this.onAction,

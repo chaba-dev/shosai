@@ -32,7 +32,7 @@ class PagePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final transform = _SurfaceTransform.create(fit, source.size, size);
+    final transform = SurfaceTransform.create(fit, source.size, size);
     canvas.save();
     transform.apply(canvas);
     if (paintContent) {
@@ -154,7 +154,7 @@ class _PageContentPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final source = Rect.fromLTWH(0, 0, surface.width, surface.height);
-    final transform = _SurfaceTransform.create(fit, source.size, size);
+    final transform = SurfaceTransform.create(fit, source.size, size);
     canvas.save();
     transform.apply(canvas);
     _paintPageContent(

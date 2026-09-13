@@ -1,7 +1,8 @@
 part of 'view.dart';
 
-class _LibraryCollection extends StatelessWidget {
-  const _LibraryCollection({
+class LibraryCollection extends StatelessWidget {
+  const LibraryCollection({
+    super.key,
     required this.model,
     required this.openBook,
     required this.removeBook,
@@ -63,9 +64,16 @@ class _LibraryCollection extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 child: Center(
                   child: ShadButton.outline(
+                    width: double.infinity,
                     onPressed: model.busy ? null : loadMore,
                     trailing: const Icon(LucideIcons.chevronDown),
-                    child: const Text('Load more books'),
+                    child: const Flexible(
+                      child: Text(
+                        'Load more books',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
                 ),
               );

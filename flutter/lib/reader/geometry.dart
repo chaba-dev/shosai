@@ -1,11 +1,11 @@
 part of 'view.dart';
 
-class _SurfaceTransform {
-  const _SurfaceTransform(this.source, this.destination);
+class SurfaceTransform {
+  const SurfaceTransform(this.source, this.destination);
 
-  factory _SurfaceTransform.create(BoxFit fit, Size input, Size output) {
+  factory SurfaceTransform.create(BoxFit fit, Size input, Size output) {
     final fitted = applyBoxFit(fit, input, output);
-    return _SurfaceTransform(
+    return SurfaceTransform(
       Alignment.center.inscribe(fitted.source, Offset.zero & input),
       Alignment.center.inscribe(fitted.destination, Offset.zero & output),
     );

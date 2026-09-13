@@ -98,7 +98,7 @@ Rect _selectionActionTarget(
     selected = selected?.expandToInclude(area) ?? area;
   }
   if (selected == null) return Offset.zero & Size.zero;
-  final transform = _SurfaceTransform.create(
+  final transform = SurfaceTransform.create(
     fit,
     Size(surface.width, surface.height),
     viewport,
@@ -260,7 +260,7 @@ class _SelectableSurfaceState extends State<_SelectableSurface> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final transform = _SurfaceTransform.create(
+        final transform = SurfaceTransform.create(
           widget.fit,
           Size(widget.surface.width, widget.surface.height),
           constraints.biggest,
