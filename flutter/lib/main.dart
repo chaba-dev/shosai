@@ -7,7 +7,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
-import 'package:shosai_flutter/product_shell.dart';
+import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
