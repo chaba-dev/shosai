@@ -14,12 +14,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
-import 'package:shosai_flutter/reader_controller.dart';
+import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/product_shell.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 import 'package:shosai_flutter/src/rust/frb_generated.dart';
 
-export 'package:shosai_flutter/reader_controller.dart'
+export 'package:shosai_flutter/reader/controller.dart'
     show
         AnnotationAssociationPicker,
         AnnotationAssociationPickerCanceller,
