@@ -688,6 +688,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
 
 String _safeError(Object error) => switch (error) {
   FlutterBridgeError() => error.message,
+  ReaderPersistenceException() => error.message,
   _SafeUserError() => error.message,
   _ => 'The operation could not be completed.',
 };
