@@ -818,6 +818,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
     required this.bookmarks,
     required this.layout,
     required this.restoredLayout,
+    required this.restorationFailed,
     this.offset,
     this.toolError,
   });
@@ -828,6 +829,7 @@ final class _ReaderDocumentOpened extends ReaderMessage {
   final List<FlutterBookmark> bookmarks;
   final ReaderLayout layout;
   final bool restoredLayout;
+  final bool restorationFailed;
   final int? offset;
   final String? toolError;
 }
@@ -1068,6 +1070,7 @@ final class ReaderController implements Listenable {
   String _searchQuery = '';
   final Set<BigInt> _toolCancellations = {};
   final Set<BigInt> _searchCancellations = {};
+  BigInt? _bookmarkMutationCancellation;
   _ReaderNoteTarget? _activeNoteEditor;
   int? _activeNoteEditorRevision;
   bool _associationPickerActive = false;
@@ -1086,6 +1089,7 @@ final class ReaderController implements Listenable {
   bool _listenersDisposed = false;
   int _readingStateSaveRevision = 0;
   String? _readingStateSaveError;
+  bool _readingStatePersistenceBlocked = false;
   final Set<VoidCallback> _listeners = {};
 
   ReaderModel get model => _model;
@@ -1201,6 +1205,9 @@ final class ReaderController implements Listenable {
           _emit(_model.copyWith(bookmarkBusy: false, toolError: message.error));
         }
       case _ReaderBookmarkFinished():
+        if (_bookmarkMutationCancellation == message.cancellation) {
+          _bookmarkMutationCancellation = null;
+        }
         _toolCancellations.remove(message.cancellation);
         _bridge.releaseCancellation(id: message.cancellation);
         _activeBridgeOperations -= 1;
@@ -1471,6 +1478,16 @@ final class ReaderController implements Listenable {
       _emit(_model.copyWith(openPath: path, openBookId: message.bookId));
       return;
     }
+    if (_bookmarkMutationCancellation != null) {
+      _emit(
+        _model.copyWith(
+          toolError:
+              'Bookmark changes are still saving. Try opening again shortly.',
+          toolsVisible: true,
+        ),
+      );
+      return;
+    }
     if (_model.busy || _model.annotationOperations.isNotEmpty || _suspended) {
       return;
     }
@@ -1584,6 +1601,7 @@ final class ReaderController implements Listenable {
       final document = opened;
       FlutterReadingState? restored;
       String? toolError;
+      var restorationFailed = false;
       if (bookId != null) {
         try {
           await drainReadingStateWrites(bookId);
@@ -1592,6 +1610,7 @@ final class ReaderController implements Listenable {
             cancellationId: cancellation,
           );
         } catch (error) {
+          restorationFailed = true;
           toolError = 'Reading position could not be restored: $error';
         }
       }
@@ -1626,6 +1645,7 @@ final class ReaderController implements Listenable {
           bookmarks: bookmarks,
           layout: restoredLayout,
           restoredLayout: restored != null,
+          restorationFailed: restorationFailed,
           offset: restored?.offset?.toInt(),
           toolError: toolError,
         ),
@@ -1797,6 +1817,7 @@ final class ReaderController implements Listenable {
       lineSpacing: _requestedLayout.lineSpacing,
     );
     _requestedLayout = requestedLayout;
+    _readingStatePersistenceBlocked = message.restorationFailed;
     _emit(
       _model.copyWith(
         document: message.document,
@@ -2068,7 +2089,6 @@ final class ReaderController implements Listenable {
               bookmark.offset?.toInt() == offset,
         )
         .firstOrNull;
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     _startBookmarkMutation(
       generation: generation,
       revision: revision,
@@ -2152,7 +2172,6 @@ final class ReaderController implements Listenable {
     if (bookId == null || _model.bookmarkBusy || _closing || _suspended) return;
     final generation = _model.generation;
     final revision = ++_bookmarkRevision;
-    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     _startBookmarkMutation(
       generation: generation,
       revision: revision,
@@ -2175,7 +2194,9 @@ final class ReaderController implements Listenable {
       return;
     }
     _toolCancellations.add(cancellation);
+    _bookmarkMutationCancellation = cancellation;
     _activeBridgeOperations += 1;
+    _emit(_model.copyWith(bookmarkBusy: true, toolError: null));
     unawaited(() async {
       try {
         await mutation();
@@ -2336,6 +2357,7 @@ final class ReaderController implements Listenable {
         message.unit != _model.unit ||
         message.offset != null ||
         message.replaceReadingOffset;
+    if (changedLocation) _readingStatePersistenceBlocked = false;
     final readingOffset = changedLocation
         ? message.offset
         : _model.readingOffset;
@@ -2396,6 +2418,7 @@ final class ReaderController implements Listenable {
     BigInt unitCount,
     FlutterReadingState value,
   ) {
+    if (_readingStatePersistenceBlocked) return;
     final generation = _model.generation;
     final revision = ++_readingStateSaveRevision;
     _activeBridgeOperations += 1;

@@ -5661,6 +5661,74 @@ void main() {
     },
   );
 
+  test('document replacement cannot overtake a bookmark mutation', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/first.epub');
+    final toggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters.add(toggle);
+    var attemptedReplacement = false;
+    controller.addListener(() {
+      if (controller.model.bookmarkBusy && !attemptedReplacement) {
+        attemptedReplacement = true;
+        controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+      }
+    });
+
+    controller.dispatch(const ReaderBookmarkToggled());
+    await _waitUntil(() => controller.model.bookmarkBusy);
+
+    expect(attemptedReplacement, isTrue);
+    expect(bridge.openCalls, 1);
+    expect(controller.model.openPath, '/tmp/first.epub');
+    expect(
+      controller.model.toolError,
+      'Bookmark changes are still saving. Try opening again shortly.',
+    );
+    toggle.complete(null);
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+    await bridge.waitForOp(2);
+    expect(bridge.openCalls, 2);
+    expect(controller.model.openPath, '/tmp/replacement.epub');
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
+  test('an earlier bookmark completion cannot clear a newer fence', () async {
+    final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/first.epub');
+    final firstToggle = Completer<FlutterBookmark?>();
+    final firstList = Completer<List<FlutterBookmark>>();
+    final secondToggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters
+      ..add(firstToggle)
+      ..add(secondToggle);
+    bridge.bookmarkListCompleters.add(firstList);
+    var startedSecond = false;
+    controller.addListener(() {
+      if (!controller.model.bookmarkBusy && !startedSecond) {
+        startedSecond = true;
+        controller.dispatch(const ReaderBookmarkToggled());
+      }
+    });
+
+    controller.dispatch(const ReaderBookmarkToggled());
+    firstToggle.complete(null);
+    firstList.complete(const []);
+    await _waitUntil(() => bridge.toggledBookmarkOffsets.length == 2);
+    controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
+
+    expect(bridge.openCalls, 1);
+    expect(controller.model.openPath, '/tmp/first.epub');
+    secondToggle.complete(null);
+    await _waitUntil(() => !controller.model.bookmarkBusy);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test(
     'bookmark toggles use the durable reading offset, not selection',
     () async {
@@ -5921,6 +5989,42 @@ void main() {
   });
 
   test(
+    'failed reading-state restoration does not save fallback progress',
+    () async {
+      final bridge = _ControlledBridge(
+        bookId: 7,
+        logicalUnitCount: 2,
+        immediateLists: true,
+        loadReadingStateFailure: StateError('temporary read failure'),
+      );
+      final controller = _epubController(bridge);
+      controller.dispatch(
+        const ReaderOpenRequested('/tmp/book.epub', bookId: 7),
+      );
+      await bridge.waitForOp(1);
+
+      bridge.selectionFailure = true;
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(2);
+      bridge.selectionFailure = false;
+      controller.dispatch(
+        const ReaderViewportChanged(ReaderLayout(width: 520)),
+      );
+      await bridge.waitForOp(3);
+
+      expect(controller.model.toolError, contains('could not be restored'));
+      expect(bridge.savedReadingStates, isEmpty);
+
+      controller.dispatch(const ReaderUnitRequested(1));
+      await bridge.waitForOp(4);
+      await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
+      expect(bridge.savedReadingStates.single.unit, BigInt.one);
+      controller.dispose();
+      await bridge.disposed.future;
+    },
+  );
+
+  test(
     'queued saves retain progress metadata after document replacement',
     () async {
       final bridge = _ControlledBridge(
@@ -6163,6 +6267,53 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
+
+  testWidgets('rejected Open reveals bookmark save feedback', (tester) async {
+    final bridge = _ControlledBridge(
+      format: FlutterBookFormat.epub,
+      bookId: 7,
+      immediateLists: true,
+    );
+    final toggle = Completer<FlutterBookmark?>();
+    bridge.bookmarkToggleCompleters.add(toggle);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          bridge: bridge,
+          initialPath: '/books/first.epub',
+          initialBookId: 7,
+          decoder: (pixels, {required width, required height}) => _testImage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Bookmark this location'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.pump();
+    expect(find.byTooltip('Bookmark this location'), findsNothing);
+
+    await tester.enterText(
+      find.bySemanticsLabel('Document path'),
+      '/books/replacement.epub',
+    );
+    await tester.tap(find.text('Open document'));
+    await tester.pump();
+
+    expect(
+      find.text(
+        'Bookmark changes are still saving. Try opening again shortly.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Bookmark this location'), findsOneWidget);
+    toggle.complete(null);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    await bridge.disposed.future;
+  });
 }
 
 FlutterAnnotation _annotation(String id, {int unit = 0}) => FlutterAnnotation(
@@ -6278,6 +6429,7 @@ final class _ControlledBridge implements FlutterBridge {
     this.selectionVisualLines,
     this.copyEligible = true,
     this.initialReadingState,
+    this.loadReadingStateFailure,
   }) : initialAnnotations = List.of(initialAnnotations),
        storedAnnotations = List.of(initialAnnotations),
        associationSources = List.of(associationSources),
@@ -6291,13 +6443,14 @@ final class _ControlledBridge implements FlutterBridge {
   final List<FlutterAnnotationAssociationSource> associationSources;
   final List<FlutterAnnotation> associatedAnnotations;
   final Object? associationFailure;
-  final bool selectionFailure;
+  bool selectionFailure;
   bool listFailure;
   final bool immediateLists;
   final Completer<List<FlutterAnnotation>>? initialListCompleter;
   final List<FlutterSelectionVisualLine>? selectionVisualLines;
   final bool copyEligible;
   final FlutterReadingState? initialReadingState;
+  final Object? loadReadingStateFailure;
   final disposed = Completer<void>();
   final createdCancellations = <BigInt>[];
   final releasedCancellations = <BigInt>[];
@@ -6427,6 +6580,7 @@ final class _ControlledBridge implements FlutterBridge {
     required BigInt cancellationId,
   }) async {
     loadReadingStateCalls += 1;
+    if (loadReadingStateFailure case final failure?) throw failure;
     return initialReadingState;
   }
 

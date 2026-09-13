@@ -2259,10 +2259,12 @@ impl SseDecode for crate::api::FlutterImportItem {
         let mut var_pathKey = <String>::sse_decode(deserializer);
         let mut var_book = <Option<crate::api::FlutterLibraryBook>>::sse_decode(deserializer);
         let mut var_error = <Option<String>>::sse_decode(deserializer);
+        let mut var_warning = <Option<String>>::sse_decode(deserializer);
         return crate::api::FlutterImportItem {
             path_key: var_pathKey,
             book: var_book,
             error: var_error,
+            warning: var_warning,
         };
     }
 }
@@ -3209,6 +3211,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::FlutterImportItem {
             self.path_key.into_into_dart().into_dart(),
             self.book.into_into_dart().into_dart(),
             self.error.into_into_dart().into_dart(),
+            self.warning.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3786,6 +3789,7 @@ impl SseEncode for crate::api::FlutterImportItem {
         <String>::sse_encode(self.path_key, serializer);
         <Option<crate::api::FlutterLibraryBook>>::sse_encode(self.book, serializer);
         <Option<String>>::sse_encode(self.error, serializer);
+        <Option<String>>::sse_encode(self.warning, serializer);
     }
 }
 
@@ -4490,6 +4494,7 @@ mod io {
                 path_key: self.path_key.cst_decode(),
                 book: self.book.cst_decode(),
                 error: self.error.cst_decode(),
+                warning: self.warning.cst_decode(),
             }
         }
     }
@@ -4936,6 +4941,7 @@ mod io {
                 path_key: core::ptr::null_mut(),
                 book: core::ptr::null_mut(),
                 error: core::ptr::null_mut(),
+                warning: core::ptr::null_mut(),
             }
         }
     }
@@ -6002,6 +6008,7 @@ mod io {
         path_key: *mut wire_cst_list_prim_u_8_strict,
         book: *mut wire_cst_flutter_library_book,
         error: *mut wire_cst_list_prim_u_8_strict,
+        warning: *mut wire_cst_list_prim_u_8_strict,
     }
     #[repr(C)]
     #[derive(Clone, Copy)]

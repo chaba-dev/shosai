@@ -129,7 +129,7 @@ abstract class RustLibApi extends BaseApi {
     required BigInt cancellationId,
   });
 
-  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+  Future<FlutterImportReport> crateApiFlutterBridgeImportPaths({
     required FlutterBridge that,
     required List<String> pathKeys,
     required bool managed,
@@ -684,7 +684,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<FlutterImportItem>> crateApiFlutterBridgeImportPaths({
+  Future<FlutterImportReport> crateApiFlutterBridgeImportPaths({
     required FlutterBridge that,
     required List<String> pathKeys,
     required bool managed,
@@ -709,7 +709,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: DcoCodec(
-          decodeSuccessData: dco_decode_list_flutter_import_item,
+          decodeSuccessData: dco_decode_flutter_import_report,
           decodeErrorData: dco_decode_flutter_bridge_error,
         ),
         constMeta: kCrateApiFlutterBridgeImportPathsConstMeta,
@@ -2158,12 +2158,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   FlutterImportItem dco_decode_flutter_import_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return FlutterImportItem(
       pathKey: dco_decode_String(arr[0]),
       book: dco_decode_opt_box_autoadd_flutter_library_book(arr[1]),
       error: dco_decode_opt_String(arr[2]),
+      warning: dco_decode_opt_String(arr[3]),
     );
   }
 
@@ -2973,10 +2974,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     var var_error = sse_decode_opt_String(deserializer);
+    var var_warning = sse_decode_opt_String(deserializer);
     return FlutterImportItem(
       pathKey: var_pathKey,
       book: var_book,
       error: var_error,
+      warning: var_warning,
     );
   }
 
@@ -4040,6 +4043,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.pathKey, serializer);
     sse_encode_opt_box_autoadd_flutter_library_book(self.book, serializer);
     sse_encode_opt_String(self.error, serializer);
+    sse_encode_opt_String(self.warning, serializer);
   }
 
   @protected
@@ -4635,7 +4639,7 @@ class FlutterBridgeImpl extends RustOpaque implements FlutterBridge {
     cancellationId: cancellationId,
   );
 
-  Future<List<FlutterImportItem>> importPaths({
+  Future<FlutterImportReport> importPaths({
     required List<String> pathKeys,
     required bool managed,
     required BigInt cancellationId,

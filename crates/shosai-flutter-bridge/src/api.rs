@@ -251,6 +251,7 @@ pub struct FlutterImportItem {
     pub path_key: String,
     pub book: Option<FlutterLibraryBook>,
     pub error: Option<String>,
+    pub warning: Option<String>,
 }
 impl From<ImportItemDto> for FlutterImportItem {
     fn from(v: ImportItemDto) -> Self {
@@ -258,6 +259,7 @@ impl From<ImportItemDto> for FlutterImportItem {
             path_key: v.path_key,
             book: v.book.map(Into::into),
             error: v.error,
+            warning: v.warning,
         }
     }
 }
@@ -764,11 +766,11 @@ impl FlutterBridge {
         path_keys: Vec<String>,
         managed: bool,
         cancellation_id: u64,
-    ) -> Result<Vec<FlutterImportItem>, FlutterBridgeError> {
+    ) -> Result<FlutterImportReport, FlutterBridgeError> {
         self.bridge
-            .import_paths(path_keys, managed, self.cancellation(cancellation_id)?)
+            .import_paths_report(path_keys, managed, self.cancellation(cancellation_id)?)
             .await
-            .map(|v| v.into_iter().map(Into::into).collect())
+            .map(Into::into)
             .map_err(Into::into)
     }
 
