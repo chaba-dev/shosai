@@ -4074,16 +4074,16 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.palette_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.note_alt_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
           )
           .onPressed,
       isNull,
@@ -4100,24 +4100,24 @@ void main() {
     await tester.pump();
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.palette_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.palette),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.note_alt_outlined),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.notebookPen),
           )
           .onPressed,
       isNull,
     );
     expect(
       tester
-          .widget<IconButton>(
-            find.widgetWithIcon(IconButton, Icons.delete_outline),
+          .widget<ShadIconButton>(
+            find.widgetWithIcon(ShadIconButton, LucideIcons.trash2),
           )
           .onPressed,
       isNull,
@@ -4700,7 +4700,7 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    final highlight = find.widgetWithText(TextButton, 'Highlight 1');
+    final highlight = find.widgetWithText(ShadButton, 'Highlight 1');
     for (var tabs = 0; tabs < 10; tabs += 1) {
       final focus = FocusManager.instance.primaryFocus;
       if (focus != null && focus.rect.overlaps(tester.getRect(highlight))) {
