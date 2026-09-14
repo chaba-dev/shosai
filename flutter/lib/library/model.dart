@@ -51,6 +51,7 @@ final class LibraryModel {
     this.failure = LibraryFailure.none,
     this.providerCleanupPending = false,
     this.managedFileDeletionPending = false,
+    this.notice,
   });
 
   final List<FlutterLibraryBook> books;
@@ -68,6 +69,7 @@ final class LibraryModel {
   final LibraryFailure failure;
   final bool providerCleanupPending;
   final bool managedFileDeletionPending;
+  final Notice? notice;
 
   LibraryModel copyWith({
     List<FlutterLibraryBook>? books,
@@ -84,6 +86,7 @@ final class LibraryModel {
     LibraryFailure? failure,
     bool? providerCleanupPending,
     bool? managedFileDeletionPending,
+    Object? notice = _same,
   }) => LibraryModel(
     books: books ?? this.books,
     covers: covers ?? this.covers,
@@ -107,6 +110,7 @@ final class LibraryModel {
         providerCleanupPending ?? this.providerCleanupPending,
     managedFileDeletionPending:
         managedFileDeletionPending ?? this.managedFileDeletionPending,
+    notice: identical(notice, _same) ? this.notice : notice as Notice?,
   );
 }
 

@@ -65,6 +65,11 @@ final class LibrarySettingsRequested extends LibraryMessage {
   const LibrarySettingsRequested();
 }
 
+final class LibraryNoticeConsumed extends LibraryMessage {
+  const LibraryNoticeConsumed(this.id);
+  final int id;
+}
+
 final class _LibraryLoaded extends LibraryMessage {
   const _LibraryLoaded(
     this.revision,
@@ -106,6 +111,7 @@ final class _LibraryMutationCompleted extends LibraryMessage {
     this.cancellation,
     this.refresh = false,
     this.managedFileDeletionPending = false,
+    this.notice,
   });
   final LibraryFailure failure;
   final String? error;
@@ -113,6 +119,7 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   final BigInt? cancellation;
   final bool refresh;
   final bool managedFileDeletionPending;
+  final Notice? notice;
 }
 
 final class _LibraryReaderClosed extends LibraryMessage {
