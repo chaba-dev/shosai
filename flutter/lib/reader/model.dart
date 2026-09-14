@@ -99,6 +99,7 @@ final class ReaderModel {
     this.bookmarkBusy = false,
     this.toolError,
     this.persistenceError,
+    this.notice,
     this.toolsVisible = false,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
@@ -147,6 +148,7 @@ final class ReaderModel {
 
   /// Reading-position restoration/save feedback, independent of tool chrome.
   final String? persistenceError;
+  final Notice? notice;
   final bool toolsVisible;
   final ReaderLayout layout;
   final bool relayoutBusy;
@@ -214,6 +216,7 @@ final class ReaderModel {
     bool? bookmarkBusy,
     Object? toolError = _unchanged,
     Object? persistenceError = _unchanged,
+    Object? notice = _unchanged,
     bool? toolsVisible,
     ReaderLayout? layout,
     bool? relayoutBusy,
@@ -286,6 +289,7 @@ final class ReaderModel {
       persistenceError: identical(persistenceError, _unchanged)
           ? this.persistenceError
           : persistenceError as String?,
+      notice: identical(notice, _unchanged) ? this.notice : notice as Notice?,
       toolsVisible: toolsVisible ?? this.toolsVisible,
       layout: layout ?? this.layout,
       relayoutBusy: relayoutBusy ?? this.relayoutBusy,

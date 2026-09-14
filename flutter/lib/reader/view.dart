@@ -10,6 +10,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
+import 'package:shosai_flutter/shared/sonner_bridge.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'geometry.dart';
@@ -259,55 +260,59 @@ class _ReaderScreenState extends State<ReaderScreen>
     final shadTheme = shosaiReaderShadTheme(widget.initialSettings?.theme);
     return ShadTheme(
       data: shadTheme,
-      child: Scaffold(
-        backgroundColor: shadTheme.colorScheme.background,
-        appBar: AppBar(
+      child: SonnerBridge(
+        notice: model.notice,
+        onConsumed: (id) => _controller.dispatch(ReaderNoticeConsumed(id)),
+        child: Scaffold(
           backgroundColor: shadTheme.colorScheme.background,
-          foregroundColor: shadTheme.colorScheme.foreground,
-          title: Text(
-            compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
-          ),
-          actions: model.document != null
-              ? [
-                  ShadIconAction(
-                    tooltip: 'Search and bookmarks',
-                    onPressed: () =>
-                        _controller.dispatch(const ReaderToolsToggled()),
-                    icon: const Icon(LucideIcons.search),
-                  ),
-                  if (model.document!.format != FlutterBookFormat.cbz)
+          appBar: AppBar(
+            backgroundColor: shadTheme.colorScheme.background,
+            foregroundColor: shadTheme.colorScheme.foreground,
+            title: Text(
+              compact ? 'Shōsai' : model.document?.title ?? 'Shōsai Reader',
+            ),
+            actions: model.document != null
+                ? [
                     ShadIconAction(
-                      tooltip: model.annotationsReady
-                          ? 'Associate highlights from an earlier version…'
-                          : 'Retry loading highlights',
-                      onPressed: associationEnabled
-                          ? () => _controller.dispatch(
-                              model.annotationsReady
-                                  ? const ReaderAnnotationAssociationRequested()
-                                  : const ReaderAnnotationReloadRequested(),
-                            )
-                          : null,
-                      icon: Icon(
-                        model.annotationsReady
-                            ? LucideIcons.link
-                            : LucideIcons.refreshCw,
-                      ),
+                      tooltip: 'Search and bookmarks',
+                      onPressed: () =>
+                          _controller.dispatch(const ReaderToolsToggled()),
+                      icon: const Icon(LucideIcons.search),
                     ),
-                ]
-              : null,
-        ),
-        body: SafeArea(
-          child: _ResponsiveReaderBody(
-            model: model,
-            settings: widget.initialSettings,
-            path: _path.value,
-            pathFieldKey: _pathFieldKey,
-            contentKey: _contentKey,
-            openFocus: _openFocus,
-            open: _open,
-            dispatch: _controller.dispatch,
-            readerFocus: _readerFocus,
-            actionFocus: _actionFocus,
+                    if (model.document!.format != FlutterBookFormat.cbz)
+                      ShadIconAction(
+                        tooltip: model.annotationsReady
+                            ? 'Associate highlights from an earlier version…'
+                            : 'Retry loading highlights',
+                        onPressed: associationEnabled
+                            ? () => _controller.dispatch(
+                                model.annotationsReady
+                                    ? const ReaderAnnotationAssociationRequested()
+                                    : const ReaderAnnotationReloadRequested(),
+                              )
+                            : null,
+                        icon: Icon(
+                          model.annotationsReady
+                              ? LucideIcons.link
+                              : LucideIcons.refreshCw,
+                        ),
+                      ),
+                  ]
+                : null,
+          ),
+          body: SafeArea(
+            child: _ResponsiveReaderBody(
+              model: model,
+              settings: widget.initialSettings,
+              path: _path.value,
+              pathFieldKey: _pathFieldKey,
+              contentKey: _contentKey,
+              openFocus: _openFocus,
+              open: _open,
+              dispatch: _controller.dispatch,
+              readerFocus: _readerFocus,
+              actionFocus: _actionFocus,
+            ),
           ),
         ),
       ),
@@ -470,27 +475,6 @@ class _ReaderControls extends StatelessWidget {
             ),
           ),
         ],
-        if (model.selectionError != null && model.document != null)
-          Semantics(
-            liveRegion: true,
-            child: Text('Selection unavailable: ${model.selectionError}'),
-          ),
-        if (model.selectionActionError != null && model.document != null)
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              'Selection action failed: ${model.selectionActionError}',
-            ),
-          ),
-        if (model.annotationError != null && model.document != null)
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              model.annotationsReady
-                  ? 'Highlight action failed: ${model.annotationError}'
-                  : 'Highlights unavailable: ${model.annotationError}',
-            ),
-          ),
         if (model.relayoutBusy) const ShadProgress(minHeight: 4),
       ],
     );

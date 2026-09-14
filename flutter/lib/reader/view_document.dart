@@ -616,16 +616,6 @@ class _ReaderTools extends StatelessWidget {
                   },
                 ),
               ),
-            if (model.toolError case final error?)
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  error,
-                  style: TextStyle(
-                    color: ShadTheme.of(context).colorScheme.destructive,
-                  ),
-                ),
-              ),
           ],
         ),
       ),
