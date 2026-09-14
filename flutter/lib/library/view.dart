@@ -562,35 +562,6 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                       controller.dispatch(LibraryQueryChanged(query)),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      for (final filter in <FlutterBookFormat?>[
-                        null,
-                        FlutterBookFormat.pdf,
-                        FlutterBookFormat.epub,
-                        FlutterBookFormat.cbz,
-                      ])
-                        ShadButton.raw(
-                          variant: model.format == filter
-                              ? ShadButtonVariant.primary
-                              : ShadButtonVariant.outline,
-                          size: ShadButtonSize.sm,
-                          onPressed: () =>
-                              controller.dispatch(LibraryFormatChanged(filter)),
-                          child: Text(
-                            filter == null ? 'All' : filter.name.toUpperCase(),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
               if (model.busy)
                 Row(
                   children: [
@@ -630,15 +601,38 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                       controller.dispatch(const LibraryRetryRequested()),
                 ),
               Expanded(
-                child: LibraryCollection(
-                  model: model,
-                  openBook: (book) =>
-                      controller.dispatch(LibraryBookOpened(book)),
-                  removeBook: (book) =>
-                      controller.dispatch(LibraryBookRemovalRequested(book)),
-                  loadMore: () =>
-                      controller.dispatch(const LibraryMoreRequested()),
-                  loadCover: controller.requestCover,
+                child: ShadTabs<String>(
+                  value: model.format?.name ?? 'all',
+                  maintainState: false,
+                  scrollable: true,
+                  onChanged: (filter) => controller.dispatch(
+                    LibraryFormatChanged(
+                      filter == 'all'
+                          ? null
+                          : FlutterBookFormat.values.byName(filter),
+                    ),
+                  ),
+                  tabs: [
+                    for (final filter in const ['all', 'pdf', 'epub', 'cbz'])
+                      ShadTab<String>(
+                        value: filter,
+                        expandContent: true,
+                        content: LibraryCollection(
+                          model: model,
+                          openBook: (book) =>
+                              controller.dispatch(LibraryBookOpened(book)),
+                          removeBook: (book) => controller.dispatch(
+                            LibraryBookRemovalRequested(book),
+                          ),
+                          loadMore: () =>
+                              controller.dispatch(const LibraryMoreRequested()),
+                          loadCover: controller.requestCover,
+                        ),
+                        child: Text(
+                          filter == 'all' ? 'All' : filter.toUpperCase(),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
