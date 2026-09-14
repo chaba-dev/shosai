@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show Listenable, VoidCallback;
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/shared/notice.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'message.dart';
@@ -57,6 +58,7 @@ class LibraryController implements Listenable {
   int _activeBusyEffects = 0;
   int _adapterRevision = 0;
   int _cleanupRevision = 0;
+  int _noticeId = 0;
   String? _displayedQuery;
   FlutterBookFormat? _displayedFormat;
   bool _closing = false;
@@ -192,12 +194,17 @@ class LibraryController implements Listenable {
               managedFileDeletionPending:
                   _model.managedFileDeletionPending ||
                   message.managedFileDeletionPending,
+              notice: message.notice ?? _same,
             ),
           );
           if (message.failure == LibraryFailure.import ||
               message.failure == LibraryFailure.removal) {
             _load();
           }
+        }
+      case LibraryNoticeConsumed():
+        if (_model.notice?.id == message.id) {
+          _emit(_model.copyWith(notice: null));
         }
       case LibraryManagedDeletionNoticeDismissed():
         _emit(_model.copyWith(managedFileDeletionPending: false));
@@ -505,6 +512,11 @@ class LibraryController implements Listenable {
           _LibraryMutationCompleted(
             failure: LibraryFailure.settings,
             settings: settings,
+            notice: Notice(
+              id: ++_noticeId,
+              message: 'Reader settings saved.',
+              kind: NoticeKind.success,
+            ),
           ),
         );
       } catch (error) {

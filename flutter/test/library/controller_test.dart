@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/shared/notice.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 FlutterLibraryBook _book(int id, String title) => FlutterLibraryBook(
@@ -71,16 +72,25 @@ class _StubLibraryBridge implements FlutterBridge {
   );
 
   @override
+  Future<bool> saveReaderSettings({
+    required FlutterReaderSettings value,
+  }) async => true;
+
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-LibraryController _controller(_StubLibraryBridge bridge) => LibraryController(
+LibraryController _controller(
+  _StubLibraryBridge bridge, {
+  Future<FlutterReaderSettings?> Function(FlutterReaderSettings initial)?
+  editSettings,
+}) => LibraryController(
   bridge: bridge,
   confirmRemoval: (_) async => true,
   pickImport: () async => null,
   openBook: (_) async {},
   drainReaderSaves: (_) async {},
-  editSettings: (_) async => null,
+  editSettings: editSettings ?? (_) async => null,
 );
 
 void main() {
@@ -152,6 +162,42 @@ void main() {
 
     expect(bridge.formats.last, FlutterBookFormat.epub);
     expect(controller.model.format, FlutterBookFormat.epub);
+
+    controller.dispose();
+    await _settle();
+  });
+
+  test('saving settings raises a notice that is consumed once', () async {
+    final bridge = _StubLibraryBridge();
+    final controller = _controller(
+      bridge,
+      editSettings: (initial) async => FlutterReaderSettings(
+        continuous: true,
+        theme: 'dark',
+        epubFontSize: initial.epubFontSize,
+        epubLineSpacing: initial.epubLineSpacing,
+        pdfZoom: initial.pdfZoom,
+      ),
+    );
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(1, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispatch(const LibrarySettingsRequested());
+    await _settle();
+
+    final notice = controller.model.notice;
+    expect(notice, isNotNull);
+    expect(notice!.message, 'Reader settings saved.');
+    expect(notice.kind, NoticeKind.success);
+    expect(controller.model.settings?.theme, 'dark');
+
+    controller.dispatch(LibraryNoticeConsumed(notice.id));
+    expect(controller.model.notice, isNull);
 
     controller.dispose();
     await _settle();
