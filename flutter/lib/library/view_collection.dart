@@ -115,10 +115,16 @@ class LibraryCollection extends StatelessWidget {
                               ),
                             const SizedBox(height: 8),
                             ShadProgress(value: book.progress, minHeight: 8),
-                            Text(
-                              book.lastRead == null
-                                  ? '${(book.progress * 100).round()}% read'
-                                  : 'Continue reading · ${(book.progress * 100).round()}%',
+                            const SizedBox(height: 4),
+                            Align(
+                              alignment: AlignmentDirectional.centerStart,
+                              child: ShadBadge.outline(
+                                child: Text(
+                                  book.lastRead == null
+                                      ? '${(book.progress * 100).round()}% read'
+                                      : 'Continue reading · ${(book.progress * 100).round()}%',
+                                ),
+                              ),
                             ),
                           ],
                         ),
