@@ -256,30 +256,35 @@ class _DialogActionTile extends StatelessWidget {
     final theme = ShadTheme.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: ShadButton.ghost(
-        width: double.infinity,
-        mainAxisAlignment: MainAxisAlignment.start,
-        onPressed: onPressed,
-        child: Row(
-          children: [
-            Icon(icon),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.muted.fallback(
-                      color: theme.colorScheme.mutedForeground,
-                    ),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: ShadCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Icon(icon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.muted.fallback(
+                          color: theme.colorScheme.mutedForeground,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
