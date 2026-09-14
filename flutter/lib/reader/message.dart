@@ -60,6 +60,11 @@ final class ReaderToolsToggled extends ReaderMessage {
   const ReaderToolsToggled();
 }
 
+final class ReaderNoticeConsumed extends ReaderMessage {
+  const ReaderNoticeConsumed(this.id);
+  final int id;
+}
+
 final class _ReaderSearchCompleted extends ReaderMessage {
   const _ReaderSearchCompleted(this.generation, this.revision, this.results);
   final int generation;

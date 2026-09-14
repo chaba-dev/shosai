@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
     show FlutterError, FlutterErrorDetails, Listenable, VoidCallback;
+import 'package:shosai_flutter/shared/notice.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 part 'effects.dart';
@@ -59,6 +60,7 @@ final class ReaderController implements Listenable {
   final ReaderSelectionAnnouncer? _selectionAnnouncer;
 
   ReaderModel _model = ReaderModel();
+  int _noticeId = 0;
   BigInt? _activeCancellation;
   final Set<BigInt> _relayoutCancellations = {};
   final Set<BigInt> _annotationCancellations = {};
@@ -219,6 +221,10 @@ final class ReaderController implements Listenable {
         );
       case ReaderToolsToggled():
         _emit(_model.copyWith(toolsVisible: !_model.toolsVisible));
+      case ReaderNoticeConsumed():
+        if (_model.notice?.id == message.id) {
+          _emit(_model.copyWith(notice: null));
+        }
       case _ReaderSearchCompleted():
         if (_isCurrent(message.generation) &&
             message.revision == _searchRevision) {
@@ -2918,7 +2924,8 @@ final class ReaderController implements Listenable {
   void _emit(ReaderModel model, {bool notifyListeners = true}) {
     final selectionChanged =
         _model.selectionDescription != model.selectionDescription;
-    _model = model;
+    final notice = _pendingNotice(model);
+    _model = notice == null ? model : model.copyWith(notice: notice);
     if (!_closing && selectionChanged && _selectionAnnouncer != null) {
       unawaited(_announceSelection(model.selectionDescription));
     }
@@ -2939,6 +2946,34 @@ final class ReaderController implements Listenable {
         }
       }
     }
+  }
+
+  // Transient selection/search/annotation failures surface as toasts. A notice
+  // is raised only when the error field changes and no explicit notice was set
+  // by the transition (for example, consumption clearing the current one).
+  Notice? _pendingNotice(ReaderModel next) {
+    if (!identical(next.notice, _model.notice)) return null;
+    String? message;
+    if (next.selectionActionError != null &&
+        next.selectionActionError != _model.selectionActionError) {
+      message = 'Selection action failed: ${next.selectionActionError}';
+    } else if (next.annotationError != null &&
+        next.annotationError != _model.annotationError) {
+      message = next.annotationsReady
+          ? 'Highlight action failed: ${next.annotationError}'
+          : 'Highlights unavailable: ${next.annotationError}';
+    } else if (next.selectionError != null &&
+        next.selectionError != _model.selectionError) {
+      message = 'Selection unavailable: ${next.selectionError}';
+    } else if (next.toolError != null && next.toolError != _model.toolError) {
+      message = next.toolError;
+    }
+    if (message == null) return null;
+    return Notice(
+      id: ++_noticeId,
+      message: message,
+      kind: NoticeKind.destructive,
+    );
   }
 
   Future<void> _announceSelection(String description) async {

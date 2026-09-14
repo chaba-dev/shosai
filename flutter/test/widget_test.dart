@@ -4251,7 +4251,7 @@ void main() {
       );
       final image = await _testImage();
       await tester.pumpWidget(
-        MaterialApp(
+        ShadApp(
           home: ReaderScreen(
             bridge: bridge,
             decoder: (pixels, {required width, required height}) async => image,
@@ -6006,7 +6006,7 @@ void main() {
   ) async {
     final bridge = _ControlledBridge(format: FlutterBookFormat.epub);
     await tester.pumpWidget(
-      MaterialApp(
+      ShadApp(
         home: ReaderScreen(
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
@@ -6042,7 +6042,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Save'), findsNothing);
     expect(
-      find.text(
+      find.textContaining(
         'Selection action failed: The note was not saved because the app was suspended. Try again.',
       ),
       findsOneWidget,
@@ -7113,7 +7113,7 @@ void main() {
     final toggle = Completer<FlutterBookmark?>();
     bridge.bookmarkToggleCompleters.add(toggle);
     await tester.pumpWidget(
-      MaterialApp(
+      ShadApp(
         home: ReaderScreen(
           bridge: bridge,
           initialPath: '/books/first.epub',
@@ -7136,6 +7136,7 @@ void main() {
       '/books/replacement.epub',
     );
     await tester.tap(find.text('Open document'));
+    await tester.pump();
     await tester.pump();
 
     expect(
