@@ -52,3 +52,52 @@ disposal ordering. Widget tests must exercise gestures or shortcuts through the
 rendered surface when validating interaction contracts; dispatching offsets
 directly only tests update logic. Native bridge tests cover owned DTO transfer
 and create/reopen/update/delete flows for each supported format.
+
+## Shadcn / Material boundary
+
+flutter-shadcn-ui is the component system. Material is retained only for
+scaffolding with no Shadcn equivalent and for host interop:
+
+- `Scaffold`, `AppBar`, and `CircularProgressIndicator` remain Material. There is
+  no Shadcn app bar, scaffold, or spinner.
+- `MaterialApp` is mounted inside `ShadApp.custom`; `ShadAppBuilder` supplies the
+  Shadcn theme, toaster, and Sonner.
+- `ThemeData` is derived from the Shadcn theme in `app_theme.dart`; do not add a
+  separate Material palette.
+- `ShadIconAction` wraps the Material `Tooltip` on purpose: `ShadTooltip` exposes
+  no tooltip semantics, while Material's `Tooltip`/`RawTooltip` provides both the
+  accessibility tooltip and the `find.byTooltip` test hook.
+
+Themes (`app_theme.dart`):
+
+- `shosaiShadTheme(brightness)` is the app theme; it maps the Shosai brand accent
+  into a Shadcn `ShadColorScheme` and applies the bundled interface fonts.
+- `shosaiReaderShadTheme(readerTheme)` maps the reader's light/sepia/dark
+  preference onto a Shadcn theme. Reader page colors derive from
+  `ShadColorScheme`; there is no parallel Material reader theme.
+
+## Transient feedback (notices)
+
+Elm models own transient feedback as value data:
+
+- A controller raises a `Notice` (`lib/shared/notice.dart`); the model stores the
+  current notice. `SonnerBridge` presents it once (guarded by the notice id) as a
+  `ShadToast`, then dispatches a `*NoticeConsumed` message. The view never
+  mutates model state.
+- Use notices for transient results and failures (import summaries, selection or
+  annotation failures, tool errors). Keep persistent, actionable conditions on a
+  persistent surface (library banners for cleanup/deletion debt and retryable
+  load errors; `model.error` for failed reader content; `persistenceError` for
+  reading-state failures) so they stay visible until resolved.
+- `ReaderController` raises reader transient notices centrally in `_emit` when a
+  transient error field changes; do not raise per set-site.
+
+## Rust `enum` ↔ Dart sealed class
+
+Iced's flat `Message` enum maps to one Dart `sealed class` per page with one
+`final class` per variant in a single `message.dart` part. Dart `enum` cannot
+carry per-variant payloads, so it is reserved for payload-free value sets
+(`ReaderSelectionPhase`, `LibraryFailure`, etc.). Exhaustive `switch` over the
+sealed hierarchy is the analogue of Rust's exhaustive `match`; keep a default
+arm out so adding a variant is a compile error until it is handled.
+
