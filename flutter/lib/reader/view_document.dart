@@ -331,69 +331,94 @@ class _DocumentView extends StatelessWidget {
               height: 64,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                children: model.annotations
-                    .map(
-                      (annotation) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: ShadCard(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ShadButton.ghost(
-                                onPressed: () => dispatch(
-                                  ReaderAnnotationNavigated(annotation.id),
-                                ),
-                                child: Text(
-                                  'Highlight ${annotation.unit.toInt() + 1}'
-                                  '${_annotationResolutionSuffix(annotation.resolution)}',
-                                ),
-                              ),
-                              ShadIconAction(
-                                tooltip: 'Change color',
-                                onPressed:
-                                    model.annotationOperations.isNotEmpty ||
-                                        model.relayoutBusy
-                                    ? null
-                                    : () => dispatch(
-                                        ReaderAnnotationUpdated(
-                                          annotation.id,
-                                          _nextColor(annotation.color),
-                                          annotation.body,
-                                        ),
-                                      ),
-                                icon: const Icon(LucideIcons.palette),
-                              ),
-                              ShadIconAction(
-                                tooltip: 'Edit note',
-                                onPressed:
-                                    model.annotationOperations.isNotEmpty ||
-                                        model.relayoutBusy
-                                    ? null
-                                    : () => dispatch(
-                                        ReaderAnnotationNoteRequested(
-                                          annotation.id,
-                                        ),
-                                      ),
-                                icon: const Icon(LucideIcons.notebookPen),
-                              ),
-                              ShadIconAction(
-                                tooltip: 'Delete highlight',
-                                onPressed:
-                                    model.annotationOperations.isNotEmpty ||
-                                        model.relayoutBusy
-                                    ? null
-                                    : () => dispatch(
-                                        ReaderAnnotationDeleted(annotation.id),
-                                      ),
-                                icon: const Icon(LucideIcons.trash2),
-                              ),
-                            ],
+                children: model.annotations.map((annotation) {
+                  final actionsDisabled =
+                      model.annotationOperations.isNotEmpty ||
+                      model.relayoutBusy;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: ShadContextMenuRegion(
+                      longPressEnabled: false,
+                      tapEnabled: false,
+                      items: [
+                        ShadContextMenuItem(
+                          enabled: !actionsDisabled,
+                          onPressed: () => dispatch(
+                            ReaderAnnotationUpdated(
+                              annotation.id,
+                              _nextColor(annotation.color),
+                              annotation.body,
+                            ),
                           ),
+                          child: const Text('Change color'),
+                        ),
+                        ShadContextMenuItem(
+                          enabled: !actionsDisabled,
+                          onPressed: () => dispatch(
+                            ReaderAnnotationNoteRequested(annotation.id),
+                          ),
+                          child: const Text('Edit note'),
+                        ),
+                        ShadContextMenuItem(
+                          enabled: !actionsDisabled,
+                          onPressed: () =>
+                              dispatch(ReaderAnnotationDeleted(annotation.id)),
+                          child: const Text('Delete highlight'),
+                        ),
+                      ],
+                      child: ShadCard(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ShadButton.ghost(
+                              onPressed: () => dispatch(
+                                ReaderAnnotationNavigated(annotation.id),
+                              ),
+                              child: Text(
+                                'Highlight ${annotation.unit.toInt() + 1}'
+                                '${_annotationResolutionSuffix(annotation.resolution)}',
+                              ),
+                            ),
+                            ShadIconAction(
+                              tooltip: 'Change color',
+                              onPressed: actionsDisabled
+                                  ? null
+                                  : () => dispatch(
+                                      ReaderAnnotationUpdated(
+                                        annotation.id,
+                                        _nextColor(annotation.color),
+                                        annotation.body,
+                                      ),
+                                    ),
+                              icon: const Icon(LucideIcons.palette),
+                            ),
+                            ShadIconAction(
+                              tooltip: 'Edit note',
+                              onPressed: actionsDisabled
+                                  ? null
+                                  : () => dispatch(
+                                      ReaderAnnotationNoteRequested(
+                                        annotation.id,
+                                      ),
+                                    ),
+                              icon: const Icon(LucideIcons.notebookPen),
+                            ),
+                            ShadIconAction(
+                              tooltip: 'Delete highlight',
+                              onPressed: actionsDisabled
+                                  ? null
+                                  : () => dispatch(
+                                      ReaderAnnotationDeleted(annotation.id),
+                                    ),
+                              icon: const Icon(LucideIcons.trash2),
+                            ),
+                          ],
                         ),
                       ),
-                    )
-                    .toList(),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           _ReaderUnitNavigation(

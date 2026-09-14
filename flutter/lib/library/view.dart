@@ -562,6 +562,10 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
                       controller.dispatch(LibraryQueryChanged(query)),
                 ),
               ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: ShadSeparator.horizontal(),
+              ),
               if (model.busy)
                 Row(
                   children: [
