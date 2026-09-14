@@ -389,42 +389,36 @@ class LibraryController implements Listenable {
         cancellation = _bridge.createCancellation();
         _cancellations.add(cancellation);
         _foregroundCancellations.add(cancellation);
-        late final List<FlutterImportItem> items;
-        var refresh = false;
-        String? terminalStatus;
+        late final FlutterImportReport report;
         if (selection.runner case final runner?) {
-          final report = await runner(_bridge, cancellation);
-          items = report.items;
-          refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
+          report = await runner(_bridge, cancellation);
         } else if (selection.directory) {
-          final report = await _bridge.importDirectory(
+          report = await _bridge.importDirectory(
             pathKey: selection.paths.single,
             managed: selection.managed,
             cancellationId: cancellation,
           );
-          items = report.items;
-          refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
         } else {
-          final report = await _bridge.importPaths(
+          report = await _bridge.importPaths(
             pathKeys: selection.paths,
             managed: selection.managed,
             cancellationId: cancellation,
           );
-          items = report.items;
-          refresh = report.imported > BigInt.zero;
-          terminalStatus = _importReportStatus(report);
         }
-        final failure = items.where((item) => item.error != null).firstOrNull;
+        final terminalStatus = _importReportStatus(report);
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
-            error:
-                terminalStatus ??
-                (failure == null ? null : _safeImportError(failure.error!)),
+            notice: Notice(
+              id: ++_noticeId,
+              message:
+                  terminalStatus ?? 'Imported ${_bookCount(report.imported)}.',
+              kind: terminalStatus == null
+                  ? NoticeKind.success
+                  : NoticeKind.destructive,
+            ),
             cancellation: cancellation,
-            refresh: refresh,
+            refresh: report.imported > BigInt.zero,
           ),
         );
         cancellation = null;
@@ -432,7 +426,11 @@ class LibraryController implements Listenable {
         dispatch(
           _LibraryMutationCompleted(
             failure: LibraryFailure.import,
-            error: safeError(error),
+            notice: Notice(
+              id: ++_noticeId,
+              message: safeError(error),
+              kind: NoticeKind.destructive,
+            ),
             cancellation: cancellation,
           ),
         );
