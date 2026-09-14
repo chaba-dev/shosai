@@ -11,6 +11,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
+import 'package:shosai_flutter/shared/notice.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
 void main() {
@@ -756,10 +757,10 @@ void main() {
       await _waitUntil(() => bridge.queries.length == 2);
 
       expect(
-        controller.model.error,
+        controller.model.notice?.message,
         'Imported 1 book. 1 failed. This file type is not supported.',
       );
-      expect(controller.model.failure, LibraryFailure.import);
+      expect(controller.model.notice?.kind, NoticeKind.destructive);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -782,10 +783,10 @@ void main() {
     final controller = _libraryController(bridge);
 
     controller.dispatch(const LibraryImportRequested());
-    await _waitUntil(() => controller.model.error != null);
+    await _waitUntil(() => controller.model.notice != null);
 
     expect(
-      controller.model.error,
+      controller.model.notice?.message,
       'Imported 1 book. 1 failed. This file type is not supported. '
       'Some imported book details could not be loaded.',
     );
@@ -809,10 +810,10 @@ void main() {
     final controller = _libraryController(bridge);
 
     controller.dispatch(const LibraryImportRequested());
-    await _waitUntil(() => controller.model.error != null);
+    await _waitUntil(() => controller.model.notice != null);
 
     expect(
-      controller.model.error,
+      controller.model.notice?.message,
       '1 failed. Permission to read the selected document was denied.',
     );
     controller.dispose();
@@ -928,8 +929,11 @@ void main() {
       );
       await _waitUntil(() => bridge.queries.isNotEmpty);
 
-      expect(controller.model.error, 'Import cancelled. Imported 2 books.');
-      expect(controller.model.failure, LibraryFailure.import);
+      expect(
+        controller.model.notice?.message,
+        'Import cancelled. Imported 2 books.',
+      );
+      expect(controller.model.notice?.kind, NoticeKind.destructive);
       controller.dispose();
       await bridge.disposed.future;
     },
@@ -967,7 +971,10 @@ void main() {
 
     expect(runnerCalls, 1);
     expect(bridge.importCalls, 0);
-    expect(controller.model.error, 'Import cancelled. Imported 1 book.');
+    expect(
+      controller.model.notice?.message,
+      'Import cancelled. Imported 1 book.',
+    );
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -1004,7 +1011,7 @@ void main() {
       await _waitUntil(() => bridge.queries.isNotEmpty);
 
       expect(
-        controller.model.error,
+        controller.model.notice?.message,
         'Import cancelled. Imported 1 book. 1 failed. '
         'This file type is not supported.',
       );
@@ -1153,7 +1160,7 @@ void main() {
     },
   );
 
-  test('successful background load does not clear a mutation error', () async {
+  test('successful background load does not clear a mutation notice', () async {
     final bridge = _ControlledLibraryBridge();
     bridge.importCompleter = Completer<List<FlutterImportItem>>()
       ..complete(const [
@@ -1162,16 +1169,15 @@ void main() {
     final controller = _libraryController(bridge);
     controller.dispatch(const LibraryImportRequested());
     await _waitUntil(() => !controller.model.busy);
-    expect(controller.model.error, isNotNull);
+    expect(controller.model.notice, isNotNull);
 
     controller.dispatch(const LibraryRefreshed());
     await _waitUntil(() => !controller.model.busy);
 
     expect(
-      controller.model.error,
+      controller.model.notice?.message,
       '1 failed. This file type is not supported.',
     );
-    expect(controller.model.failure, LibraryFailure.import);
     controller.dispose();
     await bridge.disposed.future;
   });
