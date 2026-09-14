@@ -200,8 +200,8 @@ void _paintPageContent(
   }
 }
 
-({Color background, Color foreground}) pageColors(ColorScheme scheme) =>
-    (background: scheme.surface, foreground: scheme.onSurface);
+({Color background, Color foreground}) pageColors(ShadColorScheme scheme) =>
+    (background: scheme.background, foreground: scheme.foreground);
 
 Rect pageImageSource(ui.Image image) =>
     Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());

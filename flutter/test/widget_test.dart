@@ -91,7 +91,7 @@ void main() {
   });
 
   test('page colors retain strong content contrast in dark mode', () {
-    final colors = pageColors(const ColorScheme.dark());
+    final colors = pageColors(const ShadStoneColorScheme.dark());
     expect(
       ThemeData.estimateBrightnessForColor(colors.background),
       isNot(ThemeData.estimateBrightnessForColor(colors.foreground)),
@@ -2896,19 +2896,16 @@ void main() {
     await tester.pump();
 
     final scaffoldContext = tester.element(find.byType(Scaffold));
-    final theme = Theme.of(scaffoldContext);
-    expect(theme.brightness, Brightness.dark);
-    expect(theme.textTheme.bodyMedium?.fontFamily, 'Inter');
+    final shadTheme = ShadTheme.of(scaffoldContext);
+    expect(shadTheme.brightness, Brightness.dark);
+    expect(shadTheme.textTheme.family, 'Inter');
+    expect(shadTheme.textTheme.p.fontFamilyFallback, contains('Noto Sans JP'));
     expect(
-      theme.textTheme.bodyMedium?.fontFamilyFallback,
-      contains('Noto Sans JP'),
-    );
-    expect(
-      ThemeData.estimateBrightnessForColor(theme.textTheme.bodyMedium!.color!),
+      ThemeData.estimateBrightnessForColor(shadTheme.colorScheme.foreground),
       Brightness.light,
     );
     expect(
-      ThemeData.estimateBrightnessForColor(theme.scaffoldBackgroundColor),
+      ThemeData.estimateBrightnessForColor(shadTheme.colorScheme.background),
       Brightness.dark,
     );
     await tester.pumpWidget(const SizedBox());
