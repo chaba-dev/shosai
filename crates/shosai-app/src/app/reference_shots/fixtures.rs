@@ -16,7 +16,11 @@
 //!   process state is read;
 //! - the fixture set is emitted in sorted path order and hashed as bytes;
 //! - PDFs are written with a correct cross-reference table (real object offsets
-//!   and `startxref`), unlike the legacy `sample.pdf` regression fixture.
+//!   and `startxref`), unlike the legacy `sample.pdf` regression fixture, and
+//!   their pages draw shapes only: PDFium resolves fonts for unembedded PDF text
+//!   by scanning the host font directories and ignores `FONTCONFIG_FILE`, so a
+//!   text run would make a rendered cover depend on the machine (guarded by
+//!   [`pdf_font_free_problems`]).
 
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
@@ -264,6 +268,17 @@ const FEATURED_SEED: [SeedBook; 14] = [
 ];
 
 fn push_file(files: &mut Vec<FixtureFile>, relative_path: &str, bytes: Vec<u8>) {
+    // A PDF that draws text would let PDFium resolve a font from the host font
+    // directories, which the entry point cannot pin: fail the run instead of
+    // emitting a fixture whose covers depend on the machine.
+    if relative_path.ends_with(".pdf") {
+        let problems = pdf_font_free_problems(&bytes);
+        assert!(
+            problems.is_empty(),
+            "generated PDF {relative_path} is not font-free: {}",
+            problems.join("; ")
+        );
+    }
     files.push(FixtureFile {
         relative_path: relative_path.to_owned(),
         bytes,
@@ -800,8 +815,22 @@ pub(crate) fn mirror_reference_fixtures(
 ///
 /// Symlinks are not regular files: the declared dangling fixtures are validated
 /// by [`symlink_defects`] and any other symlink fails the read, so a link
-/// pointing outside the tree cannot pass as a fixture.
+/// pointing outside the tree cannot pass as a fixture. Any other kind of entry
+/// is a failure as well: a socket, FIFO or device in the tree is not something
+/// the generator writes, so accepting (skipping) it would let the tree carry an
+/// artifact no run produced. The root itself must be a real directory — a
+/// symlinked root would make the walk read whatever it points at.
 pub(crate) fn read_reference_fixtures(root: &Path) -> std::io::Result<Vec<FixtureRecord>> {
+    if !super::evidence::real_directory(root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "the fixture tree root {} is not a real directory",
+                root.display()
+            ),
+        ));
+    }
+
     fn walk(root: &Path, directory: &Path, out: &mut Vec<FixtureRecord>) -> std::io::Result<()> {
         for entry in std::fs::read_dir(directory)? {
             let entry = entry?;
@@ -811,8 +840,20 @@ pub(crate) fn read_reference_fixtures(root: &Path) -> std::io::Result<Vec<Fixtur
                 walk(root, &path, out)?;
                 continue;
             }
-            if !file_type.is_file() {
+            if file_type.is_symlink() {
+                // The declared dangling symlinks; `symlink_defects` rejects any
+                // other link (and a wrong target).
                 continue;
+            }
+            if !file_type.is_file() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "the fixture tree contains {}, which is neither a regular file nor a \
+                         declared symlink fixture",
+                        path.display()
+                    ),
+                ));
             }
             let bytes = std::fs::read(&path)?;
             let relative = path
@@ -1242,11 +1283,18 @@ const JAPANESE_PROSE: &str =
 /// A conformant PDF 1.4 with a correct cross-reference table (correct object
 /// offsets and `startxref`), unlike the legacy `sample.pdf`. Object bodies are
 /// fixed, so identical inputs produce identical bytes.
+///
+/// The page artwork is deliberately text-free: PDFium resolves fonts for
+/// unembedded PDF text itself by scanning the host font directories, and it does
+/// not follow `FONTCONFIG_FILE`, so a `Helvetica` text run would make the
+/// rendered cover depend on the machine's installed fonts. Pages draw the header
+/// band, an accent bar, the text-line bars and a page marker made of one square
+/// per page; the title, author and page count stay in the document information
+/// dictionary, which is what the library reads.
 fn pdf(title: &str, author: &str, pages: u32, accent: (u8, u8, u8)) -> Vec<u8> {
     let pages = pages.max(1);
     let page_ids: Vec<u32> = (0..pages).map(|index| 3 + index * 2).collect();
-    let font_id = 3 + pages * 2;
-    let info_id = font_id + 1;
+    let info_id = 3 + pages * 2;
 
     let mut out: Vec<u8> = Vec::new();
     out.extend_from_slice(b"%PDF-1.4\n");
@@ -1279,16 +1327,20 @@ fn pdf(title: &str, author: &str, pages: u32, accent: (u8, u8, u8)) -> Vec<u8> {
         begin_object(&mut out, &mut offsets, *page_id);
         out.extend_from_slice(
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 {font_id} 0 R >> >> /Contents {content_id} 0 R >>"
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ProcSet [/PDF] >> /Contents {content_id} 0 R >>"
             )
             .as_bytes(),
         );
         end_object(&mut out);
 
-        let mut stream = String::from("0.93 0.92 0.90 rg\n0 700 612 92 re f\n0.18 0.18 0.18 rg\n");
-        stream.push_str("BT\n/F1 26 Tf\n72 726 Td\n(");
-        stream.push_str(&escape_pdf_text(&format!("Page {}", index + 1)));
-        stream.push_str(") Tj\nET\n");
+        let mut stream = String::from("0.93 0.92 0.90 rg\n0 700 612 92 re f\n");
+        // The page marker: one square per page, so pages stay distinguishable
+        // without a glyph.
+        stream.push_str("0.18 0.18 0.18 rg\n");
+        for marker in 0..=index {
+            let x = 72 + marker as u32 * 22;
+            stream.push_str(&format!("{x} 726 14 14 re f\n"));
+        }
         stream.push_str(&format!(
             "{} {} {} rg\n72 640 240 12 re f\n",
             f32::from(accent.0) / 255.0,
@@ -1300,10 +1352,6 @@ fn pdf(title: &str, author: &str, pages: u32, accent: (u8, u8, u8)) -> Vec<u8> {
             let y = 600 - line * 26;
             stream.push_str(&format!("72 {y} 468 8 re f\n"));
         }
-        stream.push_str(&format!(
-            "0 0 0 rg\nBT\n/F1 11 Tf\n72 96 Td\n({}) Tj\nET\n",
-            escape_pdf_text(title_or_slug(title))
-        ));
 
         begin_object(&mut out, &mut offsets, content_id);
         out.extend_from_slice(format!("<< /Length {} >>\nstream\n", stream.len()).as_bytes());
@@ -1311,12 +1359,6 @@ fn pdf(title: &str, author: &str, pages: u32, accent: (u8, u8, u8)) -> Vec<u8> {
         out.extend_from_slice(b"\nendstream");
         end_object(&mut out);
     }
-
-    begin_object(&mut out, &mut offsets, font_id);
-    out.extend_from_slice(
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    );
-    end_object(&mut out);
 
     begin_object(&mut out, &mut offsets, info_id);
     out.extend_from_slice(
@@ -1345,19 +1387,31 @@ fn pdf(title: &str, author: &str, pages: u32, accent: (u8, u8, u8)) -> Vec<u8> {
     out
 }
 
-fn title_or_slug(title: &str) -> &str {
-    if title.is_ascii() {
-        title
-    } else {
-        "Shosai reference fixture"
+/// Problems if a generated PDF could make PDFium substitute a host font.
+///
+/// Pure, so the generator and the regression test share one contract. A
+/// font-free PDF has no font resource, no font name, no embedded font stream and
+/// no text-drawing operator, so no glyph is resolved and the rasterized pixels
+/// cannot follow the machine's installed fonts. (`PDFium` scans the host font
+/// directories for unembedded text and does not read `FONTCONFIG_FILE`.)
+pub(crate) fn pdf_font_free_problems(bytes: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut problems = Vec::new();
+    for (needle, description) in [
+        ("/Font", "a font resource"),
+        ("/BaseFont", "a font base name"),
+        ("/FontFile", "an embedded font stream"),
+        ("/Type1", "a font subtype"),
+        (" Tf", "a font-selection operator"),
+        (" Tj", "a text-showing operator"),
+        (" TJ", "a text-showing array operator"),
+        ("\nBT", "a text object"),
+    ] {
+        if text.contains(needle) {
+            problems.push(format!("the PDF contains {description} (`{needle}`)"));
+        }
     }
-}
-
-fn escape_pdf_text(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('(', "\\(")
-        .replace(')', "\\)")
+    problems
 }
 
 /// PDF text strings: ASCII stays a literal string, everything else becomes a

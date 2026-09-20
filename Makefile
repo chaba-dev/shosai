@@ -43,8 +43,25 @@ check-fmt-flutter:
 ## Render the 1B reference captures (deterministic Iced PNGs + provenance manifest).
 ## Set VERIFY=1 to re-render without writing and fail if anything differs from the
 ## committed evidence (see docs/reference-captures.md).
+##
+## The target pins the capture environment: the system language decides the
+## `System`-preference captures, and `FONTCONFIG_FILE` points at a fontconfig
+## configuration whose only font directory is empty, so the renderer can only use
+## the application fonts and Iced's built-ins. The capture refuses to render when
+## either is missing.
+##
+## The configuration is written inside a private temporary directory allocated
+## for this command and removed when it ends: a fixed path under `target/` would
+## be truncated by shell redirection before any Rust-side check could refuse a
+## symlinked or hard-linked destination.
 reference-shots:
-	@SHOSAI_REFERENCE_SHOTS_VERIFY="$(VERIFY)" \
+	@font_config=$$(mktemp -d "$${TMPDIR:-/tmp}/shosai-reference-shots.XXXXXX") && \
+	trap 'rm -rf "$$font_config"' EXIT && \
+	mkdir -p "$$font_config/fonts" && \
+	printf '<?xml version="1.0"?>\n<fontconfig>\n  <dir>%s</dir>\n</fontconfig>\n' \
+		"$$font_config/fonts" > "$$font_config/fontconfig.xml" && \
+	LANGUAGE=en-US FONTCONFIG_FILE="$$font_config/fontconfig.xml" \
+	SHOSAI_REFERENCE_SHOTS_VERIFY="$(VERIFY)" \
 	SHOSAI_REFERENCE_SHOTS_COMMAND="make reference-shots$(if $(VERIFY), VERIFY=$(VERIFY),)" \
 	cargo test --package shosai-app --bin shosai reference_shots_capture -- --ignored --nocapture
 

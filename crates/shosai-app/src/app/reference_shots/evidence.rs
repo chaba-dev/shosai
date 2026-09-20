@@ -15,8 +15,9 @@
 //!   they are compared when the caller rendered (`fresh_pixels`) and the
 //!   committed files are always hashed against the committed manifest;
 //! - **run metadata** (capture revision, command, output path, OS/arch/rustc
-//!   and cargo versions): recorded for provenance, deliberately exempt, because
-//!   it describes the machine that produced the evidence rather than the code.
+//!   and cargo versions, and the native PDFium identity): recorded for
+//!   provenance, deliberately exempt, because it describes the machine that
+//!   produced the evidence rather than the code.
 //!
 //! Missing artifacts are errors, never silent skips: the evidence directory is
 //! committed, so a checkout without it is broken rather than "not generated
@@ -29,6 +30,24 @@ use anyhow::{Context, Result};
 
 use super::manifest::{CaptureEntry, Manifest};
 use super::{fixtures, manifest};
+
+/// Whether a file is reachable under more than one name.
+///
+/// Hard links share the inode, so a write through one name truncates and
+/// overwrites every other name of the same file: the evidence files must be
+/// singly linked, which is how a capture run writes them. Directories always
+/// have a link count above one (`.` and `..`), which is why this only applies to
+/// files. Non-Unix platforms report no link count here, and this entry point
+/// runs on Linux.
+#[cfg(unix)]
+pub(crate) fn multiply_linked(metadata: &std::fs::Metadata) -> bool {
+    std::os::unix::fs::MetadataExt::nlink(metadata) > 1
+}
+
+#[cfg(not(unix))]
+pub(crate) fn multiply_linked(_metadata: &std::fs::Metadata) -> bool {
+    false
+}
 
 /// Non-directory files the evidence directory contains.
 pub(crate) const EVIDENCE_FILES: [&str; 4] = [
@@ -67,6 +86,62 @@ pub(crate) fn validate(directory: &Path, fresh: &Manifest, fresh_pixels: bool) -
     )
 }
 
+/// Refuse to open an evidence file that the writer would not have produced.
+///
+/// An entry the validator refuses is never opened: a symlink would read the
+/// file it points at, a FIFO or socket with no writer would block the
+/// validation, and a hard link shares its inode with whatever else is named by
+/// it. A missing file is reported with its own message. Returns `true` when the
+/// caller must not open `path`, after recording why.
+fn refuse_to_open(path: &Path, label: &str, problems: &mut Vec<String>) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Err(error) => {
+            problems.push(format!("{label} cannot be read: {error}"));
+            true
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            problems.push(format!("{label} is a symlink, so it is not opened"));
+            true
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            problems.push(format!(
+                "{label} is not a regular file, so it is not opened"
+            ));
+            true
+        }
+        Ok(metadata) if multiply_linked(&metadata) => {
+            problems.push(format!(
+                "{label} is hard-linked to another name, so it is not opened"
+            ));
+            true
+        }
+        Ok(_) => false,
+    }
+}
+
+/// Whether a path is a real directory: a directory, and not a symlink to one.
+///
+/// A symlinked directory is not traversed: listing it (or walking the fixture
+/// tree through it) would read whatever it points at. The validator reports it
+/// instead, and every walker checks this first — the fixture reader checks its
+/// own root with the same rule.
+pub(crate) fn real_directory(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+}
+
+/// The file name of a capture path, when it has the shape the writer records.
+///
+/// The writer records exactly `captures/<file name>`: a nested path, an
+/// absolute path or a `..` component is not something the capture tool produces,
+/// and is refused rather than resolved.
+fn flat_capture_name(image: &str) -> Option<&str> {
+    let name = image.strip_prefix("captures/")?;
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return None;
+    }
+    Some(name)
+}
+
 /// Every disagreement between `directory` and `fresh`.
 pub(crate) fn problems(
     directory: &Path,
@@ -78,6 +153,20 @@ pub(crate) fn problems(
     inventory(directory, &mut problems);
 
     let manifest_path = directory.join("manifest.json");
+    // The manifest decides what is compared, so it is read first and only when
+    // it is an entry the writer produces: a FIFO, symlink or hard link at that
+    // name must fail the validator rather than be opened.
+    let mut manifest_problems: Vec<String> = Vec::new();
+    if refuse_to_open(
+        &manifest_path,
+        "the committed manifest.json",
+        &mut manifest_problems,
+    ) {
+        anyhow::bail!(
+            "{} (the evidence must be committed as a regular, singly linked file)",
+            manifest_problems.join("; ")
+        );
+    }
     let committed_text = std::fs::read_to_string(&manifest_path).with_context(|| {
         format!(
             "read the committed manifest {} (the evidence must be committed, not missing)",
@@ -87,7 +176,12 @@ pub(crate) fn problems(
     let committed: Manifest =
         serde_json::from_str(&committed_text).context("parse the committed manifest.json")?;
 
-    capture_files(directory, &committed, &mut problems);
+    provenance(&committed, &mut problems);
+    // A directory that is not a real directory is reported by the inventory and
+    // then not traversed: listing it would read whatever the link points at.
+    if real_directory(&directory.join(CAPTURE_DIRECTORY)) {
+        capture_files(directory, &committed, &mut problems);
+    }
     checksum_file(
         &directory.join("captures.sha256"),
         committed
@@ -99,7 +193,9 @@ pub(crate) fn problems(
         &mut problems,
     );
     readme_file(directory, &committed, &mut problems);
-    fixture_tree(directory, &committed, fresh, &mut problems);
+    if real_directory(&directory.join(FIXTURE_DIRECTORY)) {
+        fixture_tree(directory, &committed, fresh, &mut problems);
+    }
     checksum_file(
         &directory.join("fixtures.sha256"),
         committed
@@ -121,7 +217,12 @@ pub(crate) fn problems(
     Ok(problems)
 }
 
-/// The evidence directory must hold exactly the four files and two directories.
+/// The evidence directory must hold exactly the four regular files and two real
+/// directories.
+///
+/// The types matter as much as the names: the reader validates the same
+/// destinations the writer writes, so a symlink that would have redirected a
+/// write during a capture run is refused here too.
 fn inventory(directory: &Path, problems: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         problems.push(format!(
@@ -133,12 +234,34 @@ fn inventory(directory: &Path, problems: &mut Vec<String>) {
     let mut seen = BTreeSet::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let is_dir = entry.file_type().is_ok_and(|file_type| file_type.is_dir());
-        if is_dir {
+        let Ok(file_type) = entry.file_type() else {
+            problems.push(format!("{name} cannot be inspected"));
+            continue;
+        };
+        if file_type.is_symlink() {
+            problems.push(format!(
+                "{name} is a symlink; the evidence must contain regular files and real directories"
+            ));
+            continue;
+        }
+        if file_type.is_dir() {
             if name != CAPTURE_DIRECTORY && name != FIXTURE_DIRECTORY {
                 problems.push(format!("unexpected directory {name}/ in the evidence"));
             }
             continue;
+        }
+        if !file_type.is_file() {
+            problems.push(format!("{name} is not a regular file"));
+            continue;
+        }
+        if entry
+            .metadata()
+            .is_ok_and(|metadata| multiply_linked(&metadata))
+        {
+            problems.push(format!(
+                "{name} is hard-linked to another name; the evidence must be the only name of its \
+                 files"
+            ));
         }
         if EVIDENCE_FILES.contains(&name.as_str()) {
             seen.insert(name);
@@ -152,8 +275,71 @@ fn inventory(directory: &Path, problems: &mut Vec<String>) {
         }
     }
     for name in [CAPTURE_DIRECTORY, FIXTURE_DIRECTORY] {
-        if !directory.join(name).is_dir() {
+        let is_directory = std::fs::symlink_metadata(directory.join(name))
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
+        if !is_directory {
             problems.push(format!("the evidence is missing the {name}/ directory"));
+        }
+    }
+}
+
+/// The manifest must state the exact revision its code was rendered from.
+///
+/// The revision is run metadata, so [`compare_manifests`] exempts it from the
+/// freshness comparison — which is exactly why it needs its own check: without
+/// one, a manifest recording a placeholder would compare equal forever. The
+/// change id and bookmark are the durable mapping to that revision; a manifest
+/// from an explicit override may honestly not know them, but a Jujutsu-derived
+/// manifest that records `unknown` is broken.
+///
+/// The reader accepts exactly the two sources the writer produces: a source tag
+/// that does not name one of them is a problem rather than an exemption, and the
+/// descriptive fields are never allowed to be blank.
+fn provenance(committed: &Manifest, problems: &mut Vec<String>) {
+    if let Err(error) = manifest::validated_capture_revision(
+        &committed.capture_code_revision,
+        "capture_code_revision",
+    ) {
+        problems.push(format!("manifest.json records no usable revision: {error}"));
+    }
+    // The source is matched without normalizing it: the writer emits one of two
+    // exact tags, so a padded or re-cased variant is a value it cannot produce.
+    let overridden = match committed.capture_code_revision_source.as_str() {
+        manifest::OVERRIDE_REVISION_SOURCE => true,
+        manifest::JJ_REVISION_SOURCE => false,
+        other => {
+            problems.push(format!(
+                "manifest.json records capture_code_revision_source {other:?}; the supported sources \
+                 are {:?} and {:?}",
+                manifest::JJ_REVISION_SOURCE,
+                manifest::OVERRIDE_REVISION_SOURCE
+            ));
+            false
+        }
+    };
+    for (field, value) in [
+        ("capture_code_change_id", &committed.capture_code_change_id),
+        ("capture_code_bookmark", &committed.capture_code_bookmark),
+    ] {
+        if value.trim().is_empty() {
+            problems.push(format!("manifest.json records {field} as blank"));
+            continue;
+        }
+        // The override sentinel is the writer's literal `unknown`; anything
+        // that only normalizes to it (`UNKNOWN`, ` unknown `) is a value the
+        // writer cannot emit. A Jujutsu-derived manifest records a real label.
+        if value.trim().eq_ignore_ascii_case("unknown") {
+            if value != "unknown" {
+                problems.push(format!(
+                    "manifest.json records {field} as {value:?}; the writer records the unknown \
+                     sentinel exactly as \"unknown\""
+                ));
+            } else if !overridden {
+                problems.push(format!(
+                    "manifest.json records {field} as {value:?} although the revision was not \
+                     overridden"
+                ));
+            }
         }
     }
 }
@@ -163,13 +349,29 @@ fn inventory(directory: &Path, problems: &mut Vec<String>) {
 fn capture_files(directory: &Path, committed: &Manifest, problems: &mut Vec<String>) {
     let captures = directory.join(CAPTURE_DIRECTORY);
     let mut found = BTreeSet::new();
+    // Entries that were refused during enumeration are never opened: hashing a
+    // FIFO with no writer would block the validator instead of failing it.
+    let mut refused = BTreeSet::new();
     match std::fs::read_dir(&captures) {
         Ok(entries) => {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 if !entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
-                    problems.push(format!("captures/{name} is not a regular file"));
+                    problems.push(format!(
+                        "captures/{name} is not a regular file, so it cannot be read"
+                    ));
+                    refused.insert(name);
                     continue;
+                }
+                if entry
+                    .metadata()
+                    .is_ok_and(|metadata| multiply_linked(&metadata))
+                {
+                    problems.push(format!(
+                        "captures/{name} is hard-linked to another name; the evidence must be the \
+                         only name of its files"
+                    ));
+                    refused.insert(name.clone());
                 }
                 found.insert(name);
             }
@@ -197,7 +399,24 @@ fn capture_files(directory: &Path, committed: &Manifest, problems: &mut Vec<Stri
     }
 
     for capture in &committed.captures {
+        // Only the path shape the writer records is opened. A nested path, an
+        // absolute path or a `..` component would otherwise let the manifest
+        // name a file (or a FIFO) outside the capture directory.
+        let Some(name) = flat_capture_name(&capture.image) else {
+            problems.push(format!(
+                "{} is not a plain capture path under captures/",
+                capture.image
+            ));
+            continue;
+        };
+        if refused.contains(name) {
+            // Already reported and deliberately not opened.
+            continue;
+        }
         let path = directory.join(&capture.image);
+        if refuse_to_open(&path, &capture.image, problems) {
+            continue;
+        }
         let Ok(bytes) = std::fs::read(&path) else {
             problems.push(format!("{} cannot be read", capture.image));
             continue;
@@ -227,6 +446,12 @@ fn checksum_file(
     label: &str,
     problems: &mut Vec<String>,
 ) {
+    // Checked before it is opened: a symlink or a special file (a FIFO with no
+    // writer, for instance) must fail the validation rather than be followed or
+    // block it. A missing file keeps its own message.
+    if refuse_to_open(path, label, problems) {
+        return;
+    }
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) => {
@@ -257,6 +482,9 @@ fn parse_checksums(text: &str) -> Vec<(String, String)> {
 /// The committed README must be the rendering of the committed manifest.
 fn readme_file(directory: &Path, committed: &Manifest, problems: &mut Vec<String>) {
     let path = directory.join("README.md");
+    if refuse_to_open(&path, "README.md", problems) {
+        return;
+    }
     match std::fs::read_to_string(&path) {
         Ok(text) if text == manifest::readme(committed) => {}
         Ok(_) => problems.push(
@@ -411,6 +639,18 @@ fn compare_manifests(
             committed.environment.default_text_size, fresh.environment.default_text_size
         ));
     }
+    field(
+        problems,
+        "environment.system_locale",
+        &committed.environment.system_locale,
+        &fresh.environment.system_locale,
+    );
+    field(
+        problems,
+        "environment.font_discovery",
+        &committed.environment.font_discovery,
+        &fresh.environment.font_discovery,
+    );
     field(
         problems,
         "environment.note",

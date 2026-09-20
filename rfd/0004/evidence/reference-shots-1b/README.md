@@ -7,15 +7,19 @@ and inspects its own renders (specification §4.0).
 
 - Entry point: `make reference-shots`
 - Command: `make reference-shots`
-- Capture-code revision: `36a0039395052b5ce65cf58bfc03f3569cf7e7dd` (from jj @ working-copy commit, Jujutsu change `ymupyqtqxrslroxkvzsklklkttrutupk`, bookmark `none`)
-- Revision note: `capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the stable `capture_code_change_id` plus the committed evidence change is the durable mapping; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.
+- Capture-code revision: `db552cafd475db8292ff6a0618365ab987fcfde9` (from jj @ working-copy commit, Jujutsu change `nvmkwtxkwsyyrryoyyyznzunnzzwznnl`, bookmark `feat/reference-shots-1b`)
+- Revision note: `capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the durable mapping is the stable `capture_code_change_id` (resolve it with `jj log -r 'change(<id>)'`) together with the commit that contains this evidence directory, which is the capture code revision the evidence is committed at; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.
 - Pinned design base: `1e54270a6bb24f15630ece336a0575bdbe5be113` — main@origin #108 (refactor(flutter): organize the frontend into Elm modules mirroring Iced)
 - Preference baseline: `language=en-US`, `library.add_behavior=ask`, `reader.default_mode=paginated`, `reader.default_theme=light`, `reader.default_epub_font_size=16`, `reader.default_epub_line_spacing=1.6`, `reader.default_pdf_zoom=fit-page`
 - Renderer: iced_tiny_skia 0.14 (software, in-process) · theme theme::application() — iced::Theme::custom(APP_BACKGROUND #F4F2ED) · default font Inter Variable (bundled InterVariable.ttf) at 16 px
+- System language: en-US via `LANGUAGE` (the `System`-preference captures resolve English)
+- Font discovery: font discovery pinned: the renderer's font database holds only in-memory application and Iced faces
+- Why font discovery is pinned: The capture entry point exports `FONTCONFIG_FILE` pointing at a fontconfig configuration whose only font directory is empty, so the renderer's font database holds exactly the application fonts and Iced's built-ins, all loaded from memory. Host fonts would make the images depend on the machine's installed fonts.
+- Native PDFium (run metadata, exempt from comparison): /nix/store/lzlnjc9fmn7wjrgaxfcpqnaa281n1w2w-pdfium-binaries-7643/lib/libpdfium.so (sha256 6cfbebd7c8dff974f18637e725290bca41be3ea0d928f5598e1d4526f4fd0d70)
 - Generated: linux · x86_64 (rustc rustc 1.94.0 (4a4ef493e 2026-03-02))
 - Seeded library: 46 books (`G1 library seed: 14 featured books (incl. one reused conformance book and two without covers) + 32 filler books, one continue-reading entry`), page size 40, order `last_read DESC NULLS LAST, date_added DESC, id DESC`
 - Continue-reading seed: The Quiet Cartographer (library/featured/quiet-cartographer.epub) at 42%
-- Captures: 56
+- Captures: 59
 
 ## Files
 
@@ -32,62 +36,65 @@ and inspects its own renders (specification §4.0).
 
 | Evidence id | Family | State | Rows | Client | Image | DPR | Locale | Fixture | SHA-256 (12) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `lib-wide-w1280-en` | 1B-LIB-WIDE | library | LB-01 LB-04 LB-06 LB-07 LB-11 LB-12 LB-16 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `9d0b8f5e8cfc` |
-| `lib-wide-w900-en` | 1B-LIB-WIDE | library | LB-01 LB-07 LB-11 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `514e018fa911` |
-| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `0da80e214f58` |
-| `lib-wide-w1280-dpr2` | 1B-LIB-WIDE | library | LB-15 | 1280×800 | 2560×1600 | 2 | MIX | G1 seeded library (46 books) | `c0cce6139237` |
-| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `b5320113375b` |
-| `lib-compact-c390-ja` | 1B-LIB-COMPACT | library | LB-02 LB-03 LB-05 LB-13 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `4b4446cb48af` |
-| `lib-breakpoint-759-en` | 1B-LIB-COMPACT | library | LB-03 | 759×700 | 759×700 | 1 | EN | G1 seeded library (46 books) | `8871f6604292` |
-| `lib-breakpoint-760-en` | 1B-LIB-COMPACT | library | LB-03 | 760×700 | 760×700 | 1 | EN | G1 seeded library (46 books) | `a264b981f38f` |
-| `lib-breakpoint-761-en` | 1B-LIB-COMPACT | library | LB-03 | 761×700 | 761×700 | 1 | EN | G1 seeded library (46 books) | `51dc9551b44a` |
-| `lib-compact-c390-dpr2` | 1B-LIB-COMPACT | library | LB-15 | 390×844 | 780×1688 | 2 | EN | G1 seeded library (46 books) | `0c882467ee99` |
-| `lib-state-search-ja-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | MIX | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `4757091a4571` |
-| `lib-state-search-no-matches-w1280` | 1B-LIB-STATE | library | LB-08 LB-19 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `aa325fd73acd` |
-| `lib-state-filter-pdf-w1280` | 1B-LIB-STATE | library | LB-06 LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `f4d6461eb11e` |
-| `lib-state-search-with-filter-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `5a72a679290e` |
-| `lib-state-loading-skeleton-w1280` | 1B-LIB-STATE | library | LB-17 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `8625a738f4b1` |
-| `lib-state-loading-more-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `cc336c927f0a` |
-| `lib-state-paged-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `ccd4b7dff65f` |
-| `lib-state-empty-w1280` | 1B-LIB-STATE | library | LB-18 | 1280×800 | 1280×800 | 1 | EN | empty disposable store | `e66a921972a5` |
-| `lib-state-empty-c390` | 1B-LIB-STATE | library | LB-18 | 390×844 | 390×844 | 1 | EN | empty disposable store | `cd0af8ef9904` |
-| `lib-state-load-error-w1280` | 1B-LIB-STATE | library | LB-20 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `07d207866184` |
-| `lib-state-storage-error-w900` | 1B-LIB-STATE | library | LB-20 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `33bb83d4097d` |
-| `lib-state-book-menu-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `529e78183de9` |
-| `lib-state-remove-modal-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `103a6c4ddd21` |
-| `lib-state-remove-pending-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `e466c87e9f70` |
-| `lib-meta-no-cover-w1280` | 1B-LIB-META | library | LB-12 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `4e1edb936001` |
-| `lib-meta-no-cover-c390` | 1B-LIB-META | library | LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `2eb2ba013539` |
-| `lib-meta-long-ja-w1280` | 1B-LIB-META | library | LB-13 | 1280×800 | 1280×800 | 1 | MIX | G3 Japanese/mixed metadata | `8a3a4f996f58` |
-| `lib-meta-long-ja-c390` | 1B-LIB-META | library | LB-13 | 390×844 | 390×844 | 1 | MIX | G3 Japanese/mixed metadata | `b16eac28303e` |
-| `import-entry-w900-en` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `db7cb12fa19d` |
-| `import-entry-w900-ja` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `0303a921a240` |
-| `import-entry-c390-en` | 1B-IMPORT | library+import-dialog | IM-10 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `5efd99494527` |
-| `import-discovery-enumerating-w900` | 1B-IMPORT | library+import-dialog | IM-03 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `39437c434f02` |
-| `import-discovery-checking-w900` | 1B-IMPORT | library+import-dialog | IM-03 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `7418e8b07597` |
-| `import-review-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `cd9e8c433293` |
-| `import-review-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `b5e6c72f7af5` |
-| `import-review-no-match-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `655fecfd318e` |
-| `import-review-deselect-all-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `dae24deb86ca` |
-| `import-files-selection-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `62fce9cca88c` |
-| `import-no-supported-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `26fe8234d8ee` |
-| `import-storage-copy-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `5faa95a07310` |
-| `import-storage-current-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `49946f7776ea` |
+| `lib-wide-w1280-en` | 1B-LIB-WIDE | library | LB-01 LB-03 LB-04 LB-06 LB-07 LB-11 LB-12 LB-16 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `f465e87aa73d` |
+| `lib-wide-w900-en` | 1B-LIB-WIDE | library | LB-01 LB-07 LB-11 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `396ac4ed6593` |
+| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `c7a5d87718fb` |
+| `lib-wide-w1280-dpr2` | 1B-LIB-WIDE | library | LB-15 | 1280×800 | 2560×1600 | 2 | MIX | G1 seeded library (46 books) | `7c61250363ca` |
+| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `3ca984ca9db6` |
+| `lib-compact-c390-ja` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-13 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `544e77a381cb` |
+| `lib-breakpoint-759-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 759×700 | 759×700 | 1 | EN | G1 seeded library (46 books) | `ebe43c4a0283` |
+| `lib-breakpoint-760-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 760×700 | 760×700 | 1 | EN | G1 seeded library (46 books) | `4ca89a0372eb` |
+| `lib-breakpoint-761-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 761×700 | 761×700 | 1 | EN | G1 seeded library (46 books) | `74f20a72670c` |
+| `lib-breakpoint-759-ja` | 1B-LIB-COMPACT | library | LB-03 | 759×700 | 759×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `fbcd691921d4` |
+| `lib-breakpoint-760-ja` | 1B-LIB-COMPACT | library | LB-03 | 760×700 | 760×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `70feb055a76d` |
+| `lib-breakpoint-761-ja` | 1B-LIB-COMPACT | library | LB-03 | 761×700 | 761×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `4abd85fd8c5d` |
+| `lib-compact-c390-dpr2` | 1B-LIB-COMPACT | library | LB-15 | 390×844 | 780×1688 | 2 | EN | G1 seeded library (46 books) | `123cfe0d7671` |
+| `lib-state-search-ja-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | MIX | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `67c95208e9df` |
+| `lib-state-search-no-matches-w1280` | 1B-LIB-STATE | library | LB-08 LB-19 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `a344e11c2e1b` |
+| `lib-state-filter-pdf-w1280` | 1B-LIB-STATE | library | LB-06 LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c2702451bb69` |
+| `lib-state-search-with-filter-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `70ac88d42319` |
+| `lib-state-loading-skeleton-w1280` | 1B-LIB-STATE | library | LB-17 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `3f8d4e941214` |
+| `lib-state-loading-more-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `38079805817c` |
+| `lib-state-paged-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `b652b4ffea8d` |
+| `lib-state-empty-w1280` | 1B-LIB-STATE | library | LB-18 | 1280×800 | 1280×800 | 1 | EN | empty disposable store | `ab7c1f7a4825` |
+| `lib-state-empty-c390` | 1B-LIB-STATE | library | LB-18 | 390×844 | 390×844 | 1 | EN | empty disposable store | `fa5ca4778697` |
+| `lib-state-load-error-w1280` | 1B-LIB-STATE | library | LB-20 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `1684117496aa` |
+| `lib-state-storage-error-w900` | 1B-LIB-STATE | library | LB-20 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `c55f39b9c388` |
+| `lib-state-book-menu-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `507687a1753c` |
+| `lib-state-remove-modal-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `4ac44fe8f176` |
+| `lib-state-remove-pending-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c10e95469ad7` |
+| `lib-meta-no-cover-w1280` | 1B-LIB-META | library | LB-12 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `22bbe352cd7f` |
+| `lib-meta-no-cover-c390` | 1B-LIB-META | library | LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `2ed927bea6bc` |
+| `lib-meta-long-ja-w1280` | 1B-LIB-META | library | LB-13 | 1280×800 | 1280×800 | 1 | MIX | G3 Japanese/mixed metadata | `fa8322e06030` |
+| `lib-meta-long-ja-c390` | 1B-LIB-META | library | LB-13 | 390×844 | 390×844 | 1 | MIX | G3 Japanese/mixed metadata | `23bef08c4d54` |
+| `import-entry-w900-en` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `5b23b2cda216` |
+| `import-entry-w900-ja` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `19289eff97f3` |
+| `import-entry-c390-en` | 1B-IMPORT | library+import-dialog | IM-10 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `539a03c17c78` |
+| `import-discovery-enumerating-w900` | 1B-IMPORT | library+import-dialog | IM-03 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `2be3b6569c54` |
+| `import-discovery-checking-w900` | 1B-IMPORT | library+import-dialog | IM-03 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `d521edf2fc00` |
+| `import-review-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `dd1768e6bd6c` |
+| `import-review-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1537efddc6c8` |
+| `import-review-no-match-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `decb0ef58114` |
+| `import-review-deselect-all-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `3631678123c2` |
+| `import-files-selection-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `c8e511f7ab48` |
+| `import-no-supported-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `9841307bb8ab` |
+| `import-storage-copy-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `676e88b9f740` |
+| `import-storage-current-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `a2bc73687dbb` |
 | `import-progress-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1a5e9bb47739` |
-| `import-completed-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `3c3b253c0882` |
-| `import-review-dpr2-w900` | 1B-IMPORT | library+import-dialog | IM-10 | 900×700 | 1800×1400 | 2 | EN | G1 seeded library (46 books) + import folder | `d3c9c7c2a98b` |
-| `settings-wide-w900-en` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `b5f8c243a2e3` |
-| `settings-wide-w900-ja` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `8e950db9b50b` |
-| `settings-compact-c390-en` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `daa77f7ab3f7` |
-| `settings-compact-c390-ja` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) | `cd08d9129ac3` |
-| `settings-changed-w900-en` | 1B-SETTINGS | settings | ST-04 ST-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `1be1210e2bcf` |
-| `settings-move-dialog-w900-ja` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `0db716f791ad` |
+| `import-completed-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `31563983b232` |
+| `import-review-dpr2-w900` | 1B-IMPORT | library+import-dialog | IM-10 | 900×700 | 1800×1400 | 2 | EN | G1 seeded library (46 books) + import folder | `d2c317b6922a` |
+| `settings-wide-w900-en` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `2a1d876828e2` |
+| `settings-wide-w900-ja` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | JA | G1 seeded library (46 books) | `7c4fe6937f44` |
+| `settings-compact-c390-en` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `1c11d2be4a71` |
+| `settings-compact-c390-ja` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) | `315b2aa01731` |
+| `settings-changed-w900-en` | 1B-SETTINGS | settings | ST-04 ST-05 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `68238c21e2cc` |
+| `settings-move-dialog-w900-ja` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `18465f9101c7` |
 | `settings-move-progress-w900-en` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `e3a6ef1dae91` |
-| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `4702edbd2639` |
-| `settings-disabled-importing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `df5629189048` |
-| `settings-disabled-removing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `df5629189048` |
-| `settings-unavailable-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `929c995fa018` |
-| `settings-compact-c390-dpr2-ja` | 1B-SETTINGS | settings | ST-09 | 390×844 | 780×1688 | 2 | JA | G1 seeded library (46 books) | `94fb38512383` |
+| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `26acdd982ace` |
+| `settings-disabled-importing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `6dccc2341bd1` |
+| `settings-disabled-removing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `6dccc2341bd1` |
+| `settings-unavailable-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `92e372b11819` |
+| `settings-compact-c390-dpr2-ja` | 1B-SETTINGS | settings | ST-09 | 390×844 | 780×1688 | 2 | JA | G1 seeded library (46 books) | `ea3313da6276` |
 
 ## State derivation and settings
 
@@ -96,6 +103,7 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-LIB-WIDE · state: library
 - State: seeded library loaded through `Message::Initialized` + the real library page and cover tasks
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
+- Note: `LB-03` lists the wide side of the breakpoint row in both families: the boundary itself is covered by the `B760±` probes, this capture shows the wide composition the breakpoint switches to
 
 ### `lib-wide-w900-en`
 
@@ -110,6 +118,7 @@ and inspects its own renders (specification §4.0).
 - State: as the loaded library, then `Message::SelectLanguage(Japanese)`
 - Settings: language=ja (persisted by `Message::SelectLanguage`)
 - Note: `LB-05` is the compact filter row and is covered by the `C390` captures, not by this wide one
+- Note: `LB-03` lists the wide side of the breakpoint row: this is the Japanese wide composition the breakpoint switches to, while the boundary itself is covered by the `B760±` probes
 
 ### `lib-wide-w1280-dpr2`
 
@@ -138,21 +147,42 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-LIB-COMPACT · state: library
 - State: seeded library loaded through `Message::Initialized` + the real library page and cover tasks
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
-- Note: `B760±` probe: compact filter row
+- Note: `B760±` probe: the compact composition (`LB-02`) and the compact side of the breakpoint (`LB-03`)
 
 ### `lib-breakpoint-760-en`
 
 - Family: 1B-LIB-COMPACT · state: library
 - State: seeded library loaded through `Message::Initialized` + the real library page and cover tasks
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
-- Note: `B760±` probe: wide sidebar at the breakpoint
+- Note: `B760±` probe: the breakpoint itself, where `LB-02`'s compact composition ends (`LB-03` asks for both sides), and the wide sidebar starts
 
 ### `lib-breakpoint-761-en`
 
 - Family: 1B-LIB-COMPACT · state: library
 - State: seeded library loaded through `Message::Initialized` + the real library page and cover tasks
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
-- Note: `B760±` probe: wide sidebar
+- Note: `B760±` probe: the wide sidebar, so the compact composition cannot remain above the breakpoint in `LB-02`'s configuration
+
+### `lib-breakpoint-759-ja`
+
+- Family: 1B-LIB-COMPACT · state: library
+- State: as the loaded library, then `Message::SelectLanguage(Japanese)`
+- Settings: language=ja (persisted by `Message::SelectLanguage`)
+- Note: `B760±` probe: compact filter row, Japanese interface
+
+### `lib-breakpoint-760-ja`
+
+- Family: 1B-LIB-COMPACT · state: library
+- State: as the loaded library, then `Message::SelectLanguage(Japanese)`
+- Settings: language=ja (persisted by `Message::SelectLanguage`)
+- Note: `B760±` probe: wide sidebar at the breakpoint, Japanese interface
+
+### `lib-breakpoint-761-ja`
+
+- Family: 1B-LIB-COMPACT · state: library
+- State: as the loaded library, then `Message::SelectLanguage(Japanese)`
+- Settings: language=ja (persisted by `Message::SelectLanguage`)
+- Note: `B760±` probe: wide sidebar, Japanese interface
 
 ### `lib-compact-c390-dpr2`
 
@@ -197,6 +227,7 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-LIB-STATE · state: library
 - State: `Message::LoadMoreLibrary` dispatched without settling its page task
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
+- Note: The viewport is taller than the usual `W1280` window (`W1280_TALL`): the loading-more indicator and the paging row are the last items of the library scroll column, below the 40-card first page, and this renderer has no scroll interaction, so a taller window is the only way to show them without inventing a scroll position
 
 ### `lib-state-paged-w1280`
 
@@ -204,6 +235,7 @@ and inspects its own renders (specification §4.0).
 - State: `Message::LoadMoreLibrary` settled
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
 - Note: 46 books: the first page holds 40, the second page holds 6
+- Note: `W1280_TALL`, for the same reason as `lib-state-loading-more-w1280`: the paging row is the last item of the library scroll column
 
 ### `lib-state-empty-w1280`
 
@@ -388,12 +420,14 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-SETTINGS · state: settings
 - State: `Message::ShowSettings`
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
+- Note: `W900_TALL`: the reader-defaults controls (`ST-05`) are the last card of the settings scroll column and would sit below the fold of the usual `W900` window, which this renderer cannot scroll
 
 ### `settings-wide-w900-ja`
 
 - Family: 1B-SETTINGS · state: settings
 - State: `Message::SelectLanguage(Japanese)` then `Message::ShowSettings`
 - Settings: language=ja (persisted by `Message::SelectLanguage`)
+- Note: `W900_TALL`: the reader-defaults controls (`ST-05`) are the last card of the settings scroll column and would sit below the fold of the usual `W900` window, which this renderer cannot scroll
 
 ### `settings-compact-c390-en`
 
@@ -413,6 +447,7 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-SETTINGS · state: settings
 - State: `Message::ShowSettings` then the real settings messages for add behavior, reading mode, theme, EPUB font size, line spacing and PDF zoom
 - Settings: library.add_behavior=copy (persisted); reader.default_mode=continuous (persisted); reader.default_theme=dark (persisted); reader.default_epub_font_size=20 (persisted); reader.default_epub_line_spacing=2.0 (persisted); reader.default_pdf_zoom=fit-width (persisted)
+- Note: `W900_TALL` so the changed reader defaults (`ST-05`: reading mode, theme, EPUB font size, line spacing, PDF zoom) are visible next to the changed import behavior (`ST-04`)
 
 ### `settings-move-dialog-w900-ja`
 
@@ -469,8 +504,8 @@ Covered by a capture in this set:
 | Row | Captures |
 | --- | --- |
 | LB-01 | `lib-wide-w1280-en` `lib-wide-w900-en` |
-| LB-02 | `lib-compact-c390-en` `lib-compact-c390-ja` |
-| LB-03 | `lib-wide-w1280-ja` `lib-compact-c390-ja` `lib-breakpoint-759-en` `lib-breakpoint-760-en` `lib-breakpoint-761-en` |
+| LB-02 | `lib-compact-c390-en` `lib-compact-c390-ja` `lib-breakpoint-759-en` `lib-breakpoint-760-en` `lib-breakpoint-761-en` |
+| LB-03 | `lib-wide-w1280-en` `lib-wide-w1280-ja` `lib-breakpoint-759-en` `lib-breakpoint-760-en` `lib-breakpoint-761-en` `lib-breakpoint-759-ja` `lib-breakpoint-760-ja` `lib-breakpoint-761-ja` |
 | LB-04 | `lib-wide-w1280-en` `lib-wide-w1280-ja` |
 | LB-05 | `lib-compact-c390-en` `lib-compact-c390-ja` |
 | LB-06 | `lib-wide-w1280-en` `lib-state-filter-pdf-w1280` |
@@ -560,3 +595,6 @@ dangling-symlink discovery-failure fixture could be created on this platform: tr
 - Import progress counters are captured at their deterministic point: the in-flight capture shows the header action with `0/N` while the copy tasks are undelivered. Mid-import numbers are not captured because the parallel prepare/copy tasks complete in a scheduling-dependent order, so a partial progress reading is not reproducible.
 - The import discovery 'reading' phase is a race between the hashing worker and the polling tick and is not deterministically capturable in-process; the enumerating and checking phases are captured with real counts.
 - Rendering is in-process software rasterization, not a compositor screenshot: window decorations, native menus, toasts and animations are outside the capture.
+- Every capture needs a viewport the page fits in, because the renderer has no scroll interaction and the application exposes no message that scrolls the settings or library column: `settings-wide-*`, `settings-changed-*` and `settings-error-*` use `W900_TALL` (900×1200) and the `LB-22` paging pair uses `W1280_TALL` (1280×3250). The layout rules, the theme and the composition are unchanged; only the window is tall enough for the column.
+- The generated PDF fixtures draw shapes only: PDFium resolves fonts for unembedded PDF text itself by scanning the host font directories and does not follow `FONTCONFIG_FILE`, so a text run would make a rendered cover depend on the machine's installed fonts. The native PDFium that rasterized the covers is recorded in `environment.pdfium`; a PDF reference with real typography needs an embedded, pinned font and belongs to the reader packages.
+- The capture entry point runs on Linux with a pinned environment (`LANGUAGE=en-US`, `FONTCONFIG_FILE` naming an empty font directory, see docs/reference-captures.md). Another platform or an unpinned environment refuses to render rather than write images that depend on the machine.

@@ -151,6 +151,17 @@ pub(crate) struct Environment {
     pub(crate) theme: String,
     pub(crate) default_font: String,
     pub(crate) default_text_size: f32,
+    /// The pinned system language the `System`-preference captures resolve.
+    pub(crate) system_locale: String,
+    /// The pinned font discovery: what the renderer's font database may contain.
+    pub(crate) font_discovery: String,
+    /// Run metadata: the native PDFium that rasterizes PDF covers, with its
+    /// SHA-256 when it can be read. PDFium resolves fonts for unembedded PDF
+    /// text itself (it scans the host font directories and ignores
+    /// `FONTCONFIG_FILE`), which is why the generated PDFs carry no text; the
+    /// rasterizer identity is recorded because a different build renders the
+    /// artwork differently. `None` when no mapped `pdfium` object was found.
+    pub(crate) pdfium: Option<String>,
     pub(crate) note: String,
 }
 
@@ -161,8 +172,9 @@ pub(crate) struct Manifest {
     pub(crate) entry_point: String,
     pub(crate) command: String,
     pub(crate) capture_code_revision: String,
-    /// How the revision was determined (`jj @ working-copy commit`, an
-    /// environment variable, or `git HEAD`).
+    /// How the revision was determined: the Jujutsu working copy named itself
+    /// ([`manifest::JJ_REVISION_SOURCE`]), or the operator asserted it through
+    /// `SHOSAI_REFERENCE_SHOTS_REVISION` ([`manifest::OVERRIDE_REVISION_SOURCE`]).
     pub(crate) capture_code_revision_source: String,
     /// Jujutsu change id, stable across `describe`/`commit`, so the manifest can
     /// be mapped back to the change that produced it.
@@ -227,10 +239,25 @@ pub(crate) fn environment() -> Environment {
             super::render::DEFAULT_FONT_NAME
         ),
         default_text_size: super::render::DEFAULT_TEXT_SIZE,
+        system_locale: super::runner::environment_pins().0,
+        // Static text on purpose: the manifest records the contract, and the
+        // capture asserts the live database against it, so an unpinned process
+        // (an ordinary `cargo test`) cannot make the committed field depend on
+        // the machine's installed fonts.
+        font_discovery: super::runner::environment_pins().1,
+        // Run metadata: which native PDFium rasterized the PDF covers. It is
+        // read after the captures rendered, so the library is already mapped.
+        pdfium: super::runner::pdfium_identity(),
         note: "No window, compositor, X server or GPU is involved: the production view is laid \
                out and drawn offscreen with the same software renderer Iced falls back to, and \
                the bundled fonts are loaded into Iced's global font system exactly like \
-               `iced::application(..).font(..)`."
+               `iced::application(..).font(..)`. `runner::FONT_DISCOVERY_NOTE` and \
+               `runner::CAPTURE_LANGUAGE` record how the capture pins font discovery and the \
+               system language; the fonts listed above are the application fonts, and Iced's \
+               built-in icon font is pinned by the locked dependencies rather than hashed here. \
+               PDF covers are rasterized by the native PDFium recorded in `pdfium`, so the \
+               generated PDFs deliberately draw no text: PDFium's own font substitution scans \
+               the host font directories and does not follow `FONTCONFIG_FILE`."
             .to_owned(),
     }
 }
@@ -305,6 +332,31 @@ pub(crate) fn write_all(directory: &Path, manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
+/// Validate the exact capture-code revision a manifest records.
+///
+/// The revision is run metadata, so [`super::evidence::problems`] exempts it
+/// from the freshness comparison — which is exactly why it must not be guessed:
+/// a placeholder would compare equal forever. The format is checked instead, by
+/// the writer ([`super::runner::capture_revision`]) and by the reader
+/// ([`super::evidence::problems`]) alike: a commit id is 7 to 64 hexadecimal
+/// characters, which covers an abbreviated Git id and a full Jujutsu id.
+pub(crate) fn validated_capture_revision(revision: &str, source: &str) -> Result<String> {
+    anyhow::ensure!(
+        (7..=64).contains(&revision.len()) && revision.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "{source} must be a hexadecimal commit id of 7 to 64 characters, not {revision:?}"
+    );
+    Ok(revision.to_owned())
+}
+
+/// The revision source of a run inside the Jujutsu workspace: the working copy
+/// named its own commit.
+pub(crate) const JJ_REVISION_SOURCE: &str = "jj @ working-copy commit";
+
+/// The revision source of a run started with `SHOSAI_REFERENCE_SHOTS_REVISION`:
+/// the operator asserted the commit id, so the descriptive fields may honestly
+/// be `unknown`.
+pub(crate) const OVERRIDE_REVISION_SOURCE: &str = "SHOSAI_REFERENCE_SHOTS_REVISION";
+
 fn checksum_file(entries: &[(String, String)]) -> String {
     let mut out = String::new();
     for (sha256, relative) in entries {
@@ -357,6 +409,22 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         manifest.environment.theme,
         manifest.environment.default_font,
         manifest.environment.default_text_size
+    ));
+    out.push_str(&format!(
+        "- System language: {}\n",
+        manifest.environment.system_locale
+    ));
+    out.push_str(&format!(
+        "- Font discovery: {}\n",
+        manifest.environment.font_discovery
+    ));
+    out.push_str(&format!(
+        "- Why font discovery is pinned: {}\n",
+        super::runner::FONT_DISCOVERY_NOTE
+    ));
+    out.push_str(&format!(
+        "- Native PDFium (run metadata, exempt from comparison): {}\n",
+        manifest.environment.pdfium.as_deref().unwrap_or("unknown")
     ));
     out.push_str(&format!(
         "- Generated: {} · {} (rustc {})\n",

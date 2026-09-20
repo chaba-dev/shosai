@@ -242,24 +242,31 @@ pub(crate) async fn seed_empty_library(data_dir: &Path) -> Result<SeededLibrary>
 ///
 /// The disposable root is replaced by a placeholder so the captured text is
 /// deterministic across runs and machines; everything else is the message the
-/// application shows when storage initialization fails.
-pub(crate) async fn storage_failure_message(root: &Path) -> String {
+/// application shows when storage initialization fails. A fixture that cannot be
+/// created, or a store that unexpectedly opens, is an error rather than a
+/// substituted message: the capture claims to show a real production failure.
+pub(crate) async fn storage_failure_message(root: &Path) -> Result<String> {
     let blocked = root.join("blocked");
     let _ = std::fs::remove_file(&blocked);
     let _ = std::fs::remove_dir_all(&blocked);
-    if std::fs::write(&blocked, b"not a directory").is_err() {
-        return "the disposable capture store could not be opened".to_owned();
-    }
+    std::fs::write(&blocked, b"not a directory")
+        .with_context(|| format!("create the storage-failure fixture {}", blocked.display()))?;
     let db_path = blocked.join("state.db");
     let error = ReadingStateStore::open_at_async_deferred_backfill(&db_path)
         .await
         .err()
-        .map(|error| format!("{error:#}"))
-        .unwrap_or_else(|| "the disposable capture store could not be opened".to_owned());
-    error
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "opening a store below {} succeeded, so the storage-failure capture would show a \
+                 substituted message instead of the production error",
+                blocked.display()
+            )
+        })?;
+    let error = format!("{error:#}");
+    Ok(error
         .replace(&db_path.display().to_string(), "<capture-data>/state.db")
         .replace(&blocked.display().to_string(), "<capture-data>")
-        .replace(&root.display().to_string(), "<capture-data>")
+        .replace(&root.display().to_string(), "<capture-data>"))
 }
 
 pub(crate) async fn open_store(data_dir: &Path) -> Result<ReadingStateStore> {

@@ -66,8 +66,9 @@ pub(crate) fn install_application_fonts() {
     });
 }
 
-/// The bytes of every font the captures load, with their SHA-256, so the
-/// manifest pins the exact typography toolchain used.
+/// The bytes of every application font the captures load, with their SHA-256,
+/// so the manifest pins the exact typography toolchain used. Iced's built-in
+/// icon font is not listed: it is pinned by the locked dependencies instead.
 pub(crate) fn font_identities() -> Vec<(&'static str, String)> {
     vec![
         (
@@ -83,6 +84,58 @@ pub(crate) fn font_identities() -> Vec<(&'static str, String)> {
             super::fixtures::sha256_hex(epub::math_layout::MATH_FONT_BYTES),
         ),
     ]
+}
+
+/// The renderer's font database: `(in-memory faces, file-backed faces)`.
+///
+/// The capture entry point pins font discovery, so this must report only
+/// in-memory faces: the application fonts and Iced's built-ins. A file-backed
+/// face means a host font became eligible, which would make the rendered pixels
+/// depend on the machine's installed fonts even though every application font
+/// hash in the manifest still matched.
+pub(crate) fn font_database_faces() -> (usize, usize) {
+    install_application_fonts();
+    let mut system = font_system().write().expect("lock Iced font system");
+    let mut in_memory = 0;
+    let mut file_backed = 0;
+    for face in system.raw().db().faces() {
+        match &face.source {
+            cosmic_text::fontdb::Source::Binary(_) => in_memory += 1,
+            _ => file_backed += 1,
+        }
+    }
+    (in_memory, file_backed)
+}
+
+/// Why a font database is not renderable, if it is not.
+///
+/// Pure, so the regression test can exercise both directions without needing a
+/// machine that has host fonts.
+pub(crate) fn font_database_problems(in_memory: usize, file_backed: usize) -> Vec<String> {
+    let mut problems = Vec::new();
+    if in_memory == 0 {
+        problems.push("the renderer's font database is empty".to_owned());
+    }
+    if file_backed > 0 {
+        problems.push(format!(
+            "the renderer can see {file_backed} file-backed font face(s), so host fonts would \
+             change the captures"
+        ));
+    }
+    problems
+}
+
+/// Refuse to render when a host font is visible to the renderer.
+pub(crate) fn assert_controlled_font_database() -> anyhow::Result<()> {
+    let (in_memory, file_backed) = font_database_faces();
+    let problems = font_database_problems(in_memory, file_backed);
+    anyhow::ensure!(
+        problems.is_empty(),
+        "the renderer's font database is not controlled ({}). Run the documented entry point \
+         `make reference-shots`, which pins font discovery (see docs/reference-captures.md).",
+        problems.join("; ")
+    );
+    Ok(())
 }
 
 /// The redraw event `iced_winit` feeds the interface before every frame.

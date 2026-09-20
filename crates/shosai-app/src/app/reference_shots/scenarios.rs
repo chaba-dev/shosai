@@ -20,6 +20,16 @@ use crate::theme::ReaderTheme;
 
 /// Client sizes from the reference specification §2.2.
 pub(crate) const W1280: (f32, f32) = (1280.0, 800.0);
+/// A `W1280` window tall enough to show the last items of the library column.
+///
+/// The loading-more indicator and the paging row are appended after the book grid
+/// (`app.rs::library_layout`), so at the usual `W1280` viewport they sit below the
+/// 40-card first page: the offscreen renderer has no scroll interaction and the
+/// application exposes no message that scrolls the library column, so nothing in
+/// the model can bring them into view. These captures use a viewport the page fits
+/// in instead of faking a scroll position; the composition and layout rules are
+/// untouched and the manifest records the size.
+pub(crate) const W1280_TALL: (f32, f32) = (1280.0, 3250.0);
 pub(crate) const W900: (f32, f32) = (900.0, 700.0);
 pub(crate) const C390: (f32, f32) = (390.0, 844.0);
 /// A `W900` window tall enough to show the last item of the settings column.
@@ -640,6 +650,7 @@ fn wide(
     family: &'static str,
     rows: &'static [&'static str],
     kind: Kind,
+    notes: &'static [&'static str],
 ) -> Scenario {
     Scenario {
         id,
@@ -651,7 +662,7 @@ fn wide(
         base: Base::Seeded,
         kind,
         fixture: "G1 seeded library (46 books)",
-        notes: &[],
+        notes,
     }
 }
 
@@ -663,9 +674,14 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             "lib-wide-w1280-en",
             "1B-LIB-WIDE",
             &[
-                "LB-01", "LB-04", "LB-06", "LB-07", "LB-11", "LB-12", "LB-16",
+                "LB-01", "LB-03", "LB-04", "LB-06", "LB-07", "LB-11", "LB-12", "LB-16",
             ],
             Kind::LibraryDefault,
+            &[
+                "`LB-03` lists the wide side of the breakpoint row in both families: the boundary \
+                 itself is covered by the `B760±` probes, this capture shows the wide composition \
+                 the breakpoint switches to",
+            ],
         ),
         Scenario {
             id: "lib-wide-w900-en",
@@ -695,6 +711,9 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             notes: &[
                 "`LB-05` is the compact filter row and is covered by the `C390` captures, not by \
                  this wide one",
+                "`LB-03` lists the wide side of the breakpoint row: this is the Japanese wide \
+                 composition the breakpoint switches to, while the boundary itself is covered by \
+                 the `B760±` probes",
             ],
         },
         Scenario {
@@ -734,7 +753,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
         Scenario {
             id: "lib-compact-c390-ja",
             family: "1B-LIB-COMPACT",
-            rows: &["LB-02", "LB-03", "LB-05", "LB-13"],
+            rows: &["LB-02", "LB-05", "LB-13"],
             locale: Locale::Ja,
             client: C390,
             dpr: 1.0,
@@ -749,38 +768,86 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
         Scenario {
             id: "lib-breakpoint-759-en",
             family: "1B-LIB-COMPACT",
-            rows: &["LB-03"],
+            rows: &["LB-02", "LB-03"],
             locale: Locale::En,
             client: (759.0, 700.0),
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
-            notes: &["`B760±` probe: compact filter row"],
+            notes: &[
+                "`B760±` probe: the compact composition (`LB-02`) and the compact side of the \
+                 breakpoint (`LB-03`)",
+            ],
         },
         Scenario {
             id: "lib-breakpoint-760-en",
             family: "1B-LIB-COMPACT",
-            rows: &["LB-03"],
+            rows: &["LB-02", "LB-03"],
             locale: Locale::En,
             client: (760.0, 700.0),
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
-            notes: &["`B760±` probe: wide sidebar at the breakpoint"],
+            notes: &[
+                "`B760±` probe: the breakpoint itself, where `LB-02`'s compact composition ends \
+                 (`LB-03` asks for both sides), and the wide sidebar starts",
+            ],
         },
         Scenario {
             id: "lib-breakpoint-761-en",
             family: "1B-LIB-COMPACT",
-            rows: &["LB-03"],
+            rows: &["LB-02", "LB-03"],
             locale: Locale::En,
             client: (761.0, 700.0),
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
-            notes: &["`B760±` probe: wide sidebar"],
+            notes: &[
+                "`B760±` probe: the wide sidebar, so the compact composition cannot remain above \
+                 the breakpoint in `LB-02`'s configuration",
+            ],
+        },
+        // `LB-03` asks for the breakpoint either side in both interfaces: a
+        // Japanese-only clipping problem at `B760±` would not show up in an
+        // English probe, so the three widths are captured in both locales.
+        Scenario {
+            id: "lib-breakpoint-759-ja",
+            family: "1B-LIB-COMPACT",
+            rows: &["LB-03"],
+            locale: Locale::Ja,
+            client: (759.0, 700.0),
+            dpr: 1.0,
+            base: Base::Seeded,
+            kind: Kind::LibraryJapanese,
+            fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            notes: &["`B760±` probe: compact filter row, Japanese interface"],
+        },
+        Scenario {
+            id: "lib-breakpoint-760-ja",
+            family: "1B-LIB-COMPACT",
+            rows: &["LB-03"],
+            locale: Locale::Ja,
+            client: (760.0, 700.0),
+            dpr: 1.0,
+            base: Base::Seeded,
+            kind: Kind::LibraryJapanese,
+            fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            notes: &["`B760±` probe: wide sidebar at the breakpoint, Japanese interface"],
+        },
+        Scenario {
+            id: "lib-breakpoint-761-ja",
+            family: "1B-LIB-COMPACT",
+            rows: &["LB-03"],
+            locale: Locale::Ja,
+            client: (761.0, 700.0),
+            dpr: 1.0,
+            base: Base::Seeded,
+            kind: Kind::LibraryJapanese,
+            fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            notes: &["`B760±` probe: wide sidebar, Japanese interface"],
         },
         Scenario {
             id: "lib-compact-c390-dpr2",
@@ -863,24 +930,34 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             family: "1B-LIB-STATE",
             rows: &["LB-22"],
             locale: Locale::En,
-            client: W1280,
+            client: W1280_TALL,
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryLoadingMore,
             fixture: "G1 seeded library (46 books)",
-            notes: &[],
+            notes: &[
+                "The viewport is taller than the usual `W1280` window (`W1280_TALL`): the \
+                 loading-more indicator and the paging row are the last items of the library \
+                 scroll column, below the 40-card first page, and this renderer has no scroll \
+                 interaction, so a taller window is the only way to show them without inventing \
+                 a scroll position",
+            ],
         },
         Scenario {
             id: "lib-state-paged-w1280",
             family: "1B-LIB-STATE",
             rows: &["LB-22"],
             locale: Locale::En,
-            client: W1280,
+            client: W1280_TALL,
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryPaged,
             fixture: "G1 seeded library (46 books)",
-            notes: &["46 books: the first page holds 40, the second page holds 6"],
+            notes: &[
+                "46 books: the first page holds 40, the second page holds 6",
+                "`W1280_TALL`, for the same reason as `lib-state-loading-more-w1280`: the paging \
+                 row is the last item of the library scroll column",
+            ],
         },
         Scenario {
             id: "lib-state-empty-w1280",
@@ -1212,19 +1289,27 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             "settings-wide-w900-en",
             &["ST-01", "ST-02", "ST-04", "ST-05", "ST-09"],
             Locale::En,
-            W900,
+            W900_TALL,
             1.0,
             Kind::SettingsDefault,
-            &[],
+            &[
+                "`W900_TALL`: the reader-defaults controls (`ST-05`) are the last card of the \
+                 settings scroll column and would sit below the fold of the usual `W900` window, \
+                 which this renderer cannot scroll",
+            ],
         ),
         settings(
             "settings-wide-w900-ja",
             &["ST-01", "ST-02", "ST-04", "ST-05", "ST-09"],
             Locale::Ja,
-            W900,
+            W900_TALL,
             1.0,
             Kind::SettingsJapanese,
-            &[],
+            &[
+                "`W900_TALL`: the reader-defaults controls (`ST-05`) are the last card of the \
+                 settings scroll column and would sit below the fold of the usual `W900` window, \
+                 which this renderer cannot scroll",
+            ],
         ),
         settings(
             "settings-compact-c390-en",
@@ -1248,10 +1333,14 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             "settings-changed-w900-en",
             &["ST-04", "ST-05"],
             Locale::En,
-            W900,
+            W900_TALL,
             1.0,
             Kind::SettingsChanged,
-            &[],
+            &[
+                "`W900_TALL` so the changed reader defaults (`ST-05`: reading mode, theme, EPUB \
+                 font size, line spacing, PDF zoom) are visible next to the changed import \
+                 behavior (`ST-04`)",
+            ],
         ),
         settings(
             "settings-move-dialog-w900-ja",
@@ -1445,7 +1534,7 @@ pub(crate) async fn apply(
     harness: &mut Harness,
     fixtures_root: &Path,
     data_root: &Path,
-) {
+) -> anyhow::Result<()> {
     // The interface language comes first: it is a property of the capture, not
     // of its state, and it must not be able to swallow the state dispatch (a
     // Japanese settings capture that only switched language would silently
@@ -1527,12 +1616,20 @@ pub(crate) async fn apply(
                 .clone()
                 .expect("seeded capture state has a library");
             let oversized = "x".repeat(shosai_core::library::MAX_LIBRARY_QUERY_BYTES + 1);
-            let error = library
+            // The capture must show the production error text, so the production
+            // operation has to fail: substituting a message would publish a state
+            // that the application never reaches this way.
+            let error = match library
                 .page(Some(&oversized), None, LIBRARY_PAGE_SIZE, 0)
                 .await
-                .err()
-                .map(|error| format!("{error:#}"))
-                .unwrap_or_else(|| "library page failed".to_owned());
+            {
+                Err(error) => format!("{error:#}"),
+                Ok(_) => anyhow::bail!(
+                    "the {}-byte library query succeeded, so the load-error capture would show a \
+                     substituted message instead of the production error",
+                    oversized.len()
+                ),
+            };
             let generation = harness.state.library_generation;
             let offset = harness.state.library_offset;
             harness
@@ -1544,7 +1641,7 @@ pub(crate) async fn apply(
                 .await;
         }
         Kind::LibraryStorageError => {
-            let error = super::seed::storage_failure_message(data_root).await;
+            let error = super::seed::storage_failure_message(data_root).await?;
             harness.dispatch(Message::Initialized(Err(error))).await;
         }
         Kind::ImportEntry => {
@@ -1691,11 +1788,12 @@ pub(crate) async fn apply(
             harness.dispatch(Message::ShowSettings).await;
         }
         Kind::SettingsUnavailable => {
-            let error = super::seed::storage_failure_message(data_root).await;
+            let error = super::seed::storage_failure_message(data_root).await?;
             harness.dispatch(Message::Initialized(Err(error))).await;
             harness.dispatch(Message::ShowSettings).await;
         }
     }
+    Ok(())
 }
 
 /// The first book in the loaded grid, used by the card-action captures.

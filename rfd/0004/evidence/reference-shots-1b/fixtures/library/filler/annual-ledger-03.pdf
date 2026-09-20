@@ -6,19 +6,15 @@ endobj
 << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ProcSet [/PDF] >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 400 >>
+<< /Length 324 >>
 stream
 0.93 0.92 0.90 rg
 0 700 612 92 re f
 0.18 0.18 0.18 rg
-BT
-/F1 26 Tf
-72 726 Td
-(Page 1) Tj
-ET
+72 726 14 14 re f
 0.15686275 0.2901961 0.41960785 rg
 72 640 240 12 re f
 0.25 0.25 0.25 rg
@@ -32,29 +28,20 @@ ET
 72 418 468 8 re f
 72 392 468 8 re f
 72 366 468 8 re f
-0 0 0 rg
-BT
-/F1 11 Tf
-72 96 Td
-(Annual Ledger 03) Tj
-ET
 
 endstream
 endobj
 5 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ProcSet [/PDF] >> /Contents 6 0 R >>
 endobj
 6 0 obj
-<< /Length 400 >>
+<< /Length 342 >>
 stream
 0.93 0.92 0.90 rg
 0 700 612 92 re f
 0.18 0.18 0.18 rg
-BT
-/F1 26 Tf
-72 726 Td
-(Page 2) Tj
-ET
+72 726 14 14 re f
+94 726 14 14 re f
 0.15686275 0.2901961 0.41960785 rg
 72 640 240 12 re f
 0.25 0.25 0.25 rg
@@ -68,34 +55,24 @@ ET
 72 418 468 8 re f
 72 392 468 8 re f
 72 366 468 8 re f
-0 0 0 rg
-BT
-/F1 11 Tf
-72 96 Td
-(Annual Ledger 03) Tj
-ET
 
 endstream
 endobj
 7 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
-endobj
-8 0 obj
 << /Title (Annual Ledger 03) /Author (Shosai Press) /Producer (Shosai reference fixture generator) /CreationDate (D:20260101000000Z) >>
 endobj
 xref
-0 9
+0 8
 0000000000 65535 f
 0000000009 00000 n
 0000000058 00000 n
 0000000121 00000 n
-0000000247 00000 n
-0000000698 00000 n
-0000000824 00000 n
-0000001275 00000 n
-0000001372 00000 n
+0000000241 00000 n
+0000000616 00000 n
+0000000736 00000 n
+0000001129 00000 n
 trailer
-<< /Size 9 /Root 1 0 R /Info 8 0 R >>
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
 startxref
-1523
+1280
 %%EOF

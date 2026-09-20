@@ -6,19 +6,15 @@ endobj
 << /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ProcSet [/PDF] >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 407 >>
+<< /Length 323 >>
 stream
 0.93 0.92 0.90 rg
 0 700 612 92 re f
 0.18 0.18 0.18 rg
-BT
-/F1 26 Tf
-72 726 Td
-(Page 1) Tj
-ET
+72 726 14 14 re f
 0.3529412 0.18431373 0.3137255 rg
 72 640 240 12 re f
 0.25 0.25 0.25 rg
@@ -32,29 +28,20 @@ ET
 72 418 468 8 re f
 72 392 468 8 re f
 72 366 468 8 re f
-0 0 0 rg
-BT
-/F1 11 Tf
-72 96 Td
-(Shosai reference fixture) Tj
-ET
 
 endstream
 endobj
 5 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /ProcSet [/PDF] >> /Contents 6 0 R >>
 endobj
 6 0 obj
-<< /Length 407 >>
+<< /Length 341 >>
 stream
 0.93 0.92 0.90 rg
 0 700 612 92 re f
 0.18 0.18 0.18 rg
-BT
-/F1 26 Tf
-72 726 Td
-(Page 2) Tj
-ET
+72 726 14 14 re f
+94 726 14 14 re f
 0.3529412 0.18431373 0.3137255 rg
 72 640 240 12 re f
 0.25 0.25 0.25 rg
@@ -68,34 +55,24 @@ ET
 72 418 468 8 re f
 72 392 468 8 re f
 72 366 468 8 re f
-0 0 0 rg
-BT
-/F1 11 Tf
-72 96 Td
-(Shosai reference fixture) Tj
-ET
 
 endstream
 endobj
 7 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
-endobj
-8 0 obj
 << /Title <FEFF628088535831544A66F80020003200300032003600202014002066F8658E30D730ED30B830A730AF30C8306E5E746B215831544A> /Author <FEFF66F8658E7DE896C690E8> /Producer (Shosai reference fixture generator) /CreationDate (D:20260101000000Z) >>
 endobj
 xref
-0 9
+0 8
 0000000000 65535 f
 0000000009 00000 n
 0000000058 00000 n
 0000000121 00000 n
-0000000247 00000 n
-0000000705 00000 n
-0000000831 00000 n
-0000001289 00000 n
-0000001386 00000 n
+0000000241 00000 n
+0000000615 00000 n
+0000000735 00000 n
+0000001127 00000 n
 trailer
-<< /Size 9 /Root 1 0 R /Info 8 0 R >>
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
 startxref
-1641
+1382
 %%EOF
