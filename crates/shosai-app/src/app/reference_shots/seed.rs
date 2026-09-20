@@ -93,6 +93,102 @@ pub(crate) fn seed_path(fixtures_root: &Path, file: &str) -> PathBuf {
     }
 }
 
+/// Build the initialized-state payload for a disposable store.
+///
+/// This is the *harness copy* of the parsing `boot`'s initialize task performs
+/// after opening the application's store: the capture tool checks out no
+/// production code for it, so the state a capture starts from is built here from
+/// the same preference keys, the same `from_stored` constructors and the same
+/// `stored_f32` clamp helper the application uses (`super::super::stored_f32`),
+/// against a store the application never opens. Keep it aligned with `boot` when
+/// that parsing changes; `capture_startup_parsing_matches_the_application_defaults`
+/// and `capture_startup_parsing_reads_persisted_preferences` in
+/// [`super::tests`] pin the baseline and non-default values.
+pub(crate) async fn capture_initialized_state(
+    store: ReadingStateStore,
+) -> Result<super::super::InitializedState, String> {
+    use super::super::{
+        ADD_BOOK_BEHAVIOR_KEY, AddBookBehavior, DEFAULT_EPUB_FONT_SIZE_KEY,
+        DEFAULT_EPUB_LINE_SPACING_KEY, DEFAULT_PDF_ZOOM_KEY, DEFAULT_READER_THEME_KEY,
+        DEFAULT_READING_MODE_KEY, LANGUAGE_PREFERENCE_KEY, ReaderDefaults, WINDOW_HEIGHT_KEY,
+        WINDOW_WIDTH_KEY, WINDOW_X_KEY, WINDOW_Y_KEY, stored_f32,
+    };
+    use crate::i18n::LanguagePreference;
+    use crate::pdf::ZoomMode;
+    use crate::theme::ReaderTheme;
+    use shosai_core::path_from_key;
+    use shosai_core::reader::ReadingMode;
+
+    let preferences = store
+        .get_prefs_async()
+        .await
+        .map_err(|error| error.to_string())?;
+    let pref_int = |key: &str| {
+        preferences
+            .get(key)
+            .and_then(|value| value.parse::<i64>().ok())
+    };
+    let geometry = match (
+        pref_int(WINDOW_WIDTH_KEY),
+        pref_int(WINDOW_HEIGHT_KEY),
+        pref_int(WINDOW_X_KEY),
+        pref_int(WINDOW_Y_KEY),
+    ) {
+        (Some(width), Some(height), Some(x), Some(y)) if width >= 480 && height >= 360 => Some((
+            iced::Size::new(width as f32, height as f32),
+            iced::Point::new(x as f32, y as f32),
+        )),
+        _ => None,
+    };
+    let language_preference = LanguagePreference::from_stored(
+        preferences.get(LANGUAGE_PREFERENCE_KEY).map(String::as_str),
+    );
+    let managed_books_dir = preferences
+        .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
+        .map(|path| path_from_key(path))
+        .unwrap_or_else(|| store.managed_books_dir());
+    if managed_books_dir != store.managed_books_dir() {
+        shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)
+            .map_err(|error| error.to_string())?;
+    }
+    let add_book_behavior =
+        AddBookBehavior::from_stored(preferences.get(ADD_BOOK_BEHAVIOR_KEY).map(String::as_str));
+    let reader_defaults = ReaderDefaults {
+        reading_mode: ReadingMode::from_stored(
+            preferences
+                .get(DEFAULT_READING_MODE_KEY)
+                .map(String::as_str),
+        ),
+        theme: ReaderTheme::from_stored(
+            preferences
+                .get(DEFAULT_READER_THEME_KEY)
+                .map(String::as_str),
+        ),
+        epub_font_size: stored_f32(
+            preferences.get(DEFAULT_EPUB_FONT_SIZE_KEY).cloned(),
+            16.0,
+            8.0..=48.0,
+        ),
+        epub_line_spacing: stored_f32(
+            preferences.get(DEFAULT_EPUB_LINE_SPACING_KEY).cloned(),
+            1.6,
+            1.0..=2.4,
+        ),
+        pdf_zoom: match preferences.get(DEFAULT_PDF_ZOOM_KEY).map(String::as_str) {
+            Some("fit-width") => ZoomMode::FitWidth,
+            _ => ZoomMode::FitPage,
+        },
+    };
+    Ok(super::super::InitializedState {
+        store,
+        window_geometry: geometry,
+        language_preference,
+        managed_books_dir,
+        add_book_behavior,
+        reader_defaults,
+    })
+}
+
 /// Write the capture preference baseline back into a base store.
 ///
 /// Called before every capture state is built: the application persists
@@ -147,8 +243,7 @@ pub(crate) async fn seed_empty_library(data_dir: &Path) -> Result<SeededLibrary>
 /// The disposable root is replaced by a placeholder so the captured text is
 /// deterministic across runs and machines; everything else is the message the
 /// application shows when storage initialization fails.
-pub(crate) async fn storage_failure_message() -> String {
-    let root = super::runner::data_root();
+pub(crate) async fn storage_failure_message(root: &Path) -> String {
     let blocked = root.join("blocked");
     let _ = std::fs::remove_file(&blocked);
     let _ = std::fs::remove_dir_all(&blocked);
@@ -167,7 +262,7 @@ pub(crate) async fn storage_failure_message() -> String {
         .replace(&root.display().to_string(), "<capture-data>")
 }
 
-async fn open_store(data_dir: &Path) -> Result<ReadingStateStore> {
+pub(crate) async fn open_store(data_dir: &Path) -> Result<ReadingStateStore> {
     std::fs::create_dir_all(data_dir).with_context(|| format!("create {}", data_dir.display()))?;
     ReadingStateStore::open_at_async_deferred_backfill(&data_dir.join("state.db"))
         .await

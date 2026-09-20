@@ -3,9 +3,9 @@
   "package": "1B",
   "entry_point": "make reference-shots",
   "command": "make reference-shots",
-  "capture_code_revision": "bebec1ff30197e24025808e368e7a82ae72f7eca",
+  "capture_code_revision": "36a0039395052b5ce65cf58bfc03f3569cf7e7dd",
   "capture_code_revision_source": "jj @ working-copy commit",
-  "capture_code_change_id": "nqrsuovkrqywxyswwsyrvluvxvkvttzr",
+  "capture_code_change_id": "ymupyqtqxrslroxkvzsklklkttrutupk",
   "capture_code_bookmark": "none",
   "capture_code_note": "`capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the stable `capture_code_change_id` plus the committed evidence change is the durable mapping; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.",
   "pinned_design_base": "1e54270a6bb24f15630ece336a0575bdbe5be113",
@@ -92,12 +92,12 @@
       },
       {
         "relative_path": "library/featured/kaze-no-mukougawa.epub",
-        "sha256": "3f6d111cf1cf9dea20bab44e1ced88455dc8cd65132d4705aa9469af68a6471a",
+        "sha256": "4cb2339292e76a591bc0d73288e21d94740e2342b04de10e6e4298c143cd4d9a",
         "bytes": 8748
       },
       {
         "relative_path": "library/featured/mizu-no-kioku.epub",
-        "sha256": "bab6b4e2cfcb10f77868c1e37c6b9dd392ec30f09548577bd12c7a7bc728b1a3",
+        "sha256": "6bb45dc565816a5af1323c77eb22e1a063dc503018d2ddfaa350705c3cf6f045",
         "bytes": 9376
       },
       {
@@ -127,7 +127,7 @@
       },
       {
         "relative_path": "library/featured/toshokan-no-tebiki.epub",
-        "sha256": "aedfc74506ddb2bbab1a0e3ff1d259cc6e584227b43e07fdc9e747b76c16cc88",
+        "sha256": "0ad27221521add80d6ceadae109b36da3782d4588ae3655b78a2a33a31dff3a3",
         "bytes": 8593
       },
       {
@@ -302,12 +302,12 @@
       },
       {
         "relative_path": "sources/long-names/砂漠のアーカイブ — 失われた書架をめぐる長い旅路.epub",
-        "sha256": "e7924f5044d6fb43903a10dd2bc35a457a81873ea8d4ebfafa762ae98019ac29",
+        "sha256": "c851ea37fe3fbc0218469566c8f436d07530ed5229197b9fd9a2af0cfe3a1e6e",
         "bytes": 7507
       },
       {
         "relative_path": "sources/long-names/静かな海の図書館の一年 — 年次報告書と収蔵目録 2026年版.epub",
-        "sha256": "b35b625ba1917138ec01bfd56a83ba187aa2d96addfd4e0863faa554e0f8d6ea",
+        "sha256": "92978d431bacebf4539f1e7216601b2e4995a4e83257ae4e0ae67721e2ac8fbb",
         "bytes": 7507
       },
       {
@@ -352,12 +352,12 @@
       },
       {
         "relative_path": "sources/reading-queue/砂漠のアーカイブ — 失われた書架をめぐる長い旅路.epub",
-        "sha256": "cdebcbb91faba3abe5589ced53d92d2562c5eb7014e22dbd23e257fcb65f9161",
+        "sha256": "231e6eaa1c55d23ca6d09037804e24a1c633fbfe831fc2732fecba96f7ee3af2",
         "bytes": 7492
       },
       {
         "relative_path": "sources/reading-queue/静かな海の図書館の一年 — 年次報告書と収蔵目録 2026年版.epub",
-        "sha256": "2eecbb935b2e9568a48ad8c835b79afe92fdbf3d3de703c92eb55dba996039b2",
+        "sha256": "ac3769e9eb4d0d8dbddaeacc84066f5f0eb61e14222eada8e694bc1cdb611f4b",
         "bytes": 7525
       }
     ],
@@ -798,7 +798,7 @@
         "author": "佐藤 健一",
         "format": "epub",
         "file_size": 9376,
-        "content_hash": "bab6b4e2cfcb10f77868c1e37c6b9dd392ec30f09548577bd12c7a7bc728b1a3",
+        "content_hash": "6bb45dc565816a5af1323c77eb22e1a063dc503018d2ddfaa350705c3cf6f045",
         "progress": 0.24,
         "date_added": "2026-02-04 10:00:00",
         "has_cover": true
@@ -810,7 +810,7 @@
         "author": "Darwin Shosai",
         "format": "epub",
         "file_size": 8593,
-        "content_hash": "aedfc74506ddb2bbab1a0e3ff1d259cc6e584227b43e07fdc9e747b76c16cc88",
+        "content_hash": "0ad27221521add80d6ceadae109b36da3782d4588ae3655b78a2a33a31dff3a3",
         "progress": 0.0,
         "date_added": "2026-02-05 10:00:00",
         "has_cover": true
@@ -822,7 +822,7 @@
         "author": "日本 花子",
         "format": "epub",
         "file_size": 8748,
-        "content_hash": "3f6d111cf1cf9dea20bab44e1ced88455dc8cd65132d4705aa9469af68a6471a",
+        "content_hash": "4cb2339292e76a591bc0d73288e21d94740e2342b04de10e6e4298c143cd4d9a",
         "progress": 0.05,
         "date_added": "2026-02-06 10:00:00",
         "has_cover": true
@@ -999,12 +999,13 @@
       "rows": [
         "LB-03",
         "LB-04",
-        "LB-05",
         "LB-07",
         "LB-11",
         "LB-13"
       ],
-      "notes": []
+      "notes": [
+        "`LB-05` is the compact filter row and is covered by the `C390` captures, not by this wide one"
+      ]
     },
     {
       "id": "lib-wide-w1280-dpr2",
@@ -1027,7 +1028,7 @@
       ],
       "notes": [
         "DPR 2 sharpness subset (specification `D2`); composition is identical to `lib-wide-w1280-en`, only the raster density differs",
-        "cover bitmaps come from the seeded cover blobs; the lazy-load path itself (`sensor().on_show`) needs a real window and is not exercised here"
+        "The cards' cover sensors run through the capture's redraw path, so a visible card without a decoded cover requests it exactly like a real window; a real window's scroll- and paging-driven sensor transitions are not reproduced offscreen"
       ]
     },
     {
@@ -1049,10 +1050,11 @@
       "rows": [
         "LB-02",
         "LB-05",
-        "LB-12",
-        "LB-18"
+        "LB-12"
       ],
-      "notes": []
+      "notes": [
+        "`LB-12` is the missing-cover card in compact form; it uses the populated seed, so the empty-library row `LB-18` is covered by `lib-state-empty-c390` instead"
+      ]
     },
     {
       "id": "lib-compact-c390-ja",
@@ -1885,7 +1887,7 @@
     {
       "id": "import-progress-w900-en",
       "family": "1B-IMPORT",
-      "state": "library+import-dialog",
+      "state": "library",
       "image": "captures/import-progress-w900-en.png",
       "sha256": "1a5e9bb477397568d001f374a307a30e6332a38385026ad32d191bbe9f9402d5",
       "bytes": 143037,
@@ -1904,13 +1906,14 @@
         "IM-08"
       ],
       "notes": [
+        "`AddSelectedBooks` closes the dialog before the copy starts, so this capture is the library with the header action in its import state, not a dialog state",
         "The import task is started and deliberately left unsettled, so the header action shows the real cancel/progress label with 0 of N; mid-import counts are not captured because the parallel copy tasks complete in a scheduling-dependent order"
       ]
     },
     {
       "id": "import-completed-w900-en",
       "family": "1B-IMPORT",
-      "state": "library+import-dialog",
+      "state": "library",
       "image": "captures/import-completed-w900-en.png",
       "sha256": "3c3b253c08825f662e0d74a75b60de08f0bf7285e7ac672f917cb960d329c2e0",
       "bytes": 134500,
@@ -1929,6 +1932,7 @@
         "IM-08"
       ],
       "notes": [
+        "The import dialog is closed by `AddSelectedBooks`, so this capture is the library after the import, with the imported book in the grid",
         "Runs against its own disposable seed, because the import adds rows to the store",
         "The imported books are copied into the disposable managed directory; the committed library is untouched"
       ]
@@ -2138,22 +2142,24 @@
       "family": "1B-SETTINGS",
       "state": "settings",
       "image": "captures/settings-error-w900-en.png",
-      "sha256": "515b277e8493c5a25f8f001172a8a892b68b8e7ddc6040bf74c76c1f37298df1",
-      "bytes": 154129,
+      "sha256": "4702edbd2639ddb4e2f652b44dd5d95e9c9322e459a5f95103b2155649a9b7cf",
+      "bytes": 239764,
       "client_width": 900.0,
-      "client_height": 700.0,
+      "client_height": 1200.0,
       "image_width": 900,
-      "image_height": 700,
+      "image_height": 1200,
       "dpr": 1.0,
       "locale": "EN",
       "fixture": "G1 seeded library (46 books)",
-      "state_derivation": "`Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Err(..) }`",
+      "state_derivation": "`Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Err(..) }` with synthetic reference text, because a real permission failure cannot be triggered in-process; the banner composition is production",
       "settings": [],
       "rows": [
         "ST-06"
       ],
       "notes": [
-        "ST-06 acceptance stays with 6B's renders; this is the Iced reference for the error banner"
+        "ST-06 acceptance stays with 6B's renders; this is the Iced reference for the error banner",
+        "The viewport is taller than the usual `W900` window (`W900_TALL`) because the alert is the last item of the settings scroll column and this renderer has no scroll interaction: a taller window is the only way to show the real banner composition without inventing a scroll position",
+        "The failure text is synthetic reference text delivered through `ManagedLibraryMovePlanned { result: Err(..) }`: no real filesystem failure is triggered, because the move target is a fixed path the capture never writes"
       ]
     },
     {
@@ -2299,7 +2305,6 @@
         "row": "LB-05",
         "status": "capture",
         "captures": [
-          "lib-wide-w1280-ja",
           "lib-compact-c390-en",
           "lib-compact-c390-ja"
         ],
@@ -2406,7 +2411,6 @@
         "row": "LB-18",
         "status": "capture",
         "captures": [
-          "lib-compact-c390-en",
           "lib-state-empty-w1280",
           "lib-state-empty-c390"
         ],

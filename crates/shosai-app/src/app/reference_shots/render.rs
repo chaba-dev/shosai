@@ -96,6 +96,18 @@ fn redraw_event() -> iced::Event {
     ))
 }
 
+/// Physical (device) pixel size of a `width`×`height` logical client at `dpr`.
+///
+/// This is the one place the capture's image size is derived, so the manifest
+/// entry of an unrendered expectation and the raster a render produces cannot
+/// disagree.
+pub(crate) fn physical_size(width: f32, height: f32, dpr: f32) -> (u32, u32) {
+    (
+        (width * dpr).round().max(1.0) as u32,
+        (height * dpr).round().max(1.0) as u32,
+    )
+}
+
 /// One frame pass over the production view.
 pub(crate) enum FrameOutcome {
     /// The frame is a fixed point: this is the capture image.
@@ -128,10 +140,8 @@ pub(crate) fn render_frame(
     };
 
     let logical = Size::new(width, height);
-    let physical = Size::new(
-        (width * dpr).round().max(1.0) as u32,
-        (height * dpr).round().max(1.0) as u32,
-    );
+    let (physical_width, physical_height) = physical_size(width, height, dpr);
+    let physical = Size::new(physical_width, physical_height);
     let viewport = Viewport::with_physical_size(physical, dpr);
 
     let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(

@@ -37,7 +37,7 @@ pub(crate) const PACKAGE_1B_FAMILIES: [&str; 6] = [
 ];
 
 /// One manifest capture entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CaptureEntry {
     /// Evidence id, unique inside the run.
     pub(crate) id: String,
@@ -99,7 +99,7 @@ pub(crate) struct MatrixCoverage {
     pub(crate) pending: Vec<RowCoverage>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct FixtureInventory {
     pub(crate) generator: String,
     pub(crate) redistribution: String,
@@ -316,7 +316,7 @@ fn checksum_file(entries: &[(String, String)]) -> String {
     out
 }
 
-fn readme(manifest: &Manifest) -> String {
+pub(crate) fn readme(manifest: &Manifest) -> String {
     let mut out = String::new();
     out.push_str("# 1B reference captures (Iced, package 1B)\n\n");
     out.push_str(

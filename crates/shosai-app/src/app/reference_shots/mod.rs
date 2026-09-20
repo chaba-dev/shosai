@@ -17,10 +17,12 @@
 //! - [`scenarios`] lists the capture states and how each is reached.
 //! - [`render`] rasterizes the production view.
 //! - [`manifest`] serializes the provenance record.
+//! - [`evidence`] validates the committed evidence directory without rendering.
 //! - [`runner`] is the `make reference-shots` entry point.
 //! - [`tests`] are the always-on regression checks (determinism, fixture
 //!   metadata, PDF offsets, committed-evidence consistency).
 
+pub(crate) mod evidence;
 pub(crate) mod fixtures;
 pub(crate) mod harness;
 pub(crate) mod manifest;

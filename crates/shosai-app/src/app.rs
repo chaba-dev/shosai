@@ -1369,95 +1369,85 @@ pub fn boot() -> (State, Task<Message>) {
             let store = ReadingStateStore::open_async_deferred_backfill()
                 .await
                 .map_err(|error| error.to_string())?;
-            let initialized = initialized_state_from_preferences(store).await?;
+            let preferences = store
+                .get_prefs_async()
+                .await
+                .map_err(|error| error.to_string())?;
+            let pref_int = |key: &str| {
+                preferences
+                    .get(key)
+                    .and_then(|value| value.parse::<i64>().ok())
+            };
+            let geometry = match (
+                pref_int(WINDOW_WIDTH_KEY),
+                pref_int(WINDOW_HEIGHT_KEY),
+                pref_int(WINDOW_X_KEY),
+                pref_int(WINDOW_Y_KEY),
+            ) {
+                (Some(width), Some(height), Some(x), Some(y)) if width >= 480 && height >= 360 => {
+                    Some((
+                        Size::new(width as f32, height as f32),
+                        Point::new(x as f32, y as f32),
+                    ))
+                }
+                _ => None,
+            };
+            let language_preference = LanguagePreference::from_stored(
+                preferences.get(LANGUAGE_PREFERENCE_KEY).map(String::as_str),
+            );
+            let managed_books_dir = preferences
+                .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
+                .map(|path| path_from_key(path))
+                .unwrap_or_else(|| store.managed_books_dir());
+            if managed_books_dir != store.managed_books_dir() {
+                shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)
+                    .map_err(|error| error.to_string())?;
+            }
+            let add_book_behavior = AddBookBehavior::from_stored(
+                preferences.get(ADD_BOOK_BEHAVIOR_KEY).map(String::as_str),
+            );
+            let reader_defaults = ReaderDefaults {
+                reading_mode: ReadingMode::from_stored(
+                    preferences
+                        .get(DEFAULT_READING_MODE_KEY)
+                        .map(String::as_str),
+                ),
+                theme: ReaderTheme::from_stored(
+                    preferences
+                        .get(DEFAULT_READER_THEME_KEY)
+                        .map(String::as_str),
+                ),
+                epub_font_size: stored_f32(
+                    preferences.get(DEFAULT_EPUB_FONT_SIZE_KEY).cloned(),
+                    16.0,
+                    8.0..=48.0,
+                ),
+                epub_line_spacing: stored_f32(
+                    preferences.get(DEFAULT_EPUB_LINE_SPACING_KEY).cloned(),
+                    1.6,
+                    1.0..=2.4,
+                ),
+                pdf_zoom: match preferences.get(DEFAULT_PDF_ZOOM_KEY).map(String::as_str) {
+                    Some("fit-width") => ZoomMode::FitWidth,
+                    _ => ZoomMode::FitPage,
+                },
+            };
             eprintln!(
                 "startup: database and preferences initialized in {} ms",
                 started.elapsed().as_millis()
             );
-            Ok(initialized)
+            Ok(InitializedState {
+                store,
+                window_geometry: geometry,
+                language_preference,
+                managed_books_dir,
+                add_book_behavior,
+                reader_defaults,
+            })
         },
         Message::Initialized,
     );
     (state, initialize)
-}
-
-/// Reads the persisted preferences into the initialized-state payload.
-///
-/// `boot` calls this after opening the application's store. The reference
-/// capture harness calls it with its disposable store, so a capture cannot
-/// drift from the preference parsing the application performs at startup; the
-/// only difference is which store is opened.
-pub(crate) async fn initialized_state_from_preferences(
-    store: ReadingStateStore,
-) -> Result<InitializedState, String> {
-    let preferences = store
-        .get_prefs_async()
-        .await
-        .map_err(|error| error.to_string())?;
-    let pref_int = |key: &str| {
-        preferences
-            .get(key)
-            .and_then(|value| value.parse::<i64>().ok())
-    };
-    let geometry = match (
-        pref_int(WINDOW_WIDTH_KEY),
-        pref_int(WINDOW_HEIGHT_KEY),
-        pref_int(WINDOW_X_KEY),
-        pref_int(WINDOW_Y_KEY),
-    ) {
-        (Some(width), Some(height), Some(x), Some(y)) if width >= 480 && height >= 360 => Some((
-            Size::new(width as f32, height as f32),
-            Point::new(x as f32, y as f32),
-        )),
-        _ => None,
-    };
-    let language_preference = LanguagePreference::from_stored(
-        preferences.get(LANGUAGE_PREFERENCE_KEY).map(String::as_str),
-    );
-    let managed_books_dir = preferences
-        .get(shosai_core::library::MANAGED_LIBRARY_DIR_PREFERENCE)
-        .map(|path| path_from_key(path))
-        .unwrap_or_else(|| store.managed_books_dir());
-    if managed_books_dir != store.managed_books_dir() {
-        shosai_core::reading_state::validate_managed_library_directory(&managed_books_dir)
-            .map_err(|error| error.to_string())?;
-    }
-    let add_book_behavior =
-        AddBookBehavior::from_stored(preferences.get(ADD_BOOK_BEHAVIOR_KEY).map(String::as_str));
-    let reader_defaults = ReaderDefaults {
-        reading_mode: ReadingMode::from_stored(
-            preferences
-                .get(DEFAULT_READING_MODE_KEY)
-                .map(String::as_str),
-        ),
-        theme: ReaderTheme::from_stored(
-            preferences
-                .get(DEFAULT_READER_THEME_KEY)
-                .map(String::as_str),
-        ),
-        epub_font_size: stored_f32(
-            preferences.get(DEFAULT_EPUB_FONT_SIZE_KEY).cloned(),
-            16.0,
-            8.0..=48.0,
-        ),
-        epub_line_spacing: stored_f32(
-            preferences.get(DEFAULT_EPUB_LINE_SPACING_KEY).cloned(),
-            1.6,
-            1.0..=2.4,
-        ),
-        pdf_zoom: match preferences.get(DEFAULT_PDF_ZOOM_KEY).map(String::as_str) {
-            Some("fit-width") => ZoomMode::FitWidth,
-            _ => ZoomMode::FitPage,
-        },
-    };
-    Ok(InitializedState {
-        store,
-        window_geometry: geometry,
-        language_preference,
-        managed_books_dir,
-        add_book_behavior,
-        reader_defaults,
-    })
 }
 
 fn stored_f32(value: Option<String>, fallback: f32, range: std::ops::RangeInclusive<f32>) -> f32 {

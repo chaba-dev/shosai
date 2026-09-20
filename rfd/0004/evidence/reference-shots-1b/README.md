@@ -7,7 +7,7 @@ and inspects its own renders (specification §4.0).
 
 - Entry point: `make reference-shots`
 - Command: `make reference-shots`
-- Capture-code revision: `bebec1ff30197e24025808e368e7a82ae72f7eca` (from jj @ working-copy commit, Jujutsu change `nqrsuovkrqywxyswwsyrvluvxvkvttzr`, bookmark `none`)
+- Capture-code revision: `36a0039395052b5ce65cf58bfc03f3569cf7e7dd` (from jj @ working-copy commit, Jujutsu change `ymupyqtqxrslroxkvzsklklkttrutupk`, bookmark `none`)
 - Revision note: `capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the stable `capture_code_change_id` plus the committed evidence change is the durable mapping; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.
 - Pinned design base: `1e54270a6bb24f15630ece336a0575bdbe5be113` — main@origin #108 (refactor(flutter): organize the frontend into Elm modules mirroring Iced)
 - Preference baseline: `language=en-US`, `library.add_behavior=ask`, `reader.default_mode=paginated`, `reader.default_theme=light`, `reader.default_epub_font_size=16`, `reader.default_epub_line_spacing=1.6`, `reader.default_pdf_zoom=fit-page`
@@ -34,9 +34,9 @@ and inspects its own renders (specification §4.0).
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `lib-wide-w1280-en` | 1B-LIB-WIDE | library | LB-01 LB-04 LB-06 LB-07 LB-11 LB-12 LB-16 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `9d0b8f5e8cfc` |
 | `lib-wide-w900-en` | 1B-LIB-WIDE | library | LB-01 LB-07 LB-11 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `514e018fa911` |
-| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-05 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `0da80e214f58` |
+| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `0da80e214f58` |
 | `lib-wide-w1280-dpr2` | 1B-LIB-WIDE | library | LB-15 | 1280×800 | 2560×1600 | 2 | MIX | G1 seeded library (46 books) | `c0cce6139237` |
-| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 LB-18 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `b5320113375b` |
+| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `b5320113375b` |
 | `lib-compact-c390-ja` | 1B-LIB-COMPACT | library | LB-02 LB-03 LB-05 LB-13 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `4b4446cb48af` |
 | `lib-breakpoint-759-en` | 1B-LIB-COMPACT | library | LB-03 | 759×700 | 759×700 | 1 | EN | G1 seeded library (46 books) | `8871f6604292` |
 | `lib-breakpoint-760-en` | 1B-LIB-COMPACT | library | LB-03 | 760×700 | 760×700 | 1 | EN | G1 seeded library (46 books) | `a264b981f38f` |
@@ -73,8 +73,8 @@ and inspects its own renders (specification §4.0).
 | `import-no-supported-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `26fe8234d8ee` |
 | `import-storage-copy-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `5faa95a07310` |
 | `import-storage-current-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `49946f7776ea` |
-| `import-progress-w900-en` | 1B-IMPORT | library+import-dialog | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1a5e9bb47739` |
-| `import-completed-w900-en` | 1B-IMPORT | library+import-dialog | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `3c3b253c0882` |
+| `import-progress-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1a5e9bb47739` |
+| `import-completed-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `3c3b253c0882` |
 | `import-review-dpr2-w900` | 1B-IMPORT | library+import-dialog | IM-10 | 900×700 | 1800×1400 | 2 | EN | G1 seeded library (46 books) + import folder | `d3c9c7c2a98b` |
 | `settings-wide-w900-en` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `b5f8c243a2e3` |
 | `settings-wide-w900-ja` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `8e950db9b50b` |
@@ -83,7 +83,7 @@ and inspects its own renders (specification §4.0).
 | `settings-changed-w900-en` | 1B-SETTINGS | settings | ST-04 ST-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `1be1210e2bcf` |
 | `settings-move-dialog-w900-ja` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `0db716f791ad` |
 | `settings-move-progress-w900-en` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `e3a6ef1dae91` |
-| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `515b277e8493` |
+| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `4702edbd2639` |
 | `settings-disabled-importing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `df5629189048` |
 | `settings-disabled-removing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `df5629189048` |
 | `settings-unavailable-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `929c995fa018` |
@@ -109,6 +109,7 @@ and inspects its own renders (specification §4.0).
 - Family: 1B-LIB-WIDE · state: library
 - State: as the loaded library, then `Message::SelectLanguage(Japanese)`
 - Settings: language=ja (persisted by `Message::SelectLanguage`)
+- Note: `LB-05` is the compact filter row and is covered by the `C390` captures, not by this wide one
 
 ### `lib-wide-w1280-dpr2`
 
@@ -116,13 +117,14 @@ and inspects its own renders (specification §4.0).
 - State: as the loaded library, rendered at DPR 2
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
 - Note: DPR 2 sharpness subset (specification `D2`); composition is identical to `lib-wide-w1280-en`, only the raster density differs
-- Note: cover bitmaps come from the seeded cover blobs; the lazy-load path itself (`sensor().on_show`) needs a real window and is not exercised here
+- Note: The cards' cover sensors run through the capture's redraw path, so a visible card without a decoded cover requests it exactly like a real window; a real window's scroll- and paging-driven sensor transitions are not reproduced offscreen
 
 ### `lib-compact-c390-en`
 
 - Family: 1B-LIB-COMPACT · state: library
 - State: seeded library loaded through `Message::Initialized` + the real library page and cover tasks
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
+- Note: `LB-12` is the missing-cover card in compact form; it uses the populated seed, so the empty-library row `LB-18` is covered by `lib-state-empty-c390` instead
 
 ### `lib-compact-c390-ja`
 
@@ -359,16 +361,18 @@ and inspects its own renders (specification §4.0).
 
 ### `import-progress-w900-en`
 
-- Family: 1B-IMPORT · state: library+import-dialog
+- Family: 1B-IMPORT · state: library
 - State: the settled review list with a storage choice, then `Message::AddSelectedBooks` without settling its import task
 - Settings: import storage choice: copy into the library
+- Note: `AddSelectedBooks` closes the dialog before the copy starts, so this capture is the library with the header action in its import state, not a dialog state
 - Note: The import task is started and deliberately left unsettled, so the header action shows the real cancel/progress label with 0 of N; mid-import counts are not captured because the parallel copy tasks complete in a scheduling-dependent order
 
 ### `import-completed-w900-en`
 
-- Family: 1B-IMPORT · state: library+import-dialog
+- Family: 1B-IMPORT · state: library
 - State: the settled review list with a storage choice, then `Message::AddSelectedBooks` settled: the real post-import library
 - Settings: import storage choice: copy into the library
+- Note: The import dialog is closed by `AddSelectedBooks`, so this capture is the library after the import, with the imported book in the grid
 - Note: Runs against its own disposable seed, because the import adds rows to the store
 - Note: The imported books are copied into the disposable managed directory; the committed library is untouched
 
@@ -426,9 +430,11 @@ and inspects its own renders (specification §4.0).
 ### `settings-error-w900-en`
 
 - Family: 1B-SETTINGS · state: settings
-- State: `Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Err(..) }`
+- State: `Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Err(..) }` with synthetic reference text, because a real permission failure cannot be triggered in-process; the banner composition is production
 - Settings: harness defaults (language en-US, add behavior ask, reader defaults paginated/light/16 px/1.6/fit page)
 - Note: ST-06 acceptance stays with 6B's renders; this is the Iced reference for the error banner
+- Note: The viewport is taller than the usual `W900` window (`W900_TALL`) because the alert is the last item of the settings scroll column and this renderer has no scroll interaction: a taller window is the only way to show the real banner composition without inventing a scroll position
+- Note: The failure text is synthetic reference text delivered through `ManagedLibraryMovePlanned { result: Err(..) }`: no real filesystem failure is triggered, because the move target is a fixed path the capture never writes
 
 ### `settings-disabled-importing-w900-en`
 
@@ -466,7 +472,7 @@ Covered by a capture in this set:
 | LB-02 | `lib-compact-c390-en` `lib-compact-c390-ja` |
 | LB-03 | `lib-wide-w1280-ja` `lib-compact-c390-ja` `lib-breakpoint-759-en` `lib-breakpoint-760-en` `lib-breakpoint-761-en` |
 | LB-04 | `lib-wide-w1280-en` `lib-wide-w1280-ja` |
-| LB-05 | `lib-wide-w1280-ja` `lib-compact-c390-en` `lib-compact-c390-ja` |
+| LB-05 | `lib-compact-c390-en` `lib-compact-c390-ja` |
 | LB-06 | `lib-wide-w1280-en` `lib-state-filter-pdf-w1280` |
 | LB-07 | `lib-wide-w1280-en` `lib-wide-w900-en` `lib-wide-w1280-ja` |
 | LB-08 | `lib-state-search-ja-w1280` `lib-state-search-no-matches-w1280` `lib-state-filter-pdf-w1280` `lib-state-search-with-filter-w1280` |
@@ -477,7 +483,7 @@ Covered by a capture in this set:
 | LB-15 | `lib-wide-w1280-dpr2` `lib-compact-c390-dpr2` |
 | LB-16 | `lib-wide-w1280-en` |
 | LB-17 | `lib-state-loading-skeleton-w1280` |
-| LB-18 | `lib-compact-c390-en` `lib-state-empty-w1280` `lib-state-empty-c390` |
+| LB-18 | `lib-state-empty-w1280` `lib-state-empty-c390` |
 | LB-19 | `lib-state-search-no-matches-w1280` |
 | LB-20 | `lib-state-load-error-w1280` `lib-state-storage-error-w900` |
 | LB-22 | `lib-state-loading-more-w1280` `lib-state-paged-w1280` |

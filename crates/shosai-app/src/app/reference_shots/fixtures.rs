@@ -631,15 +631,106 @@ pub(crate) fn reference_fixtures() -> Vec<FixtureFile> {
     files
 }
 
+/// Relative target of the dangling symlinks the fixture writer creates.
+///
+/// The target is deliberately relative and does not exist: the committed link
+/// stays valid (and identical) in any checkout, on any machine.
+pub(crate) const BROKEN_SYMLINK_TARGET: &str = "missing-target.epub";
+
 /// Relative paths of the dangling symlinks the fixture writer creates. They
 /// produce the deterministic discovery failure state (IM-06): the scan sees a
 /// supported extension, then `std::fs::metadata` fails for the missing target.
 pub(crate) const BROKEN_SYMLINKS: [&str; 1] = ["sources/reading-queue/broken-book.epub"];
 
+/// Create the declared dangling symlink at `root/<relative_path>`.
+///
+/// On platforms without symlink support this is a no-op; the manifest records
+/// whether the link could be created (`broken_symlinks_available`) so the
+/// affected capture is not claimed to show a failure it never reached.
+fn write_broken_symlinks(root: &Path) -> std::io::Result<()> {
+    for relative_path in BROKEN_SYMLINKS {
+        let path = root.join(relative_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        #[cfg(unix)]
+        {
+            // Remove a stale link first: `symlink` fails when the path exists.
+            let _ = std::fs::remove_file(&path);
+            std::os::unix::fs::symlink(BROKEN_SYMLINK_TARGET, &path)?;
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = &path;
+        }
+    }
+    Ok(())
+}
+
+/// Every symlink problem in a fixture tree.
+///
+/// A tree may contain exactly the declared dangling fixtures: each declared
+/// path must be a symlink whose target is [`BROKEN_SYMLINK_TARGET`] and whose
+/// target does not exist. Any other symlink is a defect, because the tree is
+/// meant to be data the library can import and a link that resolves into the
+/// checkout would import something the run does not control.
+///
+/// On a platform that cannot create symlinks the declared fixtures are simply
+/// absent: that is reported by [`broken_symlinks_available`] and recorded in the
+/// manifest instead of being treated as a defect.
+pub(crate) fn symlink_defects(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, directory: &Path, defects: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                let relative = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if !BROKEN_SYMLINKS.contains(&relative.as_str()) {
+                    defects.push(format!("{relative}: unexpected symlink"));
+                    continue;
+                }
+                match std::fs::read_link(&path) {
+                    Ok(target) if target != Path::new(BROKEN_SYMLINK_TARGET) => {
+                        defects.push(format!(
+                            "{relative}: symlink target is {}, not {BROKEN_SYMLINK_TARGET}",
+                            target.display()
+                        ))
+                    }
+                    Ok(_) if std::fs::metadata(&path).is_ok() => defects.push(format!(
+                        "{relative}: symlink target exists, so the link is not dangling"
+                    )),
+                    Ok(_) => {}
+                    Err(error) => {
+                        defects.push(format!("{relative}: symlink cannot be read: {error}"))
+                    }
+                }
+                continue;
+            }
+            if file_type.is_dir() {
+                walk(root, &path, defects);
+            }
+        }
+    }
+
+    let mut defects = Vec::new();
+    walk(root, root, &mut defects);
+    defects.sort();
+    defects
+}
+
 /// Write the full fixture tree under `root`, returning the written byte files.
 ///
 /// `root` is created if needed and is expected to be a disposable directory
-/// (`target/reference-fixtures`). Existing files are overwritten so repeated
+/// (the capture tool's data root). Existing files are overwritten so repeated
 /// runs are idempotent. Dangling symlinks are best-effort: on platforms that
 /// cannot create them the affected capture records the gap instead of
 /// fabricating the state.
@@ -657,32 +748,17 @@ pub(crate) fn write_reference_fixtures(root: &Path) -> std::io::Result<Vec<Fixtu
             bytes: file.bytes.len(),
         });
     }
-    for relative_path in BROKEN_SYMLINKS {
-        let path = root.join(relative_path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        #[cfg(unix)]
-        {
-            // Remove a stale link first: `symlink` fails when the path exists.
-            let _ = std::fs::remove_file(&path);
-            let target = path.with_file_name("missing-target.epub");
-            std::os::unix::fs::symlink(target, &path)?;
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = &path;
-        }
-    }
+    write_broken_symlinks(root)?;
     records.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(records)
 }
 
 /// Whether the dangling-symlink failure fixture could be created.
 pub(crate) fn broken_symlinks_available(root: &Path) -> bool {
-    BROKEN_SYMLINKS
-        .iter()
-        .all(|relative_path| std::fs::symlink_metadata(root.join(relative_path)).is_ok())
+    BROKEN_SYMLINKS.iter().all(|relative_path| {
+        let path = root.join(relative_path);
+        path.is_symlink() && std::fs::metadata(&path).is_err()
+    })
 }
 
 /// Copy a generated fixture tree into the committed evidence directory.
@@ -715,30 +791,16 @@ pub(crate) fn mirror_reference_fixtures(
             bytes: bytes.len(),
         });
     }
-    for relative_path in BROKEN_SYMLINKS {
-        let path = destination.join(relative_path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        #[cfg(unix)]
-        {
-            let _ = std::fs::remove_file(&path);
-            let target = path.with_file_name("missing-target.epub");
-            std::os::unix::fs::symlink(target, &path)?;
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = &path;
-        }
-    }
+    write_broken_symlinks(destination)?;
     verified.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(verified)
 }
 
 /// Hash every regular file of a committed fixture tree, relative to its root.
 ///
-/// Symlinks are skipped here and checked by [`broken_symlinks_available`], so a
-/// dangling link is not mistaken for a missing file.
+/// Symlinks are not regular files: the declared dangling fixtures are validated
+/// by [`symlink_defects`] and any other symlink fails the read, so a link
+/// pointing outside the tree cannot pass as a fixture.
 pub(crate) fn read_reference_fixtures(root: &Path) -> std::io::Result<Vec<FixtureRecord>> {
     fn walk(root: &Path, directory: &Path, out: &mut Vec<FixtureRecord>) -> std::io::Result<()> {
         for entry in std::fs::read_dir(directory)? {
@@ -770,6 +832,13 @@ pub(crate) fn read_reference_fixtures(root: &Path) -> std::io::Result<Vec<Fixtur
     let mut records = Vec::new();
     walk(root, root, &mut records)?;
     records.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    let defects = symlink_defects(root);
+    if !defects.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("symlink fixture defects: {}", defects.join("; ")),
+        ));
+    }
     Ok(records)
 }
 
@@ -984,7 +1053,7 @@ fn epub(
         spine.push_str(&format!("    <itemref idref=\"chapter-{number}\"/>\n"));
         archive.add(
             &format!("OEBPS/text/chapter-{number}.xhtml"),
-            chapter_xhtml(title, heading, body).as_bytes(),
+            chapter_xhtml(title, heading, body, language).as_bytes(),
         );
     }
     if let Some(cover) = cover {
@@ -1032,18 +1101,26 @@ fn epub(
         )
         .as_bytes(),
     );
-    archive.add("OEBPS/nav.xhtml", nav_xhtml(title, chapters).as_bytes());
+    archive.add(
+        "OEBPS/nav.xhtml",
+        nav_xhtml(title, chapters, language).as_bytes(),
+    );
     archive.add("OEBPS/toc.ncx", toc_ncx(title, chapters).as_bytes());
     archive.finish()
 }
 
 const EPUB_STYLE: &str = "body { font-family: serif; margin: 1.5em; }\nh1 { font-size: 1.4em; }\np { margin: 0.8em 0; }\n";
 
-fn chapter_xhtml(title: &str, heading: &str, body: &str) -> String {
+/// One chapter document.
+///
+/// `language` is the publication language from the OPF, so the document-language
+/// metadata inside the archive agrees with `<dc:language>` for English *and*
+/// Japanese fixtures instead of always declaring English.
+fn chapter_xhtml(title: &str, heading: &str, body: &str, language: &str) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{language}">
   <head>
     <title>{}</title>
     <link rel="stylesheet" type="text/css" href="../style.css"/>
@@ -1060,7 +1137,9 @@ fn chapter_xhtml(title: &str, heading: &str, body: &str) -> String {
     )
 }
 
-fn nav_xhtml(title: &str, chapters: &[(&str, &str)]) -> String {
+/// The table-of-contents document, with the same declared language as the
+/// chapters.
+fn nav_xhtml(title: &str, chapters: &[(&str, &str)], language: &str) -> String {
     let mut entries = String::new();
     for (index, (heading, _)) in chapters.iter().enumerate() {
         entries.push_str(&format!(
@@ -1072,7 +1151,7 @@ fn nav_xhtml(title: &str, chapters: &[(&str, &str)]) -> String {
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="{language}">
   <head><title>{}</title></head>
   <body>
     <nav epub:type="toc" id="toc">

@@ -14,7 +14,7 @@ use super::super::{AddBookBehavior, LIBRARY_PAGE_SIZE, Message, ReadingMode};
 use super::fixtures::{IMPORT_EMPTY_FOLDER, IMPORT_FOLDER, IMPORT_LONG_FILES};
 use super::harness::Harness;
 use super::seed::seed_path;
-use crate::i18n::LanguagePreference;
+use crate::i18n::{I18n, LanguagePreference};
 use crate::pdf::ZoomMode;
 use crate::theme::ReaderTheme;
 
@@ -22,6 +22,16 @@ use crate::theme::ReaderTheme;
 pub(crate) const W1280: (f32, f32) = (1280.0, 800.0);
 pub(crate) const W900: (f32, f32) = (900.0, 700.0);
 pub(crate) const C390: (f32, f32) = (390.0, 844.0);
+/// A `W900` window tall enough to show the last item of the settings column.
+///
+/// The settings alert is the final child of the settings scroll column
+/// (`app.rs::settings_content`), so at the usual `W900` viewport it sits below
+/// the fold: the offscreen renderer has no user scroll interaction, and the
+/// application exposes no message that scrolls that column, so nothing in the
+/// model can bring it into view. The capture uses a viewport the page fits in
+/// instead of faking a scroll position; the composition, the theme and the
+/// layout rules are untouched, and the manifest records the size.
+pub(crate) const W900_TALL: (f32, f32) = (900.0, 1200.0);
 
 /// Locale of a capture, from the reference specification §2.1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +128,25 @@ fn review_rows_present(state: &super::super::State) -> bool {
     review_dialog_open(state) && !state.add_books_review_rows.is_empty()
 }
 
+/// Whether an interface resolved to English rather than to the host locale.
+///
+/// Used by the no-store captures, whose persisted preference is `System`: their
+/// recorded `EN` locale is only honest if the resolved interface really is the
+/// English one, so the assertion compares the rendered strings and the UI font
+/// with a known English interface instead of trusting the preference alone.
+/// `tests::english_and_japanese_interfaces_are_distinguishable` pins the
+/// discrimination in both directions.
+pub(crate) fn interface_resolved_english(i18n: &I18n) -> bool {
+    i18n.ui_font() == crate::typography::INTER
+        && [
+            "library-subtitle",
+            "settings-subtitle",
+            "empty-library-heading",
+        ]
+        .iter()
+        .all(|key| i18n.text(key) == I18n::new(LanguagePreference::English).text(key))
+}
+
 /// Assert that a capture reached the surface, language and state its rows claim.
 ///
 /// The runner calls this before rendering: a capture that silently shows the
@@ -133,15 +162,26 @@ pub(crate) fn assert_reached(scenario: &Scenario, state: &super::super::State) {
         scenario.surface().label()
     );
     match scenario.locale {
-        // Without a store there is no persisted preference to read: the
-        // application boots with `LanguagePreference::System` and only resolves
-        // it once initialization succeeds, so that is the honest expectation.
-        _ if scenario.base == Base::NoStore => assert_eq!(
-            state.i18n.preference(),
-            LanguagePreference::System,
-            "{}: no store, so the interface language stays unresolved",
-            scenario.id
-        ),
+        _ if scenario.base == Base::NoStore => {
+            // A capture without a store has no persisted preference to read, so
+            // it boots with `LanguagePreference::System`. That preference is
+            // *not* deferred: `I18n::new(System)` resolves it from the process
+            // locale immediately, which the runner pins to English before any
+            // state exists (`runner::pin_system_locale`). The capture therefore
+            // records `EN` and this asserts the interface really resolved to
+            // English rather than to the host machine's language.
+            assert_eq!(
+                state.i18n.preference(),
+                LanguagePreference::System,
+                "{}: no store, so the persisted preference stays `System`",
+                scenario.id
+            );
+            assert!(
+                interface_resolved_english(&state.i18n),
+                "{}: the no-store interface did not resolve to the English strings and font",
+                scenario.id
+            );
+        }
         Locale::Ja => assert_eq!(
             state.i18n.preference(),
             LanguagePreference::Japanese,
@@ -207,12 +247,17 @@ pub(crate) fn assert_reached(scenario: &Scenario, state: &super::super::State) {
         Kind::ImportStorageCurrent => {
             review_rows_present(state) && state.add_books_copy == Some(false)
         }
-        Kind::ImportInProgress => state.adding_books,
+        // `Message::AddSelectedBooks` closes the import dialog before it starts
+        // the copy, so both of these captures show the library: the in-flight
+        // one with the header action replaced by its cancel/progress state, the
+        // completed one with the imported book in the grid.
+        Kind::ImportInProgress => state.adding_books && !state.add_books_open,
         // The import resets `book_import_completed` when it finishes, so the
         // post-condition of a completed import is its visible effect: a book
         // that only exists in the import sources is now in the library.
         Kind::ImportCompleted => {
             !state.adding_books
+                && !state.add_books_open
                 && state
                     .library_books
                     .iter()
@@ -490,7 +535,8 @@ impl Scenario {
             }
             Kind::SettingsError => {
                 "`Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: \
-                 Err(..) }`"
+                 Err(..) }` with synthetic reference text, because a real permission failure \
+                 cannot be triggered in-process; the banner composition is production"
                     .to_owned()
             }
             Kind::SettingsDisabledImporting => {
@@ -526,6 +572,36 @@ impl Scenario {
             // Every other capture is the library; the import dialog is an
             // overlay on top of it, not a screen of its own.
             _ => Surface::Library,
+        }
+    }
+
+    /// The manifest entry this capture produces, without rendered pixels.
+    ///
+    /// The runner fills `sha256` and `bytes` in from the render; the
+    /// non-rendering evidence validator compares this entry against the
+    /// committed manifest, so the capture table and the evidence cannot drift
+    /// apart without a test failing.
+    pub(crate) fn expected_capture(&self) -> super::manifest::CaptureEntry {
+        let (width, height) = self.client;
+        let (image_width, image_height) = super::render::physical_size(width, height, self.dpr);
+        super::manifest::CaptureEntry {
+            id: self.id.to_owned(),
+            family: self.family.to_owned(),
+            state: state_id(self).to_owned(),
+            image: format!("captures/{}.png", self.id),
+            sha256: String::new(),
+            bytes: 0,
+            client_width: width,
+            client_height: height,
+            image_width,
+            image_height,
+            dpr: self.dpr,
+            locale: self.locale.code().to_owned(),
+            fixture: self.fixture.to_owned(),
+            state_derivation: self.derivation(),
+            settings: self.settings(),
+            rows: self.rows.iter().map(|row| (*row).to_owned()).collect(),
+            notes: self.notes.iter().map(|note| (*note).to_owned()).collect(),
         }
     }
 
@@ -609,14 +685,17 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
         Scenario {
             id: "lib-wide-w1280-ja",
             family: "1B-LIB-WIDE",
-            rows: &["LB-03", "LB-04", "LB-05", "LB-07", "LB-11", "LB-13"],
+            rows: &["LB-03", "LB-04", "LB-07", "LB-11", "LB-13"],
             locale: Locale::Ja,
             client: W1280,
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
-            notes: &[],
+            notes: &[
+                "`LB-05` is the compact filter row and is covered by the `C390` captures, not by \
+                 this wide one",
+            ],
         },
         Scenario {
             id: "lib-wide-w1280-dpr2",
@@ -631,22 +710,26 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             notes: &[
                 "DPR 2 sharpness subset (specification `D2`); composition is identical to \
                  `lib-wide-w1280-en`, only the raster density differs",
-                "cover bitmaps come from the seeded cover blobs; the lazy-load path itself \
-                 (`sensor().on_show`) needs a real window and is not exercised here",
+                "The cards' cover sensors run through the capture's redraw path, so a visible card \
+                 without a decoded cover requests it exactly like a real window; a real window's \
+                 scroll- and paging-driven sensor transitions are not reproduced offscreen",
             ],
         },
         // -- 1B-LIB-COMPACT ----------------------------------------------------
         Scenario {
             id: "lib-compact-c390-en",
             family: "1B-LIB-COMPACT",
-            rows: &["LB-02", "LB-05", "LB-12", "LB-18"],
+            rows: &["LB-02", "LB-05", "LB-12"],
             locale: Locale::En,
             client: C390,
             dpr: 1.0,
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
-            notes: &[],
+            notes: &[
+                "`LB-12` is the missing-cover card in compact form; it uses the populated seed, so \
+                 the empty-library row `LB-18` is covered by `lib-state-empty-c390` instead",
+            ],
         },
         Scenario {
             id: "lib-compact-c390-ja",
@@ -1087,6 +1170,8 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             1.0,
             Kind::ImportInProgress,
             &[
+                "`AddSelectedBooks` closes the dialog before the copy starts, so this capture is the \
+                 library with the header action in its import state, not a dialog state",
                 "The import task is started and deliberately left unsettled, so the header action \
                  shows the real cancel/progress label with 0 of N; mid-import counts are not \
                  captured because the parallel copy tasks complete in a scheduling-dependent order",
@@ -1103,6 +1188,8 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             kind: Kind::ImportCompleted,
             fixture: "G1 seeded library (46 books) + import sources",
             notes: &[
+                "The import dialog is closed by `AddSelectedBooks`, so this capture is the library \
+                 after the import, with the imported book in the grid",
                 "Runs against its own disposable seed, because the import adds rows to the store",
                 "The imported books are copied into the disposable managed directory; the \
                  committed library is untouched",
@@ -1191,12 +1278,19 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             "settings-error-w900-en",
             &["ST-06"],
             Locale::En,
-            W900,
+            W900_TALL,
             1.0,
             Kind::SettingsError,
             &[
                 "ST-06 acceptance stays with 6B's renders; this is the Iced reference for the \
                  error banner",
+                "The viewport is taller than the usual `W900` window (`W900_TALL`) because the \
+                 alert is the last item of the settings scroll column and this renderer has no \
+                 scroll interaction: a taller window is the only way to show the real banner \
+                 composition without inventing a scroll position",
+                "The failure text is synthetic reference text delivered through \
+                 `ManagedLibraryMovePlanned { result: Err(..) }`: no real filesystem failure is \
+                 triggered, because the move target is a fixed path the capture never writes",
             ],
         ),
         settings(
@@ -1346,7 +1440,12 @@ pub(crate) fn matrix_rows() -> (
 
 /// Apply a scenario to a harness, reaching the state through production
 /// messages only.
-pub(crate) async fn apply(scenario: &Scenario, harness: &mut Harness, fixtures_root: &Path) {
+pub(crate) async fn apply(
+    scenario: &Scenario,
+    harness: &mut Harness,
+    fixtures_root: &Path,
+    data_root: &Path,
+) {
     // The interface language comes first: it is a property of the capture, not
     // of its state, and it must not be able to swallow the state dispatch (a
     // Japanese settings capture that only switched language would silently
@@ -1445,7 +1544,7 @@ pub(crate) async fn apply(scenario: &Scenario, harness: &mut Harness, fixtures_r
                 .await;
         }
         Kind::LibraryStorageError => {
-            let error = super::seed::storage_failure_message().await;
+            let error = super::seed::storage_failure_message(data_root).await;
             harness.dispatch(Message::Initialized(Err(error))).await;
         }
         Kind::ImportEntry => {
@@ -1592,7 +1691,7 @@ pub(crate) async fn apply(scenario: &Scenario, harness: &mut Harness, fixtures_r
             harness.dispatch(Message::ShowSettings).await;
         }
         Kind::SettingsUnavailable => {
-            let error = super::seed::storage_failure_message().await;
+            let error = super::seed::storage_failure_message(data_root).await;
             harness.dispatch(Message::Initialized(Err(error))).await;
             harness.dispatch(Message::ShowSettings).await;
         }
@@ -1669,9 +1768,10 @@ pub(crate) fn state_id(scenario: &Scenario) -> &'static str {
         | Kind::ImportNoSupported
         | Kind::ImportStorageCopy
         | Kind::ImportStorageCurrent
-        | Kind::ImportInProgress
-        | Kind::ImportCompleted
         | Kind::SharpnessImport => "library+import-dialog",
+        // `AddSelectedBooks` closes the dialog, so the in-flight and completed
+        // captures are the library surface.
+        Kind::ImportInProgress | Kind::ImportCompleted => "library",
         Kind::SettingsDefault
         | Kind::SettingsJapanese
         | Kind::SettingsChanged
