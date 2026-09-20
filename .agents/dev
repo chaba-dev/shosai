@@ -5,6 +5,10 @@ nix_bin="$HOME/.nix-profile/bin/nix"
 repo_root="$(cd "$(dirname "$BASH_SOURCE")/.." && pwd)"
 
 if [[ ! -x "$nix_bin" ]]; then
+  nix_bin="$(command -v nix || true)"
+fi
+
+if [[ ! -x "$nix_bin" ]]; then
   echo "Nix is not installed; run .agents/setup first." >&2
   exit 1
 fi
