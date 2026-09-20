@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -39,6 +39,14 @@ check-fmt-rust:
 ## Check Dart formatting without changing files
 check-fmt-flutter:
 	cd flutter && dart format --output=none --set-exit-if-changed integration_test lib test
+
+## Render the 1B reference captures (deterministic Iced PNGs + provenance manifest).
+## Set VERIFY=1 to re-render without writing and fail if anything differs from the
+## committed evidence (see docs/reference-captures.md).
+reference-shots:
+	@SHOSAI_REFERENCE_SHOTS_VERIFY="$(VERIFY)" \
+	SHOSAI_REFERENCE_SHOTS_COMMAND="make reference-shots$(if $(VERIFY), VERIFY=$(VERIFY),)" \
+	cargo test --package shosai-app --bin shosai reference_shots_capture -- --ignored --nocapture
 
 ## Run all Rust, script, bridge, and Flutter tests
 test:

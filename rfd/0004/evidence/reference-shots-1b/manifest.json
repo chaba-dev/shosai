@@ -1,0 +1,2695 @@
+{
+  "schema": 1,
+  "package": "1B",
+  "entry_point": "make reference-shots",
+  "command": "make reference-shots",
+  "capture_code_revision": "bebec1ff30197e24025808e368e7a82ae72f7eca",
+  "capture_code_revision_source": "jj @ working-copy commit",
+  "capture_code_change_id": "nqrsuovkrqywxyswwsyrvluvxvkvttzr",
+  "capture_code_bookmark": "none",
+  "capture_code_note": "`capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the stable `capture_code_change_id` plus the committed evidence change is the durable mapping; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.",
+  "pinned_design_base": "1e54270a6bb24f15630ece336a0575bdbe5be113",
+  "pinned_design_base_subject": "main@origin #108 (refactor(flutter): organize the frontend into Elm modules mirroring Iced)",
+  "output_directory": "/home/darwin/workspace/shosai-1b/crates/shosai-app/../../rfd/0004/evidence/reference-shots-1b",
+  "preferences": [
+    {
+      "key": "language",
+      "value": "en-US"
+    },
+    {
+      "key": "library.add_behavior",
+      "value": "ask"
+    },
+    {
+      "key": "reader.default_mode",
+      "value": "paginated"
+    },
+    {
+      "key": "reader.default_theme",
+      "value": "light"
+    },
+    {
+      "key": "reader.default_epub_font_size",
+      "value": "16"
+    },
+    {
+      "key": "reader.default_epub_line_spacing",
+      "value": "1.6"
+    },
+    {
+      "key": "reader.default_pdf_zoom",
+      "value": "fit-page"
+    }
+  ],
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+    "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+    "renderer": "iced_tiny_skia 0.14 (software, in-process)",
+    "theme": "theme::application() — iced::Theme::custom(APP_BACKGROUND #F4F2ED)",
+    "default_font": "Inter Variable (bundled InterVariable.ttf)",
+    "default_text_size": 16.0,
+    "note": "No window, compositor, X server or GPU is involved: the production view is laid out and drawn offscreen with the same software renderer Iced falls back to, and the bundled fonts are loaded into Iced's global font system exactly like `iced::application(..).font(..)`."
+  },
+  "fonts": [
+    {
+      "role": "InterVariable.ttf (type.ui.family.latin)",
+      "sha256": "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf"
+    },
+    {
+      "role": "NotoSansJP-Variable.ttf (type.ui.family.japanese)",
+      "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f"
+    },
+    {
+      "role": "math font (type.math.family)",
+      "sha256": "4989b125924991b90d05b2d16e0e388c48f7d5bb8b30539bbf9c755278d0ccaf"
+    }
+  ],
+  "fixtures": {
+    "generator": "crates/shosai-app/src/app/reference_shots/fixtures.rs",
+    "redistribution": "Generated in-repo: every archive and image is produced by the deterministic generator above, no third-party content is embedded, and the generator reads no clock, locale or random source. The reused conformance book keeps its own documented redistribution statement.",
+    "files": [
+      {
+        "relative_path": "library/featured/annual-report-ja.pdf",
+        "sha256": "23732728a69033a54c97e036225e47358f16efe34db5cf9758f5c8e7d854a09f",
+        "bytes": 1897
+      },
+      {
+        "relative_path": "library/featured/comet-courier-02.cbz",
+        "sha256": "c994e598df6d7109b478f6e4aa6369e524aca8cb9dd93b74cd8581914e4bf5da",
+        "bytes": 7309
+      },
+      {
+        "relative_path": "library/featured/comet-courier.cbz",
+        "sha256": "44338ddf6fe912990286ea739930ba58585e7c5e85cfdcdfd2920bba8086f015",
+        "bytes": 29471
+      },
+      {
+        "relative_path": "library/featured/field-notes.pdf",
+        "sha256": "a0fefb21c66db28dd220c8f1eb4c0b918bc43d8327968b853c536f29a93d5a9b",
+        "bytes": 1796
+      },
+      {
+        "relative_path": "library/featured/kaze-no-mukougawa.epub",
+        "sha256": "3f6d111cf1cf9dea20bab44e1ced88455dc8cd65132d4705aa9469af68a6471a",
+        "bytes": 8748
+      },
+      {
+        "relative_path": "library/featured/mizu-no-kioku.epub",
+        "sha256": "bab6b4e2cfcb10f77868c1e37c6b9dd392ec30f09548577bd12c7a7bc728b1a3",
+        "bytes": 9376
+      },
+      {
+        "relative_path": "library/featured/paper-lanterns.epub",
+        "sha256": "b31f7c0d4835fdfc466293019670cb4736d7870f0832d458a82cc1ea6f674664",
+        "bytes": 8361
+      },
+      {
+        "relative_path": "library/featured/quiet-cartographer.epub",
+        "sha256": "53e827f91c5fbd289850abdd2e5f6c6dd565d08b4ce6cc533a99eb9cfe754dfd",
+        "bytes": 9450
+      },
+      {
+        "relative_path": "library/featured/salt-and-iron.epub",
+        "sha256": "a0f0432d0b9a16bd5149e2f33979c105222492240d83d6403639eb31c8f9dd51",
+        "bytes": 8383
+      },
+      {
+        "relative_path": "library/featured/slow-rivers.epub",
+        "sha256": "bee90fdac975f9be395dbcb86550d9494865c748d3ad99979712c72cc8fa2b12",
+        "bytes": 10269
+      },
+      {
+        "relative_path": "library/featured/small-atlas.pdf",
+        "sha256": "d24bae152b96798aa920eeacff64adc0cd7f069f55c4c47fddbf32857708dd9b",
+        "bytes": 3143
+      },
+      {
+        "relative_path": "library/featured/toshokan-no-tebiki.epub",
+        "sha256": "aedfc74506ddb2bbab1a0e3ff1d259cc6e584227b43e07fdc9e747b76c16cc88",
+        "bytes": 8593
+      },
+      {
+        "relative_path": "library/featured/workshop-proceedings.epub",
+        "sha256": "a8eb238349d8d719a678ab767359fef940e29716166af81a9d3cb2c649c9a6cc",
+        "bytes": 4377
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-01.pdf",
+        "sha256": "cacb90fe769c9c9d05d4af6ccd08d510aa715910148d4201d87863417930f3ff",
+        "bytes": 1779
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-02.pdf",
+        "sha256": "d0dd7c4b2106cc997d4bfe800867b08421b1349e2e8ef385e0363926745f27b8",
+        "bytes": 1779
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-03.pdf",
+        "sha256": "e02f8c877367a416e8055556be91e5cf6b5bf28240987e1dccb7998851983c3a",
+        "bytes": 1779
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-04.pdf",
+        "sha256": "53bee08d8871157d5e8564e84639aa1284c729d9f1289f8c84a79a2050563ac8",
+        "bytes": 1779
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-05.pdf",
+        "sha256": "dc884ab3e4b8829cbb7b451eb06ad18c4b1b48b7bcc4464590b5203dc73d7874",
+        "bytes": 1781
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-06.pdf",
+        "sha256": "40b9acef0b98effb3b1f9d4f9ab8ac9c6790265b1bb1ef24db641019016be543",
+        "bytes": 1781
+      },
+      {
+        "relative_path": "library/filler/annual-ledger-07.pdf",
+        "sha256": "a4614cf811a5419c4cde173de57997f70f48fd89f6764ba1bc5aae8517db8c0f",
+        "bytes": 1779
+      },
+      {
+        "relative_path": "library/filler/collected-papers-01.epub",
+        "sha256": "5e21982130686ad354a8aa376a4c1a9c338a4020e5b0776104b02b1e7da80759",
+        "bytes": 8429
+      },
+      {
+        "relative_path": "library/filler/collected-papers-02.epub",
+        "sha256": "05188ccbda04a8195eafc317886a05e7744428dece925cfb15b71b2ce3286f1d",
+        "bytes": 7569
+      },
+      {
+        "relative_path": "library/filler/collected-papers-03.epub",
+        "sha256": "cc3b857abb9e1dec7bad79c44e22f746865056f953af547eb4c886562c9572fe",
+        "bytes": 9451
+      },
+      {
+        "relative_path": "library/filler/collected-papers-04.epub",
+        "sha256": "616c62d7b1797ae84bd5989733b1dd70b798bd9763db72e6444b137c4de9354a",
+        "bytes": 7629
+      },
+      {
+        "relative_path": "library/filler/collected-papers-05.epub",
+        "sha256": "f961909003e6bf47a017bf7dc46697dbeadc2fe2ad7a2fa3b964a4da762b3959",
+        "bytes": 4281
+      },
+      {
+        "relative_path": "library/filler/collected-papers-06.epub",
+        "sha256": "b146dacd6fb13182d993d0b58d1538e386c4196eb2f20259244071755ca1d917",
+        "bytes": 7569
+      },
+      {
+        "relative_path": "library/filler/collected-papers-07.epub",
+        "sha256": "4ef9bb047ec1b8270cfb883fa1d275eefd803dbf923c88dfcf621b7a686ffdec",
+        "bytes": 9443
+      },
+      {
+        "relative_path": "library/filler/collected-papers-08.epub",
+        "sha256": "89ab8ff2ffab31c6a3118d4357634a905cd7051d3442c750b40860c46598366b",
+        "bytes": 7653
+      },
+      {
+        "relative_path": "library/filler/collected-papers-09.epub",
+        "sha256": "76c887e7fff16767c525d8bf0f512329de8fcb90fda6c49692c6c03d56fe7d37",
+        "bytes": 8445
+      },
+      {
+        "relative_path": "library/filler/collected-papers-10.epub",
+        "sha256": "9ac9f940265fd58156ed5f3f892d76d66e81c070f86f3f914b4e036dd2e01e00",
+        "bytes": 3417
+      },
+      {
+        "relative_path": "library/filler/collected-papers-11.epub",
+        "sha256": "5357733cda3269a883b60fb5d554d0b47d8f122939f7492aee5b654855fea966",
+        "bytes": 9469
+      },
+      {
+        "relative_path": "library/filler/collected-papers-12.epub",
+        "sha256": "d5e35e917d32e4dd8db9e4c539b9ca33a8c76b465b4a0d79b3f5ef48f5976067",
+        "bytes": 7644
+      },
+      {
+        "relative_path": "library/filler/collected-papers-13.epub",
+        "sha256": "b0931d206d3975524057765d8f7483c3766dc6e3c89f59719ec92538dc4957af",
+        "bytes": 8438
+      },
+      {
+        "relative_path": "library/filler/collected-papers-14.epub",
+        "sha256": "2b94dad4cdcef4c1d083f66f29edcec78e744e52fba9359d8a3b5adc898d6570",
+        "bytes": 7588
+      },
+      {
+        "relative_path": "library/filler/collected-papers-15.epub",
+        "sha256": "0684bef2e8d51f4d4a1babd343b05ae12e7234d0a4445435f8851a8ec7e19e16",
+        "bytes": 5305
+      },
+      {
+        "relative_path": "library/filler/collected-papers-16.epub",
+        "sha256": "5c9df4103f6a9f92a505abd763b30e01b862b5816b752dd111307828600f6c2a",
+        "bytes": 7629
+      },
+      {
+        "relative_path": "library/filler/collected-papers-17.epub",
+        "sha256": "d97561eb571445a80767f2c74bdcf0d831340e0e87182ef8df1474aa5f08936b",
+        "bytes": 8420
+      },
+      {
+        "relative_path": "library/filler/collected-papers-18.epub",
+        "sha256": "182a1f1efcf93788d6bbb5e2d33781ee9dd0856173290cfa26c1c7963976cc46",
+        "bytes": 3422
+      },
+      {
+        "relative_path": "library/filler/sketchbook-01.cbz",
+        "sha256": "7d316ee7469d5a9e0edcfe1738060840e57ea973a6be5d5a8c09b8dd2face650",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-02.cbz",
+        "sha256": "d5e4aaf201b519abf436da73e37df04a3d59d8aee35c1eb02fa3117ec09bdd78",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-03.cbz",
+        "sha256": "ab383a6908cd8bc6c6a10c65521fbecaafd22a3990883e08976b210abf2ea0d3",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-04.cbz",
+        "sha256": "c2b45368846bd694b8c525f03345eed81d5ef6272bfb314bbeccb4fb7ef6fdca",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-05.cbz",
+        "sha256": "b13c16939fab7718ae827877f0d143fd69388668bf1c8bf17f8ccb5adfcfba48",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-06.cbz",
+        "sha256": "66161a0d822f782cebc6f30e3be4023811c422219763538657ac165fbc1c8fba",
+        "bytes": 7296
+      },
+      {
+        "relative_path": "library/filler/sketchbook-07.cbz",
+        "sha256": "872b77c1c41b72e9a5d3fdbb226c30020bcc99958b9a16449fd04b592dadff43",
+        "bytes": 7295
+      },
+      {
+        "relative_path": "sources/long-names/司書の手引き と 目録作成の実際 (改訂第三版).pdf",
+        "sha256": "8ff9e3b1bbc58e97c091ee0fb07cd08ffe46bd1b0ac60378ebe2e6daefb5b807",
+        "bytes": 1857
+      },
+      {
+        "relative_path": "sources/long-names/砂漠のアーカイブ — 失われた書架をめぐる長い旅路.epub",
+        "sha256": "e7924f5044d6fb43903a10dd2bc35a457a81873ea8d4ebfafa762ae98019ac29",
+        "bytes": 7507
+      },
+      {
+        "relative_path": "sources/long-names/静かな海の図書館の一年 — 年次報告書と収蔵目録 2026年版.epub",
+        "sha256": "b35b625ba1917138ec01bfd56a83ba187aa2d96addfd4e0863faa554e0f8d6ea",
+        "bytes": 7507
+      },
+      {
+        "relative_path": "sources/no-supported/cover.jpg",
+        "sha256": "da8ec641a50d8b38984acfac8d81050b8aa4055e66762653c63c0e83c8e89c2d",
+        "bytes": 3878
+      },
+      {
+        "relative_path": "sources/no-supported/readme.txt",
+        "sha256": "bcdedd33a06817adc6f64f0a433409ad7ea1a65080186588c4e271f718bf8b45",
+        "bytes": 34
+      },
+      {
+        "relative_path": "sources/reading-queue/notes.txt",
+        "sha256": "153bdab31d1c96623f1c2f91c03681838c472e5c4ad15462027c9ed590124b17",
+        "bytes": 36
+      },
+      {
+        "relative_path": "sources/reading-queue/quiet-cartographer.epub",
+        "sha256": "53e827f91c5fbd289850abdd2e5f6c6dd565d08b4ce6cc533a99eb9cfe754dfd",
+        "bytes": 9450
+      },
+      {
+        "relative_path": "sources/reading-queue/shelf-a/bright-harbor.epub",
+        "sha256": "e3c3825b0f4e44f2d386f6e3a6f31a13588da781a2389c5c738364f527a2a2d3",
+        "bytes": 8353
+      },
+      {
+        "relative_path": "sources/reading-queue/shelf-b/bright-harbor.cbz",
+        "sha256": "8275d2d164978560c255ccfb64e91d9201d5bca47701d43391256626deec8809",
+        "bytes": 7299
+      },
+      {
+        "relative_path": "sources/reading-queue/tandem-a.epub",
+        "sha256": "3730064a62240536ece558eb57b0fcec7108e2a58057283f11b095e960652f9c",
+        "bytes": 7444
+      },
+      {
+        "relative_path": "sources/reading-queue/tandem-b.epub",
+        "sha256": "3730064a62240536ece558eb57b0fcec7108e2a58057283f11b095e960652f9c",
+        "bytes": 7444
+      },
+      {
+        "relative_path": "sources/reading-queue/砂漠のアーカイブ — 失われた書架をめぐる長い旅路.epub",
+        "sha256": "cdebcbb91faba3abe5589ced53d92d2562c5eb7014e22dbd23e257fcb65f9161",
+        "bytes": 7492
+      },
+      {
+        "relative_path": "sources/reading-queue/静かな海の図書館の一年 — 年次報告書と収蔵目録 2026年版.epub",
+        "sha256": "2eecbb935b2e9568a48ad8c835b79afe92fdbf3d3de703c92eb55dba996039b2",
+        "bytes": 7525
+      }
+    ],
+    "reused": [
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/conformance.epub",
+        "sha256": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "conformance sampler book in the seeded library",
+        "verified_sha256": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a"
+      }
+    ],
+    "broken_symlinks_available": true
+  },
+  "seeded_library": {
+    "profile": "G1 library seed: 14 featured books (incl. one reused conformance book and two without covers) + 32 filler books, one continue-reading entry",
+    "count": 46,
+    "page_size": 40,
+    "order": "last_read DESC NULLS LAST, date_added DESC, id DESC",
+    "continue_reading": "The Quiet Cartographer (library/featured/quiet-cartographer.epub) at 42%",
+    "books": [
+      {
+        "fixture": "library/filler/collected-papers-01.epub",
+        "id": 1,
+        "title": "Collected Papers, Volume 01",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8429,
+        "content_hash": "5e21982130686ad354a8aa376a4c1a9c338a4020e5b0776104b02b1e7da80759",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-02.epub",
+        "id": 2,
+        "title": "Collected Papers, Volume 02: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7569,
+        "content_hash": "05188ccbda04a8195eafc317886a05e7744428dece925cfb15b71b2ce3286f1d",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-03.epub",
+        "id": 3,
+        "title": "Collected Papers, Volume 03: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 9451,
+        "content_hash": "cc3b857abb9e1dec7bad79c44e22f746865056f953af547eb4c886562c9572fe",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-04.epub",
+        "id": 4,
+        "title": "Collected Papers, Volume 04: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 7629,
+        "content_hash": "616c62d7b1797ae84bd5989733b1dd70b798bd9763db72e6444b137c4de9354a",
+        "progress": 0.13,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-05.epub",
+        "id": 5,
+        "title": "Collected Papers, Volume 05",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 4281,
+        "content_hash": "f961909003e6bf47a017bf7dc46697dbeadc2fe2ad7a2fa3b964a4da762b3959",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-06.epub",
+        "id": 6,
+        "title": "Collected Papers, Volume 06: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7569,
+        "content_hash": "b146dacd6fb13182d993d0b58d1538e386c4196eb2f20259244071755ca1d917",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-07.epub",
+        "id": 7,
+        "title": "Collected Papers, Volume 07: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 9443,
+        "content_hash": "4ef9bb047ec1b8270cfb883fa1d275eefd803dbf923c88dfcf621b7a686ffdec",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-08.epub",
+        "id": 8,
+        "title": "Collected Papers, Volume 08: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7653,
+        "content_hash": "89ab8ff2ffab31c6a3118d4357634a905cd7051d3442c750b40860c46598366b",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-09.epub",
+        "id": 9,
+        "title": "Collected Papers, Volume 09",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 8445,
+        "content_hash": "76c887e7fff16767c525d8bf0f512329de8fcb90fda6c49692c6c03d56fe7d37",
+        "progress": 0.62,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-10.epub",
+        "id": 10,
+        "title": "Collected Papers, Volume 10: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 3417,
+        "content_hash": "9ac9f940265fd58156ed5f3f892d76d66e81c070f86f3f914b4e036dd2e01e00",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-11.epub",
+        "id": 11,
+        "title": "Collected Papers, Volume 11: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 9469,
+        "content_hash": "5357733cda3269a883b60fb5d554d0b47d8f122939f7492aee5b654855fea966",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-12.epub",
+        "id": 12,
+        "title": "Collected Papers, Volume 12: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7644,
+        "content_hash": "d5e35e917d32e4dd8db9e4c539b9ca33a8c76b465b4a0d79b3f5ef48f5976067",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-13.epub",
+        "id": 13,
+        "title": "Collected Papers, Volume 13",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8438,
+        "content_hash": "b0931d206d3975524057765d8f7483c3766dc6e3c89f59719ec92538dc4957af",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-14.epub",
+        "id": 14,
+        "title": "Collected Papers, Volume 14: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7588,
+        "content_hash": "2b94dad4cdcef4c1d083f66f29edcec78e744e52fba9359d8a3b5adc898d6570",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-15.epub",
+        "id": 15,
+        "title": "Collected Papers, Volume 15: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 5305,
+        "content_hash": "0684bef2e8d51f4d4a1babd343b05ae12e7234d0a4445435f8851a8ec7e19e16",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-16.epub",
+        "id": 16,
+        "title": "Collected Papers, Volume 16: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 7629,
+        "content_hash": "5c9df4103f6a9f92a505abd763b30e01b862b5816b752dd111307828600f6c2a",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-01.pdf",
+        "id": 17,
+        "title": "Annual Ledger 01",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1779,
+        "content_hash": "cacb90fe769c9c9d05d4af6ccd08d510aa715910148d4201d87863417930f3ff",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-02.pdf",
+        "id": 18,
+        "title": "Annual Ledger 02",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1779,
+        "content_hash": "d0dd7c4b2106cc997d4bfe800867b08421b1349e2e8ef385e0363926745f27b8",
+        "progress": 0.21,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-03.pdf",
+        "id": 19,
+        "title": "Annual Ledger 03",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1779,
+        "content_hash": "e02f8c877367a416e8055556be91e5cf6b5bf28240987e1dccb7998851983c3a",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-04.pdf",
+        "id": 20,
+        "title": "Annual Ledger 04",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1779,
+        "content_hash": "53bee08d8871157d5e8564e84639aa1284c729d9f1289f8c84a79a2050563ac8",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-05.pdf",
+        "id": 21,
+        "title": "Annual Ledger 05",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1781,
+        "content_hash": "dc884ab3e4b8829cbb7b451eb06ad18c4b1b48b7bcc4464590b5203dc73d7874",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-06.pdf",
+        "id": 22,
+        "title": "Annual Ledger 06",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1781,
+        "content_hash": "40b9acef0b98effb3b1f9d4f9ab8ac9c6790265b1bb1ef24db641019016be543",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-01.cbz",
+        "id": 23,
+        "title": "sketchbook-01",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "7d316ee7469d5a9e0edcfe1738060840e57ea973a6be5d5a8c09b8dd2face650",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-02.cbz",
+        "id": 24,
+        "title": "sketchbook-02",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "d5e4aaf201b519abf436da73e37df04a3d59d8aee35c1eb02fa3117ec09bdd78",
+        "progress": 0.48,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-03.cbz",
+        "id": 25,
+        "title": "sketchbook-03",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "ab383a6908cd8bc6c6a10c65521fbecaafd22a3990883e08976b210abf2ea0d3",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-04.cbz",
+        "id": 26,
+        "title": "sketchbook-04",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "c2b45368846bd694b8c525f03345eed81d5ef6272bfb314bbeccb4fb7ef6fdca",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-05.cbz",
+        "id": 27,
+        "title": "sketchbook-05",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "b13c16939fab7718ae827877f0d143fd69388668bf1c8bf17f8ccb5adfcfba48",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-06.cbz",
+        "id": 28,
+        "title": "sketchbook-06",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "66161a0d822f782cebc6f30e3be4023811c422219763538657ac165fbc1c8fba",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-17.epub",
+        "id": 29,
+        "title": "Collected Papers, Volume 17",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8420,
+        "content_hash": "d97561eb571445a80767f2c74bdcf0d831340e0e87182ef8df1474aa5f08936b",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-07.pdf",
+        "id": 30,
+        "title": "Annual Ledger 07",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1779,
+        "content_hash": "a4614cf811a5419c4cde173de57997f70f48fd89f6764ba1bc5aae8517db8c0f",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-07.cbz",
+        "id": 31,
+        "title": "sketchbook-07",
+        "format": "cbz",
+        "file_size": 7295,
+        "content_hash": "872b77c1c41b72e9a5d3fdbb226c30020bcc99958b9a16449fd04b592dadff43",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-18.epub",
+        "id": 32,
+        "title": "Collected Papers, Volume 18",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 3422,
+        "content_hash": "182a1f1efcf93788d6bbb5e2d33781ee9dd0856173290cfa26c1c7963976cc46",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/conformance.epub",
+        "id": 33,
+        "title": "Shosai Conformance: conformance",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 16289,
+        "content_hash": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a",
+        "progress": 0.0,
+        "date_added": "2026-02-13 12:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/featured/comet-courier-02.cbz",
+        "id": 34,
+        "title": "comet-courier-02",
+        "format": "cbz",
+        "file_size": 7309,
+        "content_hash": "c994e598df6d7109b478f6e4aa6369e524aca8cb9dd93b74cd8581914e4bf5da",
+        "progress": 0.0,
+        "date_added": "2026-02-02 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/annual-report-ja.pdf",
+        "id": 35,
+        "title": "技術報告書 2026 — 書斎プロジェクトの年次報告",
+        "author": "書斎編集部",
+        "format": "pdf",
+        "file_size": 1897,
+        "content_hash": "23732728a69033a54c97e036225e47358f16efe34db5cf9758f5c8e7d854a09f",
+        "progress": 0.6,
+        "date_added": "2026-02-03 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/mizu-no-kioku.epub",
+        "id": 36,
+        "title": "水の記憶、砂の記録",
+        "author": "佐藤 健一",
+        "format": "epub",
+        "file_size": 9376,
+        "content_hash": "bab6b4e2cfcb10f77868c1e37c6b9dd392ec30f09548577bd12c7a7bc728b1a3",
+        "progress": 0.24,
+        "date_added": "2026-02-04 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/toshokan-no-tebiki.epub",
+        "id": 37,
+        "title": "司書の手引き / The Librarian's Companion",
+        "author": "Darwin Shosai",
+        "format": "epub",
+        "file_size": 8593,
+        "content_hash": "aedfc74506ddb2bbab1a0e3ff1d259cc6e584227b43e07fdc9e747b76c16cc88",
+        "progress": 0.0,
+        "date_added": "2026-02-05 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/kaze-no-mukougawa.epub",
+        "id": 38,
+        "title": "風の向こう側にある図書館と、そこで暮らす人々の長い物語",
+        "author": "日本 花子",
+        "format": "epub",
+        "file_size": 8748,
+        "content_hash": "3f6d111cf1cf9dea20bab44e1ced88455dc8cd65132d4705aa9469af68a6471a",
+        "progress": 0.05,
+        "date_added": "2026-02-06 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/comet-courier.cbz",
+        "id": 39,
+        "title": "comet-courier",
+        "format": "cbz",
+        "file_size": 29471,
+        "content_hash": "44338ddf6fe912990286ea739930ba58585e7c5e85cfdcdfd2920bba8086f015",
+        "progress": 0.31,
+        "date_added": "2026-02-07 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/field-notes.pdf",
+        "id": 40,
+        "title": "Field Notes, 1962-1968",
+        "author": "R. Okafor",
+        "format": "pdf",
+        "file_size": 1796,
+        "content_hash": "a0fefb21c66db28dd220c8f1eb4c0b918bc43d8327968b853c536f29a93d5a9b",
+        "progress": 0.0,
+        "date_added": "2026-02-08 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/small-atlas.pdf",
+        "id": 41,
+        "title": "A Small Atlas of Imaginary Coastlines",
+        "author": "P. Herrera",
+        "format": "pdf",
+        "file_size": 3143,
+        "content_hash": "d24bae152b96798aa920eeacff64adc0cd7f069f55c4c47fddbf32857708dd9b",
+        "progress": 0.0,
+        "date_added": "2026-02-09 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/workshop-proceedings.epub",
+        "id": 42,
+        "title": "Proceedings of the Ninth Shosai Workshop",
+        "author": "Shosai Project",
+        "format": "epub",
+        "file_size": 4377,
+        "content_hash": "a8eb238349d8d719a678ab767359fef940e29716166af81a9d3cb2c649c9a6cc",
+        "progress": 0.0,
+        "date_added": "2026-02-10 10:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/featured/paper-lanterns.epub",
+        "id": 43,
+        "title": "Paper Lanterns at Dusk",
+        "author": "Elena Marchetti",
+        "format": "epub",
+        "file_size": 8361,
+        "content_hash": "b31f7c0d4835fdfc466293019670cb4736d7870f0832d458a82cc1ea6f674664",
+        "progress": 0.0,
+        "date_added": "2026-02-11 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/slow-rivers.epub",
+        "id": 44,
+        "title": "A Field Guide to Slow Rivers",
+        "author": "Tomoko Sato",
+        "format": "epub",
+        "file_size": 10269,
+        "content_hash": "bee90fdac975f9be395dbcb86550d9494865c748d3ad99979712c72cc8fa2b12",
+        "progress": 0.78,
+        "date_added": "2026-02-12 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/salt-and-iron.epub",
+        "id": 45,
+        "title": "Salt and Iron",
+        "author": "Nikolai Varga",
+        "format": "epub",
+        "file_size": 8383,
+        "content_hash": "a0f0432d0b9a16bd5149e2f33979c105222492240d83d6403639eb31c8f9dd51",
+        "progress": 0.0,
+        "date_added": "2026-02-13 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/quiet-cartographer.epub",
+        "id": 46,
+        "title": "The Quiet Cartographer",
+        "author": "Amara Okonkwo",
+        "format": "epub",
+        "file_size": 9450,
+        "content_hash": "53e827f91c5fbd289850abdd2e5f6c6dd565d08b4ce6cc533a99eb9cfe754dfd",
+        "progress": 0.42,
+        "date_added": "2026-02-14 10:00:00",
+        "last_read": "2026-02-14 09:30:00",
+        "has_cover": true
+      }
+    ]
+  },
+  "captures": [
+    {
+      "id": "lib-wide-w1280-en",
+      "family": "1B-LIB-WIDE",
+      "state": "library",
+      "image": "captures/lib-wide-w1280-en.png",
+      "sha256": "9d0b8f5e8cfc3c007b054e3025d769107bcd64c696bfdfb3b3ddffe55bb667e6",
+      "bytes": 225163,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-01",
+        "LB-04",
+        "LB-06",
+        "LB-07",
+        "LB-11",
+        "LB-12",
+        "LB-16"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-wide-w900-en",
+      "family": "1B-LIB-WIDE",
+      "state": "library",
+      "image": "captures/lib-wide-w900-en.png",
+      "sha256": "514e018fa91183cf9628c799d3ebf921551a6500bacc38a83122a30bbfc22e9a",
+      "bytes": 139971,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-01",
+        "LB-07",
+        "LB-11"
+      ],
+      "notes": [
+        "Iced default window (`main.rs`); wide under both breakpoints, so it is a wide reference and not a compact one"
+      ]
+    },
+    {
+      "id": "lib-wide-w1280-ja",
+      "family": "1B-LIB-WIDE",
+      "state": "library",
+      "image": "captures/lib-wide-w1280-ja.png",
+      "sha256": "0da80e214f58861dfeea2d334481d10c3278fb74b48d6cf2c8a10d99bb00fa26",
+      "bytes": 217401,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+      "state_derivation": "as the loaded library, then `Message::SelectLanguage(Japanese)`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "LB-03",
+        "LB-04",
+        "LB-05",
+        "LB-07",
+        "LB-11",
+        "LB-13"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-wide-w1280-dpr2",
+      "family": "1B-LIB-WIDE",
+      "state": "library",
+      "image": "captures/lib-wide-w1280-dpr2.png",
+      "sha256": "c0cce61392377e910318a1b48569a685e890bf9856565b513fa6b62701b630cd",
+      "bytes": 616123,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 2560,
+      "image_height": 1600,
+      "dpr": 2.0,
+      "locale": "MIX",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "as the loaded library, rendered at DPR 2",
+      "settings": [],
+      "rows": [
+        "LB-15"
+      ],
+      "notes": [
+        "DPR 2 sharpness subset (specification `D2`); composition is identical to `lib-wide-w1280-en`, only the raster density differs",
+        "cover bitmaps come from the seeded cover blobs; the lazy-load path itself (`sensor().on_show`) needs a real window and is not exercised here"
+      ]
+    },
+    {
+      "id": "lib-compact-c390-en",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-compact-c390-en.png",
+      "sha256": "b5320113375b58f88254356b41d0ab6f4b0e54f6a82424f2aece075a23fb0336",
+      "bytes": 107420,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-02",
+        "LB-05",
+        "LB-12",
+        "LB-18"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-compact-c390-ja",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-compact-c390-ja.png",
+      "sha256": "4b4446cb48af756fd5446e4fd8c7115fbfb75ebdc4f46b181a880f642c49e8d4",
+      "bytes": 102294,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+      "state_derivation": "as the loaded library, then `Message::SelectLanguage(Japanese)`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "LB-02",
+        "LB-03",
+        "LB-05",
+        "LB-13"
+      ],
+      "notes": [
+        "Iced renders no `T200` text scaling, so the 200% text row stays with the accepting package"
+      ]
+    },
+    {
+      "id": "lib-breakpoint-759-en",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-breakpoint-759-en.png",
+      "sha256": "8871f6604292f1d736965c7b25897e559b16a0616c31099319ed4ab797b6bb3a",
+      "bytes": 117161,
+      "client_width": 759.0,
+      "client_height": 700.0,
+      "image_width": 759,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-03"
+      ],
+      "notes": [
+        "`B760±` probe: compact filter row"
+      ]
+    },
+    {
+      "id": "lib-breakpoint-760-en",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-breakpoint-760-en.png",
+      "sha256": "a264b981f38fc59ed1d51aecc404fe1af345b48c6f1e36b86b4d2252a1372e2d",
+      "bytes": 136776,
+      "client_width": 760.0,
+      "client_height": 700.0,
+      "image_width": 760,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-03"
+      ],
+      "notes": [
+        "`B760±` probe: wide sidebar at the breakpoint"
+      ]
+    },
+    {
+      "id": "lib-breakpoint-761-en",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-breakpoint-761-en.png",
+      "sha256": "51dc9551b44a662edaafdbc4b40f20e64f624cbf5cb9330c69246bcee5b669df",
+      "bytes": 139507,
+      "client_width": 761.0,
+      "client_height": 700.0,
+      "image_width": 761,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "seeded library loaded through `Message::Initialized` + the real library page and cover tasks",
+      "settings": [],
+      "rows": [
+        "LB-03"
+      ],
+      "notes": [
+        "`B760±` probe: wide sidebar"
+      ]
+    },
+    {
+      "id": "lib-compact-c390-dpr2",
+      "family": "1B-LIB-COMPACT",
+      "state": "library",
+      "image": "captures/lib-compact-c390-dpr2.png",
+      "sha256": "0c882467ee991afdf5031410d45406b4b92ad3a6378f119aa2a40ceaaa202072",
+      "bytes": 282594,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 780,
+      "image_height": 1688,
+      "dpr": 2.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "as the loaded library, rendered at DPR 2",
+      "settings": [],
+      "rows": [
+        "LB-15"
+      ],
+      "notes": [
+        "DPR 2 sharpness subset (specification `D2`)"
+      ]
+    },
+    {
+      "id": "lib-state-search-ja-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-search-ja-w1280.png",
+      "sha256": "4757091a457163644a0b85abcf7d622c34f6195f79fc7d5436af1e8d85ac027d",
+      "bytes": 78709,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "MIX",
+      "fixture": "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+      "state_derivation": "`Message::LibrarySearchChanged(\"図書館\")` settled through its debounce",
+      "settings": [],
+      "rows": [
+        "LB-08"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-search-no-matches-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-search-no-matches-w1280.png",
+      "sha256": "aa325fd73acd1a73485453139e2f9f360d455d9efc12cd3cbfe97e1cf0661d97",
+      "bytes": 65495,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LibrarySearchChanged(\"no such title\")` settled through its debounce",
+      "settings": [],
+      "rows": [
+        "LB-08",
+        "LB-19"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-filter-pdf-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-filter-pdf-w1280.png",
+      "sha256": "f4d6461eb11ec9b4c09e4359b75302fe0466ff37390c29f2f500f2cb1afddd79",
+      "bytes": 254178,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LibraryFilterChanged(Some(Pdf))` settled",
+      "settings": [],
+      "rows": [
+        "LB-06",
+        "LB-08"
+      ],
+      "notes": [
+        "The CBZ filter entry is a retained Flutter extension and has no Iced filter; Iced offers All/EPUB/PDF only"
+      ]
+    },
+    {
+      "id": "lib-state-search-with-filter-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-search-with-filter-w1280.png",
+      "sha256": "5a72a679290e8c3be61960d70a680c18ec8b136387a4fe714fd7fbda61443567",
+      "bytes": 189745,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LibraryFilterChanged(Some(Pdf))` then `Message::LibrarySearchChanged(\"annual\")`, both settled",
+      "settings": [],
+      "rows": [
+        "LB-08"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-loading-skeleton-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-loading-skeleton-w1280.png",
+      "sha256": "8625a738f4b1be5d4c0ccf258c00a0bd25cbb4c01963169a6801e0b1af8e5a9d",
+      "bytes": 87996,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::RefreshLibrary` dispatched without settling its page task: the first-page load state the window shows while the page loads, with the skeleton placeholders",
+      "settings": [],
+      "rows": [
+        "LB-17"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-loading-more-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-loading-more-w1280.png",
+      "sha256": "cc336c927f0a1b5affa6e870ebf08b7c6c7de0cfa2129a9fdc87ba2b88c713ee",
+      "bytes": 225164,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LoadMoreLibrary` dispatched without settling its page task",
+      "settings": [],
+      "rows": [
+        "LB-22"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-paged-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-paged-w1280.png",
+      "sha256": "ccd4b7dff65f0b44e9312cf63e84382981c5ba33589d94e9905e2ea849d9bc5a",
+      "bytes": 209551,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LoadMoreLibrary` settled",
+      "settings": [],
+      "rows": [
+        "LB-22"
+      ],
+      "notes": [
+        "46 books: the first page holds 40, the second page holds 6"
+      ]
+    },
+    {
+      "id": "lib-state-empty-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-empty-w1280.png",
+      "sha256": "e66a921972a5c86a40fbbd6a2f5b9b5e058b21378d40cff8de3558a61cb3cb3b",
+      "bytes": 77815,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "empty disposable store",
+      "state_derivation": "an empty disposable store loaded through `Message::Initialized`",
+      "settings": [],
+      "rows": [
+        "LB-18"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-empty-c390",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-empty-c390.png",
+      "sha256": "cd0af8ef9904b13bec1fae7791fadac8423f329eda1e770e8ae4ba1e03c14573",
+      "bytes": 58285,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "empty disposable store",
+      "state_derivation": "an empty disposable store loaded through `Message::Initialized`",
+      "settings": [],
+      "rows": [
+        "LB-18"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-load-error-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-load-error-w1280.png",
+      "sha256": "07d2078661848fe15bcfb0fa9da3d24289ab88593092425fbda07ebe3e16654d",
+      "bytes": 220704,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "a real `Library::page` failure (oversized query) delivered through `Message::LibraryLoaded { result: Err(..) }`, exactly like a failing production load",
+      "settings": [],
+      "rows": [
+        "LB-20"
+      ],
+      "notes": [
+        "The failure text is a real `Library` error; the library stays usable and shows the alert bar above the grid, which is Iced's load-error composition"
+      ]
+    },
+    {
+      "id": "lib-state-storage-error-w900",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-storage-error-w900.png",
+      "sha256": "33bb83d4097dea2fb9c9d21502a51b078d695acfbe018732002745087270f4d2",
+      "bytes": 72078,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "no store (real open failure)",
+      "state_derivation": "the real failure from opening a store where the data path is a file, delivered through `Message::Initialized(Err(..))`; the disposable path is replaced by a placeholder so the image stays deterministic",
+      "settings": [],
+      "rows": [
+        "LB-20"
+      ],
+      "notes": [
+        "Iced shows the storage failure inside the empty-library composition (there is no library to keep usable); there is no separate storage-error alert bar"
+      ]
+    },
+    {
+      "id": "lib-state-book-menu-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-book-menu-w1280.png",
+      "sha256": "529e78183de9fc56a0147620b70d814ecde5cc5cc0d0f82187ce30ed22adceb1",
+      "bytes": 228999,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ToggleBookMenu(first book id)`",
+      "settings": [],
+      "rows": [
+        "LB-14"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-remove-modal-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-remove-modal-w1280.png",
+      "sha256": "103a6c4ddd2113874ae2176cdd1a59713cc2827010f8dfc5bcf286d114323cb2",
+      "bytes": 225134,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::RequestRemoveBook(first book id)`",
+      "settings": [],
+      "rows": [
+        "LB-14"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-state-remove-pending-w1280",
+      "family": "1B-LIB-STATE",
+      "state": "library",
+      "image": "captures/lib-state-remove-pending-w1280.png",
+      "sha256": "e466c87e9f70f500bf85ee340123ec6e4e164f8e953516fff343801ea7e31db2",
+      "bytes": 225643,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::RequestRemoveBook` then `Message::RemoveBook` without settling its removal task",
+      "settings": [],
+      "rows": [
+        "LB-14"
+      ],
+      "notes": [
+        "Runs against its own disposable seed so the removal cannot affect other captures"
+      ]
+    },
+    {
+      "id": "lib-meta-no-cover-w1280",
+      "family": "1B-LIB-META",
+      "state": "library",
+      "image": "captures/lib-meta-no-cover-w1280.png",
+      "sha256": "4e1edb936001dc1724e78aa24fb418daad75b626e8e2c268ea06dfcc40844747",
+      "bytes": 81117,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LibrarySearchChanged(\"Conformance\")` settled through its debounce",
+      "settings": [],
+      "rows": [
+        "LB-12"
+      ],
+      "notes": [
+        "`Conformance` matches the reused redistribution-safe conformance book, which has no cover image, so the placeholder keeps the 210 px cover box"
+      ]
+    },
+    {
+      "id": "lib-meta-no-cover-c390",
+      "family": "1B-LIB-META",
+      "state": "library",
+      "image": "captures/lib-meta-no-cover-c390.png",
+      "sha256": "2eb2ba0135392c2a94474e3f96939cec9d6cbcce7baa9420bfd73d672682c03e",
+      "bytes": 60951,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::LibrarySearchChanged(\"Conformance\")` settled through its debounce",
+      "settings": [],
+      "rows": [
+        "LB-12"
+      ],
+      "notes": []
+    },
+    {
+      "id": "lib-meta-long-ja-w1280",
+      "family": "1B-LIB-META",
+      "state": "library",
+      "image": "captures/lib-meta-long-ja-w1280.png",
+      "sha256": "8a3a4f996f58b69aa11a6a5f0dfa541358a170f77d46a0873649ecd6b34d27c7",
+      "bytes": 146364,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "MIX",
+      "fixture": "G3 Japanese/mixed metadata",
+      "state_derivation": "`Message::LibrarySearchChanged(\"の\")` settled through its debounce: a grid of long Japanese titles and authors",
+      "settings": [],
+      "rows": [
+        "LB-13"
+      ],
+      "notes": [
+        "The search returns only long Japanese titles and authors while the UI language stays English, so this is the mixed-metadata surface"
+      ]
+    },
+    {
+      "id": "lib-meta-long-ja-c390",
+      "family": "1B-LIB-META",
+      "state": "library",
+      "image": "captures/lib-meta-long-ja-c390.png",
+      "sha256": "b16eac28303e242789a947fcb7b1a7905c25de36675228a11c482f06728edc17",
+      "bytes": 105614,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "MIX",
+      "fixture": "G3 Japanese/mixed metadata",
+      "state_derivation": "`Message::LibrarySearchChanged(\"の\")` settled through its debounce: a grid of long Japanese titles and authors",
+      "settings": [],
+      "rows": [
+        "LB-13"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-entry-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-entry-w900-en.png",
+      "sha256": "db7cb12fa19dfe47ff6069ee1653027a7550e3983c7d1acb98b9853a5a3259d4",
+      "bytes": 144969,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks`",
+      "settings": [],
+      "rows": [
+        "IM-01",
+        "IM-10"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-entry-w900-ja",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-entry-w900-ja.png",
+      "sha256": "0303a921a240fdcba1f414f6f87bc283be06767a14927444b476af573afc5d0d",
+      "bytes": 139811,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-01",
+        "IM-10"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-entry-c390-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-entry-c390-en.png",
+      "sha256": "5efd99494527a59a9fff73587b8a7aaa37754b317faaaa46eecd238637a05444",
+      "bytes": 119714,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks`",
+      "settings": [],
+      "rows": [
+        "IM-10"
+      ],
+      "notes": [
+        "Compact client: the modal keeps its 680 px maximum width inside a 390 px window"
+      ]
+    },
+    {
+      "id": "import-discovery-enumerating-w900",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-discovery-enumerating-w900.png",
+      "sha256": "39437c434f02d40aed2a775c85c87365d0346410326c2b659122a5ab73f4b040",
+      "bytes": 152261,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then `Message::AddBookFolderSelected` with the discovery task not polled: the initial enumerating phase",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-03",
+        "IM-10"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-discovery-checking-w900",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-discovery-checking-w900.png",
+      "sha256": "7418e8b07597849ec35458f9ce60389999b434e5646026b58188579a019467cb",
+      "bytes": 147877,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then `Message::AddBookFolderSelected` with the real discovery task polled to completion and its final `BooksDiscovered` message not delivered: the checking phase with real counts",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-03"
+      ],
+      "notes": [
+        "The reading phase (`hashed_files < total_files`) is a race between the hashing worker and the polling tick; it is not deterministically capturable in-process and stays open for 6A's own renders"
+      ]
+    },
+    {
+      "id": "import-review-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-review-w900-en.png",
+      "sha256": "cd9e8c43329352dfc06d9ef5030d8f7c9de88fd268a64a86d927438e83afe74c",
+      "bytes": 235159,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then a real `AddBookFolderSelected` discovery of the import folder, settled",
+      "settings": [],
+      "rows": [
+        "IM-04",
+        "IM-05",
+        "IM-06",
+        "IM-07",
+        "IM-10"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-review-w900-ja",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-review-w900-ja.png",
+      "sha256": "b5e6c72f7af552b95164b58e5ee93edfafbc5136a7f2dc7079233a1b0a0144e3",
+      "bytes": 233023,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then a real `AddBookFolderSelected` discovery of the import folder, settled",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-04",
+        "IM-05",
+        "IM-06",
+        "IM-07",
+        "IM-12"
+      ],
+      "notes": [
+        "The pre-choice storage state (no copy/keep decision yet) renders exactly like this review list, so IM-07's two choices are evidenced by the copy/current captures instead of a duplicate ask-state image"
+      ]
+    },
+    {
+      "id": "import-review-no-match-w900-ja",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-review-no-match-w900-ja.png",
+      "sha256": "655fecfd318e7bba77fb4ffb12b1cb420c820e6f946594145e73aaa6fc469892",
+      "bytes": 188161,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "the settled review list, then `Message::AddBooksReviewSearchChanged(\"no such book\")`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-04"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-review-deselect-all-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-review-deselect-all-w900-en.png",
+      "sha256": "dae24deb86ca9c819522c1e504c741eabd05b1e3ae258a696174451d9079faa4",
+      "bytes": 234966,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "the settled review list with the select-all-new checkbox pressed off, so every row is deselected",
+      "settings": [],
+      "rows": [
+        "IM-04",
+        "IM-05"
+      ],
+      "notes": [
+        "Discovery selects every non-duplicate row, so pressing select-all-new on is pixel-identical to import-review-w900-en; this capture shows the toggle in its off position: all rows cleared, the duplicate row still unchecked, and the add action disabled while nothing is selected"
+      ]
+    },
+    {
+      "id": "import-files-selection-w900-ja",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-files-selection-w900-ja.png",
+      "sha256": "62fce9cca88ca247c6baddafdb1dceabe7b027bd928c46fa682bf420f5398ab9",
+      "bytes": 292011,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then a real `AddBookFilesSelected` discovery of the long Japanese file paths, settled",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-04",
+        "IM-12"
+      ],
+      "notes": [
+        "Long Japanese file paths; the native file picker itself cannot run in-process (IM-02)"
+      ]
+    },
+    {
+      "id": "import-no-supported-w900-ja",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-no-supported-w900-ja.png",
+      "sha256": "26fe8234d8ee9d3bbbde87e51387b8dd1129f04fc64f11bd130cfc0a8da2b0e6",
+      "bytes": 169441,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "`Message::OpenAddBooks` then a real `AddBookFolderSelected` discovery of a folder with no supported books, settled",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "IM-04"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-storage-copy-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-storage-copy-w900-en.png",
+      "sha256": "5faa95a073102e016e2845c39fce1bf3abcbf922a1202ce3c04a075478b196ad",
+      "bytes": 216847,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "the settled review list, then `Message::SelectAddBooksStorage(true)`",
+      "settings": [
+        "import storage choice: copy into the library"
+      ],
+      "rows": [
+        "IM-07"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-storage-current-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-storage-current-w900-en.png",
+      "sha256": "49946f7776ea9b7fda7447457b3f66732c3898dc94ddf7d9159864a3181de066",
+      "bytes": 216602,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "the settled review list, then `Message::SelectAddBooksStorage(false)`",
+      "settings": [
+        "import storage choice: keep current location"
+      ],
+      "rows": [
+        "IM-07"
+      ],
+      "notes": []
+    },
+    {
+      "id": "import-progress-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-progress-w900-en.png",
+      "sha256": "1a5e9bb477397568d001f374a307a30e6332a38385026ad32d191bbe9f9402d5",
+      "bytes": 143037,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+      "state_derivation": "the settled review list with a storage choice, then `Message::AddSelectedBooks` without settling its import task",
+      "settings": [
+        "import storage choice: copy into the library"
+      ],
+      "rows": [
+        "IM-08"
+      ],
+      "notes": [
+        "The import task is started and deliberately left unsettled, so the header action shows the real cancel/progress label with 0 of N; mid-import counts are not captured because the parallel copy tasks complete in a scheduling-dependent order"
+      ]
+    },
+    {
+      "id": "import-completed-w900-en",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-completed-w900-en.png",
+      "sha256": "3c3b253c08825f662e0d74a75b60de08f0bf7285e7ac672f917cb960d329c2e0",
+      "bytes": 134500,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import sources",
+      "state_derivation": "the settled review list with a storage choice, then `Message::AddSelectedBooks` settled: the real post-import library",
+      "settings": [
+        "import storage choice: copy into the library"
+      ],
+      "rows": [
+        "IM-08"
+      ],
+      "notes": [
+        "Runs against its own disposable seed, because the import adds rows to the store",
+        "The imported books are copied into the disposable managed directory; the committed library is untouched"
+      ]
+    },
+    {
+      "id": "import-review-dpr2-w900",
+      "family": "1B-IMPORT",
+      "state": "library+import-dialog",
+      "image": "captures/import-review-dpr2-w900.png",
+      "sha256": "d3c9c7c2a98b9bfc59b60ee7ae59622ea66958f9a044059cac05e0fd437f52f7",
+      "bytes": 636439,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 1800,
+      "image_height": 1400,
+      "dpr": 2.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + import folder",
+      "state_derivation": "as the import review list, rendered at DPR 2",
+      "settings": [],
+      "rows": [
+        "IM-10"
+      ],
+      "notes": [
+        "DPR 2 sharpness subset (specification `D2`)"
+      ]
+    },
+    {
+      "id": "settings-wide-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-wide-w900-en.png",
+      "sha256": "b5f8c243a2e34dc8c5086b3d9c4bb3416ee2de2a4f08b13a85ed9cee85346a0b",
+      "bytes": 154137,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ShowSettings`",
+      "settings": [],
+      "rows": [
+        "ST-01",
+        "ST-02",
+        "ST-04",
+        "ST-05",
+        "ST-09"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-wide-w900-ja",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-wide-w900-ja.png",
+      "sha256": "8e950db9b50bfd900821cec3396d89875b66daa9fd7a290cd284a44bcaa36d6d",
+      "bytes": 144684,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::SelectLanguage(Japanese)` then `Message::ShowSettings`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "ST-01",
+        "ST-02",
+        "ST-04",
+        "ST-05",
+        "ST-09"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-compact-c390-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-compact-c390-en.png",
+      "sha256": "daa77f7ab3f7a3d35443a85afc99a7d2737edb8ad4374f14cd0736b956a7f078",
+      "bytes": 158298,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ShowSettings`",
+      "settings": [],
+      "rows": [
+        "ST-09",
+        "ST-01"
+      ],
+      "notes": [
+        "Compact settings stack the controls vertically"
+      ]
+    },
+    {
+      "id": "settings-compact-c390-ja",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-compact-c390-ja.png",
+      "sha256": "cd08d9129ac3100c083302a8bccab30f5934860431a1922a5e1d8fbf86a895a4",
+      "bytes": 152793,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::SelectLanguage(Japanese)` then `Message::ShowSettings`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "ST-09",
+        "ST-01"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-changed-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-changed-w900-en.png",
+      "sha256": "1be1210e2bcf187f7d3c1ab5a3a11fd157cdc0c57ce3332ccd1fb5d07720705e",
+      "bytes": 154541,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ShowSettings` then the real settings messages for add behavior, reading mode, theme, EPUB font size, line spacing and PDF zoom",
+      "settings": [
+        "library.add_behavior=copy (persisted)",
+        "reader.default_mode=continuous (persisted)",
+        "reader.default_theme=dark (persisted)",
+        "reader.default_epub_font_size=20 (persisted)",
+        "reader.default_epub_line_spacing=2.0 (persisted)",
+        "reader.default_pdf_zoom=fit-width (persisted)"
+      ],
+      "rows": [
+        "ST-04",
+        "ST-05"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-move-dialog-w900-ja",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-move-dialog-w900-ja.png",
+      "sha256": "0db716f791ad4aeca87eca7de6f6531b817ea8810a160f59557a89e304d90c68",
+      "bytes": 155161,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Ok(summary) }` with the summary produced by `Library::managed_storage_summary`, standing in for the native folder picker",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "ST-03",
+        "ST-07"
+      ],
+      "notes": [
+        "The book count and size come from the real `Library::managed_storage_summary`; the destination path stands in for the native folder picker's result"
+      ]
+    },
+    {
+      "id": "settings-move-progress-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-move-progress-w900-en.png",
+      "sha256": "e3a6ef1dae91aac281ea7c1d46e4b243a85cb47a6da04bacb46893859824096c",
+      "bytes": 163732,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "as the move dialog, then `Message::ConfirmManagedLibraryMove` without settling its move task",
+      "settings": [],
+      "rows": [
+        "ST-03",
+        "ST-07"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-error-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-error-w900-en.png",
+      "sha256": "515b277e8493c5a25f8f001172a8a892b68b8e7ddc6040bf74c76c1f37298df1",
+      "bytes": 154129,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::ShowSettings` then `Message::ManagedLibraryMovePlanned { result: Err(..) }`",
+      "settings": [],
+      "rows": [
+        "ST-06"
+      ],
+      "notes": [
+        "ST-06 acceptance stays with 6B's renders; this is the Iced reference for the error banner"
+      ]
+    },
+    {
+      "id": "settings-disabled-importing-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-disabled-importing-w900-en.png",
+      "sha256": "df56291890481f24112deebedb156e4406c9550564d2329ab595361a636c17bd",
+      "bytes": 153955,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "an import started for real (discovery + `Message::AddSelectedBooks` in flight), then `Message::ShowSettings`",
+      "settings": [],
+      "rows": [
+        "ST-07"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-disabled-removing-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-disabled-removing-w900-en.png",
+      "sha256": "df56291890481f24112deebedb156e4406c9550564d2329ab595361a636c17bd",
+      "bytes": 153955,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "a removal started for real (`Message::RequestRemoveBook` + `Message::RemoveBook` in flight), then `Message::ShowSettings`",
+      "settings": [],
+      "rows": [
+        "ST-07"
+      ],
+      "notes": []
+    },
+    {
+      "id": "settings-unavailable-w900-en",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-unavailable-w900-en.png",
+      "sha256": "929c995fa018715c23a47f8a320dc70356fed1a1716bb38a8d56d97ecb17143f",
+      "bytes": 149902,
+      "client_width": 900.0,
+      "client_height": 700.0,
+      "image_width": 900,
+      "image_height": 700,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "no store (real open failure)",
+      "state_derivation": "the storage-failure state, then `Message::ShowSettings`",
+      "settings": [],
+      "rows": [
+        "ST-07"
+      ],
+      "notes": [
+        "Shows the unavailable managed location and the disabled library actions"
+      ]
+    },
+    {
+      "id": "settings-compact-c390-dpr2-ja",
+      "family": "1B-SETTINGS",
+      "state": "settings",
+      "image": "captures/settings-compact-c390-dpr2-ja.png",
+      "sha256": "94fb385123832c54e680845046849f032673dd42f2b45c874ee4275b0c46ab08",
+      "bytes": 400494,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 780,
+      "image_height": 1688,
+      "dpr": 2.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books)",
+      "state_derivation": "`Message::SelectLanguage(Japanese)` then `Message::ShowSettings`",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "ST-09"
+      ],
+      "notes": [
+        "DPR 2 sharpness subset (specification `D2`)"
+      ]
+    }
+  ],
+  "pixel_aliases": [
+    {
+      "left": "settings-disabled-importing-w900-en",
+      "right": "settings-disabled-removing-w900-en",
+      "reason": "The settings screen disables exactly the same managed-library actions while an import and while a removal run, and it renders no progress indicator, so both states legitimately render the same image; `assert_reached` still checks each state separately"
+    }
+  ],
+  "matrix": {
+    "captured": [
+      {
+        "row": "LB-01",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-wide-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-02",
+        "status": "capture",
+        "captures": [
+          "lib-compact-c390-en",
+          "lib-compact-c390-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-03",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-ja",
+          "lib-compact-c390-ja",
+          "lib-breakpoint-759-en",
+          "lib-breakpoint-760-en",
+          "lib-breakpoint-761-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-04",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-wide-w1280-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-05",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-ja",
+          "lib-compact-c390-en",
+          "lib-compact-c390-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-06",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-state-filter-pdf-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-07",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-wide-w900-en",
+          "lib-wide-w1280-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-08",
+        "status": "capture",
+        "captures": [
+          "lib-state-search-ja-w1280",
+          "lib-state-search-no-matches-w1280",
+          "lib-state-filter-pdf-w1280",
+          "lib-state-search-with-filter-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-11",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-wide-w900-en",
+          "lib-wide-w1280-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-12",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en",
+          "lib-compact-c390-en",
+          "lib-meta-no-cover-w1280",
+          "lib-meta-no-cover-c390"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-13",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-ja",
+          "lib-compact-c390-ja",
+          "lib-meta-long-ja-w1280",
+          "lib-meta-long-ja-c390"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-14",
+        "status": "capture",
+        "captures": [
+          "lib-state-book-menu-w1280",
+          "lib-state-remove-modal-w1280",
+          "lib-state-remove-pending-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-15",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-dpr2",
+          "lib-compact-c390-dpr2"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-16",
+        "status": "capture",
+        "captures": [
+          "lib-wide-w1280-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-17",
+        "status": "capture",
+        "captures": [
+          "lib-state-loading-skeleton-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-18",
+        "status": "capture",
+        "captures": [
+          "lib-compact-c390-en",
+          "lib-state-empty-w1280",
+          "lib-state-empty-c390"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-19",
+        "status": "capture",
+        "captures": [
+          "lib-state-search-no-matches-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-20",
+        "status": "capture",
+        "captures": [
+          "lib-state-load-error-w1280",
+          "lib-state-storage-error-w900"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "LB-22",
+        "status": "capture",
+        "captures": [
+          "lib-state-loading-more-w1280",
+          "lib-state-paged-w1280"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-01",
+        "status": "capture",
+        "captures": [
+          "import-entry-w900-en",
+          "import-entry-w900-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-03",
+        "status": "capture",
+        "captures": [
+          "import-discovery-enumerating-w900",
+          "import-discovery-checking-w900"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-04",
+        "status": "capture",
+        "captures": [
+          "import-review-w900-en",
+          "import-review-w900-ja",
+          "import-review-no-match-w900-ja",
+          "import-review-deselect-all-w900-en",
+          "import-files-selection-w900-ja",
+          "import-no-supported-w900-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-05",
+        "status": "capture",
+        "captures": [
+          "import-review-w900-en",
+          "import-review-w900-ja",
+          "import-review-deselect-all-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-06",
+        "status": "capture",
+        "captures": [
+          "import-review-w900-en",
+          "import-review-w900-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-07",
+        "status": "capture",
+        "captures": [
+          "import-review-w900-en",
+          "import-review-w900-ja",
+          "import-storage-copy-w900-en",
+          "import-storage-current-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-08",
+        "status": "capture",
+        "captures": [
+          "import-progress-w900-en",
+          "import-completed-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-10",
+        "status": "capture",
+        "captures": [
+          "import-entry-w900-en",
+          "import-entry-w900-ja",
+          "import-entry-c390-en",
+          "import-discovery-enumerating-w900",
+          "import-review-w900-en",
+          "import-review-dpr2-w900"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "IM-12",
+        "status": "capture",
+        "captures": [
+          "import-review-w900-ja",
+          "import-files-selection-w900-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-01",
+        "status": "capture",
+        "captures": [
+          "settings-wide-w900-en",
+          "settings-wide-w900-ja",
+          "settings-compact-c390-en",
+          "settings-compact-c390-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-02",
+        "status": "capture",
+        "captures": [
+          "settings-wide-w900-en",
+          "settings-wide-w900-ja"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-03",
+        "status": "capture",
+        "captures": [
+          "settings-move-dialog-w900-ja",
+          "settings-move-progress-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-04",
+        "status": "capture",
+        "captures": [
+          "settings-wide-w900-en",
+          "settings-wide-w900-ja",
+          "settings-changed-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-05",
+        "status": "capture",
+        "captures": [
+          "settings-wide-w900-en",
+          "settings-wide-w900-ja",
+          "settings-changed-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-06",
+        "status": "capture",
+        "captures": [
+          "settings-error-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-07",
+        "status": "capture",
+        "captures": [
+          "settings-move-dialog-w900-ja",
+          "settings-move-progress-w900-en",
+          "settings-disabled-importing-w900-en",
+          "settings-disabled-removing-w900-en",
+          "settings-unavailable-w900-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "ST-09",
+        "status": "capture",
+        "captures": [
+          "settings-wide-w900-en",
+          "settings-wide-w900-ja",
+          "settings-compact-c390-en",
+          "settings-compact-c390-ja",
+          "settings-compact-c390-dpr2-ja"
+        ],
+        "reason": ""
+      }
+    ],
+    "manifest": [
+      {
+        "row": "XA-10",
+        "status": "manifest",
+        "captures": [],
+        "reason": "satisfied by `manifest.json` with `captures.sha256`, `fixtures.sha256` and the README rather than by an image"
+      }
+    ],
+    "pending": [
+      {
+        "row": "LB-09",
+        "status": "pending",
+        "captures": [],
+        "reason": "3A — Flutter keyboard behavior with no Iced counterpart"
+      },
+      {
+        "row": "LB-10",
+        "status": "pending",
+        "captures": [],
+        "reason": "3A — 200% text scaling is Flutter-only (`T200`)"
+      },
+      {
+        "row": "LB-21",
+        "status": "pending",
+        "captures": [],
+        "reason": "3C — cleanup/deletion debt policy is retained Flutter/plan-owned"
+      },
+      {
+        "row": "LB-23",
+        "status": "pending",
+        "captures": [],
+        "reason": "2C — library palette states are mapped and rendered by 2C (`2C-PALETTE`)"
+      },
+      {
+        "row": "IM-02",
+        "status": "pending",
+        "captures": [],
+        "reason": "6A — native pickers and the Android provider path cannot run in-process"
+      },
+      {
+        "row": "IM-09",
+        "status": "pending",
+        "captures": [],
+        "reason": "6A — completion summaries are Flutter behavior per the notice policy"
+      },
+      {
+        "row": "IM-11",
+        "status": "pending",
+        "captures": [],
+        "reason": "2A — dialog accessibility is Flutter-owned (`WT`)"
+      },
+      {
+        "row": "ST-08",
+        "status": "pending",
+        "captures": [],
+        "reason": "6B — restart persistence and per-book precedence are behavioral (`WT`)"
+      },
+      {
+        "row": "ST-10",
+        "status": "pending",
+        "captures": [],
+        "reason": "6B/6A — capability-parity review record, not a capture"
+      },
+      {
+        "row": "RD-*",
+        "status": "pending",
+        "captures": [],
+        "reason": "1C — reader captures use this harness in package 1C"
+      }
+    ]
+  },
+  "limitations": [
+    "Iced has no text scaling (`T200`), no CBZ filter entry, no tiled continuous render and no decision-11 tab overflow: those rows have no Iced counterpart and are not fabricated here; they stay with the Flutter/renderer packages.",
+    "The native file/folder pickers (IM-02, ST-02's change-location flow) cannot run in-process; captures start from the discovered/reviewed state that follows a pick, and the move dialog uses the real storage summary with a fixed destination path.",
+    "Covers are decoded by the real batch decode path during seeding, and the per-card `sensor().on_show` cover request is exercised too: the capture delivers the frame's redraw event, dispatches what the view asks for and draws the settled frame. Books with no cover blob keep the placeholder card.",
+    "The capture renders in-process from the disposable data root, so application text that names a real path (discovery-failure rows, the managed-library path) shows `/tmp/shosai-reference-shots-1b/…`. That root is fixed by default and `SHOSAI_REFERENCE_SHOTS_DATA_DIR` moves it; a run with a different data root renders different bytes, which verification reports instead of hiding.",
+    "Import progress counters are captured at their deterministic point: the in-flight capture shows the header action with `0/N` while the copy tasks are undelivered. Mid-import numbers are not captured because the parallel prepare/copy tasks complete in a scheduling-dependent order, so a partial progress reading is not reproducible.",
+    "The import discovery 'reading' phase is a race between the hashing worker and the polling tick and is not deterministically capturable in-process; the enumerating and checking phases are captured with real counts.",
+    "Rendering is in-process software rasterization, not a compositor screenshot: window decorations, native menus, toasts and animations are outside the capture."
+  ]
+}
