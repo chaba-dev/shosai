@@ -53,6 +53,65 @@ fn generated_fixtures_are_deterministic() {
     );
 }
 
+/// Every generated archive pins the ZIP "version made by" system byte.
+///
+/// The `zip` crate derives that byte from the host it was compiled for
+/// (`System::Dos` on Windows, `System::Unix` elsewhere), so without the pin the
+/// same fixture is a different byte sequence per platform and the committed
+/// hashes only describe Unix. The assertions below are the byte-level rule those
+/// hashes depend on, checked in the raw bytes (every central directory entry)
+/// and again through the reader API.
+#[test]
+fn generated_archives_declare_a_pinned_unix_system() {
+    let mut archives = 0usize;
+    for file in fixtures::reference_fixtures() {
+        let archive = file.relative_path.ends_with(".epub") || file.relative_path.ends_with(".cbz");
+        if !archive {
+            continue;
+        }
+        archives += 1;
+
+        let mut offset = 0usize;
+        let mut entries = 0usize;
+        while let Some(found) = file.bytes[offset..]
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+        {
+            let entry = offset + found;
+            assert_eq!(
+                file.bytes[entry + 5],
+                3,
+                "{} entry {entries} must declare the Unix system byte",
+                file.relative_path
+            );
+            entries += 1;
+            offset = entry + 4;
+        }
+        assert!(
+            entries > 0,
+            "{} has no central directory entries",
+            file.relative_path
+        );
+
+        let mut reader = zip::ZipArchive::new(std::io::Cursor::new(file.bytes.clone()))
+            .expect("fixture archive");
+        for index in 0..reader.len() {
+            let entry = reader.by_index(index).expect("archive entry");
+            assert_eq!(
+                zip::HasZipMetadata::get_metadata(&entry).system,
+                zip::System::Unix,
+                "{} entry {} must be written for Unix",
+                file.relative_path,
+                entry.name()
+            );
+        }
+    }
+    assert!(
+        archives >= 20,
+        "expected the generated EPUB and CBZ fixtures, checked {archives}"
+    );
+}
+
 /// A socket (or any other special file) inside the committed fixture tree is not
 /// a fixture: the reader must refuse it rather than walk past it.
 #[cfg(unix)]
@@ -2808,7 +2867,15 @@ fn a_resolved_output_survives_the_root_teardown_that_removes_its_symlink() {
     );
 
     let mirror = super::runner::evidence_fixtures_path(&resolved);
-    assert_eq!(mirror, external.join("fixtures"));
+    assert_eq!(
+        mirror,
+        // Both sides are resolved: on macOS the temporary directory itself is
+        // reached through a symlink (`/var` -> `/private/var`), and comparing a
+        // resolved path with a spelling would fail there for the wrong reason.
+        super::runner::resolve_path(&external)
+            .expect("resolve the external directory")
+            .join("fixtures")
+    );
     std::fs::create_dir_all(&mirror).expect("mirror the fixture tree");
     guard.finish(false).expect("teardown");
     assert!(

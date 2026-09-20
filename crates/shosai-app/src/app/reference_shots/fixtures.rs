@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, DateTime, ZipWriter};
+use zip::{CompressionMethod, DateTime, System, ZipWriter};
 
 /// A fixture that is reused from the repository's documented fixture set
 /// instead of being regenerated, with the provenance record that makes it
@@ -896,6 +896,13 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 fn zip_options() -> SimpleFileOptions {
     SimpleFileOptions::default()
         .compression_method(CompressionMethod::Stored)
+        // The `zip` crate otherwise derives the "version made by" system byte
+        // from the host (`System::Dos` on Windows, `System::Unix` elsewhere),
+        // which makes every archive a different byte sequence per platform. The
+        // committed fixture hashes are the Unix bytes, so the system is pinned
+        // rather than inherited: a Windows or macOS run must emit the same
+        // fixture bytes as the pinned capture environment.
+        .system(System::Unix)
         .last_modified_time(
             DateTime::from_date_and_time(
                 FIXTURE_ZIP_DATE.0,
