@@ -607,6 +607,12 @@ fn compare_manifests(
     field(problems, "matrix", &committed.matrix, &fresh.matrix);
     field(
         problems,
+        "non_iced_authority",
+        &committed.non_iced_authority,
+        &fresh.non_iced_authority,
+    );
+    field(
+        problems,
         "limitations",
         &committed.limitations,
         &fresh.limitations,

@@ -1,21 +1,56 @@
-# Reference captures (package 1B)
+# Reference captures (packages 1B and 1C)
 
-Deterministic, inspected **Iced reference images** for the library, import and
-settings surfaces, with a provenance manifest. They are the reference the Flutter
-restoration is compared against; they are not acceptance evidence for the Flutter
-implementation, which produces and inspects its own renders
-(`docs/flutter-ui-reference-spec.md` §4.0, `docs/flutter-ui-restoration-plan.md`
+Deterministic, inspected **Iced reference images** for the library, import,
+settings and reader surfaces, each with a provenance manifest. They are the
+reference the Flutter restoration is compared against; they are not acceptance
+evidence for the Flutter implementation, which produces and inspects its own
+renders (`docs/flutter-ui-reference-spec.md` §4.0, `docs/flutter-ui-restoration-plan.md`
 stage 1).
 
-Package 1C (reader reference) reuses this runner; see
-[Extending for package 1C](#extending-for-package-1c).
+Two packages share one runner, one fixture generator and one validator, and each
+writes its own evidence directory:
+
+| Package | Surfaces | Evidence families | Evidence directory |
+| --- | --- | --- | --- |
+| 1B | Library, import, settings | `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` | `rfd/0004/evidence/reference-shots-1b/` |
+| 1C | Reader chrome, panels, formats and modes | `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG`, `1C-CBZ-CONT` | `rfd/0004/evidence/reference-shots-1c/` |
+
+## What these images are evidence for, and what they are not
+
+A `1B-*`/`1C-*` capture is the **reference** for a row: it records what Iced
+renders for a state, so a later package knows what it is rebuilding. It is never
+the acceptance evidence for that row. Every accepting package renders and
+inspects its own states at the row's configuration and runs its own behavior
+checks (specification §4.0 rules 1–3), and a row whose authority is not Iced —
+`Owner`, `RFD 6`, `Retained Flutter`, `Plan contract` — cannot be satisfied by a
+capture here at all. The reader rows that fall in that class are named in the
+package 1C manifest under `non_iced_authority` and listed as `pending` in its
+matrix, with the owning package; no image is fabricated for them.
+
+Two consequences worth stating plainly, because both are easy to misread from a
+directory of PNGs:
+
+- **Coverage is not acceptance.** A row appearing in a package's `captured`
+  matrix means a capture *renders that state*; the row's accepting package still
+  has to produce and inspect its own render and its own tests. The matrix in
+  each manifest records the accepting package's ownership through the row ids
+  the reference specification assigns, not a claim that the row is done.
+- **A capture can be comparison-only.** `rd-spread-large-font-bf32-w1280-en` and
+  `rd-spread-large-font-bf48-w1280-en` show what Iced does at large book fonts
+  (it keeps the width-only spread rule and never falls back). Decision 12
+  replaces that behavior in the Flutter reader, so those images are recorded as
+  comparison and `FM-11`/`FM-12` stay pending with 5A/5B/5H.
 
 ## Entry point
 
 ```sh
-make reference-shots              # render every capture and write the evidence
-make reference-shots VERIFY=1     # re-render, write nothing, fail on any difference
+make reference-shots              # render every capture of both packages and write the evidence
+make reference-shots VERIFY=1     # re-render both, write nothing, fail on any difference
 ```
+
+`SHOSAI_REFERENCE_SHOTS_PACKAGE=1b` or `=1c` restricts a run to one package (an
+unknown value is refused rather than ignored). The default runs both, so the
+documented command produces every reference set in one pass.
 
 Both run the ignored test `reference_shots_capture` in `shosai-app` with the
 capture environment pinned:
@@ -109,9 +144,26 @@ instead of compared, on both sides:
   `unknown`. A manifest produced through the explicit override may honestly
   record `unknown` for the descriptive fields, because its source field says so.
 
+**Resolving the recorded change id.** The manifest and the README tell a reader
+to resolve `capture_code_change_id`, and the command they name is the one this
+evidence was produced with, run under the pinned Jujutsu (`jj 0.39.0`, the
+version the dev shell provides):
+
+```sh
+jj log --no-graph -r 'change_id(<change id>)' \
+  -T 'commit_id.short() ++ " " ++ change_id ++ " " ++ description.first_line() ++ "\n"'
+```
+
+`change(<id>)` is **not** a Jujutsu revset function — `jj log -r 'change(<id>)'`
+fails with `Function 'change' doesn't exist` — so the note must not name it. The
+`change_id()` form was executed against the workspace that produced this
+evidence, and the two forms' behavior is checked by the regression test
+`recorded_revision_lookup_is_a_real_jujutsu_command`.
+
 ## Outputs
 
-Everything lives under `rfd/0004/evidence/reference-shots-1b/`:
+Each package writes the same six entries into its own evidence directory
+(`rfd/0004/evidence/reference-shots-1b/`, `rfd/0004/evidence/reference-shots-1c/`):
 
 | Path | Contents |
 | --- | --- |
@@ -121,6 +173,10 @@ Everything lives under `rfd/0004/evidence/reference-shots-1b/`:
 | `README.md` | Human-readable rendering of the manifest |
 | `fixtures/` | The generated reference fixture tree, committed for inspection |
 | `fixtures.sha256` | Verifies the committed fixture tree |
+
+The two packages share the fixture tree: package 1C adds no fixture of its own,
+so its `fixtures/` copy is byte-identical to package 1B's and the accepted 1B
+fixture bytes are untouched by 1C work.
 
 `manifest.json` records, per run:
 
@@ -133,12 +189,13 @@ Everything lives under `rfd/0004/evidence/reference-shots-1b/`:
 - the SHA-256 of each application font the capture loads (`InterVariable.ttf`,
   `NotoSansJP-Variable.ttf` and the math font); Iced's built-in icon font is
   pinned by the locked `iced_*` dependencies instead of being hashed here;
-- the native PDFium identity the PDF covers were rasterized with (best-effort:
+- the native PDFium identity the PDF pages were rasterized with (best-effort:
   the mapped library, `SHOSAI_PDFIUM_LIBRARY`, the executable directory or an
   `LD_LIBRARY_PATH` entry, with its SHA-256) and, next to it, the reason the
   generated PDFs carry no text: PDFium resolves fonts for unembedded PDF text
   itself by scanning the host font directories and does not follow
-  `FONTCONFIG_FILE`, so a text run would make a cover depend on the machine;
+  `FONTCONFIG_FILE`, so a text run would make a cover or a page depend on the
+  machine;
 - the generated fixture inventory (per-file SHA-256, size, redistribution
   statement) and the reused repository fixture with its verified hash;
 - the seeded library inventory: profile, book count, page size, ordering,
@@ -146,8 +203,46 @@ Everything lives under `rfd/0004/evidence/reference-shots-1b/`:
 - per capture: id, family, state id, image path, image SHA-256 and byte size,
   client size, physical image size, DPR, locale, fixture, state derivation,
   settings that differ from the baseline, covered matrix rows and notes;
-- the covered / manifest-satisfied / pending acceptance rows with owners;
+- package 1C only: a per-capture `reader` block — the document, format, reading
+  mode, the raster zoom mode (`fit-page`, `fit-width`, `manual(<scale>)`, or
+  `n/a` when no raster document is open), palette,
+  page count, current location, the visible pages and whether they
+  form a spread, the available reader size the layout ran at, the book font and
+  line spacing, the open panels, and the saved-place, search-match and tab
+  counts. The runner compares it with the state it actually reached and fails
+  instead of writing an image whose manifest would describe a state it never
+  showed;
+- the covered / manifest-satisfied / pending acceptance rows with owners, and a
+  `reason` on any covered row whose reference coverage is deliberately partial
+  (package 1C: `FM-01`, `FM-02`, `FM-13` and `RD-06`, each naming what no image
+  covers);
+- package 1C only: the `non_iced_authority` records for the rows Iced cannot
+  evidence at all (selection and highlighting above all);
 - the declared pixel aliases and the known limitations.
+
+### Run metadata, and why some fields are exempt
+
+`evidence::problems` compares the committed manifest with a manifest built from
+the current code field by field, and deliberately **exempts run metadata** —
+`capture_code_revision`, `capture_code_revision_source`, `capture_code_change_id`,
+`capture_code_bookmark`, `command`, `output_directory`, `environment.os`,
+`environment.arch`, `environment.rustc`, `environment.cargo` and
+`environment.pdfium`. Those fields describe the machine and the checkout that
+produced the evidence, not the code, so a verification run on another machine
+must not fail on them.
+
+`output_directory` is recorded as an **absolute** path (the run resolves it once
+and never re-reads the configuration), and it is run metadata for exactly that
+reason: two reviewers verifying the same evidence from different checkouts see
+different absolute paths and the same images. The per-capture `image` path stays
+relative to the manifest, and the capture and fixture checksum files are relative
+to the evidence directory, so the committed set is portable even though the
+recorded output path is not.
+
+`capture_code_revision` is exempt but **validated**, not ignored: the writer
+refuses to render without an exact revision and the validator rejects a
+committed manifest whose revision is not a hexadecimal commit id (see
+[Reading the recorded revision](#reading-the-recorded-revision)).
 
 ## How a capture state is produced
 
@@ -157,7 +252,8 @@ The runner drives the production application:
   initialize task it returns is dropped without being polled, so the real user
   data directory is never opened. The harness then dispatches
   `Message::Initialized(Ok(..))` built by `reference_shots::seed::capture_initialized_state`
-  against a **disposable** store under `/tmp/shosai-reference-shots-1b/`. That
+  against a **disposable** store under the package's own data root
+  (`/tmp/shosai-reference-shots-1b/`, `/tmp/shosai-reference-shots-1c/`). That
   function contains the same preference parsing `boot`'s initialization performs,
   so the capture state is the state a real start with these preferences produces
   while production `boot()` stays untouched.
@@ -223,6 +319,35 @@ The runner drives the production application:
   production message that carries it (for example
   `ManagedLibraryMovePlanned { result: Err(..) }`); the affected captures say so
   in their manifest note.
+
+### Colour order and the 1B rebaseline
+
+`iced_tiny_skia` builds every `tiny_skia::Color` in **BGRA** byte order
+(`engine::into_color` calls `from_rgba(color.b, color.g, color.r, color.a)`),
+because the compositor presents into `softbuffer`'s `u32` buffer and the window
+path unpacks that buffer with explicit channel masks. The capture renderer
+encodes a `tiny_skia::Pixmap` as an RGBA PNG, so encoding it directly wrote every
+pixel with red and blue exchanged: the application accent `#4D5E86` was recorded
+as the brown `#865E4D` the design rejects, and the sepia palette read as pale
+blue. The renderer now swaps the two channels back before encoding
+(`reference_shots::render::encode_rgba_png`), and
+`reference_shots::tests::rendered_pixels_carry_the_application_colors` renders the
+production library view and checks the recorded bytes against the palette tokens,
+so a channel-order regression fails in an ordinary `cargo test`.
+
+**This re-encoded every committed package 1B capture.** The 1B capture set,
+states, client and image sizes, DPR, locales, settings, fixture inventory, fonts,
+seeded library, matrix and limitations are unchanged. The only differences from
+the accepted 1B manifest are each image's `sha256`/`bytes`, the
+`capture_code_note` (the corrected `change_id(<id>)` command, which is a code
+change rather than a pixel one) and the run metadata the validator exempts
+(capture revision, change id, bookmark, command, output directory). Every
+deterministic field was compared against the accepted revision to confirm that,
+and the corrected images were re-inspected. Package 1B was already accepted, so
+the rebaselined 1B evidence is called out to the owner in the pull request
+instead of being treated as a silent side effect of 1C work; the previously
+accepted bytes remain in the accepted merge `565187cff25e` and in `main@origin`
+history for comparison.
 
 ## Isolated state
 
@@ -292,7 +417,20 @@ Captures never touch a real library:
   manifest writer and the verifier all use that one value. The data root may
   contain the very symlink the evidence configuration names, so a re-read after
   preparation would resolve to the cleared path *inside* the root — resolving
-  once is what keeps the mirror and the manifest outside it;
+  once is what keeps the mirror and the manifest outside it. The same holds for
+  the disposable data root: both packages' roots are resolved and cross-checked
+  before anything runs, each package then runs on those resolved values, and a
+  data-root spelling whose resolution changed after the preflight (a link
+  another package's preparation removed) is a refusal rather than a write to a
+  directory no check covered;
+- before anything is created, cleared or written, both packages' evidence
+  directories and disposable roots are resolved and cross-checked: equal or
+  nested locations (evidence versus evidence, data versus data, or one inside the
+  other) are refused, and a directory whose existing `manifest.json` names another
+  package is refused as well. That ownership read never opens an entry the writer
+  would not have produced — a symlink, a FIFO, a hard-linked file, unreadable
+  text, invalid JSON and a manifest without a `package` field are all refusals,
+  because a damaged marker is not permission to overwrite the directory;
 - the root's *input* policy is enforced before that resolution: a relative root
   is refused rather than turned into an absolute path against the process
   directory, and a root that is itself a symlink is refused rather than
@@ -434,11 +572,14 @@ checking would fail the suite:
   test checks that a recorded identity on this machine names a real library whose
   hash matches the bytes;
 - symlink target/type/dangling validation in every direction;
-- the committed evidence against the current code, plus one mutation test per
-  validator rule (missing, tampered or orphaned capture; missing, tampered or
-  orphaned fixture; stale README or checksum file; changed capture row, capture
-  order, alias reason, seeded inventory, seeded order, matrix row, limitation or
-  font hash; missing manifest; a fresh render that differs). These tests read
+- the committed evidence against the current code **for every package**, plus one
+  mutation test per validator rule (missing, tampered or orphaned capture;
+  missing, tampered or orphaned fixture; stale README or checksum file; changed
+  capture row, reader fact, capture order, alias reason, seeded inventory, seeded
+  order, matrix row, limitation or font hash; missing manifest; a fresh render
+  that differs). The reader-fact mutation is the negative control for the 1C
+  `reader` block: without it the always-on check would still pass if a capture's
+  reader facts were compared against nothing. These tests read
   and copy the committed evidence directory, which is a **Linux artifact**: its
   fixture tree contains the dangling-symlink discovery-failure fixture and its
   manifest records `broken_symlinks_available: true`, which a Windows checkout
@@ -450,50 +591,80 @@ checking would fail the suite:
 `crates/shosai-core/tests/fixtures/sample.*` remain unverified-provenance
 regression fixtures and are never overwritten by the generator.
 
-## Extending for package 1C
+## Package 1C: the reader captures
 
-1C adds reader captures to the same runner rather than a second harness. The
-integration points that are deliberately 1B-only today:
+1C reuses this runner rather than adding a second harness. What it adds:
 
-1. `scenarios::Surface` knows only `Library` and `Settings`; a reader surface
-   needs its own variant (and the `Screen`/label mapping) before a reader state
-   can be asserted as reached.
-2. `manifest::PACKAGE_1B_FAMILIES` and the `capture_table_is_consistent` test
-   restrict families to the 1B set; a 1C package must add its own allowed-family
-   set and its own output label instead of widening 1B's.
-3. `runner::DEFAULT_OUTPUT`, `runner::DEFAULT_DATA_ROOT`, the manifest `package`
-   field and the generated README title are hard-coded for 1B. 1C must
-   parameterize them or add its own entry point and **must choose its own
-   evidence directory and data root**: the ownership marker and the lock are
-   package-neutral, so they do not stop a later run from pruning 1B evidence or
-   clearing a 1B data root that it points at. `RD-*` rows currently sit in the
-   1B `matrix_rows()` pending list and belong to 1C.
-4. add the states to `scenarios.rs` as new `Kind` variants reached by production
-   messages, with the `1C-…`/`RD-…` rows they cover, a locale, a client size and
-   a DPR from the specification;
-5. extend `Kind::apply` to reach the state (open a document, load a page, switch
-   format/mode/theme …) using the same `Harness` helpers, and extend
-   `assert_reached` with the flags the new rows claim;
-6. if a state cannot be reached in-process, record it under `matrix_rows()`
-   `pending` with an owner and reason instead of fabricating it;
-7. keep the surfaces separate: reader captures may use their own `Base` profile
-   and their own disposable store, but they share the fixture generator,
-   renderer, manifest, checksum and verify machinery — and their entry point has
-   to export the pinned environment (`LANGUAGE`, `FONTCONFIG_FILE`) that
-   `runner::assert_capture_environment` and the font-database check require.
+- `reader::ReaderKind` describes each reader state (a paginated EPUB page, a
+  continuous column, a raster page, a panel, a tab set, the opening composition,
+  a failure alert, a palette, a large book font) and `reader::apply` reaches it
+  through production messages only: `Message::OpenLibraryBook` on a seeded book,
+  then page navigation, `Message::ToggleReadingMode`, the panel toggles,
+  `Message::ToggleBookmark`, the note editor, the search query through its
+  debounce, `Message::CycleTheme` and `Message::FontSizeUp`.
+- `reader::ReaderFacts` is the declared state of a capture — document, format,
+  mode, palette, page count, location, visible pages, spread, available reader
+  size, book font, line spacing, panels, saved places, search matches and tabs.
+  The runner compares it with the state it actually reached and fails rather
+  than writing an image whose manifest would describe a state it never showed.
+  A regression test pins the specification's arithmetic and pairing rule as
+  literal expected values, then recomputes every declaration from its own client
+  size and panel state and re-paginates every fixture with the core paginator, so
+  the declarations are checked against the contract instead of against a previous
+  observation.
+- `package::Package` separates the two evidence sets: their own evidence
+  directory, their own disposable data root, their own allowed families, their
+  own capture table, their own matrix and their own limitations. The ownership
+  marker and the lock are package-neutral, so this separation is what stops a
+  1C run from pruning 1B evidence or clearing the data root 1B's captures were
+  rendered from.
+- `Surface::Reader` and the `reader` state id let `assert_reached` verify the
+  screen, the interface language and the reader facts before a render.
+- The reader package clears the durable reader state (reading positions and
+  saved places) in its disposable store before every capture, because the
+  application persists both: without it a capture that turned to page 4 would
+  decide where the next capture of the same book opens, and the saved-place
+  captures would see each other's bookmarks. The reset touches the disposable
+  store only, exactly like the preference baseline; the reader model is still
+  driven by production messages alone.
 
-Two harness limits matter for reader work:
+### The harness had to grow two capabilities
 
-- `Harness::settle` delivers only `iced_runtime::Action::Output(message)` and
-  silently skips every other runtime action; a reader state that depends on a
-  stream/future/task action must handle it explicitly rather than assuming it ran.
-- `SETTLE_LIMIT` counts delivered messages; it is not a timeout. A task that never
-  finishes hangs the run instead of failing it, so reader states that wait on a
-  real render or a platform event need a bounded driver.
+Both are general, and both are documented because they change what a capture can
+show:
 
-Reader states are expected to need document-generation guards (a page render that
-completes after the document changed must be ignored); drive them through the
-same message/task path so the capture shows what a window shows.
+- **Widget operations are executed.** `Harness::settle` used to deliver
+  `iced_runtime::Action::Output` and skip everything else. The reader's
+  continuous mode resolves its scroll position with a widget operation
+  (`ContinuousItemOperation::resolve`), so `render::operate` now applies an
+  `Action::Widget` to an interface built from the same state and view, the way
+  `iced_winit` applies it to the live one, including the operation `finish()`
+  chains. Without it the continuous captures could not settle at all.
+- **A capture may take more than one frame round.** `iced_winit` bounds the
+  redraw events per message batch, but its event loop then dispatches the
+  messages and draws again. The reader publishes messages per frame while its
+  chapter sensors and scroll viewport converge, so the harness has an outer
+  round bound (`MAX_FRAME_ROUNDS`) as well as the inner one. A capture that
+  never settles still fails instead of looping.
+
+### Non-Iced authority
+
+Iced has no production interactive selection or highlighting, so `RD-12`,
+`FM-16` and `FM-17` have no capture here at all. Their authority is RFD 6 plus
+the retained Flutter implementation, owned by 4D/5I, and the package 1C manifest
+records that in `non_iced_authority` next to the pending matrix rows. The same
+section records the other rows Iced cannot evidence (tab overflow, keyboard
+reachability, large-text inspection, the decision-12 fallback, tiled continuous
+seams, mode-switch position preservation and resource-rejection
+distinguishability) with their owning packages.
+
+### Reader fixtures
+
+Package 1C adds no fixture of its own. The shared generated tree already carries
+the multi-chapter English and Japanese EPUBs, a four-page and a two-page
+artwork-only PDF and a twelve-page and a three-page CBZ that the reader captures
+open, and the reused conformance EPUB stays in the tree for the other packages.
+Which fixture each capture uses is recorded per capture in the manifest.
 
 ## Coverage and limitations
 
@@ -507,11 +678,48 @@ interfaces *and* by the wide captures the breakpoint switches to, and `LB-05`
 (compact filter row) by the `C390` captures only. Two regression tests assert
 those memberships instead of trusting the labels.
 
-The `1B-LIB-*`, `1B-IMPORT` and `1B-SETTINGS` capture-status statements in
-`docs/flutter-ui-reference-spec.md` (its introduction and §5.4) describe the state
-when the plan was accepted: they name no captures and list these families as
-pending. This package is what produces them; the specification is owned by the
-accepting package and is not rewritten here.
+The `1B-LIB-*`, `1B-IMPORT`, `1B-SETTINGS` and `1C-*` capture-status statements
+in `docs/flutter-ui-reference-spec.md` (its introduction and §5.4) describe the
+state when the plan was accepted: they name no captures and list these families
+as pending. These packages are what produce them; the specification is owned by
+the accepting package and is not rewritten here.
+
+The package 1C matrix is the one to read for reader coverage. It records the
+`RD-*` rows a capture renders, the `FM-*` rows a capture renders, and — with the
+owning package — every reader row this package does **not** cover: `RD-04`
+(decision-11 tab overflow), `RD-12` (selection), `RD-13` (panel exclusivity, a
+behavioral row), `RD-14`, `RD-15`, `FM-11`, `FM-12`, `FM-14`, `FM-15`, `FM-16`,
+`FM-17`, `FM-18`, `FM-19` and `FM-20`. The rows whose authority is not Iced at
+all are also recorded in `non_iced_authority`, with the authority that owns them.
+
+`FM-18` (EPUB pages keep document colours through compositing) is pending with
+5G even though `1C-EPUB-PAG` is the family the specification assigns to it: the
+row's acceptance is plan 5G's, and 1C renders no document-colour fixture of its
+own. The `1C-EPUB-PAG` captures are its Iced reference, not its acceptance
+evidence.
+
+Four covered rows carry a `reason` saying that their reference coverage is
+deliberately partial, so the row id alone is not read as complete coverage:
+
+- `FM-01`: the generated fixtures carry headings and body text, so the row's
+  styled text and page number are referenced; its lists, quotes and links need
+  the reused conformance fixture, which the Iced reader cannot render under the
+  pinned font environment (see the rich-fixture limitation), and acceptance
+  stays with 5G;
+- `FM-02` and `FM-13`: the raster pages and spreads are referenced at fit-page
+  (`rd-pdf-pag-w1280-en`, `rd-spread-pdf-w1280-en`, `rd-spread-cbz-w1280-en`,
+  `rd-cbz-pag-w1280-en`) and `rd-pdf-fit-width-w1280-en` adds a PDF fit-width
+  spread; manual zoom is stepwise (`Message::ZoomIn`/`ZoomOut` from the current
+  fit scale, which is derived from the document's page size) and is not captured
+  at all, and there is no CBZ fit-width capture, so both are left to the
+  accepting package;
+- `RD-06`: the enabled and disabled edge-navigation states are referenced; hover
+  needs a pointer position the offscreen renderer does not deliver, so that part
+  of the row stays with 4B.
+
+These gaps are the owner's to accept with the package, and they are the reason
+the 1C matrix should be read through its `reason` field rather than through the
+row ids alone.
 
 The known limitations section records what is deliberately not captured, including:
 
@@ -545,7 +753,34 @@ The known limitations section records what is deliberately not captured, includi
   scroll position;
 - window decorations, native menus, toasts and animations are outside an
   offscreen frame, and the disposable data root path is visible in application
-  text that names a real path.
+  text that names a real path;
+- the offscreen renderer has no scroll interaction and the application exposes no
+  message that scrolls the reader, so the continuous captures show the chapter or
+  page column from its top and the paginated captures are reached with the
+  production page-navigation messages. Tiled continuous seams (`FM-14`) stay with
+  the Flutter/renderer packages;
+- the document-opening capture (`rd-chrome-opening-w900-en`) delivers the
+  production timer's own `Message::ShowDocumentOpenNotice(generation)` for the
+  in-flight generation, because an offscreen run cannot wait on a real window's
+  200 ms timer without also completing the open it is capturing; the state it
+  shows is the production opening composition;
+- the missing-file and open-error captures (`rd-chrome-missing-file-w900-en`,
+  `rd-chrome-open-error-w900-en`) need a real failure, so they remove
+  (respectively overwrite) the disposable copy of one seeded fixture and write
+  the original bytes back immediately afterwards; the committed fixture tree and
+  its checksums stay complete, and the disposable root is the run's own. The
+  open-error capture delivers the real `OpenDocumentError` the production
+  preparation path reports for those bytes through `Message::DocumentOpened`,
+  because a *preparation* failure leaves the reader on the library screen rather
+  than showing the reader's own alert;
+- **the Iced reader cannot render the reused conformance EPUB under the pinned
+  capture font environment.** Building its view panics inside the text stack
+  (`no default font found`). This is production behavior, not a harness artifact:
+  with only the application fonts registered, an EPUB span that asks for the
+  default family in italic has no matching face, and cosmic-text's fallback
+  iterator runs out. `reader::limitations` records it, `FM-21`/`FM-22`/`FM-23`
+  stay pending with 5C/5D, and no rich-composition capture is fabricated; the
+  reader's `FM-01` reference uses the generated deterministic fixtures instead.
 
 ## Environment variables
 
@@ -554,8 +789,11 @@ The known limitations section records what is deliberately not captured, includi
 | `LANGUAGE` | **Required.** Must be `en-US`: the language the `System`-preference captures resolve |
 | `FONTCONFIG_FILE` | **Required.** Must point at a fontconfig file that names a font directory (the entry point names an empty one), so no host font is eligible |
 | `SHOSAI_REFERENCE_SHOTS_VERIFY` | `1`/non-empty: verify mode (default: capture) |
-| `SHOSAI_REFERENCE_SHOTS_DIR` | Evidence output directory |
-| `SHOSAI_REFERENCE_SHOTS_DATA_DIR` | Disposable data root (fixtures, seeded libraries) |
+| `SHOSAI_REFERENCE_SHOTS_PACKAGE` | `1b`, `1c` or `all` (default): which packages this run produces |
+| `SHOSAI_REFERENCE_SHOTS_DIR` | Package 1B evidence output directory |
+| `SHOSAI_REFERENCE_SHOTS_DIR_1C` | Package 1C evidence output directory |
+| `SHOSAI_REFERENCE_SHOTS_DATA_DIR` | Package 1B disposable data root (fixtures, seeded libraries) |
+| `SHOSAI_REFERENCE_SHOTS_DATA_DIR_1C` | Package 1C disposable data root |
 | `SHOSAI_REFERENCE_SHOTS_KEEP_DATA` | Keep the disposable data root after the run |
 | `SHOSAI_REFERENCE_SHOTS_REVISION` | Override the recorded capture-code revision: a hexadecimal commit id of 7–64 characters. Required when `jj` cannot name the working copy |
 | `SHOSAI_REFERENCE_SHOTS_CHANGE_ID` | Override the recorded Jujutsu change id |

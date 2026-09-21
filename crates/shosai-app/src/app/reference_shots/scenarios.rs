@@ -91,6 +91,8 @@ pub(crate) enum Surface {
     Library,
     /// The settings screen.
     Settings,
+    /// The reader screen (package 1C).
+    Reader,
 }
 
 impl Surface {
@@ -98,6 +100,7 @@ impl Surface {
         match self {
             Self::Library => super::super::Screen::Library,
             Self::Settings => super::super::Screen::Settings,
+            Self::Reader => super::super::Screen::Reader,
         }
     }
 
@@ -105,8 +108,58 @@ impl Surface {
         match self {
             Self::Library => "library",
             Self::Settings => "settings",
+            Self::Reader => "reader",
         }
     }
+}
+
+/// The reader state a package 1C capture declares before it is rendered.
+///
+/// These are the facts an accepting package needs to cite a reader capture
+/// without opening it: which document, in which mode and palette, how many
+/// pages it has, where the capture is, which pages are visible together and
+/// whether they form a spread, the available reader size the layout ran at, the
+/// open panels and the search/bookmark/tab counts. The runner compares them with
+/// the state it actually reached and records the observed copy in the manifest.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReaderFacts {
+    /// Document file name.
+    pub(crate) document: String,
+    /// `epub`, `pdf`, `cbz` or empty when no document is open.
+    pub(crate) format: String,
+    /// `paginated` or `continuous`.
+    pub(crate) mode: String,
+    /// The raster zoom mode: `fit-page`, `fit-width` or `manual(<scale>)`.
+    ///
+    /// Recorded as `n/a` when no raster document is open (an EPUB, or no
+    /// document at all), because the state's zoom only applies to PDF/CBZ pages.
+    pub(crate) zoom: String,
+    /// `light`, `dark` or `sepia`.
+    pub(crate) theme: String,
+    /// Pages the document laid out to.
+    pub(crate) page_count: usize,
+    /// 1-based current location, or 0 when no document is open.
+    pub(crate) location: usize,
+    /// 1-based pages visible together, in order.
+    pub(crate) visible_pages: Vec<usize>,
+    /// Whether the visible pages form a two-page spread.
+    pub(crate) spread: bool,
+    /// Available reader width in logical pixels.
+    pub(crate) available_width: f32,
+    /// Available reader height in logical pixels.
+    pub(crate) available_height: f32,
+    /// EPUB book font size in logical pixels.
+    pub(crate) font_size: f32,
+    /// EPUB line spacing.
+    pub(crate) line_spacing: f32,
+    /// Open panels, in layout order.
+    pub(crate) panels: Vec<String>,
+    /// Saved places loaded for the open document.
+    pub(crate) bookmarks: usize,
+    /// Search matches, when the search bar is open.
+    pub(crate) search_matches: Option<usize>,
+    /// Open document tabs.
+    pub(crate) tabs: usize,
 }
 
 /// Captures that are allowed to be pixel-identical to each other.
@@ -163,7 +216,12 @@ pub(crate) fn interface_resolved_english(i18n: &I18n) -> bool {
 /// wrong surface, the wrong interface language or a state that never reached the
 /// flags the evidence describes is not evidence for its rows, so it must fail
 /// instead of being written.
+///
+/// The interface-language check runs first and for every package, including the
+/// reader captures: it is a property of the capture, not of its surface, and a
+/// surface-specific check must not be able to skip it.
 pub(crate) fn assert_reached(scenario: &Scenario, state: &super::super::State) {
+    assert_interface_locale(scenario, state);
     assert_eq!(
         state.screen,
         scenario.surface().screen(),
@@ -171,45 +229,15 @@ pub(crate) fn assert_reached(scenario: &Scenario, state: &super::super::State) {
         scenario.id,
         scenario.surface().label()
     );
-    match scenario.locale {
-        _ if scenario.base == Base::NoStore => {
-            // A capture without a store has no persisted preference to read, so
-            // it boots with `LanguagePreference::System`. That preference is
-            // *not* deferred: `I18n::new(System)` resolves it from the process
-            // locale immediately, which the runner pins to English before any
-            // state exists (`runner::pin_system_locale`). The capture therefore
-            // records `EN` and this asserts the interface really resolved to
-            // English rather than to the host machine's language.
-            assert_eq!(
-                state.i18n.preference(),
-                LanguagePreference::System,
-                "{}: no store, so the persisted preference stays `System`",
-                scenario.id
-            );
-            assert!(
-                interface_resolved_english(&state.i18n),
-                "{}: the no-store interface did not resolve to the English strings and font",
-                scenario.id
-            );
-        }
-        Locale::Ja => assert_eq!(
-            state.i18n.preference(),
-            LanguagePreference::Japanese,
-            "{}: expected the Japanese interface",
-            scenario.id
-        ),
-        Locale::En | Locale::Mix => assert_eq!(
-            state.i18n.preference(),
-            LanguagePreference::English,
-            "{}: expected the English interface",
-            scenario.id
-        ),
+    if matches!(scenario.kind, Kind::Reader(_)) {
+        super::reader::assert_reached(scenario, state);
+        return;
     }
-
     // The flags the capture's rows describe. Anything listed here is claimed by
     // the scenario table, and the capture fails rather than recording an image
     // of a state that never got there.
     let reached = match scenario.kind {
+        Kind::Reader(_) => unreachable!("reader captures return above"),
         Kind::LibraryDefault | Kind::LibraryJapanese | Kind::SharpnessLibrary => {
             !state.library_loading && !state.library_books.is_empty()
         }
@@ -294,8 +322,50 @@ pub(crate) fn assert_reached(scenario: &Scenario, state: &super::super::State) {
     );
 }
 
+/// Assert that the interface resolved to the language the capture records.
+///
+/// Every capture records `EN`, `JA` or `MIX`; this is the check that the state
+/// really resolved that language rather than the host machine's. It runs for
+/// every package and every surface, the reader captures included.
+pub(crate) fn assert_interface_locale(scenario: &Scenario, state: &super::super::State) {
+    match scenario.locale {
+        _ if scenario.base == Base::NoStore => {
+            // A capture without a store has no persisted preference to read, so
+            // it boots with `LanguagePreference::System`. That preference is
+            // *not* deferred: `I18n::new(System)` resolves it from the process
+            // locale immediately, which the runner pins to English before any
+            // state exists (`runner::pin_system_locale`). The capture therefore
+            // records `EN` and this asserts the interface really resolved to
+            // English rather than to the host machine's language.
+            assert_eq!(
+                state.i18n.preference(),
+                LanguagePreference::System,
+                "{}: no store, so the persisted preference stays `System`",
+                scenario.id
+            );
+            assert!(
+                interface_resolved_english(&state.i18n),
+                "{}: the no-store interface did not resolve to the English strings and font",
+                scenario.id
+            );
+        }
+        Locale::Ja => assert_eq!(
+            state.i18n.preference(),
+            LanguagePreference::Japanese,
+            "{}: expected the Japanese interface",
+            scenario.id
+        ),
+        Locale::En | Locale::Mix => assert_eq!(
+            state.i18n.preference(),
+            LanguagePreference::English,
+            "{}: expected the English interface",
+            scenario.id
+        ),
+    }
+}
+
 /// The capture states. Each variant is reached by production messages only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Kind {
     /// The seeded library exactly as it loads.
     LibraryDefault,
@@ -380,6 +450,8 @@ pub(crate) enum Kind {
     SharpnessLibrary,
     /// The import dialog at DPR 2 (sharpness subset).
     SharpnessImport,
+    /// A package 1C reader state ([`super::reader::ReaderKind`]).
+    Reader(super::reader::ReaderKind),
 }
 
 /// One capture.
@@ -395,6 +467,8 @@ pub(crate) struct Scenario {
     pub(crate) kind: Kind,
     /// Seeded fixtures the state is built from.
     pub(crate) fixture: &'static str,
+    /// The reader state a package 1C capture declares; `None` for 1B captures.
+    pub(crate) reader: Option<ReaderFacts>,
     pub(crate) notes: &'static [&'static str],
 }
 
@@ -564,6 +638,7 @@ impl Scenario {
             }
             Kind::SharpnessLibrary => "as the loaded library, rendered at DPR 2".to_owned(),
             Kind::SharpnessImport => "as the import review list, rendered at DPR 2".to_owned(),
+            Kind::Reader(kind) => kind.derivation(),
         }
     }
 
@@ -579,6 +654,7 @@ impl Scenario {
             | Kind::SettingsDisabledImporting
             | Kind::SettingsDisabledRemoving
             | Kind::SettingsUnavailable => Surface::Settings,
+            Kind::Reader(_) => Surface::Reader,
             // Every other capture is the library; the import dialog is an
             // overlay on top of it, not a screen of its own.
             _ => Surface::Library,
@@ -611,6 +687,7 @@ impl Scenario {
             state_derivation: self.derivation(),
             settings: self.settings(),
             rows: self.rows.iter().map(|row| (*row).to_owned()).collect(),
+            reader: self.reader.clone(),
             notes: self.notes.iter().map(|note| (*note).to_owned()).collect(),
         }
     }
@@ -662,6 +739,7 @@ fn wide(
         base: Base::Seeded,
         kind,
         fixture: "G1 seeded library (46 books)",
+        reader: None,
         notes,
     }
 }
@@ -693,6 +771,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "Iced default window (`main.rs`); wide under both breakpoints, so it is a wide \
                  reference and not a compact one",
@@ -708,6 +787,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &[
                 "`LB-05` is the compact filter row and is covered by the `C390` captures, not by \
                  this wide one",
@@ -726,6 +806,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::SharpnessLibrary,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "DPR 2 sharpness subset (specification `D2`); composition is identical to \
                  `lib-wide-w1280-en`, only the raster density differs",
@@ -745,6 +826,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "`LB-12` is the missing-cover card in compact form; it uses the populated seed, so \
                  the empty-library row `LB-18` is covered by `lib-state-empty-c390` instead",
@@ -760,6 +842,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &[
                 "Iced renders no `T200` text scaling, so the 200% text row stays with the \
                  accepting package",
@@ -775,6 +858,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "`B760±` probe: the compact composition (`LB-02`) and the compact side of the \
                  breakpoint (`LB-03`)",
@@ -790,6 +874,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "`B760±` probe: the breakpoint itself, where `LB-02`'s compact composition ends \
                  (`LB-03` asks for both sides), and the wide sidebar starts",
@@ -805,6 +890,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryDefault,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "`B760±` probe: the wide sidebar, so the compact composition cannot remain above \
                  the breakpoint in `LB-02`'s configuration",
@@ -823,6 +909,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &["`B760±` probe: compact filter row, Japanese interface"],
         },
         Scenario {
@@ -835,6 +922,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &["`B760±` probe: wide sidebar at the breakpoint, Japanese interface"],
         },
         Scenario {
@@ -847,6 +935,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &["`B760±` probe: wide sidebar, Japanese interface"],
         },
         Scenario {
@@ -859,6 +948,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::SharpnessLibrary,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &["DPR 2 sharpness subset (specification `D2`)"],
         },
         // -- 1B-LIB-STATE ------------------------------------------------------
@@ -872,6 +962,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchJapanese,
             fixture: "G1 seeded library (46 books) + G3 Japanese/mixed metadata",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -884,6 +975,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchNoMatches,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -896,6 +988,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryFilterPdf,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "The CBZ filter entry is a retained Flutter extension and has no Iced filter; \
                  Iced offers All/EPUB/PDF only",
@@ -911,6 +1004,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchWithFilter,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -923,6 +1017,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryLoadingSkeleton,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -935,6 +1030,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryLoadingMore,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "The viewport is taller than the usual `W1280` window (`W1280_TALL`): the \
                  loading-more indicator and the paging row are the last items of the library \
@@ -953,6 +1049,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryPaged,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "46 books: the first page holds 40, the second page holds 6",
                 "`W1280_TALL`, for the same reason as `lib-state-loading-more-w1280`: the paging \
@@ -969,6 +1066,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Empty,
             kind: Kind::LibraryEmpty,
             fixture: "empty disposable store",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -981,6 +1079,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Empty,
             kind: Kind::LibraryEmpty,
             fixture: "empty disposable store",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -993,6 +1092,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryLoadError,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "The failure text is a real `Library` error; the library stays usable and shows \
                  the alert bar above the grid, which is Iced's load-error composition",
@@ -1008,6 +1108,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::NoStore,
             kind: Kind::LibraryStorageError,
             fixture: "no store (real open failure)",
+            reader: None,
             notes: &[
                 "Iced shows the storage failure inside the empty-library composition (there is no \
                  library to keep usable); there is no separate storage-error alert bar",
@@ -1023,6 +1124,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryBookMenu,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -1035,6 +1137,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibraryRemoveModal,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -1047,6 +1150,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::ImportRemoval,
             kind: Kind::LibraryRemovePending,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "Runs against its own disposable seed so the removal cannot affect other captures",
             ],
@@ -1062,6 +1166,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchNoCover,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[
                 "`Conformance` matches the reused redistribution-safe conformance book, which has \
                  no cover image, so the placeholder keeps the 210 px cover box",
@@ -1077,6 +1182,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchNoCover,
             fixture: "G1 seeded library (46 books)",
+            reader: None,
             notes: &[],
         },
         Scenario {
@@ -1089,6 +1195,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchLongJapanese,
             fixture: "G3 Japanese/mixed metadata",
+            reader: None,
             notes: &[
                 "The search returns only long Japanese titles and authors while the UI language \
                  stays English, so this is the mixed-metadata surface",
@@ -1104,6 +1211,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Seeded,
             kind: Kind::LibrarySearchLongJapanese,
             fixture: "G3 Japanese/mixed metadata",
+            reader: None,
             notes: &[],
         },
         // -- 1B-IMPORT ---------------------------------------------------------
@@ -1264,6 +1372,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::ImportCompleted,
             kind: Kind::ImportCompleted,
             fixture: "G1 seeded library (46 books) + import sources",
+            reader: None,
             notes: &[
                 "The import dialog is closed by `AddSelectedBooks`, so this capture is the library \
                  after the import, with the imported book in the grid",
@@ -1282,6 +1391,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::Import,
             kind: Kind::SharpnessImport,
             fixture: "G1 seeded library (46 books) + import folder",
+            reader: None,
             notes: &["DPR 2 sharpness subset (specification `D2`)"],
         },
         // -- 1B-SETTINGS -------------------------------------------------------
@@ -1410,6 +1520,7 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
             base: Base::NoStore,
             kind: Kind::SettingsUnavailable,
             fixture: "no store (real open failure)",
+            reader: None,
             notes: &["Shows the unavailable managed location and the disabled library actions"],
         },
         settings(
@@ -1443,6 +1554,7 @@ fn import(
         base: Base::Import,
         kind,
         fixture: "G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths)",
+        reader: None,
         notes,
     }
 }
@@ -1466,6 +1578,7 @@ fn settings(
         base: Base::Seeded,
         kind,
         fixture: "G1 seeded library (46 books)",
+        reader: None,
         notes,
     }
 }
@@ -1544,7 +1657,11 @@ pub(crate) async fn apply(
             .dispatch(Message::SelectLanguage(LanguagePreference::Japanese))
             .await;
     }
+    if matches!(scenario.kind, Kind::Reader(_)) {
+        return super::reader::apply(scenario, harness, data_root).await;
+    }
     match scenario.kind {
+        Kind::Reader(_) => unreachable!("reader captures return above"),
         Kind::LibraryDefault => {}
         Kind::LibraryJapanese => {}
         Kind::SettingsJapanese => {
@@ -1879,5 +1996,6 @@ pub(crate) fn state_id(scenario: &Scenario) -> &'static str {
         | Kind::SettingsDisabledImporting
         | Kind::SettingsDisabledRemoving
         | Kind::SettingsUnavailable => "settings",
+        Kind::Reader(_) => "reader",
     }
 }

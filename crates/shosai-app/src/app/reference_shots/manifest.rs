@@ -68,6 +68,14 @@ pub(crate) struct CaptureEntry {
     pub(crate) settings: Vec<String>,
     /// Specification matrix rows this capture is reference evidence for.
     pub(crate) rows: Vec<String>,
+    /// Package 1C: the reader state the capture shows (document, mode, palette,
+    /// page count, visible pages, spread, available size, panels, counts).
+    ///
+    /// Absent for package 1B captures, and skipped when absent, so adding the
+    /// field changes no 1B capture entry: the 1B manifest keeps exactly the
+    /// fields it had before 1C.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reader: Option<super::scenarios::ReaderFacts>,
     /// Notes about intentional gaps (for example native pickers).
     pub(crate) notes: Vec<String>,
 }
@@ -198,6 +206,11 @@ pub(crate) struct Manifest {
     /// Capture pairs that intentionally render identical pixels.
     pub(crate) pixel_aliases: Vec<PixelAliasRecord>,
     pub(crate) matrix: MatrixCoverage,
+    /// Rows this package deliberately does not capture because Iced has no
+    /// counterpart, with the authority that owns them instead. Empty (and
+    /// omitted) for package 1B.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) non_iced_authority: Vec<String>,
     pub(crate) limitations: Vec<String>,
 }
 
@@ -368,15 +381,35 @@ fn checksum_file(entries: &[(String, String)]) -> String {
     out
 }
 
+/// The README heading of a package's evidence directory.
+pub(crate) fn readme_title(package: &str) -> String {
+    format!("# {package} reference captures (Iced, package {package})")
+}
+
+/// What a package's captures are evidence for, for the README.
+pub(crate) fn readme_scope(package: &str) -> String {
+    match package {
+        "1B" => "the `1B-LIB-*`, `1B-IMPORT` and `1B-SETTINGS` families of the Flutter UI \
+                 reference specification"
+            .to_owned(),
+        "1C" => "the `1C-RD-CHROME`, `1C-RD-PANEL`, `1C-SPREAD`, `1C-EPUB-PAG`, `1C-EPUB-CONT`, \
+                  `1C-PDF-PAG`, `1C-PDF-CONT`, `1C-CBZ-PAG` and `1C-CBZ-CONT` families of the \
+                  Flutter UI reference specification"
+            .to_owned(),
+        other => format!("the {other} reference families"),
+    }
+}
+
 pub(crate) fn readme(manifest: &Manifest) -> String {
     let mut out = String::new();
-    out.push_str("# 1B reference captures (Iced, package 1B)\n\n");
-    out.push_str(
-        "Generated evidence for the `1B-LIB-*`, `1B-IMPORT` and `1B-SETTINGS` families of the\n\
-         Flutter UI reference specification. These images are the **Iced reference**, not\n\
+    out.push_str(&readme_title(&manifest.package));
+    out.push_str("\n\n");
+    out.push_str(&format!(
+        "Generated evidence for {}. These images are the **Iced reference**, not\n\
          acceptance evidence for the Flutter restoration: each accepting package still produces\n\
          and inspects its own renders (specification §4.0).\n\n",
-    );
+        readme_scope(&manifest.package)
+    ));
     out.push_str(&format!("- Entry point: `{}`\n", manifest.entry_point));
     out.push_str(&format!("- Command: `{}`\n", manifest.command));
     out.push_str(&format!(
@@ -488,6 +521,40 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
                 capture.settings.join("; ")
             }
         ));
+        if let Some(reader) = &capture.reader {
+            out.push_str(&format!(
+                "- Reader: {} `{}` · {} · palette {} · page {} of {} · visible {} · spread {} · \
+                 available {}×{} logical · book font {} px at line spacing {} · panels [{}] · saved \
+                 places {} · search matches {} · tabs {}\n",
+                reader.format,
+                reader.document,
+                reader.mode,
+                reader.theme,
+                reader.location,
+                reader.page_count,
+                if reader.visible_pages.is_empty() {
+                    "none".to_owned()
+                } else {
+                    reader
+                        .visible_pages
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                reader.spread,
+                reader.available_width,
+                reader.available_height,
+                reader.font_size,
+                reader.line_spacing,
+                reader.panels.join(", "),
+                reader.bookmarks,
+                reader
+                    .search_matches
+                    .map_or_else(|| "n/a".to_owned(), |matches| matches.to_string()),
+                reader.tabs
+            ));
+        }
         for note in &capture.notes {
             out.push_str(&format!("- Note: {note}\n"));
         }
@@ -576,6 +643,13 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
     out.push_str("\n## Fonts\n\n| Role | SHA-256 |\n| --- | --- |\n");
     for font in &manifest.fonts {
         out.push_str(&format!("| {} | `{}` |\n", font.role, font.sha256));
+    }
+
+    if !manifest.non_iced_authority.is_empty() {
+        out.push_str("\n## Non-Iced authority (rows this package does not capture)\n\n");
+        for authority in &manifest.non_iced_authority {
+            out.push_str(&format!("- {authority}\n"));
+        }
     }
 
     out.push_str("\n## Known limitations\n\n");

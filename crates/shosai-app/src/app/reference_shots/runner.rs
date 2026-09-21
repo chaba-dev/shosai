@@ -1,10 +1,10 @@
 //! The `make reference-shots` entry point.
 //!
-//! One run: validates and clears its disposable data root, writes the
-//! deterministic fixture tree, seeds the disposable libraries, reaches every
-//! [`super::scenarios`] state through the production messages, renders each one
-//! offscreen with the production view, and writes the PNGs, their checksums and
-//! the provenance manifest.
+//! One run per selected [`Package`]: validates and clears its disposable data
+//! root, writes the deterministic fixture tree, seeds the disposable libraries,
+//! reaches every state of its capture table through the production messages,
+//! renders each one offscreen with the production view, and writes the PNGs,
+//! their checksums and the provenance manifest into its own evidence directory.
 //!
 //! Nothing outside the output directory and the disposable data root is
 //! touched: the application's real data directory is never opened, because the
@@ -20,16 +20,9 @@ use iced::Size;
 
 use super::super::Message;
 use super::harness::Harness;
-use super::scenarios::{self, Base};
-use super::{evidence, fixtures, manifest, render, seed};
-
-/// Committed evidence directory, relative to the repository root.
-pub(crate) const DEFAULT_OUTPUT: &str = "rfd/0004/evidence/reference-shots-1b";
-
-/// Fixed disposable data root. It is removed at the start and the end of a run,
-/// and it is deliberately not the platform's user data directory: captures must
-/// never read or write a real library.
-pub(crate) const DEFAULT_DATA_ROOT: &str = "/tmp/shosai-reference-shots-1b";
+use super::package::Package;
+use super::scenarios::Base;
+use super::{evidence, fixtures, manifest, reader, render, scenarios, seed};
 
 /// The documented entry point.
 pub(crate) const ENTRY_POINT: &str = "make reference-shots";
@@ -38,9 +31,10 @@ pub(crate) const ENTRY_POINT: &str = "make reference-shots";
 pub(crate) const REVISION_NOTE: &str = "`capture_code_revision` is the working-copy commit id at \
      render time. Jujutsu rewrites a commit id when its change is described or committed, so the \
      durable mapping is the stable `capture_code_change_id` (resolve it with `jj log -r \
-     'change(<id>)'`) together with the commit that contains this evidence directory, which is \
-     the capture code revision the evidence is committed at; `make reference-shots VERIFY=1` \
-     re-renders this evidence byte-identically at any revision that carries the change.";
+     'change_id(<id>)'` in the pinned Jujutsu, which is the command `docs/reference-captures.md` \
+     records) together with the commit that contains this evidence directory, which is the capture \
+     code revision the evidence is committed at; `make reference-shots VERIFY=1` re-renders this \
+     evidence byte-identically at any revision that carries the change.";
 
 /// The command the Makefile target runs.
 pub(crate) const DEFAULT_COMMAND: &str = "cargo test --package shosai-app --bin shosai \
@@ -51,41 +45,16 @@ pub(crate) fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Disposable data root; `SHOSAI_REFERENCE_SHOTS_DATA_DIR` overrides it.
-pub(crate) fn data_root() -> PathBuf {
-    std::env::var_os("SHOSAI_REFERENCE_SHOTS_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_ROOT))
-}
-
-/// Evidence output directory; `SHOSAI_REFERENCE_SHOTS_DIR` overrides it.
-///
-/// The override is resolved once ([`resolve_path`]), like the data root inside
-/// [`DisposableRoot::prepare`]. The run keeps that resolved value: the overlap
-/// check, the capture writes, the fixture mirror, the manifest writer and the
-/// verifier all use it, so no step can re-read the configuration and reach a
-/// different directory after preparation cleared the data root.
-///
-/// Resolution fails instead of falling back to the configured spelling: a
-/// spelling the file system cannot traverse (a symlink loop, a dangling link, a
-/// file used as a directory, a drive-relative path) must not be silently
-/// replaced by a location that happens to be reachable through `..`.
-pub(crate) fn output_root() -> Result<PathBuf> {
-    let configured = std::env::var_os("SHOSAI_REFERENCE_SHOTS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository_root().join(DEFAULT_OUTPUT));
-    resolve_path(&configured)
-}
-
-/// Where the reference fixture tree is generated and read from.
+/// Where the reference fixture tree is generated and read from for a package.
 ///
 /// It is always inside the disposable data root, never inside the evidence
 /// directory: the application renders real absolute paths (the discovery-failure
-/// rows), so a capture taken from a checkout path would embed a machine-specific
-/// path and would not reproduce elsewhere. With the default data root the path is
-/// fixed, and `SHOSAI_REFERENCE_SHOTS_DATA_DIR` is the documented way to move it.
-pub(crate) fn fixtures_root() -> PathBuf {
-    data_root().join("fixtures")
+/// rows, the managed-library location), so a capture taken from a checkout path
+/// would embed a machine-specific path and would not reproduce elsewhere. With
+/// the default data root the path is fixed, and each package's data-root
+/// override is the documented way to move it.
+pub(crate) fn fixtures_root(package: Package) -> PathBuf {
+    package.data_root().join("fixtures")
 }
 
 /// Where the committed copy of the generated fixture tree lives.
@@ -144,6 +113,46 @@ impl DisposableRoot {
     /// traverse — so validation and every filesystem operation below use the
     /// same location.
     pub(crate) fn prepare(root: &Path, output: &Path) -> Result<Self> {
+        let spelling = Self::check_input_policy(root)?;
+        let resolved = resolve_path(&spelling)?;
+        Self::adopt(&resolved, output)
+    }
+
+    /// The same, for a root the entry point already resolved and cross-checked.
+    ///
+    /// The input policy still runs on the configured spelling, and the resolved
+    /// path must be the one the preflight approved: resolving the spelling again
+    /// after another package's preparation could reach a different directory (a
+    /// symlink that package deleted), and this run would then clear and write a
+    /// location no cross-package check approved.
+    pub(crate) fn prepare_resolved(
+        spelling: &Path,
+        resolved: &Path,
+        output: &Path,
+    ) -> Result<Self> {
+        let spelling = Self::check_input_policy(spelling)?;
+        let configured = resolve_path(&spelling)?;
+        anyhow::ensure!(
+            configured == resolved,
+            "the disposable data root {} resolves to {} instead of the {} the cross-package \
+             checks approved; refusing to clear a directory those checks did not cover",
+            spelling.display(),
+            configured.display(),
+            resolved.display()
+        );
+        Self::adopt(resolved, output)
+    }
+
+    /// The data-root *input* policy, before anything is resolved.
+    ///
+    /// A relative root is refused instead of being turned into an absolute path
+    /// against the process directory, and a root that names a symlink as its
+    /// final component is refused instead of being silently dereferenced to
+    /// whatever directory the link names (an empty unrelated directory would
+    /// otherwise be adopted, locked and deleted). The final component is
+    /// inspected without trailing separators or `.`, so `link/` and `link/.`
+    /// cannot smuggle the link past the check. Returns the spelling to resolve.
+    fn check_input_policy(root: &Path) -> Result<PathBuf> {
         let spelling = final_spelling(root);
         if !spelling.is_absolute() {
             anyhow::bail!(
@@ -159,7 +168,15 @@ impl DisposableRoot {
                 root.display()
             );
         }
-        let root = resolve_path(root)?;
+        Ok(spelling)
+    }
+
+    /// Take the lock on an already-resolved root and clear it.
+    ///
+    /// Everything here acts on `resolved`, so validation and every filesystem
+    /// operation use the same location.
+    fn adopt(resolved: &Path, output: &Path) -> Result<Self> {
+        let root = resolved.to_path_buf();
         validate_root_configuration(&root, output)?;
         if root.exists() {
             let metadata = std::fs::symlink_metadata(&root)
@@ -355,7 +372,7 @@ pub(crate) fn validate_root_configuration(root: &Path, output: &Path) -> Result<
             output.display()
         );
     }
-    for protected in protected_paths()? {
+    for protected in protected_paths(&output)? {
         if root == protected || protected.starts_with(&root) {
             anyhow::bail!(
                 "refusing to use {} as the disposable data root: it is, or contains, {}",
@@ -505,8 +522,12 @@ pub(crate) fn final_spelling(path: &Path) -> PathBuf {
 }
 
 /// Paths the disposable root may never be, or contain, because it is deleted.
-fn protected_paths() -> Result<Vec<PathBuf>> {
-    let mut protected = vec![PathBuf::from("/"), repository_root(), output_root()?];
+///
+/// The evidence directory is the caller's *resolved* output, not a re-read of
+/// the configuration: a run must compare against the directory it actually
+/// writes.
+fn protected_paths(output: &Path) -> Result<Vec<PathBuf>> {
+    let mut protected = vec![PathBuf::from("/"), repository_root(), output.to_path_buf()];
     if let Some(home) = std::env::var_os("HOME") {
         protected.push(PathBuf::from(home));
     }
@@ -770,25 +791,48 @@ fn reference_shots_capture() {
         .build()
         .expect("capture runtime");
     runtime.block_on(async {
-        run().await.expect("reference capture run");
+        let packages = super::package::selected().expect("select the reference-shots packages");
+        // Resolved and cross-checked before anything is created, cleared or
+        // written: a configuration that points one package at another's evidence
+        // directory or disposable root would prune or delete it. The resolved
+        // values are what each package runs on — no package re-resolves its
+        // configuration, so the directory a run clears is the one that was
+        // checked, even if resolving the spelling again would now reach
+        // somewhere else (a symlink another package's preparation deleted).
+        let roots = super::package::resolved_roots().expect("resolve the package roots");
+        super::package::assert_roots_disjoint(&roots).expect("disjoint package roots");
+        super::package::assert_evidence_belongs_to(&roots).expect("owned evidence directories");
+        for roots in &roots {
+            if !packages.contains(&roots.package) {
+                continue;
+            }
+            run_package(roots).await.unwrap_or_else(|error| {
+                panic!(
+                    "reference capture run for package {:?}: {error}",
+                    roots.package
+                )
+            });
+        }
     });
 }
 
-async fn run() -> Result<()> {
+async fn run_package(roots: &super::package::PackageRoots) -> Result<()> {
+    let package = roots.package;
     // The renderer must not be able to see host fonts: the entry point pins font
     // discovery, and this refuses to render if it did not.
     render::assert_controlled_font_database()?;
     let (in_memory_faces, file_backed_faces) = render::font_database_faces();
     println!(
-        "reference-shots: renderer font database: {in_memory_faces} in-memory face(s), \
-         {file_backed_faces} file-backed face(s)"
+        "reference-shots [{}]: renderer font database: {in_memory_faces} in-memory face(s), \
+         {file_backed_faces} file-backed face(s)",
+        package.id()
     );
     let verify = std::env::var("SHOSAI_REFERENCE_SHOTS_VERIFY")
         .is_ok_and(|value| !value.is_empty() && value != "0");
-    // Resolved once: every step below — capture writes, mirroring, manifest,
-    // verification — uses this value, never the configuration again.
-    let output = output_root()?;
-    let scenarios = scenarios::scenarios();
+    // The preflight's own value: every step below — capture writes, mirroring,
+    // manifest, verification — uses it, never the configuration again.
+    let output = roots.output.clone();
+    let scenarios = package.scenarios();
     // The evidence entries themselves must be the regular files and real
     // directories this run owns. Validating the two roots is not enough: a
     // symlink among the entries would redirect a capture write, the fixture
@@ -808,24 +852,30 @@ async fn run() -> Result<()> {
     // verify mode writes nothing outside it: the fresh captures are compared
     // with the committed evidence instead, and a capture run then mirrors the
     // tree it rendered from into the evidence directory.
-    let data = data_root();
     let keep_data = std::env::var_os("SHOSAI_REFERENCE_SHOTS_KEEP_DATA").is_some();
-    let root = DisposableRoot::prepare(&data, &output)?;
+    // The spelling's input policy is enforced inside `prepare_resolved`, and the
+    // resolved root must still be the preflight's value: a spelling that now
+    // resolves elsewhere (a symlink another package's preparation removed) is a
+    // refusal rather than a write to an unchecked directory.
+    let root = DisposableRoot::prepare_resolved(&roots.data_spelling, &roots.data, &output)?;
     // Everything below works on the resolved root, so the fixtures and stores it
     // creates are the ones the ownership checks and the teardown act on.
     let data = root.path().to_path_buf();
     let fixtures_root = data.join("fixtures");
     let pdfium = pdfium_identity();
     println!(
-        "reference-shots: native PDFium: {}",
+        "reference-shots [{}]: native PDFium: {}",
+        package.id(),
         pdfium
             .as_deref()
             .unwrap_or("unknown (no library named pdfium is mapped)")
     );
 
     println!(
-        "reference-shots: {} mode, fixtures -> {}",
+        "reference-shots [{}]: {} mode, evidence -> {}, fixtures -> {}",
+        package.id(),
         if verify { "verify" } else { "capture" },
+        output.display(),
         fixtures_root.display()
     );
     let fixture_records = fixtures::write_reference_fixtures(&fixtures_root)?;
@@ -834,14 +884,19 @@ async fn run() -> Result<()> {
     let seeded = seed::seed_library(&data.join("seeded"), &fixtures_root).await?;
     let empty = seed::seed_empty_library(&data.join("empty")).await?;
     println!(
-        "reference-shots: seeded {} books, {} fixtures",
+        "reference-shots [{}]: seeded {} books, {} fixtures",
+        package.id(),
         seeded.books.len(),
         fixture_records.len()
     );
 
     let mut import_bases: HashMap<Base, seed::SeededLibrary> = HashMap::new();
     let mut captures: Vec<manifest::CaptureEntry> = Vec::new();
-    println!("reference-shots: {} captures", scenarios.len());
+    println!(
+        "reference-shots [{}]: {} captures",
+        package.id(),
+        scenarios.len()
+    );
 
     for scenario in &scenarios {
         // Every capture starts from a fresh harness: the base seeds are built
@@ -871,15 +926,25 @@ async fn run() -> Result<()> {
             }
         };
 
-        let mut harness = base_harness(base_seed).await?;
+        let mut harness = base_harness(base_seed, package).await?;
         apply_window(scenario, &mut harness);
         scenarios::apply(scenario, &mut harness, &fixtures_root, &data).await?;
         scenarios::assert_reached(scenario, &harness.state);
         assert_window(scenario, &harness.state);
 
         let (width, height) = scenario.client;
+        println!(
+            "reference-shots [{}]: rendering {}",
+            package.id(),
+            scenario.id
+        );
         let image = harness.render_image(width, height, scenario.dpr).await;
         assert_window(scenario, &harness.state);
+        // The render loop dispatches the messages the view asks for, so it can
+        // move the state. The image is evidence for the declared state only if
+        // the state it settled on is still that state, so the check runs again
+        // after the last frame and before anything is written or recorded.
+        scenarios::assert_reached(scenario, &harness.state);
         // Fence this capture's persisted writes before the next capture resets
         // the shared store: dropping a writer only signals shutdown, so a
         // queued preference write could otherwise land after the next baseline
@@ -891,6 +956,17 @@ async fn run() -> Result<()> {
         }
 
         let mut capture = scenario.expected_capture();
+        if scenario.reader.is_some() {
+            // The manifest records the state the renderer drew. `assert_reached`
+            // has just proven it equals the declaration, on both sides of the
+            // render, so the observed copy and the declared one are the same.
+            capture.reader = Some(reader::observe(&harness.state));
+            println!(
+                "  {} reader facts: {}",
+                scenario.id,
+                serde_json::to_string(&capture.reader).unwrap_or_default()
+            );
+        }
         capture.sha256 = fixtures::sha256_hex(&image.png);
         capture.bytes = image.png.len() as u64;
         // The manifest must describe the raster that was produced, not a
@@ -915,9 +991,10 @@ async fn run() -> Result<()> {
         );
     }
 
-    let matrix = matrix();
-    reject_duplicate_pixels(&captures)?;
+    let matrix = matrix(package);
+    reject_duplicate_pixels(&captures, package.pixel_aliases())?;
     let manifest = build_manifest(
+        package,
         &fixture_records,
         broken_symlinks_available,
         &seeded,
@@ -930,7 +1007,9 @@ async fn run() -> Result<()> {
         evidence::validate(&output, &manifest, true)
             .context("verify the committed evidence against a fresh render")?;
         println!(
-            "reference-shots: {} captures re-rendered byte-identically to the committed evidence",
+            "reference-shots [{}]: {} captures re-rendered byte-identically to the committed \
+             evidence",
+            package.id(),
             manifest.captures.len()
         );
     } else {
@@ -956,7 +1035,8 @@ async fn run() -> Result<()> {
         evidence::validate(&output, &manifest, true)
             .context("validate the evidence this run wrote")?;
         println!(
-            "reference-shots: manifest, checksums and README written and validated in {}",
+            "reference-shots [{}]: manifest, checksums and README written and validated in {}",
+            package.id(),
             output.display()
         );
     }
@@ -973,7 +1053,9 @@ async fn run() -> Result<()> {
 /// [`evidence::validate`]. `revision` is resolved by the caller
 /// ([`capture_revision`]), so a run that cannot state the revision its code was
 /// rendered from fails before it writes anything.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_manifest(
+    package: Package,
     fixture_records: &[fixtures::FixtureRecord],
     broken_symlinks_available: bool,
     seeded: &seed::SeededLibrary,
@@ -984,10 +1066,9 @@ pub(crate) fn build_manifest(
 ) -> Result<manifest::Manifest> {
     Ok(manifest::Manifest {
         schema: 2,
-        package: "1B".to_owned(),
+        package: package.id().to_owned(),
         entry_point: ENTRY_POINT.to_owned(),
-        command: std::env::var("SHOSAI_REFERENCE_SHOTS_COMMAND")
-            .unwrap_or_else(|_| DEFAULT_COMMAND.to_owned()),
+        command: package.command(),
         capture_code_revision: revision.revision.clone(),
         capture_code_revision_source: revision.source.clone(),
         capture_code_change_id: revision.change_id.clone(),
@@ -1024,7 +1105,8 @@ pub(crate) fn build_manifest(
             books: seeded.books.clone(),
         },
         captures,
-        pixel_aliases: scenarios::PIXEL_ALIASES
+        pixel_aliases: package
+            .pixel_aliases()
             .iter()
             .map(|(left, right, reason)| manifest::PixelAliasRecord {
                 left: (*left).to_owned(),
@@ -1033,7 +1115,8 @@ pub(crate) fn build_manifest(
             })
             .collect(),
         matrix,
-        limitations: limitations(broken_symlinks_available),
+        non_iced_authority: package.non_iced_authority(),
+        limitations: package.limitations(broken_symlinks_available),
     })
 }
 
@@ -1110,23 +1193,26 @@ pub(crate) async fn fence_capture_writes(harness: &mut Harness) -> Result<()> {
 /// missing check.
 #[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) async fn expected_manifest(
+    package: Package,
     fixtures_root: &Path,
     seeded: &seed::SeededLibrary,
     revision: &CaptureRevision,
 ) -> Result<manifest::Manifest> {
     let records = fixtures::write_reference_fixtures(fixtures_root)?;
-    let captures = scenarios::scenarios()
+    let captures = package
+        .scenarios()
         .iter()
         .map(|scenario| scenario.expected_capture())
         .collect();
     build_manifest(
+        package,
         &records,
         fixtures::broken_symlinks_available(fixtures_root),
         seeded,
         captures,
-        matrix(),
+        matrix(package),
         revision,
-        &output_root()?,
+        &package.output_root()?,
     )
 }
 
@@ -1333,14 +1419,17 @@ fn describe_entry(metadata: &std::fs::Metadata) -> &'static str {
 /// of the captures is silently showing the other's state, which is how a
 /// wrong-surface capture is caught before it becomes evidence. Aliases have to
 /// be declared in [`scenarios::PIXEL_ALIASES`] with a reason.
-pub(crate) fn reject_duplicate_pixels(captures: &[manifest::CaptureEntry]) -> Result<()> {
+pub(crate) fn reject_duplicate_pixels(
+    captures: &[manifest::CaptureEntry],
+    aliases: &[(&str, &str, &str)],
+) -> Result<()> {
     let mut duplicates: Vec<String> = Vec::new();
     for (index, capture) in captures.iter().enumerate() {
         for other in &captures[index + 1..] {
             if capture.sha256 != other.sha256 {
                 continue;
             }
-            let aliased = scenarios::PIXEL_ALIASES.iter().any(|(left, right, _)| {
+            let aliased = aliases.iter().any(|(left, right, _)| {
                 (*left == capture.id && *right == other.id)
                     || (*left == other.id && *right == capture.id)
             });
@@ -1353,14 +1442,14 @@ pub(crate) fn reject_duplicate_pixels(captures: &[manifest::CaptureEntry]) -> Re
     // longer shares pixels means one of the two captures changed state, and the
     // recorded reason is stale.
     let mut stale: Vec<String> = Vec::new();
-    for (left, right, _) in scenarios::PIXEL_ALIASES {
+    for (left, right, _) in aliases {
         let left_sha = captures
             .iter()
-            .find(|capture| capture.id == left)
+            .find(|capture| capture.id == *left)
             .map(|capture| capture.sha256.as_str());
         let right_sha = captures
             .iter()
-            .find(|capture| capture.id == right)
+            .find(|capture| capture.id == *right)
             .map(|capture| capture.sha256.as_str());
         match (left_sha, right_sha) {
             (Some(left_sha), Some(right_sha)) if left_sha == right_sha => {}
@@ -1389,7 +1478,13 @@ pub(crate) fn reject_duplicate_pixels(captures: &[manifest::CaptureEntry]) -> Re
 /// first library page and decodes its covers. Without a store it is a bare boot
 /// state, which is what a machine with no readable data directory has when
 /// initialization fails.
-async fn base_harness(seeded: Option<&seed::SeededLibrary>) -> Result<Harness> {
+///
+/// Shared with the regression tests, which exercise a scenario through the same
+/// production messages the capture run uses.
+pub(crate) async fn base_harness(
+    seeded: Option<&seed::SeededLibrary>,
+    package: Package,
+) -> Result<Harness> {
     let Some(seeded) = seeded else {
         return Ok(Harness::new(fresh_state()));
     };
@@ -1398,6 +1493,12 @@ async fn base_harness(seeded: Option<&seed::SeededLibrary>) -> Result<Harness> {
     // otherwise leak into the next one and make the set order-dependent. Every
     // capture therefore starts from the documented preference baseline.
     seed::reset_capture_preferences(&seeded.store).await?;
+    // The reader captures additionally write durable reading positions and
+    // saved places, so they start from the documented reader baseline too: a
+    // capture that turned to page 4 must not decide where the next one opens.
+    if package.resets_reader_state() {
+        seed::reset_capture_reader_state(&seeded.store).await?;
+    }
     let initialized = seed::capture_initialized_state(seeded.store.clone())
         .await
         .map_err(anyhow::Error::msg)
@@ -1534,9 +1635,9 @@ fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-pub(crate) fn matrix() -> manifest::MatrixCoverage {
-    let captures = scenarios::scenarios();
-    let (captured_rows, manifest_rows, pending_rows) = scenarios::matrix_rows();
+pub(crate) fn matrix(package: Package) -> manifest::MatrixCoverage {
+    let captures = package.scenarios();
+    let (captured_rows, manifest_rows, pending_rows) = package.matrix_rows();
     let captured = captured_rows
         .iter()
         .map(|row| manifest::RowCoverage {
@@ -1547,7 +1648,12 @@ pub(crate) fn matrix() -> manifest::MatrixCoverage {
                 .filter(|scenario| scenario.rows.contains(row))
                 .map(|scenario| scenario.id.to_owned())
                 .collect(),
-            reason: String::new(),
+            reason: package
+                .captured_reasons()
+                .iter()
+                .find(|(partial, _)| partial == row)
+                .map(|(_, reason)| (*reason).to_owned())
+                .unwrap_or_default(),
         })
         .collect();
     let from_manifest = manifest_rows
@@ -1577,7 +1683,7 @@ pub(crate) fn matrix() -> manifest::MatrixCoverage {
     }
 }
 
-fn limitations(broken_symlinks_available: bool) -> Vec<String> {
+pub(crate) fn library_limitations(broken_symlinks_available: bool) -> Vec<String> {
     let mut limitations = vec![
         "Iced has no text scaling (`T200`), no CBZ filter entry, no tiled continuous render and \
          no decision-11 tab overflow: those rows have no Iced counterpart and are not fabricated \

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use super::fixtures::{self, FixtureRecord, SeedBook};
 use super::harness::Harness;
+use super::package::Package;
 use super::scenarios::{self, Base};
 use super::seed;
 use crate::app::{AddBookBehavior, Message};
@@ -18,8 +19,15 @@ fn temp_root() -> tempfile::TempDir {
     tempfile::tempdir().expect("temp dir")
 }
 
+/// The committed evidence directory of a package.
+fn evidence_root_for(package: Package) -> PathBuf {
+    package
+        .output_root()
+        .expect("resolve the committed evidence directory")
+}
+
 fn evidence_root() -> PathBuf {
-    super::runner::output_root().expect("resolve the committed evidence directory")
+    evidence_root_for(Package::OneB)
 }
 
 /// Generate the fixture tree twice and compare bytes, order and hashes.
@@ -897,9 +905,11 @@ fn capture_table_is_consistent() {
 /// machine-specific path and stops reproducing: this is a regression guard.
 #[test]
 fn capture_fixtures_live_in_the_disposable_data_root() {
-    let fixtures_root = super::runner::fixtures_root();
-    let data_root = super::runner::data_root();
-    let output = super::runner::output_root().expect("resolve the evidence directory");
+    let data_root = Package::OneB.data_root();
+    let fixtures_root = super::runner::fixtures_root(Package::OneB);
+    let output = Package::OneB
+        .output_root()
+        .expect("resolve the evidence directory");
     assert!(
         fixtures_root.starts_with(&data_root),
         "captures must read fixtures from {}",
@@ -997,17 +1007,21 @@ fn pixel_alias_rules_reject_both_kinds_of_mismatch() {
         state_derivation: "derivation".to_owned(),
         settings: Vec::new(),
         rows: vec!["LB-01".to_owned()],
+        reader: None,
         notes: Vec::new(),
     };
 
     let declared = scenarios::PIXEL_ALIASES[0];
     // The declared pair, plus an unrelated capture that happens to share bytes
     // with the declared left capture: the undeclared duplicate must fail.
-    let undeclared = super::runner::reject_duplicate_pixels(&[
-        entry(declared.0, "1"),
-        entry(declared.1, "1"),
-        entry("lib-wide-w1280-en", "1"),
-    ])
+    let undeclared = super::runner::reject_duplicate_pixels(
+        &[
+            entry(declared.0, "1"),
+            entry(declared.1, "1"),
+            entry("lib-wide-w1280-en", "1"),
+        ],
+        &scenarios::PIXEL_ALIASES,
+    )
     .expect_err("an undeclared identical pair must fail");
     let message = undeclared.to_string();
     assert!(
@@ -1017,17 +1031,22 @@ fn pixel_alias_rules_reject_both_kinds_of_mismatch() {
 
     // A declared pair with different pixels must fail too, because the recorded
     // reason no longer describes the evidence.
-    let stale =
-        super::runner::reject_duplicate_pixels(&[entry(declared.0, "1"), entry(declared.1, "2")])
-            .expect_err("a stale alias must fail");
+    let stale = super::runner::reject_duplicate_pixels(
+        &[entry(declared.0, "1"), entry(declared.1, "2")],
+        &scenarios::PIXEL_ALIASES,
+    )
+    .expect_err("a stale alias must fail");
     assert!(
         stale.to_string().contains(declared.0),
         "the stale-alias failure must name the pair: {stale}"
     );
 
     // The declared pair with identical pixels is accepted.
-    super::runner::reject_duplicate_pixels(&[entry(declared.0, "1"), entry(declared.1, "1")])
-        .expect("the declared pair is allowed to share pixels");
+    super::runner::reject_duplicate_pixels(
+        &[entry(declared.0, "1"), entry(declared.1, "1")],
+        &scenarios::PIXEL_ALIASES,
+    )
+    .expect("the declared pair is allowed to share pixels");
 }
 
 /// Stale evidence files must be pruned: a renamed capture must not leave an
@@ -1057,6 +1076,7 @@ fn stale_evidence_files_are_pruned() {
         state_derivation: "derivation".to_owned(),
         settings: Vec::new(),
         rows: vec!["LB-01".to_owned()],
+        reader: None,
         notes: Vec::new(),
     };
     super::runner::prune_stale_evidence(output.path(), &[entry.clone()])
@@ -1108,11 +1128,16 @@ fn stale_evidence_files_are_pruned() {
 ///
 /// Only synchronous tests may call this, because it builds its own runtime.
 #[cfg(unix)]
-fn expected_manifest() -> &'static super::manifest::Manifest {
+fn expected_manifest_for(package: Package) -> &'static super::manifest::Manifest {
     use std::sync::OnceLock;
 
-    static EXPECTED: OnceLock<Result<super::manifest::Manifest, String>> = OnceLock::new();
-    EXPECTED
+    static ONE_B: OnceLock<Result<super::manifest::Manifest, String>> = OnceLock::new();
+    static ONE_C: OnceLock<Result<super::manifest::Manifest, String>> = OnceLock::new();
+    let expected = match package {
+        Package::OneB => &ONE_B,
+        Package::OneC => &ONE_C,
+    };
+    expected
         .get_or_init(|| {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1129,6 +1154,7 @@ fn expected_manifest() -> &'static super::manifest::Manifest {
                     .await
                     .map_err(|error| format!("seed the disposable library: {error:#}"))?;
                 super::runner::expected_manifest(
+                    package,
                     fixtures_root.path(),
                     &seeded,
                     &manifest_revision(),
@@ -1139,6 +1165,12 @@ fn expected_manifest() -> &'static super::manifest::Manifest {
         })
         .as_ref()
         .unwrap_or_else(|error| panic!("build the expected manifest: {error}"))
+}
+
+/// The unrendered expectation of the accepted package 1B evidence.
+#[cfg(unix)]
+fn expected_manifest() -> &'static super::manifest::Manifest {
+    expected_manifest_for(Package::OneB)
 }
 
 /// The provenance must be exact, so a missing probe or a placeholder value stops
@@ -1857,17 +1889,30 @@ fn manifest_revision() -> super::runner::CaptureRevision {
 /// generator and seed produce, hashes the committed PNGs against the committed
 /// hashes, and re-derives the checksum files, the README and the committed
 /// fixture tree. It renders nothing, so it can run in every `cargo test`.
+///
+/// Every package is checked, not just the one whose evidence predates the
+/// split: each has its own capture table and its own manifest, so validating one
+/// says nothing about the other.
 #[cfg(unix)]
 #[test]
 fn committed_evidence_matches_current_code() {
-    let root = evidence_root();
-    assert!(
-        root.is_dir(),
-        "the committed evidence directory {} is missing",
-        root.display()
-    );
-    super::evidence::validate(&root, expected_manifest(), false)
-        .expect("the committed evidence must match the current code");
+    for package in Package::ALL {
+        let root = evidence_root_for(package);
+        assert!(
+            root.is_dir(),
+            "the committed evidence directory of package {} ({}) is missing",
+            package.id(),
+            root.display()
+        );
+        super::evidence::validate(&root, expected_manifest_for(package), false).unwrap_or_else(
+            |error| {
+                panic!(
+                    "the committed package {} evidence must match the current code: {error:#}",
+                    package.id()
+                )
+            },
+        );
+    }
 }
 
 /// The committed manifest must still record the run metadata that is exempt
@@ -1935,21 +1980,23 @@ fn run_bounded<T: Send + 'static>(check: impl FnOnce() -> T + Send + 'static) ->
         .expect("the validation must finish: it may not block on a FIFO")
 }
 
-/// Mutate a disposable copy of the committed evidence and require the validator
-/// to reject it with a problem naming `needle`.
+/// Mutate a disposable copy of a package's committed evidence and require the
+/// validator to reject it with a problem naming `needle`.
 ///
 /// The untouched copy is validated first, so a failure is caused by the
 /// mutation and not by the copy.
 #[cfg(unix)]
-fn tampered_evidence(mutate: impl FnOnce(&Path), needle: &str) {
+fn tampered_evidence_for(package: Package, mutate: impl FnOnce(&Path), needle: &str) {
     let copy = temp_root();
-    copy_evidence(&evidence_root(), copy.path());
-    let expected = expected_manifest();
+    copy_evidence(&evidence_root_for(package), copy.path());
+    let expected = expected_manifest_for(package);
     let clean = super::evidence::problems(copy.path(), expected, false)
         .expect("a copy of the committed evidence must be readable");
     assert!(
         clean.is_empty(),
-        "the untouched copy must validate, otherwise the mutation proves nothing: {clean:?}"
+        "the untouched package {} copy must validate, otherwise the mutation proves nothing: \
+         {clean:?}",
+        package.id()
     );
 
     mutate(copy.path());
@@ -1961,6 +2008,12 @@ fn tampered_evidence(mutate: impl FnOnce(&Path), needle: &str) {
         problems.iter().any(|problem| problem.contains(needle)),
         "expected a problem mentioning {needle:?}, got {problems:?}"
     );
+}
+
+/// The package 1B shorthand of [`tampered_evidence_for`].
+#[cfg(unix)]
+fn tampered_evidence(mutate: impl FnOnce(&Path), needle: &str) {
+    tampered_evidence_for(Package::OneB, mutate, needle)
 }
 
 /// Rewrite the manifest of a disposable copy and re-render its README.
@@ -2116,6 +2169,35 @@ fn evidence_validator_rejects_a_changed_capture_row() {
             });
         },
         "describes a different state or size than the capture table",
+    );
+}
+
+/// A changed reader fact on a package 1C capture must be rejected.
+///
+/// This is the negative control for the `reader` block: 1B captures never carry
+/// it, so the always-on evidence check would still pass if a 1C capture's reader
+/// facts were compared against nothing. The mutation leaves the capture id and
+/// every 1B-shaped field alone, so only the reader comparison can catch it.
+#[cfg(unix)]
+#[test]
+fn evidence_validator_rejects_a_changed_reader_fact() {
+    const CAPTURE: &str = "rd-epub-pag-w1280-en";
+    tampered_evidence_for(
+        Package::OneC,
+        |root| {
+            tamper_manifest(root, |manifest| {
+                let captures = manifest["captures"].as_array_mut().expect("captures");
+                let capture = captures
+                    .iter_mut()
+                    .find(|capture| capture["id"] == serde_json::json!(CAPTURE))
+                    .unwrap_or_else(|| panic!("{CAPTURE} must be in the committed 1C manifest"));
+                let visible = capture["reader"]["visible_pages"]
+                    .as_array_mut()
+                    .expect("visible_pages is an array");
+                visible[0] = serde_json::json!(99);
+            });
+        },
+        &format!("{CAPTURE} describes a different state or size than the capture table"),
     );
 }
 
@@ -3331,5 +3413,1367 @@ fn symlink_validation_rejects_wrong_targets_and_live_links() {
             .iter()
             .any(|defect| defect.contains("unexpected symlink")),
         "an undeclared symlink must be reported"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Package 1C: the reader capture table
+// ---------------------------------------------------------------------------
+
+/// The 1C capture table is internally consistent and claims only 1C families.
+#[test]
+fn reader_capture_table_is_consistent() {
+    let scenarios = super::reader::scenarios();
+    assert!(!scenarios.is_empty());
+
+    let mut ids = BTreeMap::new();
+    for scenario in &scenarios {
+        assert!(
+            ids.insert(scenario.id, scenario.family).is_none(),
+            "duplicate capture id {}",
+            scenario.id
+        );
+        assert!(
+            super::reader::PACKAGE_1C_FAMILIES.contains(&scenario.family),
+            "{} uses a family outside package 1C: {}",
+            scenario.id,
+            scenario.family
+        );
+        assert!(
+            !scenario.rows.is_empty(),
+            "{} must name the matrix rows it covers",
+            scenario.id
+        );
+        for row in scenario.rows {
+            assert!(
+                row.starts_with("RD-") || row.starts_with("FM-") || row == &"XA-10",
+                "{} claims {row}, which is not a reader row",
+                scenario.id
+            );
+        }
+        assert!(
+            scenario.reader.is_some(),
+            "{} must declare the reader state it shows",
+            scenario.id
+        );
+        assert_eq!(
+            scenario.surface(),
+            super::scenarios::Surface::Reader,
+            "{} must be a reader capture",
+            scenario.id
+        );
+        assert!(
+            matches!(scenario.kind, super::scenarios::Kind::Reader(_)),
+            "{} must use a reader state",
+            scenario.id
+        );
+        assert_eq!(
+            super::scenarios::state_id(scenario),
+            "reader",
+            "{} must record the reader state id",
+            scenario.id
+        );
+    }
+
+    let (captured, from_manifest, pending) = super::reader::matrix_rows();
+    for scenario in &scenarios {
+        for row in scenario.rows {
+            assert!(
+                captured.contains(row),
+                "{} lists row {row}, which is not in the captured mapping",
+                scenario.id
+            );
+        }
+    }
+    let from_table: Vec<&str> = captured
+        .iter()
+        .copied()
+        .filter(|row| scenarios.iter().any(|scenario| scenario.rows.contains(row)))
+        .collect();
+    assert_eq!(
+        from_table, captured,
+        "the captured mapping lists rows no capture references"
+    );
+    assert_eq!(
+        from_manifest,
+        vec!["XA-10"],
+        "the provenance row must stay manifest-satisfied, not faked as a capture"
+    );
+    for (row, reason) in &pending {
+        assert!(
+            !captured.contains(row) && !from_manifest.contains(row),
+            "{row} is both covered and pending"
+        );
+        assert!(!reason.is_empty(), "{row} needs a reason and owner");
+    }
+    for row in [
+        "RD-04", "RD-12", "RD-14", "RD-15", "FM-11", "FM-12", "FM-14", "FM-15", "FM-16", "FM-17",
+        "FM-19", "FM-20",
+    ] {
+        assert!(
+            pending.iter().any(|(pending_row, _)| *pending_row == row),
+            "{row} has no Iced counterpart and must stay explicitly pending"
+        );
+    }
+
+    // Every capture must name the reader state it shows, and no 1C capture may
+    // claim a library/import/settings row.
+    for scenario in &scenarios {
+        assert!(
+            !scenario.derivation().is_empty(),
+            "{} needs a state derivation",
+            scenario.id
+        );
+        for row in scenario.rows {
+            assert!(
+                !row.starts_with("LB-") && !row.starts_with("IM-") && !row.starts_with("ST-"),
+                "{} claims the 1B row {row}",
+                scenario.id
+            );
+        }
+    }
+
+    // The reader families the specification assigns to 1C must all be used, or
+    // a family silently has no reference at all.
+    for family in super::reader::PACKAGE_1C_FAMILIES {
+        assert!(
+            scenarios.iter().any(|scenario| scenario.family == family),
+            "family {family} has no capture"
+        );
+    }
+
+    for (left, right, reason) in super::reader::PIXEL_ALIASES {
+        assert_ne!(left, right, "a capture cannot alias itself");
+        for id in [left, right] {
+            assert!(
+                scenarios.iter().any(|scenario| scenario.id == id),
+                "the pixel alias names {id}, which is not a capture"
+            );
+        }
+        assert!(
+            !reason.trim().is_empty(),
+            "{left}/{right} must record why the two captures share pixels"
+        );
+    }
+}
+
+/// A literal available-size expectation: client size, the four panel flags in
+/// `available_size`'s parameter order, and the expected available size.
+type AvailableCase = ((f32, f32), bool, bool, bool, bool, (f32, f32));
+
+/// Every declared reader fact must be reachable geometry, not a guess.
+///
+/// Two checks run together. The literal tables below are the specification's own
+/// arithmetic written out by hand — `available = client − 112 − panels` and
+/// `height − 148 − panel heights`, and the first/last/odd-final pairing rule — so
+/// the helpers the declarations use are pinned against numbers rather than
+/// against themselves. The per-capture loop then recomputes each declaration
+/// from its own client size and panel state, so a declaration that drifts from
+/// the arithmetic fails here.
+#[test]
+fn reader_declared_geometry_follows_the_specification() {
+    // (client, contents panel, search, typography, more, available size), from
+    // `available = client − 112 − panels` and the 148/52/62/58/88 panel heights.
+    let available_cases: [AvailableCase; 18] = [
+        ((1280.0, 800.0), false, false, false, false, (1168.0, 652.0)),
+        ((1280.0, 800.0), true, false, false, false, (868.0, 652.0)),
+        ((1280.0, 800.0), false, false, true, false, (1168.0, 590.0)),
+        ((1280.0, 800.0), false, false, false, true, (1168.0, 594.0)),
+        ((1280.0, 800.0), false, true, false, true, (1168.0, 542.0)),
+        ((900.0, 700.0), false, false, false, false, (788.0, 552.0)),
+        ((390.0, 844.0), false, false, false, false, (278.0, 696.0)),
+        ((390.0, 844.0), false, false, false, true, (278.0, 612.0)),
+        ((390.0, 844.0), false, true, false, true, (278.0, 524.0)),
+        ((859.0, 700.0), false, false, false, false, (747.0, 552.0)),
+        ((860.0, 700.0), false, false, false, false, (748.0, 552.0)),
+        ((861.0, 700.0), false, false, false, false, (749.0, 552.0)),
+        ((831.0, 700.0), false, false, false, false, (719.0, 552.0)),
+        ((832.0, 700.0), false, false, false, false, (720.0, 552.0)),
+        ((833.0, 700.0), false, false, false, false, (721.0, 552.0)),
+        ((1131.0, 700.0), true, false, false, false, (719.0, 552.0)),
+        ((1132.0, 700.0), true, false, false, false, (720.0, 552.0)),
+        ((1133.0, 700.0), true, false, false, false, (721.0, 552.0)),
+    ];
+    for (client, bookmarks, search, settings, more, expected) in available_cases {
+        assert_eq!(
+            super::reader::available_size(client, bookmarks, search, settings, more),
+            expected,
+            "available size at client {client:?} with contents={bookmarks} search={search} \
+             typography={settings} more={more}"
+        );
+    }
+
+    // (page index, page count, spread, visible 1-based pages): the pairing rule,
+    // including the odd-final page that is shown alone and the clamp past the end.
+    let pairing_cases: [(usize, usize, bool, &[usize]); 12] = [
+        (0, 4, true, &[1, 2]),
+        (1, 4, true, &[1, 2]),
+        (2, 4, true, &[3, 4]),
+        (3, 4, true, &[3, 4]),
+        (0, 3, true, &[1, 2]),
+        (2, 3, true, &[3]),
+        (0, 1, true, &[1]),
+        (1, 3, false, &[2]),
+        (2, 3, false, &[3]),
+        (9, 3, true, &[3]),
+        (9, 3, false, &[3]),
+        (0, 0, true, &[]),
+    ];
+    for (page, page_count, spread, expected) in pairing_cases {
+        assert_eq!(
+            super::reader::visible_for(page, page_count, spread),
+            expected,
+            "visible pages for page index {page} of {page_count} (spread {spread})"
+        );
+    }
+
+    for scenario in super::reader::scenarios() {
+        let facts = scenario
+            .reader
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} declares no reader facts", scenario.id));
+        let (bookmarks, settings, more, search) = match &scenario.kind {
+            super::scenarios::Kind::Reader(kind) => super::reader::panels_of_kind(*kind),
+            _ => panic!("{} is not a reader capture", scenario.id),
+        };
+        let available =
+            super::reader::available_size(scenario.client, bookmarks, search, settings, more);
+        assert_eq!(
+            (facts.available_width, facts.available_height),
+            available,
+            "{}: the declared available size is not the specification's arithmetic",
+            scenario.id
+        );
+        if facts.mode == "continuous" {
+            assert!(
+                !facts.spread,
+                "{}: a continuous reader forms no spread",
+                scenario.id
+            );
+            assert!(
+                facts.visible_pages.is_empty(),
+                "{}: a continuous reader has no page pairing",
+                scenario.id
+            );
+            continue;
+        }
+        let expected_spread = facts.page_count > 1 && available.0 >= 720.0;
+        assert_eq!(
+            facts.spread, expected_spread,
+            "{}: the declared spread state is not the 720 px rule",
+            scenario.id
+        );
+        if facts.page_count > 0 {
+            let page = facts.location - 1;
+            assert_eq!(
+                facts.visible_pages,
+                super::reader::visible_for(page, facts.page_count, facts.spread),
+                "{}: the declared visible pages are not the pairing rule",
+                scenario.id
+            );
+        }
+    }
+}
+
+/// The breakpoint probes must exist at the exact widths the specification names.
+#[test]
+fn reader_breakpoint_probes_cover_both_boundaries() {
+    let scenarios = super::reader::scenarios();
+    let probe = |id: &str| {
+        scenarios
+            .iter()
+            .find(|scenario| scenario.id == id)
+            .unwrap_or_else(|| panic!("missing probe {id}"))
+    };
+    // `B860±`: compact chrome at 859, wide chrome at 860 and 861, height 700,
+    // DPR 1, all panels closed. The derived available width is 747/748/749, all
+    // above the 720 px spread threshold, so the spread persists across the
+    // breakpoint.
+    for (id, width) in [
+        ("rd-chrome-b860-859-en", 747.0),
+        ("rd-chrome-b860-860-en", 748.0),
+        ("rd-chrome-b860-861-en", 749.0),
+    ] {
+        let scenario = probe(id);
+        let facts = scenario.reader.as_ref().expect("facts");
+        assert_eq!(scenario.client, (width + 112.0, 700.0));
+        assert_eq!(scenario.dpr, 1.0);
+        assert!(
+            facts.panels.is_empty(),
+            "{id}: the probes close every panel"
+        );
+        assert_eq!(facts.available_width, width);
+        assert!(
+            facts.spread,
+            "{id}: the spread must persist across the reader breakpoint"
+        );
+    }
+    // `B720±`: panels closed, client 831/832/833; the bookmarks panel open,
+    // client 1131/1132/1133. Both reach available width 719/720/721, and the
+    // page count changes once, at the threshold.
+    for (closed, open, width) in [
+        ("rd-spread-b720-831-en", "rd-spread-b720-1131-en", 719.0),
+        ("rd-spread-b720-832-en", "rd-spread-b720-1132-en", 720.0),
+        ("rd-spread-b720-833-en", "rd-spread-b720-1133-en", 721.0),
+    ] {
+        let closed = probe(closed);
+        let closed_facts = closed.reader.as_ref().expect("facts");
+        assert_eq!(closed.client, (width + 112.0, 700.0));
+        assert_eq!(closed_facts.available_width, width);
+        assert!(closed_facts.panels.is_empty());
+        assert_eq!(
+            closed_facts.spread,
+            width >= 720.0,
+            "{}: the threshold is 720 available pixels",
+            closed.id
+        );
+
+        let open = probe(open);
+        let open_facts = open.reader.as_ref().expect("facts");
+        assert_eq!(open.client, (width + 112.0 + 300.0, 700.0));
+        assert_eq!(open_facts.available_width, width);
+        assert_eq!(open_facts.panels, vec!["contents".to_owned()]);
+        assert_eq!(open_facts.spread, closed_facts.spread);
+        assert_eq!(open_facts.page_count, closed_facts.page_count);
+    }
+}
+
+/// The spread rows must cover the first spread, the last spread and an odd
+/// final spread, each with the pairing the specification requires.
+#[test]
+fn reader_spread_rows_cover_first_last_and_odd_final() {
+    let scenarios = super::reader::scenarios();
+    let facts = |id: &str| {
+        scenarios
+            .iter()
+            .find(|scenario| scenario.id == id)
+            .unwrap_or_else(|| panic!("missing capture {id}"))
+            .reader
+            .clone()
+            .expect("facts")
+    };
+
+    let first = facts("rd-spread-first-w1280-en");
+    assert_eq!(first.visible_pages, vec![1, 2]);
+    assert_eq!(first.location, 1);
+    assert!(first.spread);
+
+    let last = facts("rd-spread-last-w1280-en");
+    assert_eq!(
+        last.page_count % 2,
+        0,
+        "the last-spread capture is an even total"
+    );
+    assert_eq!(
+        last.visible_pages,
+        vec![last.page_count - 1, last.page_count],
+        "an even total must end with a complete final spread"
+    );
+
+    let odd = facts("rd-spread-odd-final-w1280-en");
+    assert_eq!(
+        odd.page_count % 2,
+        1,
+        "the odd-final capture is an odd total"
+    );
+    assert_eq!(
+        odd.visible_pages,
+        vec![odd.page_count],
+        "an odd total must end with exactly one page, never a repeated or blank one"
+    );
+    assert!(odd.spread, "the odd final spread keeps its spread mode");
+
+    let narrow = facts("rd-spread-narrow-c390-en");
+    assert!(!narrow.spread, "a narrow reader is single-page");
+    assert_eq!(
+        narrow.visible_pages,
+        vec![1],
+        "narrow single-page mode reserves no second slot"
+    );
+
+    for id in [
+        "rd-spread-pdf-w1280-en",
+        "rd-spread-pdf-last-w1280-en",
+        "rd-spread-cbz-w1280-en",
+    ] {
+        let raster = facts(id);
+        assert!(raster.spread, "{id}: a wide raster reader spreads");
+        assert!(raster.visible_pages.len() <= 2, "{id}: at most two pages");
+        assert!(
+            raster.page_count > 1,
+            "{id}: a spread needs more than one page"
+        );
+    }
+
+    // The raster rows must cover both endings too: the last spread of an even
+    // total is a complete pair, and the final spread of an odd total is one page.
+    let raster_last = facts("rd-spread-pdf-last-w1280-en");
+    assert_eq!(
+        raster_last.page_count % 2,
+        0,
+        "the raster last-spread capture is an even total"
+    );
+    assert_eq!(
+        raster_last.visible_pages,
+        vec![raster_last.page_count - 1, raster_last.page_count],
+        "an even raster total must end with a complete final spread"
+    );
+
+    let raster_odd = facts("rd-spread-cbz-w1280-en");
+    assert_eq!(
+        raster_odd.page_count % 2,
+        1,
+        "the raster odd-final capture is an odd total"
+    );
+    assert_eq!(
+        raster_odd.visible_pages,
+        vec![raster_odd.page_count],
+        "an odd raster total must end with exactly one page, never a repeated or blank one"
+    );
+    assert!(
+        raster_odd.spread,
+        "the odd raster final spread keeps its spread mode"
+    );
+    assert_eq!(
+        raster_odd.location, raster_odd.page_count,
+        "the odd-final capture must be located on the last page"
+    );
+}
+
+/// The declared page counts must be the counts the core paginator produces.
+///
+/// The capture table declares a page count per fixture and book font so the
+/// runner can fail when a render reaches a different state. This test
+/// re-paginates every paginated EPUB capture's fixture with
+/// `crate::epub::paginate_document` at that capture's own layout size, which is
+/// an independent path to the same number: a declaration that stopped matching
+/// the renderer fails here.
+#[test]
+fn reader_fixture_page_counts_are_declared() {
+    use shosai_core::epub::EpubDoc;
+
+    let root = temp_root();
+    let fixtures_root = root.path().join("fixtures");
+    fixtures::write_reference_fixtures(&fixtures_root).expect("fixture tree");
+
+    let mut checked = 0usize;
+    for scenario in super::reader::scenarios() {
+        let super::scenarios::Kind::Reader(kind) = scenario.kind else {
+            continue;
+        };
+        let (fixture, font_size) = match kind {
+            super::reader::ReaderKind::EpubPage { fixture, .. } => (fixture, 16.0),
+            super::reader::ReaderKind::EpubContinuous { fixture, .. } => (fixture, 16.0),
+            super::reader::ReaderKind::EpubLargeFont { fixture, font_size } => (fixture, font_size),
+            super::reader::ReaderKind::Tabs { fixtures, .. } => (fixtures[0], 16.0),
+            _ => continue,
+        };
+        let facts = scenario.reader.as_ref().expect("facts");
+        let bytes = std::fs::read(seed::seed_path(&fixtures_root, fixture))
+            .unwrap_or_else(|error| panic!("read {fixture}: {error}"));
+        let document =
+            EpubDoc::from_bytes(bytes).unwrap_or_else(|error| panic!("{fixture}: {error}"));
+        let uses_spread = facts.spread;
+        let page = crate::epub::page_size(
+            crate::epub::LayoutSize::new(facts.available_width, facts.available_height),
+            uses_spread,
+            super::super::PAGE_GUTTER,
+            font_size,
+            1.6,
+        );
+        let pages = crate::epub::paginate_document(
+            &document,
+            font_size,
+            1.6,
+            crate::epub::LayoutSize::new(page.width, page.height),
+        );
+        assert_eq!(
+            pages.len(),
+            facts.page_count,
+            "{}: {fixture} at a {font_size} px book font paginated to {} pages at available \
+             {}x{} (spread {}), but the capture declares {}",
+            scenario.id,
+            pages.len(),
+            facts.available_width,
+            facts.available_height,
+            facts.spread,
+            facts.page_count
+        );
+        assert_eq!(
+            pages.len(),
+            super::reader::epub_page_count_at(fixture, font_size),
+            "{}: the declared table disagrees with the paginator",
+            scenario.id
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 10,
+        "the page-count check must cover the paginated EPUB captures, saw {checked}"
+    );
+}
+
+/// The raster page counts must come from the generated fixture bytes.
+#[test]
+fn reader_raster_page_counts_match_the_generated_fixtures() {
+    let root = temp_root();
+    let fixtures_root = root.path().join("fixtures");
+    fixtures::write_reference_fixtures(&fixtures_root).expect("fixture tree");
+
+    for fixture in [super::reader::PDF_FOUR, super::reader::PDF_TWO] {
+        let bytes = std::fs::read(seed::seed_path(&fixtures_root, fixture)).expect("read pdf");
+        let text = String::from_utf8_lossy(&bytes);
+        let declared = super::reader::raster_page_count(fixture);
+        assert!(
+            text.contains(&format!("/Count {declared}")),
+            "{fixture}: the generated PDF does not declare {declared} pages"
+        );
+        assert_eq!(
+            text.matches("/Type /Page ").count(),
+            declared,
+            "{fixture}: the generated PDF does not carry {declared} page objects"
+        );
+    }
+    for fixture in [super::reader::CBZ_TWELVE, super::reader::CBZ_THREE] {
+        let bytes = std::fs::read(seed::seed_path(&fixtures_root, fixture)).expect("read cbz");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("cbz archive");
+        let pages = (0..archive.len())
+            .filter(|index| {
+                archive
+                    .by_index(*index)
+                    .map(|entry| {
+                        let name = entry.name();
+                        name.starts_with("page") && name.ends_with(".png")
+                    })
+                    .unwrap_or(false)
+            })
+            .count();
+        assert_eq!(
+            pages,
+            super::reader::raster_page_count(fixture),
+            "{fixture}: the generated CBZ does not carry the declared page count"
+        );
+    }
+}
+
+/// A package selection must be exact, and the two packages must not share
+/// directories: the disposable root is deleted at the start of every run.
+#[test]
+fn package_selection_and_roots_are_disjoint() {
+    assert_eq!(
+        super::package::Package::ALL.map(|package| package.id()),
+        ["1B", "1C"]
+    );
+    for package in super::package::Package::ALL {
+        assert_ne!(
+            package.default_output(),
+            super::package::Package::ALL
+                .iter()
+                .filter(|other| **other != package)
+                .map(|other| other.default_output())
+                .next()
+                .expect("the other package"),
+            "{package:?} shares an evidence directory with the other package"
+        );
+        assert!(!package.default_data_root().is_empty());
+        assert_ne!(
+            package.default_data_root(),
+            package.default_output(),
+            "{package:?}: the data root and the evidence directory must not be the same"
+        );
+        for family in package.families() {
+            assert!(!family.is_empty(), "{package:?} has an empty family");
+        }
+    }
+    assert_eq!(
+        super::package::Package::OneB.non_iced_authority(),
+        Vec::<String>::new(),
+        "package 1B records no non-Iced authority"
+    );
+    assert!(
+        !super::package::Package::OneC
+            .non_iced_authority()
+            .is_empty(),
+        "package 1C must record its non-Iced authority"
+    );
+}
+
+/// The resolved roots of one package, as the entry point builds them.
+fn package_roots(package: Package, output: PathBuf, data: PathBuf) -> super::package::PackageRoots {
+    super::package::PackageRoots {
+        package,
+        data_spelling: data.clone(),
+        output,
+        data,
+    }
+}
+
+/// Two packages must not resolve to overlapping roots.
+///
+/// The disposable root is deleted at the start of every run and the evidence
+/// directory is pruned, so equal or nested locations would destroy each other's
+/// state. The defaults are separate; this is what keeps a misconfigured override
+/// from silently doing the same.
+#[test]
+fn package_roots_must_not_overlap() {
+    let root = temp_root();
+    let directory = |name: &str| root.path().join(name);
+    let ok = vec![
+        package_roots(
+            Package::OneB,
+            directory("evidence-1b"),
+            directory("data-1b"),
+        ),
+        package_roots(
+            Package::OneC,
+            directory("evidence-1c"),
+            directory("data-1c"),
+        ),
+    ];
+    super::package::assert_roots_disjoint(&ok).expect("separate roots");
+
+    let cases: [(&str, Vec<super::package::PackageRoots>); 4] = [
+        (
+            "the same evidence directory",
+            vec![
+                package_roots(Package::OneB, directory("shared"), directory("data-1b")),
+                package_roots(Package::OneC, directory("shared"), directory("data-1c")),
+            ],
+        ),
+        (
+            "the same disposable root",
+            vec![
+                package_roots(Package::OneB, directory("evidence-1b"), directory("shared")),
+                package_roots(Package::OneC, directory("evidence-1c"), directory("shared")),
+            ],
+        ),
+        (
+            "a nested evidence directory",
+            vec![
+                package_roots(Package::OneB, directory("evidence"), directory("data-1b")),
+                package_roots(
+                    Package::OneC,
+                    directory("evidence/1c"),
+                    directory("data-1c"),
+                ),
+            ],
+        ),
+        (
+            "an evidence directory inside the other's data root",
+            vec![
+                package_roots(
+                    Package::OneB,
+                    directory("data-1c/evidence"),
+                    directory("data-1b"),
+                ),
+                package_roots(
+                    Package::OneC,
+                    directory("evidence-1c"),
+                    directory("data-1c"),
+                ),
+            ],
+        ),
+    ];
+    for (name, roots) in cases {
+        let error = super::package::assert_roots_disjoint(&roots)
+            .expect_err(&format!("{name} must be refused"));
+        assert!(
+            error.to_string().contains("resolve to the same")
+                || error.to_string().contains("have overlapping"),
+            "{name}: the refusal must say why: {error}"
+        );
+    }
+}
+
+/// A data root must be cleared and written at the path the cross-package checks
+/// approved, not at whatever its spelling resolves to later.
+///
+/// This is the alias case: the preflight resolves a spelling through a symlink
+/// and approves the target, another package's preparation removes that link, and
+/// re-resolving the same spelling would reach a directory no check covered. The
+/// run must refuse instead of clearing the new target.
+#[cfg(unix)]
+#[test]
+fn a_data_root_whose_resolution_changed_is_refused() {
+    let root = temp_root();
+    let first = root.path().join("first");
+    let second = root.path().join("second");
+    std::fs::create_dir_all(&first).expect("first directory");
+    std::fs::create_dir_all(&second).expect("second directory");
+    let parent = root.path().join("parent");
+    std::os::unix::fs::symlink(&first, &parent).expect("symlinked parent");
+    let spelling = parent.join("data");
+    let output = root.path().join("evidence");
+
+    // The preflight's value: the spelling resolved through the link.
+    let approved = super::runner::resolve_path(&spelling).expect("resolve the spelling");
+    assert_eq!(
+        approved,
+        std::fs::canonicalize(&first).expect("first").join("data"),
+        "the approved path must be the link's target"
+    );
+
+    // The unchanged spelling is adopted and cleared at the approved path.
+    let guard = super::runner::DisposableRoot::prepare_resolved(&spelling, &approved, &output)
+        .expect("the approved root is adopted");
+    let cleared = guard.path().to_path_buf();
+    guard.finish(false).expect("finish the run");
+    assert_eq!(
+        cleared, approved,
+        "the run must clear the path the preflight approved"
+    );
+
+    // Another package's preparation removes the link the resolution went
+    // through and points the name at a different directory.
+    std::fs::remove_file(&parent).expect("remove the link");
+    std::os::unix::fs::symlink(&second, &parent).expect("repoint the link");
+
+    let error = super::runner::DisposableRoot::prepare_resolved(&spelling, &approved, &output)
+        .expect_err("a data root that no longer resolves to the approved path must be refused");
+    assert!(
+        error.to_string().contains("cross-package checks approved"),
+        "{error:#}"
+    );
+    assert!(
+        !second.join("data").exists(),
+        "the unchecked directory must not be created or cleared"
+    );
+}
+
+/// The ownership preflight must refuse a damaged or foreign marker instead of
+/// treating it as permission to overwrite the directory.
+#[cfg(unix)]
+#[test]
+fn package_ownership_preflight_refuses_damaged_and_foreign_markers() {
+    let root = temp_root();
+    let owned = root.path().join("owned");
+    let fresh = root.path().join("fresh");
+    std::fs::create_dir_all(&owned).expect("owned directory");
+    std::fs::create_dir_all(&fresh).expect("fresh directory");
+    let data = |name: &str| root.path().join(name);
+    let roots = |output: &Path| {
+        vec![package_roots(
+            Package::OneC,
+            output.to_path_buf(),
+            data("data-1c"),
+        )]
+    };
+
+    // A directory without a manifest is a fresh evidence directory.
+    super::package::assert_evidence_belongs_to(&roots(&fresh))
+        .expect("a fresh directory must pass");
+
+    // The package's own marker passes; the other package's is refused.
+    let manifest = owned.join("manifest.json");
+    std::fs::write(&manifest, br#"{"package":"1C"}"#).expect("own marker");
+    super::package::assert_evidence_belongs_to(&roots(&owned)).expect("its own marker passes");
+    let foreign = vec![package_roots(Package::OneC, owned.clone(), data("data-1c"))];
+    let mut foreign_manifest = std::fs::read(&manifest).expect("marker");
+    foreign_manifest = String::from_utf8(foreign_manifest)
+        .expect("utf-8")
+        .replace("\"1C\"", "\"1B\"")
+        .into_bytes();
+    std::fs::write(&manifest, foreign_manifest).expect("foreign marker");
+    let error = super::package::assert_evidence_belongs_to(&foreign)
+        .expect_err("1C must not claim 1B's evidence directory");
+    assert!(
+        error
+            .to_string()
+            .contains("already holds package 1B's evidence"),
+        "{error:#}"
+    );
+
+    // Malformed JSON and a missing owner are refusals, not permission.
+    std::fs::write(&manifest, b"{ not json").expect("malformed marker");
+    let error = super::package::assert_evidence_belongs_to(&roots(&owned))
+        .expect_err("a malformed marker must fail");
+    assert!(
+        error.to_string().contains("parse the existing"),
+        "{error:#}"
+    );
+    std::fs::write(&manifest, br#"{"captures":[]}"#).expect("ownerless marker");
+    let error = super::package::assert_evidence_belongs_to(&roots(&owned))
+        .expect_err("a marker without an owner must fail");
+    assert!(
+        error.to_string().contains("no `package` field"),
+        "{error:#}"
+    );
+
+    // A symlink is refused without being followed, and a FIFO without being
+    // opened (opening one with no writer would block the entry point).
+    std::fs::write(&manifest, br#"{"package":"1C"}"#).expect("marker");
+    let linked = root.path().join("linked");
+    std::fs::create_dir_all(&linked).expect("linked directory");
+    std::os::unix::fs::symlink(&manifest, linked.join("manifest.json")).expect("symlink marker");
+    let error = super::package::assert_evidence_belongs_to(&roots(&linked))
+        .expect_err("a symlinked marker must fail");
+    assert!(error.to_string().contains("is a symlink"), "{error:#}");
+
+    let fifo = root.path().join("fifo");
+    std::fs::create_dir_all(&fifo).expect("fifo directory");
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(fifo.join("manifest.json"))
+            .status()
+            .expect("run mkfifo")
+            .success(),
+        "mkfifo failed"
+    );
+    let fifo_roots = roots(&fifo);
+    let error = run_bounded(move || super::package::assert_evidence_belongs_to(&fifo_roots))
+        .expect_err("a FIFO marker must fail rather than block");
+    assert!(
+        error.to_string().contains("not a regular file"),
+        "{error:#}"
+    );
+}
+
+/// The reader captures must pass the shared interface-language check.
+///
+/// The reader has its own `assert_reached`, so the shared check has to run
+/// before the delegation; otherwise a Japanese reader capture could render an
+/// English interface and still be written. The negative control runs the whole
+/// check against a Japanese reader scenario and an English state and requires
+/// the interface-language failure, which also proves the reader delegation was
+/// not reached first.
+#[test]
+fn reader_captures_must_reach_their_interface_language() {
+    let state = super::runner::fresh_state();
+    let japanese = super::reader::scenarios()
+        .into_iter()
+        .find(|scenario| scenario.locale == super::scenarios::Locale::Ja)
+        .expect("a Japanese reader capture");
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::scenarios::assert_reached(&japanese, &state);
+    }))
+    .expect_err("an English state must not pass a Japanese reader capture");
+    let message = panic
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| panic.downcast_ref::<&str>().map(|text| (*text).to_owned()))
+        .unwrap_or_default();
+    assert!(
+        message.contains("expected the Japanese interface"),
+        "the failure must be the interface-language check, not a later one: {message}"
+    );
+
+    // The positive control: the same helper accepts a state that resolved the
+    // language an English reader capture records.
+    let english = super::reader::scenarios()
+        .into_iter()
+        .find(|scenario| scenario.locale == super::scenarios::Locale::En)
+        .expect("an English reader capture");
+    let mut english_state = super::runner::fresh_state();
+    english_state.i18n = crate::i18n::I18n::new(crate::i18n::LanguagePreference::English);
+    super::scenarios::assert_interface_locale(&english, &english_state);
+}
+
+/// The zoom the manifest records must be the zoom the production messages reach.
+///
+/// The declaration test above only checks the table; this drives the fit-width
+/// and fit-page captures through the same production messages the capture run
+/// uses and reads the observed facts, so removing the `SetZoomFitWidth` dispatch
+/// or changing the observer fails here.
+#[tokio::test]
+async fn the_fit_mode_captures_reach_their_recorded_zoom() {
+    let root = temp_root();
+    let data_root = root.path().join("data");
+    let fixtures_root = data_root.join("fixtures");
+    fixtures::write_reference_fixtures(&fixtures_root).expect("fixture tree");
+    let seeded = seed::seed_library(&data_root.join("seeded"), &fixtures_root)
+        .await
+        .expect("seeded library");
+
+    let scenarios = super::reader::scenarios();
+    let capture = |id: &str| {
+        scenarios
+            .iter()
+            .find(|scenario| scenario.id == id)
+            .unwrap_or_else(|| panic!("missing capture {id}"))
+            .clone()
+    };
+
+    for (id, expected) in [
+        ("rd-pdf-fit-width-w1280-en", "fit-width"),
+        ("rd-pdf-pag-w1280-en", "fit-page"),
+        ("rd-cbz-pag-w1280-en", "fit-page"),
+    ] {
+        let scenario = capture(id);
+        let mut harness = super::runner::base_harness(Some(&seeded), Package::OneC)
+            .await
+            .expect("capture harness");
+        super::runner::apply_window(&scenario, &mut harness);
+        super::scenarios::apply(&scenario, &mut harness, &fixtures_root, &data_root)
+            .await
+            .unwrap_or_else(|error| panic!("{id}: {error:#}"));
+        let observed = super::reader::observe(&harness.state);
+        assert_eq!(observed.zoom, expected, "{id}: the reached zoom mode");
+        assert_eq!(
+            scenario.reader.as_ref().expect("facts"),
+            &observed,
+            "{id}: the declaration must equal the state the messages reached"
+        );
+    }
+
+    // A latent zoom on a state where it is not a reader fact: an EPUB reflows,
+    // and a state that has not opened its document yet has no page to scale.
+    // Both must observe `n/a` even when the state carries a non-default zoom.
+    // The file-removal captures are deliberately not used here: their
+    // `locate_book` compares canonical paths, and a removed file cannot be
+    // canonicalized, which is part of why the capture run itself is Linux-only.
+    for id in ["rd-epub-pag-w1280-en", "rd-chrome-opening-w900-en"] {
+        let scenario = capture(id);
+        let mut harness = super::runner::base_harness(Some(&seeded), Package::OneC)
+            .await
+            .expect("capture harness");
+        super::runner::apply_window(&scenario, &mut harness);
+        super::scenarios::apply(&scenario, &mut harness, &fixtures_root, &data_root)
+            .await
+            .unwrap_or_else(|error| panic!("{id}: {error:#}"));
+        harness.state.zoom = crate::pdf::ZoomMode::Manual(2.0);
+        assert_eq!(
+            super::reader::observe(&harness.state).zoom,
+            super::reader::ZOOM_NOT_APPLICABLE,
+            "{id}: a state without a raster document records no zoom fact"
+        );
+    }
+}
+
+/// A partially covered row must be a captured row, name its captures, and carry
+/// the same reason the matrix records.
+#[test]
+fn partially_covered_rows_are_captured_and_explained() {
+    let matrix = super::runner::matrix(Package::OneC);
+    let captures = super::reader::scenarios();
+    for (row, reason) in super::reader::CAPTURED_PARTIAL {
+        assert!(
+            reason.starts_with("partial:"),
+            "{row}: the reason must say the coverage is partial"
+        );
+        let covered = matrix
+            .captured
+            .iter()
+            .find(|coverage| coverage.row == row)
+            .unwrap_or_else(|| {
+                panic!("{row} is recorded as partially covered but is not a captured row")
+            });
+        assert!(
+            !covered.captures.is_empty(),
+            "{row}: a captured row must name at least one capture"
+        );
+        assert_eq!(
+            covered.reason, reason,
+            "{row}: the built matrix must carry the recorded reason"
+        );
+        for id in &covered.captures {
+            assert!(
+                captures.iter().any(|scenario| scenario.id == id),
+                "{row} names {id}, which is not a capture"
+            );
+        }
+    }
+
+    // The intended set, pinned by name: a row that stops being partial, or a
+    // partial row that is not recorded, fails here rather than drifting.
+    assert_eq!(
+        super::reader::CAPTURED_PARTIAL.map(|(row, _)| row),
+        ["FM-01", "FM-02", "FM-13", "RD-06"]
+    );
+    // `FM-13`'s reason names the captures it counts on, and each must really
+    // carry the row.
+    let fm13 = matrix
+        .captured
+        .iter()
+        .find(|coverage| coverage.row == "FM-13")
+        .expect("FM-13 is a captured row");
+    for id in [
+        "rd-spread-pdf-w1280-en",
+        "rd-pdf-fit-width-w1280-en",
+        "rd-spread-cbz-w1280-en",
+        "rd-cbz-pag-w1280-en",
+    ] {
+        assert!(
+            fm13.captures.iter().any(|capture| capture == id),
+            "FM-13's reason names {id}, which must carry the row: {:?}",
+            fm13.captures
+        );
+    }
+
+    // The generated limitations must repeat every gap, because that is the
+    // artefact a reviewer reads without opening the matrix.
+    let limitations = super::reader::limitations(true).join("\n");
+    for (row, _) in super::reader::CAPTURED_PARTIAL {
+        assert!(
+            limitations.contains(row),
+            "the known limitations must name the partial row {row}"
+        );
+    }
+    // Each qualification the matrix reasons make must appear there too, so the
+    // standalone section cannot silently lose one of them.
+    for qualification in [
+        "no CBZ fit-width capture",
+        "not manual raster zoom",
+        "panics the Iced reader",
+        "hover stays with 4B",
+    ] {
+        assert!(
+            limitations.contains(qualification),
+            "the known limitations must repeat {qualification:?}"
+        );
+    }
+
+    // Package 1B has no partial rows, and no 1B capture may carry a reason.
+    assert!(Package::OneB.captured_reasons().is_empty());
+    assert!(
+        super::runner::matrix(Package::OneB)
+            .captured
+            .iter()
+            .all(|coverage| coverage.reason.is_empty()),
+        "package 1B's captured rows record no partial coverage"
+    );
+}
+
+/// The raster zoom mode must be recorded, and the fit-width capture must select
+/// it through the production message rather than being declared into existence.
+#[test]
+fn reader_zoom_modes_are_recorded() {
+    use super::reader::{RasterZoom, ReaderKind};
+
+    assert_eq!(RasterZoom::FitPage.stored(), "fit-page");
+    assert_eq!(RasterZoom::FitWidth.stored(), "fit-width");
+
+    let scenarios = super::reader::scenarios();
+    let fit_width = scenarios
+        .iter()
+        .find(|scenario| scenario.id == "rd-pdf-fit-width-w1280-en")
+        .expect("the fit-width capture");
+    assert_eq!(fit_width.reader.as_ref().expect("facts").zoom, "fit-width");
+    match fit_width.kind {
+        super::scenarios::Kind::Reader(ReaderKind::RasterPage { zoom, .. }) => {
+            assert_eq!(zoom, RasterZoom::FitWidth);
+        }
+        other => panic!("the fit-width capture must be a raster page, not {other:?}"),
+    }
+
+    let mut defaulted = 0usize;
+    for scenario in &scenarios {
+        let facts = scenario.reader.as_ref().expect("facts");
+        assert!(
+            matches!(facts.zoom.as_str(), "fit-page" | "fit-width" | "n/a")
+                || facts.zoom.starts_with("manual("),
+            "{}: the recorded zoom is not a mode the state can carry",
+            scenario.id
+        );
+        if scenario.id == "rd-pdf-fit-width-w1280-en" {
+            continue;
+        }
+        // Every other capture is either a raster page at the application
+        // default or a state where the zoom does not apply.
+        let raster = matches!(
+            scenario.kind,
+            super::scenarios::Kind::Reader(ReaderKind::RasterPage { .. })
+                | super::scenarios::Kind::Reader(ReaderKind::RasterContinuous { .. })
+        );
+        assert_eq!(
+            facts.zoom,
+            if raster { "fit-page" } else { "n/a" },
+            "{}: only the fit-width capture changes the zoom mode",
+            scenario.id
+        );
+        defaulted += 1;
+    }
+    assert!(
+        defaulted >= 45,
+        "expected the rest of the capture table to record a zoom, checked {defaulted}"
+    );
+}
+
+/// Reader state a capture can persist must not leak into the next capture.
+///
+/// The application persists reading positions and saved places, and the reader
+/// captures turn pages and save places. Without the reset a capture that
+/// navigated to page 4 would decide where the next capture of the same book
+/// opens, so this pins the reset against a real store.
+#[tokio::test]
+async fn reader_state_reset_clears_bookmarks_and_reading_state() {
+    let root = temp_root();
+    let store = seed::open_store(root.path()).await.expect("store");
+    let library =
+        shosai_core::library::Library::new(store.pool().clone(), store.managed_books_dir());
+    let path = root.path().join("book.epub");
+    std::fs::write(
+        &path,
+        include_bytes!("../../../../shosai-core/tests/fixtures/sample.epub"),
+    )
+    .expect("write a book");
+    let book = library.import_file(&path).await.expect("import");
+    let bookmarks = shosai_core::bookmarks::BookmarkStore::new(store.pool().clone());
+    bookmarks
+        .add_async(
+            &path,
+            &"0".repeat(64),
+            0,
+            Some("title"),
+            Some("note"),
+            "accent",
+        )
+        .await
+        .expect("save a place");
+    store
+        .set_for_book_async(
+            book.id,
+            &shosai_core::reading_state::FileReadingState {
+                page: 3,
+                location_offset: Some(0),
+                zoom: 1.0,
+            },
+        )
+        .await
+        .expect("save a reading position");
+    assert!(
+        !bookmarks
+            .list_for_file_async(&path, &"0".repeat(64))
+            .await
+            .expect("list")
+            .is_empty()
+    );
+    assert!(
+        store
+            .get_for_book_async(book.id)
+            .await
+            .expect("read state")
+            .is_some()
+    );
+
+    seed::reset_capture_reader_state(&store)
+        .await
+        .expect("reset");
+
+    assert!(
+        bookmarks
+            .list_for_file_async(&path, &"0".repeat(64))
+            .await
+            .expect("list")
+            .is_empty(),
+        "the reset must clear every saved place"
+    );
+    assert!(
+        store
+            .get_for_book_async(book.id)
+            .await
+            .expect("read state")
+            .is_none(),
+        "the reset must clear every reading position"
+    );
+}
+
+/// The reader panels are mutually exclusive in the production handlers.
+///
+/// `RD-13` is a behavioral row, so this drives the production messages and
+/// checks the flags rather than comparing two images that would show the same
+/// state: opening the `Aa` panel closes the Contents panel and the `⋯` panel,
+/// and vice versa.
+#[tokio::test]
+async fn reader_panels_are_mutually_exclusive() {
+    let root = temp_root();
+    let fixtures_root = root.path().join("fixtures");
+    fixtures::write_reference_fixtures(&fixtures_root).expect("fixtures");
+    let data = root.path().join("data");
+    let seeded = seed::seed_library(&data.join("seeded"), &fixtures_root)
+        .await
+        .expect("seed");
+    let initialized = seed::capture_initialized_state(seeded.store.clone())
+        .await
+        .expect("initialized");
+    let mut harness = Harness::new(super::runner::fresh_state());
+    harness
+        .dispatch(Message::Initialized(Ok(initialized)))
+        .await;
+    let (book_id, key) =
+        super::reader::locate_book(&harness.state, &fixtures_root, super::reader::EPUB_EVEN)
+            .expect("locate");
+    harness
+        .dispatch(Message::OpenLibraryBook(book_id, key))
+        .await;
+
+    let flags = |state: &crate::app::State| {
+        (
+            state.show_bookmarks_panel,
+            state.show_reader_settings,
+            state.show_reader_more,
+            state.show_search_bar,
+        )
+    };
+    assert_eq!(flags(&harness.state), (false, false, false, false));
+
+    harness.dispatch(Message::ToggleBookmarksPanel).await;
+    assert_eq!(flags(&harness.state), (true, false, false, false));
+    harness.dispatch(Message::ToggleReaderSettings).await;
+    assert_eq!(
+        flags(&harness.state),
+        (false, true, false, false),
+        "opening the typography panel must close the contents panel"
+    );
+    harness.dispatch(Message::ToggleReaderMore).await;
+    assert_eq!(
+        flags(&harness.state),
+        (false, false, true, false),
+        "opening the more panel must close the typography panel"
+    );
+    harness.dispatch(Message::ToggleBookmarksPanel).await;
+    assert_eq!(
+        flags(&harness.state),
+        (true, false, false, false),
+        "opening the contents panel must close the more panel"
+    );
+    // The search bar is not part of the mutually exclusive set the row names
+    // (settings, more, bookmarks): it is a bar below the panels and stays open
+    // beside the contents panel, which is what the production handler does.
+    harness.dispatch(Message::ToggleSearchBar).await;
+    assert_eq!(
+        flags(&harness.state),
+        (true, false, false, true),
+        "the search bar is a bar, not one of the mutually exclusive panels"
+    );
+    harness.dispatch(Message::ToggleReaderSettings).await;
+    assert_eq!(
+        flags(&harness.state),
+        (false, true, false, true),
+        "opening the typography panel must close the contents panel"
+    );
+}
+
+/// The committed PNGs must carry the application's colors, not swapped ones.
+///
+/// `iced_tiny_skia` renders into a `BGRA` byte order that the window compositor
+/// unpacks for `softbuffer`; a `tiny_skia::Pixmap` encoded as RGBA would record
+/// every pixel with red and blue exchanged, which turns the application accent
+/// `#4D5E86` into the brown `#865E4D`. This renders the production library view
+/// and checks the two palette colors the frame must contain against the token
+/// values themselves, so a channel-order regression fails here rather than in a
+/// reviewer's eyes.
+#[test]
+fn rendered_pixels_carry_the_application_colors() {
+    use super::render::{FrameOutcome, MAX_REDRAW_EVENTS};
+
+    super::render::install_application_fonts();
+    let state = super::runner::fresh_state();
+    let mut cache = iced_runtime::user_interface::Cache::new();
+    let mut image = None;
+    for _ in 0..MAX_REDRAW_EVENTS {
+        match super::render::render_frame(&state, 320.0, 200.0, 1.0, cache) {
+            FrameOutcome::Settled(rendered) => {
+                image = Some(rendered);
+                break;
+            }
+            FrameOutcome::Requests(_, next_cache) => cache = next_cache,
+        }
+    }
+    let image = image.expect("the fresh library state must settle within one frame round");
+    let decoded = image::load_from_memory(&image.png)
+        .expect("decode the capture PNG")
+        .to_rgba8();
+
+    let channels = |color: iced::Color| {
+        [
+            (color.r * 255.0).round() as u8,
+            (color.g * 255.0).round() as u8,
+            (color.b * 255.0).round() as u8,
+        ]
+    };
+    let surface = channels(crate::theme::SURFACE);
+    let background = channels(crate::theme::APP_BACKGROUND);
+
+    let top_left = decoded.get_pixel(0, 0).0;
+    assert_eq!(
+        [top_left[0], top_left[1], top_left[2]],
+        surface,
+        "the header surface must be recorded as {surface:?}, not as its channel-swapped form"
+    );
+    let found_background = decoded
+        .pixels()
+        .any(|pixel| [pixel.0[0], pixel.0[1], pixel.0[2]] == background);
+    assert!(
+        found_background,
+        "the application background {background:?} must appear in the frame exactly as specified"
+    );
+    assert!(
+        surface[0] > surface[2] && background[0] > background[2],
+        "the check is only meaningful while these tokens have red above blue"
+    );
+}
+
+/// The revision note must name a Jujutsu command that actually works.
+///
+/// The manifest and the README tell an accepting package how to map
+/// `capture_code_change_id` back to a commit. A note naming a revset function
+/// that does not exist (`change(<id>)`) is a documentation defect that only a
+/// reader would discover, so this checks the text and then runs the command the
+/// note names under the Jujutsu on this machine, together with the negative
+/// control for the form the note must not use.
+#[test]
+fn recorded_revision_lookup_is_a_real_jujutsu_command() {
+    let note = super::runner::REVISION_NOTE;
+    assert!(
+        note.contains("change_id(<id>)"),
+        "the revision note must name the change_id() revset function: {note}"
+    );
+    assert!(
+        !note.contains("'change(<id>)'"),
+        "the revision note must not name `change(<id>)`, which is not a Jujutsu revset function"
+    );
+
+    let jj = |args: &[&str]| {
+        std::process::Command::new("jj")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    };
+    let Some(change_id) = jj(&["log", "--no-graph", "-r", "@", "-T", "change_id"]) else {
+        // The capture entry point requires `jj`; an ordinary `cargo test` on a
+        // machine without it still checks the note's text above.
+        eprintln!("skipping the execution half: no working `jj` on this machine");
+        return;
+    };
+    let revset = format!("change_id({change_id})");
+    let resolved = jj(&[
+        "log",
+        "--no-graph",
+        "-r",
+        &revset,
+        "-T",
+        "commit_id.short() ++ \" \" ++ description.first_line()",
+    ])
+    .unwrap_or_else(|| panic!("the command the revision note names failed: jj log -r '{revset}'"));
+    assert!(
+        resolved
+            .split_whitespace()
+            .next()
+            .is_some_and(|id| id.len() >= 7),
+        "the resolved revision must start with a commit id: {resolved:?}"
+    );
+
+    // Negative control: the form the note must not name is not a revset function.
+    let invalid = std::process::Command::new("jj")
+        .args([
+            "log",
+            "--no-graph",
+            "-r",
+            &format!("change({change_id})"),
+            "-T",
+            "commit_id",
+        ])
+        .output()
+        .expect("run jj");
+    assert!(
+        !invalid.status.success(),
+        "`change(<id>)` unexpectedly resolved; the note's warning is stale"
+    );
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("doesn't exist"),
+        "the negative control must fail because the function does not exist: {}",
+        String::from_utf8_lossy(&invalid.stderr)
     );
 }

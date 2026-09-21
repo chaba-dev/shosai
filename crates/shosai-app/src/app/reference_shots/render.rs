@@ -161,6 +161,53 @@ pub(crate) fn physical_size(width: f32, height: f32, dpr: f32) -> (u32, u32) {
     )
 }
 
+/// Run a widget operation the way `iced_winit` runs an `Action::Widget`.
+///
+/// The capture harness drives the production `update`, so a message that starts
+/// a widget operation (the reader's continuous-mode scroll resolution, or the
+/// focus a `text_input` asks for when the search bar opens) produces an
+/// `Action::Widget` instead of an output message. In a window the runtime
+/// applies that operation to the live interface; here it is applied to an
+/// interface built from the same state and view **with the harness's own
+/// interface cache**, and the cache is handed back.
+///
+/// The cache is the part that matters: a widget operation mutates widget-local
+/// state (a focused id, a scroll offset), and that state only reaches the
+/// capture if the interface the operation ran against is the one the next frame
+/// is built from. Starting from a fresh cache would apply every operation to a
+/// throwaway tree and the rendered frame would silently drop the focus ring or
+/// the scroll position.
+///
+/// `iced_winit` follows a finished operation with the one it chains
+/// (`Outcome::Chain`), so this does too.
+pub(crate) fn operate(
+    state: &State,
+    operation: &mut dyn iced::advanced::widget::Operation,
+    cache: iced_runtime::user_interface::Cache,
+) -> iced_runtime::user_interface::Cache {
+    use iced::advanced::widget::operation::Outcome;
+
+    install_application_fonts();
+    let logical = Size::new(state.window_size.width, state.window_size.height);
+    let mut renderer = iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(
+        typography::INTER,
+        iced::Pixels(DEFAULT_TEXT_SIZE),
+    ));
+    let element = view(state);
+    let mut interface = iced_runtime::UserInterface::build(element, logical, cache, &mut renderer);
+    interface.operate(&renderer, operation);
+    let mut outcome = operation.finish();
+    loop {
+        match outcome {
+            Outcome::None | Outcome::Some(()) => return interface.into_cache(),
+            Outcome::Chain(mut next) => {
+                interface.operate(&renderer, next.as_mut());
+                outcome = next.finish();
+            }
+        }
+    }
+}
+
 /// One frame pass over the production view.
 pub(crate) enum FrameOutcome {
     /// The frame is a fixed point: this is the capture image.
@@ -211,6 +258,7 @@ pub(crate) fn render_frame(
     // without a decoded cover asks for it.
     let mut clipboard = iced::advanced::clipboard::Null;
     let mut produced = Vec::new();
+    let mut stable = false;
     for _ in 0..MAX_REDRAW_EVENTS {
         let event = redraw_event();
         let produced_before = produced.len();
@@ -222,11 +270,20 @@ pub(crate) fn render_frame(
             &mut produced,
         );
         if produced.len() == produced_before && !state.has_layout_changed() {
+            stable = true;
             break;
         }
     }
     if !produced.is_empty() {
         return FrameOutcome::Requests(produced, interface.into_cache());
+    }
+    if !stable {
+        // The interface kept invalidating its layout without producing a
+        // message. That is not a fixed point, so the frame is not the capture:
+        // the caller dispatches nothing and draws again, and a view that never
+        // stabilises fails on the caller's round bound instead of being recorded
+        // as settled.
+        return FrameOutcome::Requests(Vec::new(), interface.into_cache());
     }
 
     let mut pixmap =
@@ -252,10 +309,36 @@ pub(crate) fn render_frame(
         program_style.background_color,
     );
 
-    let png = pixmap.encode_png().expect("capture PNG encoding");
+    let png = encode_rgba_png(pixmap).expect("capture PNG encoding");
     FrameOutcome::Settled(RenderedImage {
         png,
         physical_width: physical.width,
         physical_height: physical.height,
     })
+}
+
+/// Encode the rendered pixmap as an RGBA PNG.
+///
+/// `iced_tiny_skia` writes its colors in **BGRA** byte order: `engine::into_color`
+/// builds every `tiny_skia::Color` as `from_rgba(color.b, color.g, color.r,
+/// color.a)`, because the compositor presents into `softbuffer`'s `u32` buffer
+/// (`iced_tiny_skia::window::compositor::screenshot` unpacks that same buffer
+/// with explicit channel masks, which cancels the swap for the screenshot
+/// itself). A `tiny_skia::Pixmap` is plain RGBA, so encoding it directly would
+/// record every pixel with its red and blue channels exchanged: the application
+/// accent `#4D5E86` would be written as `#865E4D`, and the accepted library
+/// evidence would show the brown accent the design explicitly rejects.
+///
+/// The two channels are swapped back here, before encoding, so the committed
+/// PNGs carry the colors the application specifies. Every recorded pixel goes
+/// through this encoder, so this is the single place the order is corrected;
+/// `reference_shots::tests::rendered_pixels_carry_the_application_colors` checks
+/// the encoded bytes against the palette tokens.
+fn encode_rgba_png(mut pixmap: tiny_skia::Pixmap) -> anyhow::Result<Vec<u8>> {
+    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    pixmap
+        .encode_png()
+        .map_err(|error| anyhow::anyhow!("encode the capture PNG: {error}"))
 }

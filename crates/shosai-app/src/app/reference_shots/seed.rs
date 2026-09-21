@@ -206,6 +206,27 @@ pub(crate) async fn reset_capture_preferences(store: &ReadingStateStore) -> Resu
         .context("reset capture preferences")
 }
 
+/// Clear the durable reader state a package 1C capture can write.
+///
+/// The reader captures turn pages and save places, and the application persists
+/// both: without this reset a capture that navigated to page 4 would decide
+/// where the next capture of the same book opens, and the saved-places captures
+/// would see each other's bookmarks. The reset touches only the disposable
+/// capture store — the same class of operation as
+/// [`reset_capture_preferences`] — and never the reader model, which is still
+/// driven by production messages alone.
+pub(crate) async fn reset_capture_reader_state(store: &ReadingStateStore) -> Result<()> {
+    sqlx::query("DELETE FROM bookmarks")
+        .execute(store.pool())
+        .await
+        .context("clear the disposable bookmark store")?;
+    sqlx::query("DELETE FROM reading_state")
+        .execute(store.pool())
+        .await
+        .context("clear the disposable reading state")?;
+    Ok(())
+}
+
 /// Seed the full reference library into `data_dir` from an already written
 /// fixture tree.
 pub(crate) async fn seed_library(data_dir: &Path, fixtures_root: &Path) -> Result<SeededLibrary> {
