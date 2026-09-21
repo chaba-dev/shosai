@@ -71,6 +71,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Align persistence and PDF geometry (#102)
 - *(library)* Persist managed deletion debt (#103)
 - *(reader)* Surface durable writes and reachable content (#104)
+- *(flutter)* Restore accessible activation for add-books dialog choices (#118)
 
 ### 🚜 Refactor
 
