@@ -56,6 +56,8 @@ mod epub_navigation;
 mod epub_view;
 mod message;
 mod perf;
+#[cfg(test)]
+mod reference_shots;
 
 pub use dispatch::update;
 use epub_navigation::*;
