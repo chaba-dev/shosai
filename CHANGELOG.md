@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-13
+## [0.1.0] - 2026-09-21
 
 ### 🚀 Features
 
@@ -46,6 +46,7 @@ All notable changes to this project will be documented in this file.
 - *(android)* Harden document provider lifecycle (#101)
 - *(flutter)* Adopt flutter-shadcn-ui for the library shell (#106)
 - *(flutter)* Adopt flutter-shadcn-ui for the reader (#107)
+- *(reference)* Add reproducible reference captures for library, import and settings (#117)
 
 ### 🐛 Bug Fixes
 
