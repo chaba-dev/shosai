@@ -13,6 +13,15 @@
 # directories point into an owned temporary profile, and the application
 # database lives there too.
 #
+# Platform paths:
+#   Linux  a private Xvfb display (no session needed) with xdotool, xwininfo,
+#          xprop and ImageMagick.
+#   macOS  the real session: the panel is an NSOpenPanel sheet, so the runner
+#          needs Accessibility (to inspect and dismiss it) and Screen Recording
+#          (to capture it). Both are preflighted and reported as UNAVAILABLE with
+#          the owner action; the runner never grants permissions itself.
+#   other  UNAVAILABLE (exit 2), never an assumed pass.
+#
 # Usage:
 #   scripts/flutter-native-picker-smoke.sh [options]
 #
@@ -22,6 +31,12 @@
 #   --timeout SECONDS  bound for the whole run, build included (default 1200)
 #   --no-pub           skip dependency resolution before the test run
 #   --keep-profile     keep the disposable profile for debugging
+#
+# Environment overrides, for evidence and controls:
+#   SHOSAI_SMOKE_REVISION    revision recorded in the report
+#   SHOSAI_SMOKE_PLATFORM    force the platform branch (Linux or Darwin)
+#   SHOSAI_SMOKE_PGID_SOURCE auto|proc|ps  force a group-lookup source
+#   X_COMMAND_TIMEOUT        per X or capture command bound (default 10)
 #
 # Bounds:
 #   Inside the run, every phase shares the `--timeout` budget and teardown a
@@ -113,6 +128,13 @@ if [[ "${SHOSAI_SMOKE_SUPERVISED:-0}" != 1 ]]; then
   # A name, not a directory: creating it here would be setup IO outside
   # supervision. The run creates and uses it, and the supervisor removes it.
   profile_dir="${TMPDIR:-/tmp}/shosai-picker-smoke.$$"
+  start_gate_seconds="${SHOSAI_SMOKE_START_GATE_SECONDS:-30}"
+  pgid_timeout="${SHOSAI_SMOKE_PGID_TIMEOUT:-10}"
+  # A name only: creating it here would be setup IO before supervision. The
+  # token makes the handshake belong to this invocation, so a file left behind
+  # by an earlier run cannot release an unconfirmed child.
+  gate_file="${SHOSAI_SMOKE_START_GATE_FILE:-${TMPDIR:-/tmp}/shosai-picker-smoke-gate.$$}"
+  gate_token="$$-$RANDOM-$RANDOM"
 
   stop_watchdog() {
     [[ -n "$watchdog_pid" ]] || return 0
@@ -148,6 +170,11 @@ if [[ "${SHOSAI_SMOKE_SUPERVISED:-0}" != 1 ]]; then
     if (( keep_profile == 0 )) && [[ -n "$profile_dir" ]]; then
       timeout --foreground --kill-after=5 20 rm -rf "$profile_dir" || true
     fi
+    if [[ -n "$gate_file" ]]; then
+      # Bounded like the profile removal above: the watchdog is already stopped
+      # here, so an unlink that stalls must not hold the supervisor.
+      timeout --foreground --kill-after=2 5 rm -f "$gate_file" 2>/dev/null || true
+    fi
     exit "$status"
   }
   trap supervisor_cleanup EXIT
@@ -157,20 +184,70 @@ if [[ "${SHOSAI_SMOKE_SUPERVISED:-0}" != 1 ]]; then
   # Job control gives the run its own process group whose id equals its pid.
   set -m
   SHOSAI_SMOKE_SUPERVISED=1 SHOSAI_SMOKE_PROFILE_DIR="$profile_dir" \
+    SHOSAI_SMOKE_START_GATE_FILE="$gate_file" \
+    SHOSAI_SMOKE_START_GATE_TOKEN="$gate_token" \
+    SHOSAI_SMOKE_START_GATE_SECONDS="$start_gate_seconds" \
     bash "${BASH_SOURCE[0]}" "${original_args[@]}" &
   supervised_pgid=$!
   set +m
 
-  # Confirm the group before relying on it; otherwise fall back to killing the
-  # run's leader alone.
-  stat_line=""
-  if read -r stat_line < "/proc/$supervised_pgid/stat" 2>/dev/null; then
-    stat_rest="${stat_line##*) }"
-    IFS=' ' read -r _state _ppid stat_pgid _session _ <<<"$stat_rest"
-    [[ "$stat_pgid" == "$supervised_pgid" ]] || group_supervision=0
-  else
+  # The run stays behind a start gate until its process group is confirmed, so
+  # a run that cannot be supervised owns nothing. Both lookups are bounded and
+  # spawn no descendants: a hung lookup cannot delay the watchdog that follows
+  # it, and killing a lookup cannot orphan a grandchild.
+  confirm_run_group() {
+    local pid="$supervised_pgid"
+    local source="${SHOSAI_SMOKE_PGID_SOURCE:-auto}"
+    if [[ "$source" != ps ]]; then
+      local proc_pgid=""
+      # shellcheck disable=SC2016  # the child shell expands these itself
+      proc_pgid="$(timeout --foreground --kill-after=2 "$pgid_timeout" bash -c '
+        read -r line < "/proc/$1/stat" || exit 1
+        rest="${line##*) }"
+        # shellcheck disable=SC2086  # word splitting reads the stat fields
+        set -- $rest
+        printf "%s" "$3"
+      ' _ "$pid" 2>/dev/null)" || proc_pgid=""
+      if [[ -n "$proc_pgid" ]]; then
+        printf '%s' "$proc_pgid"
+        return 0
+      fi
+    fi
+    [[ "$source" != proc ]] || return 1
+    command -v ps >/dev/null 2>&1 || return 1
+    local pgid=""
+    pgid="$(timeout --foreground --kill-after=2 "$pgid_timeout" \
+      ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" || return 1
+    [[ -n "$pgid" ]] || return 1
+    printf '%s' "$pgid"
+  }
+
+  stat_pgid="$(confirm_run_group)" || stat_pgid=""
+  if [[ "$stat_pgid" != "$supervised_pgid" ]]; then
     group_supervision=0
+    # The run is still behind its gate and owns nothing yet, so stopping it and
+    # reaping it is enough.
+    kill -TERM "$supervised_pgid" 2>/dev/null || true
+    stat_waited=0
+    while kill -0 "$supervised_pgid" 2>/dev/null; do
+      (( stat_waited >= 20 )) && break
+      sleep 0.1
+      stat_waited=$((stat_waited + 1))
+    done
+    kill -KILL "$supervised_pgid" 2>/dev/null || true
+    wait "$supervised_pgid" 2>/dev/null || true
+    echo "UNAVAILABLE: the run's process group could not be confirmed" \
+      "(${stat_pgid:-unknown} vs $supervised_pgid) within ${pgid_timeout}s, so" \
+      "owned descendants cannot be guaranteed to stop with it. Refusing to run." >&2
+    exit 2
   fi
+  # Open the gate the run is waiting on, writing this invocation's token.
+  # Bounded, so a stalled write cannot delay the invocation past the run's own
+  # gate timeout.
+  # shellcheck disable=SC2016  # the child shell expands these itself
+  timeout --foreground --kill-after=2 5 bash -c 'printf "%s" "$2" > "$1"' _ \
+    "$gate_file" "$gate_token" 2>/dev/null ||
+    echo "the start gate could not be opened; the run will refuse to start" >&2
 
   (
     watchdog_started=$SECONDS
@@ -230,6 +307,43 @@ log() {
   fi
 }
 
+report=""
+profile=""
+xvfb_pid=""
+test_pid=""
+display=""
+screenshots=()
+
+# The supervisor confirms this run's process group before the run is allowed to
+# start, so a run that could not be supervised owns nothing when it is refused.
+start_gate_file="${SHOSAI_SMOKE_START_GATE_FILE:-}"
+start_gate_token="${SHOSAI_SMOKE_START_GATE_TOKEN:-}"
+if [[ -n "$start_gate_file" ]]; then
+  gate_open=0
+  gate_deadline=$((SECONDS + ${SHOSAI_SMOKE_START_GATE_SECONDS:-30}))
+  while (( SECONDS < gate_deadline )); do
+    # Only this invocation's token opens the gate: a file left behind by an
+    # earlier run at the same path must not release an unconfirmed child.
+    if [[ -s "$start_gate_file" ]]; then
+      # A builtin read, not `cat`: nothing external may run before the
+      # supervisor confirms ownership, or the refusal path would leave a
+      # descendant it never owned.
+      gate_content=""
+      read -r gate_content < "$start_gate_file" || true
+      if [[ "$gate_content" == "$start_gate_token" ]]; then
+        gate_open=1
+        break
+      fi
+    fi
+    sleep 0.1
+  done
+  if (( gate_open != 1 )); then
+    log "UNAVAILABLE: the supervisor did not confirm this run's process group"
+    exit 2
+  fi
+  log "supervisor confirmed the run's process group"
+fi
+
 remaining() {
   local left=$((deadline - SECONDS))
   (( left < 0 )) && left=0
@@ -269,13 +383,6 @@ xcmd() {
   fi
   bounded "${X_COMMAND_TIMEOUT:-10}" env DISPLAY="$display" "$@"
 }
-
-report=""
-profile=""
-xvfb_pid=""
-test_pid=""
-display=""
-screenshots=()
 
 # Installed before the first resource is acquired, so an early exit still tears
 # down whatever exists. The run's own process group is swept by the supervisor.
@@ -331,6 +438,12 @@ capture() {
   local file="$artifacts/$name.png"
   local left
   left="$(teardown_remaining)"
+  # A failure before the platform capture path is defined has nothing to
+  # capture; it must not turn into "command not found" and lose the report.
+  if ! declare -F capture_screen >/dev/null; then
+    log "screenshot $name skipped: no capture path is available yet"
+    return
+  fi
   if [[ -n "$xvfb_pid" ]] && ! kill -0 "$xvfb_pid" 2>/dev/null; then
     log "screenshot $name skipped: the owned Xvfb exited"
     return
@@ -340,13 +453,12 @@ capture() {
     return
   fi
   if (( $(remaining) > 0 )); then
-    if xcmd import -window root "$file" 2>/dev/null; then
+    if capture_screen "$file"; then
       screenshots+=("$file")
       log "screenshot: $file"
       return
     fi
-  elif timeout --foreground --kill-after=5 "$left" env DISPLAY="$display" \
-      import -window root "$file" 2>/dev/null; then
+  elif capture_screen_forced "$left" "$file"; then
     screenshots+=("$file")
     log "screenshot: $file"
     return
@@ -374,8 +486,31 @@ fi
 log "native picker smoke: revision $revision"
 log "artifacts: $artifacts"
 
+# The runner has one automation path per desktop the application ships on: a
+# private Xvfb display on Linux, and the real session on macOS, where the native
+# panel is a sheet that only System Events can dismiss. SHOSAI_SMOKE_PLATFORM
+# overrides the detected platform so the other branch can be exercised on
+# purpose.
+platform="${SHOSAI_SMOKE_PLATFORM:-$(uname -s 2>/dev/null || echo unknown)}"
+log "platform: $platform"
+
+case "$platform" in
+  Linux)
+    test_device="linux"
+    prerequisites=(flutter cargo ps Xvfb xdotool xwininfo xprop timeout mktemp import)
+    ;;
+  Darwin)
+    test_device="macos"
+    prerequisites=(flutter cargo ps screencapture osascript timeout mktemp)
+    ;;
+  *)
+    log "UNAVAILABLE: no native picker automation path for platform $platform"
+    exit 2
+    ;;
+esac
+
 missing=()
-for tool in flutter cargo Xvfb xdotool xwininfo xprop timeout mktemp import; do
+for tool in "${prerequisites[@]}"; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
 if (( ${#missing[@]} > 0 )); then
@@ -404,47 +539,299 @@ else
 fi
 
 # Xvfb allocates a free display itself, so two runners can never share one.
-display_file="$profile/display"
-Xvfb -displayfd 3 -screen 0 1600x1200x24 3>"$display_file" \
-  >"$artifacts/xvfb.log" 2>&1 &
-xvfb_pid=$!
-for _ in $(seq 1 100); do
-  if [[ -s "$display_file" ]]; then
-    display=":$(head -1 "$display_file")"
-    break
+if [[ "$platform" == Linux ]]; then
+  display_file="$profile/display"
+  Xvfb -displayfd 3 -screen 0 1600x1200x24 3>"$display_file" \
+    >"$artifacts/xvfb.log" 2>&1 &
+  xvfb_pid=$!
+  for _ in $(seq 1 100); do
+    if [[ -s "$display_file" ]]; then
+      display=":$(head -1 "$display_file")"
+      break
+    fi
+    kill -0 "$xvfb_pid" 2>/dev/null || break
+    (( SECONDS < deadline )) || break
+    sleep 0.1
+  done
+  if [[ -z "$display" ]] || ! kill -0 "$xvfb_pid" 2>/dev/null; then
+    fail "Xvfb did not start"
   fi
-  kill -0 "$xvfb_pid" 2>/dev/null || break
-  (( SECONDS < deadline )) || break
-  sleep 0.1
-done
-if [[ -z "$display" ]] || ! kill -0 "$xvfb_pid" 2>/dev/null; then
-  fail "Xvfb did not start"
+  if ! xcmd xdotool getdisplaygeometry >/dev/null 2>&1; then
+    fail "the private display $display did not become ready"
+  fi
+  log "Xvfb owns display $display"
 fi
-if ! xcmd xdotool getdisplaygeometry >/dev/null 2>&1; then
-  fail "the private display $display did not become ready"
+
+if [[ "$platform" == Darwin ]]; then
+  # macOS has no private display: the panel opens in the real session, and
+  # dismissing it and capturing it both need permissions the runner cannot
+  # grant. Both are checked here so the run reports a limitation instead of a
+  # native result it could not verify.
+  # The application publishes its own pid next to the picker marker, so every
+  # AppleScript call below addresses this run's process by unix id instead of
+  # by name (another instance of the same application may be running).
+  darwin_app_pid_file="$profile/app-pid"
+  if ! sw_vers -productVersion >/dev/null 2>&1; then
+    log "UNAVAILABLE: sw_vers did not report a macOS version"
+    exit 2
+  fi
+  log "macOS $(sw_vers -productVersion) on $(uname -m)"
+
+  if ! bounded "${X_COMMAND_TIMEOUT:-10}" osascript -e 'tell application "System Events" to get name of first process' \
+      >/dev/null 2>&1; then
+    log "UNAVAILABLE: the automation host has no Accessibility permission, so the"
+    log "native panel cannot be dismissed or inspected. Owner action: grant"
+    log "Accessibility to the process running this script (System Settings ->"
+    log "Privacy & Security -> Accessibility), then re-run."
+    exit 2
+  fi
+  log "Accessibility preflight: System Events is reachable"
+
+  screenshot_probe="$artifacts/.screenshot-probe.png"
+  if ! bounded 20 screencapture -x "$screenshot_probe" ||
+    [[ ! -s "$screenshot_probe" ]]; then
+    log "UNAVAILABLE: screencapture produced no image, so failure screenshots"
+    log "cannot be captured. Owner action: grant Screen Recording to the process"
+    log "running this script (System Settings -> Privacy & Security -> Screen"
+    log "Recording), then re-run."
+    rm -f "$screenshot_probe"
+    exit 2
+  fi
+  log "Screen Recording preflight: screencapture wrote $(wc -c <"$screenshot_probe") bytes"
+  rm -f "$screenshot_probe"
 fi
-log "Xvfb owns display $display"
 
 mkdir -p "$profile/xdg-data" "$profile/xdg-config" "$profile/xdg-state"
 
-test_args=(test "$test_target" -d linux)
+# ---------------------------------------------------------------------------
+# Native panel interface
+# ---------------------------------------------------------------------------
+# Both platforms expose the same four operations, so the phases below are
+# written once: is the panel there, where is it, capture it, dismiss it.
+if [[ "$platform" == Linux ]]; then
+  root_window="$(xcmd xwininfo -root 2>/dev/null | awk '/Window id:/{print $4}')"
+  [[ -n "$root_window" ]] || fail "the private display did not report a root window"
+  root_window=$((root_window))
+
+  # Every window on this private display belongs to this run; the root window is
+  # the only one that is not.
+  window_ids() {
+    xcmd xdotool search --name '.*' 2>/dev/null \
+      | grep -v "^${root_window}$" || true
+  }
+
+  window_geometry() {
+    xcmd xdotool getwindowgeometry --shell "$1" 2>/dev/null \
+      | awk -F= '/^WIDTH=/{w=$2} /^HEIGHT=/{h=$2} END{print w" "h}'
+  }
+
+  window_type() {
+    xcmd xprop -id "$1" _NET_WM_WINDOW_TYPE 2>/dev/null | head -1
+  }
+
+  # The native file chooser is the application's dialog window; helper windows
+  # are tiny, and the main window is a normal window.
+  picker_window() {
+    local id width height
+    for id in $(window_ids); do
+      # Enumeration is bounded too: every window costs two X round trips.
+      (( $(remaining) > 0 )) || return 1
+      read -r width height < <(window_geometry "$id")
+      if [[ -z "${width:-}" || -z "${height:-}" ]]; then
+        continue
+      fi
+      (( width * height >= 200 * 100 )) || continue
+      if [[ "$(window_type "$id")" == *"_NET_WM_WINDOW_TYPE_DIALOG"* ]]; then
+        printf '%s\n' "$id"
+        return 0
+      fi
+    done
+    return 1
+  }
+
+  panel_present() {
+    [[ -n "$(picker_window || true)" ]]
+  }
+
+  panel_description() {
+    local id
+    id="$(picker_window || true)"
+    printf '%s %s\n' "$id" "$(window_geometry "$id")"
+  }
+
+  panel_geometry() {
+    window_geometry "$(picker_window || true)"
+  }
+
+  capture_screen() {
+    xcmd import -window root "$1" 2>/dev/null
+  }
+
+  # Teardown capture: the run budget is gone, so the shared grace applies.
+  capture_screen_forced() {
+    timeout --foreground --kill-after=5 "$1" env DISPLAY="$display" \
+      import -window root "$2" 2>/dev/null
+  }
+
+  dismiss_panel() {
+    local id
+    id="$(picker_window || true)"
+    xcmd xdotool windowfocus --sync "$id" 2>/dev/null || true
+    xcmd xdotool key --clearmodifiers Escape 2>/dev/null || true
+  }
+else
+  # macOS: the panel is a sheet of the application process, so the application's
+  # window list is the panel signal, and Escape is sent through System Events.
+  # Every call targets the pid this run started, never a process name.
+  darwin_pgid_of() {
+    local pid="$1" line rest pgid=""
+    if [[ -r "/proc/$pid/stat" ]] && read -r line < "/proc/$pid/stat"; then
+      rest="${line##*) }"
+      # shellcheck disable=SC2086  # word splitting reads the stat fields
+      set -- $rest
+      pgid="$3"
+    else
+      pgid="$(bounded "${X_COMMAND_TIMEOUT:-10}" ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+    fi
+    [[ -n "$pgid" ]] || return 1
+    printf '%s' "$pgid"
+  }
+
+  # This run's own group, so the application can be checked against it.
+  darwin_run_pgid() {
+    darwin_pgid_of "$$"
+  }
+
+  darwin_owned_pid() {
+    local pid=""
+    [[ -s "$darwin_app_pid_file" ]] || return 1
+    # The application writes the pid without a trailing newline, so the value is
+    # validated by shape rather than by read's end-of-file status.
+    read -r pid < "$darwin_app_pid_file" || true
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+    printf '%s' "$pid"
+  }
+
+  darwin_require_ownership() {
+    local pid run_pgid app_pgid
+    if ! pid="$(darwin_owned_pid)"; then
+      log "UNAVAILABLE: the application did not publish its pid, so this run's"
+      log "panel cannot be told apart from another instance. Refusing to drive it."
+      exit 2
+    fi
+    if ! run_pgid="$(darwin_run_pgid)" || ! app_pgid="$(darwin_pgid_of "$pid")"; then
+      log "UNAVAILABLE: the application pid $pid has no readable process group."
+      exit 2
+    fi
+    if [[ "$app_pgid" != "$run_pgid" ]]; then
+      log "UNAVAILABLE: application pid $pid is in group $app_pgid, not this run's"
+      log "group $run_pgid. Refusing to drive another instance."
+      exit 2
+    fi
+    darwin_pid="$pid"
+    log "driving application pid $darwin_pid (group $app_pgid)"
+  }
+
+  # Runs one statement inside `tell targetProcess`, where targetProcess is
+  # resolved by unix id inside the same System Events scope. Every application
+  # query and every keystroke goes through here, so no operation can fall back
+  # to a process name.
+  darwin_osascript() {
+    local fragment="$1"
+    bounded "${X_COMMAND_TIMEOUT:-10}" osascript \
+      -e 'tell application "System Events"' \
+      -e "set targetProcess to first process whose unix id is $darwin_pid" \
+      -e "tell targetProcess" \
+      -e "  $fragment" \
+      -e 'end tell' \
+      -e 'end tell' 2>/dev/null || true
+  }
+
+  darwin_windows() {
+    darwin_osascript 'return count of windows'
+  }
+
+  darwin_sheets() {
+    darwin_osascript 'return count of sheets of window 1'
+  }
+
+  panel_present() {
+    local sheets windows
+    (( $(remaining) > 0 )) || return 1
+    sheets="$(darwin_sheets)"
+    windows="$(darwin_windows)"
+    [[ "$sheets" == "1" ]] && return 0
+    [[ -n "$windows" && "$windows" -ge 2 ]] && return 0
+    return 1
+  }
+
+  panel_description() {
+    printf 'pid=%s sheet=%s windows=%s\n' "${darwin_pid:-unknown}" \
+      "$(darwin_sheets)" "$(darwin_windows)"
+  }
+
+  # The panel rect, in screen points, so the capture holds only this run's UI.
+  panel_geometry() {
+    local sheet_rect window_rect
+    sheet_rect="$(darwin_osascript 'return {(item 1 of (position of sheet 1 of window 1)), (item 2 of (position of sheet 1 of window 1)), (item 1 of (size of sheet 1 of window 1)), (item 2 of (size of sheet 1 of window 1))}')"
+    window_rect="$(darwin_osascript 'return {(item 1 of (position of window 1)), (item 2 of (position of window 1)), (item 1 of (size of window 1)), (item 2 of (size of window 1))}')" 
+    if [[ "$sheet_rect" == *","* ]]; then
+      printf '%s\n' "$sheet_rect" | tr -d ' '
+    else
+      printf '%s\n' "$window_rect" | tr -d ' '
+    fi
+  }
+
+  capture_screen() {
+    local target="$1"
+    local geometry x y width height
+    geometry="$(panel_geometry)"
+    if [[ "$geometry" =~ ^([0-9-]+),([0-9-]+),([0-9]+),([0-9]+)$ ]]; then
+      x="${BASH_REMATCH[1]}"
+      y="${BASH_REMATCH[2]}"
+      width="${BASH_REMATCH[3]}"
+      height="${BASH_REMATCH[4]}"
+      bounded "${X_COMMAND_TIMEOUT:-10}" screencapture -x \
+        -R "${x},${y},${width},${height}" "$target" 2>/dev/null && return 0
+    fi
+    # Fall back to the whole screen; the artifact then holds more than this run,
+    # which the report records.
+    log "the panel rect was unavailable; capturing the whole screen"
+    bounded "${X_COMMAND_TIMEOUT:-10}" screencapture -x "$target" 2>/dev/null
+  }
+
+  # Teardown capture: the run budget is gone, so the shared grace applies.
+  capture_screen_forced() {
+    timeout --foreground --kill-after=5 "$1" screencapture -x "$2" 2>/dev/null
+  }
+
+  dismiss_panel() {
+    darwin_osascript 'set frontmost to true'
+    darwin_osascript 'key code 53'
+  }
+fi
+
+
+test_args=(test "$test_target" -d "$test_device")
 if (( skip_pub == 1 )); then
   test_args+=(--no-pub)
 fi
 
 (
   cd "$flutter_dir" || exit 1
-  export DISPLAY="$display"
-  # Force the X11 backend: without it GDK prefers the host's Wayland session and
-  # the application never appears on this private display.
-  export GDK_BACKEND=x11
+  if [[ "$platform" == Linux ]]; then
+    export DISPLAY="$display"
+    # Force the X11 backend: without it GDK prefers the host's Wayland session
+    # and the application never appears on this private display.
+    export GDK_BACKEND=x11
+    # Force the in-process GTK dialog instead of a desktop portal, which does
+    # not exist in a bare Xvfb session.
+    export GTK_USE_PORTAL=0
+  fi
   export SHOSAI_SMOKE_DIR="$profile"
   export XDG_DATA_HOME="$profile/xdg-data"
   export XDG_CONFIG_HOME="$profile/xdg-config"
   export XDG_STATE_HOME="$profile/xdg-state"
-  # Force the in-process GTK dialog instead of a desktop portal, which does not
-  # exist in a bare Xvfb session.
-  export GTK_USE_PORTAL=0
   exec flutter "${test_args[@]}"
 ) >"$artifacts/test.log" 2>&1 &
 test_pid=$!
@@ -459,84 +846,51 @@ done
   fail "the test did not request the native picker within ${timeout_seconds}s"
 log "the application requested the native picker"
 
-root_window="$(xcmd xwininfo -root 2>/dev/null | awk '/Window id:/{print $4}')"
-[[ -n "$root_window" ]] || fail "the private display did not report a root window"
-root_window=$((root_window))
+if [[ "$platform" == Linux ]]; then
+  # On macOS the count needs the application pid, which ownership establishes
+  # later; the panel description records it there instead.
+  app_windows="$(window_ids | wc -l)"
+  log "application windows before the picker: ${app_windows:-unknown}"
+fi
 
-# Every window on this private display belongs to this run; the root window is
-# the only one that is not.
-window_ids() {
-  xcmd xdotool search --name '.*' 2>/dev/null \
-    | grep -v "^${root_window}$" || true
-}
-
-window_geometry() {
-  xcmd xdotool getwindowgeometry --shell "$1" 2>/dev/null \
-    | awk -F= '/^WIDTH=/{w=$2} /^HEIGHT=/{h=$2} END{print w" "h}'
-}
-
-window_type() {
-  xcmd xprop -id "$1" _NET_WM_WINDOW_TYPE 2>/dev/null | head -1
-}
-
-# The native file chooser is the application's dialog window; helper windows
-# are tiny, and the main window is a normal window.
-picker_window() {
-  local id width height
-  for id in $(window_ids); do
-    # Enumeration is bounded too: every window costs two X round trips.
-    (( $(remaining) > 0 )) || return 1
-    read -r width height < <(window_geometry "$id")
-    if [[ -z "${width:-}" || -z "${height:-}" ]]; then
-      continue
-    fi
-    (( width * height >= 200 * 100 )) || continue
-    if [[ "$(window_type "$id")" == *"_NET_WM_WINDOW_TYPE_DIALOG"* ]]; then
-      printf '%s\n' "$id"
-      return 0
-    fi
+if [[ "$platform" == Darwin ]]; then
+  # The pid is published by the application with its picker marker; wait for it
+  # briefly, then refuse to drive anything that is not this run's process.
+  for _ in $(seq 1 40); do
+    [[ -s "$darwin_app_pid_file" ]] && break
+    kill -0 "$test_pid" 2>/dev/null || break
+    sleep 0.25
   done
-  return 1
-}
+  darwin_require_ownership
+fi
 
-app_windows="$(window_ids | wc -l)"
-log "application windows before the picker: $app_windows"
-
-dialog_id=""
+panel_found=0
 while (( SECONDS < deadline )); do
-  dialog_id="$(picker_window || true)"
-  [[ -n "$dialog_id" ]] && break
+  if panel_present; then
+    panel_found=1
+    break
+  fi
   kill -0 "$test_pid" 2>/dev/null || break
   sleep 0.5
 done
-[[ -n "$dialog_id" ]] ||
+(( panel_found == 1 )) ||
   fail "no native picker window appeared within ${timeout_seconds}s"
-log "native picker window: $dialog_id ($(window_geometry "$dialog_id"))"
+log "native picker panel: $(panel_description)"
 capture "picker-open"
-dialog_left="$(remaining)"
-if [[ -n "$xvfb_pid" ]] && kill -0 "$xvfb_pid" 2>/dev/null; then
-  if (( dialog_left > 0 )); then
-    xcmd import -window "$dialog_id" "$artifacts/picker-dialog.png" 2>/dev/null ||
-      log "the dialog screenshot was not captured"
-  else
-    dialog_left="$(teardown_remaining)"
-    if (( dialog_left > 0 )) && timeout --foreground --kill-after=5 "$dialog_left" \
-        env DISPLAY="$display" import -window "$dialog_id" \
-        "$artifacts/picker-dialog.png" 2>/dev/null; then
-      log "screenshot: $artifacts/picker-dialog.png"
-    fi
-  fi
-  [[ -f "$artifacts/picker-dialog.png" ]] &&
+if (( $(remaining) > 0 )); then
+  if capture_screen "$artifacts/picker-dialog.png"; then
     log "screenshot: $artifacts/picker-dialog.png"
+  else
+    log "the dialog screenshot was not captured"
+  fi
 fi
 
-xcmd xdotool windowfocus --sync "$dialog_id" 2>/dev/null || true
-xcmd xdotool key --clearmodifiers Escape 2>/dev/null || true
+dismiss_panel || log "the dismissal command reported a failure"
 while (( SECONDS < deadline )); do
-  window_ids | grep -q "^${dialog_id}$" || break
+  panel_present || break
   sleep 0.5
 done
-if window_ids | grep -q "^${dialog_id}$"; then
+if panel_present; then
   fail "the native picker did not close after Escape"
 fi
 log "the native picker closed"

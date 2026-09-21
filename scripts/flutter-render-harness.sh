@@ -50,9 +50,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-revision=""
-if command -v jj >/dev/null 2>&1; then
+# Record the revision under test the same way the native picker runner does: a
+# Jujutsu working copy first, then the Git checkout, so a Git-only clone still
+# reports provenance instead of "unknown". Set SHOSAI_HARNESS_REVISION to
+# override both.
+revision="${SHOSAI_HARNESS_REVISION:-}"
+if [[ -z "$revision" ]] && command -v jj >/dev/null 2>&1; then
   revision="$(jj log -r @ --no-graph -T commit_id 2>/dev/null || true)"
+fi
+if [[ -z "$revision" ]] && command -v git >/dev/null 2>&1; then
+  revision="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
 fi
 [[ -n "$revision" ]] || revision="unknown"
 

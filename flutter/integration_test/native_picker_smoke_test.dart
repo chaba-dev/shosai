@@ -28,6 +28,9 @@ void main() {
     )..createSync(recursive: true);
     final marker = File('${directory.path}/picker-requested');
     final result = File('${directory.path}/smoke-result.json');
+    // Publish this process so a runner can address the application by pid
+    // instead of by name, which another instance could share.
+    File('${directory.path}/app-pid').writeAsStringSync('$pid');
 
     await RustLib.init(externalLibrary: nativeLibrary());
     final bridge = FlutterBridge.withDatabasePath(

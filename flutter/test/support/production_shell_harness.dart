@@ -32,6 +32,101 @@ const harnessArtifactDirVariable = 'SHOSAI_HARNESS_ARTIFACTS';
 const harnessRevisionVariable = 'SHOSAI_HARNESS_REVISION';
 
 // ---------------------------------------------------------------------------
+// Platform metrics
+// ---------------------------------------------------------------------------
+
+/// Alpha at or below which a painted pixel is not ink a user can see.
+///
+/// A pixel at 8/255 is a 3% tint, below the point where a glyph edge is
+/// distinguishable from its background.
+const int harnessInkVisibilityFloor = 8;
+
+/// Default distance ink may leave its box before it counts as a cut, in logical
+/// pixels. The reference platform is measured with this value; the platform
+/// metrics below only characterise ink that is *not* the glyph body.
+const double harnessInkOverhangTolerance = 0.5;
+
+/// Alpha at or above which a pixel is part of the body of the ink rather than
+/// its antialiased edge.
+///
+/// The body is measured from an opaque copy of the text, so this is glyph
+/// coverage and not colour.
+const int harnessInkBodyFloor = 128;
+
+/// Distance within which an overhang made only of antialiased edges is
+/// *described* as a platform edge effect in the finding.
+///
+/// This is a label on a finding, not an exemption: ink that leaves its box
+/// beyond [harnessInkOverhangTolerance] is reported on every platform, and this
+/// constant only records whether the overhang reached the body of the glyph.
+/// Glyph rasterisation differs between FreeType on Linux and CoreText/Skia on
+/// macOS by about one pixel at the outermost antialiased row, which is what the
+/// label exists to distinguish for review.
+const double harnessInkEdgeAllowance = 1.0;
+
+/// How far ink leaves the region it is painted in.
+enum InkOverhangKind {
+  /// The ink is inside the region within the tolerance.
+  none,
+
+  /// Only the antialiased edge of the glyph leaves the region, within
+  /// [harnessInkEdgeAllowance]: reported, and labelled as an edge effect.
+  edgeOnly,
+
+  /// The body of the ink leaves the region: a cut of the glyph itself.
+  material,
+}
+
+/// Describes how [visibleInk] leaves [region].
+///
+/// This labels a finding; it does not decide whether one is reported. Ink that
+/// leaves the region beyond [tolerance] is reported on every platform, and the
+/// label only records whether the overhang reached the body of a glyph or
+/// stopped at its antialiased edge.
+InkOverhangKind classifyInkOverhang({
+  required Rect? visibleInk,
+  required Rect? bodyInk,
+  required Rect region,
+  double tolerance = harnessInkOverhangTolerance,
+}) {
+  if (visibleInk == null) return InkOverhangKind.none;
+  final visibleOverhang = _overhangDistance(visibleInk, region);
+  if (visibleOverhang <= tolerance) return InkOverhangKind.none;
+  final bodyOverhang = bodyInk == null
+      ? 0.0
+      : _overhangDistance(bodyInk, region);
+  if (bodyOverhang > tolerance) return InkOverhangKind.material;
+  if (visibleOverhang <= harnessInkEdgeAllowance) {
+    return InkOverhangKind.edgeOnly;
+  }
+  return InkOverhangKind.material;
+}
+
+/// Largest distance any side of [ink] leaves [region]; zero when inside.
+double _overhangDistance(Rect ink, Rect region) {
+  var worst = 0.0;
+  final distances = [
+    region.left - ink.left,
+    region.top - ink.top,
+    ink.right - region.right,
+    ink.bottom - region.bottom,
+  ];
+  for (final distance in distances) {
+    if (distance > worst) worst = distance;
+  }
+  return worst;
+}
+
+/// The metric values every render is judged by, recorded with its artifacts.
+Map<String, Object?> harnessPlatformMetrics() => <String, Object?>{
+  'platform': Platform.operatingSystem,
+  'inkVisibilityFloor': harnessInkVisibilityFloor,
+  'inkOverhangTolerance': harnessInkOverhangTolerance,
+  'inkEdgeAllowance': harnessInkEdgeAllowance,
+  'goldenMode': goldenComparisonMode(Platform.operatingSystem).name,
+};
+
+// ---------------------------------------------------------------------------
 // Deterministic fonts
 // ---------------------------------------------------------------------------
 
@@ -708,6 +803,16 @@ class RenderDefect {
   /// Stable identity used for known-defect comparisons.
   String get id => '${kind.name}|$label';
 
+  /// The full finding, so artifacts carry the measurement and not only its id.
+  Map<String, Object?> toMetadata() => <String, Object?>{
+    'id': id,
+    'kind': kind.name,
+    'source': source,
+    'label': label,
+    'target': target,
+    'detail': detail,
+  };
+
   @override
   String toString() => '$id ($source): $detail\n      at $target';
 }
@@ -779,6 +884,7 @@ Future<List<RenderDefect>> findRenderDefects(
   Finder? within,
   double tolerance = 0.5,
   bool includeTruncation = false,
+  List<RenderDefect>? characterized,
 }) async {
   final finder = within ?? find.byKey(harnessBoundaryKey);
   final roots = finder
@@ -794,7 +900,9 @@ Future<List<RenderDefect>> findRenderDefects(
   if (candidates.isNotEmpty) {
     await tester.runAsync(() async {
       for (final candidate in candidates) {
-        defects.addAll(await _inspectParagraphInk(candidate, tolerance));
+        defects.addAll(
+          await _inspectParagraphInk(candidate, tolerance, characterized),
+        );
       }
     });
   }
@@ -921,6 +1029,7 @@ bool _overflowsLineBox(RenderParagraph paragraph, double tolerance) =>
 Future<List<RenderDefect>> _inspectParagraphInk(
   _ParagraphCandidate candidate,
   double tolerance,
+  List<RenderDefect>? characterized,
 ) async {
   final paragraph = candidate.paragraph;
   final box = Offset.zero & paragraph.size;
@@ -977,6 +1086,15 @@ Future<List<RenderDefect>> _inspectParagraphInk(
   final contentExceeds =
       contentInk != null && !_within(contentInk, box, tolerance);
   final measurable = !visible.unmeasured && !content.unmeasured;
+  // What kind of overhang this is, for the finding text: ink that leaves the
+  // box is reported on every platform, and this only records whether the
+  // overhang reached the body of a glyph or stopped at its antialiased edge.
+  final overhang = classifyInkOverhang(
+    visibleInk: visibleInk,
+    bodyInk: visible.bodyBounds,
+    region: box,
+    tolerance: tolerance,
+  );
   // Flutter clips a paragraph only when its line metrics overflow and the
   // overflow policy is not `visible` (`RenderParagraph._needsClipping`). Glyph
   // overhang can paint outside a box whose line metrics fit, so this exact
@@ -987,6 +1105,53 @@ Future<List<RenderDefect>> _inspectParagraphInk(
       (paragraph.textSize.width > paragraph.size.width ||
           paragraph.textSize.height > paragraph.size.height ||
           paragraph.didExceedMaxLines);
+
+  void recordOverhangEvidence(Rect region, String description) {
+    if (overhang != InkOverhangKind.edgeOnly) return;
+    characterized?.add(
+      _edgeInkDefect(
+        paragraph,
+        label,
+        target,
+        visible.maxAlpha,
+        visible.bounds,
+        visible.bodyBounds,
+        region,
+        description,
+      ),
+    );
+  }
+
+  /// Records an ancestor clip whose overhang stopped at the antialiased edge.
+  ///
+  /// The ink, the body and the region are all in the same (global) frame here,
+  /// so the recorded evidence can be checked without re-projecting it.
+  void recordAncestorEvidence(
+    Rect paintedInk,
+    Rect? paintedBody,
+    Rect region,
+    String description,
+  ) {
+    final kind = classifyInkOverhang(
+      visibleInk: paintedInk,
+      bodyInk: paintedBody,
+      region: region,
+      tolerance: tolerance,
+    );
+    if (kind != InkOverhangKind.edgeOnly) return;
+    characterized?.add(
+      _edgeInkDefect(
+        paragraph,
+        label,
+        target,
+        visible.maxAlpha,
+        paintedInk,
+        paintedBody,
+        region,
+        description,
+      ),
+    );
+  }
 
   if (!measurable) {
     // An unmeasured raster is reported under every overflow policy, including
@@ -1002,6 +1167,7 @@ Future<List<RenderDefect>> _inspectParagraphInk(
     // clipped, for example vertically.
     if (visibleExceeds) {
       defects.add(_clippedDefect(paragraph, label, target, visible, content));
+      recordOverhangEvidence(box, 'leaves its own box');
     }
   } else if (paragraph.didExceedMaxLines &&
       paragraph.overflow != TextOverflow.ellipsis &&
@@ -1013,6 +1179,7 @@ Future<List<RenderDefect>> _inspectParagraphInk(
     defects.add(_droppedLinesDefect(paragraph, label, target));
     if (paragraphClips && (visibleExceeds || contentExceeds)) {
       defects.add(_clippedDefect(paragraph, label, target, visible, content));
+      recordOverhangEvidence(box, 'leaves its own box');
     }
   } else if (paragraphClips && (visibleExceeds || contentExceeds)) {
     // The paragraph cuts its own ink: Flutter activates its clip and the
@@ -1020,6 +1187,7 @@ Future<List<RenderDefect>> _inspectParagraphInk(
     // box never reports here, even when glyph overhang paints outside the box;
     // that overhang is judged by the ancestor check instead.
     defects.add(_clippedDefect(paragraph, label, target, visible, content));
+    recordOverhangEvidence(box, 'leaves its own box');
   }
 
   // An ancestor clip is independent of the paragraph's own overflow policy, so
@@ -1035,7 +1203,14 @@ Future<List<RenderDefect>> _inspectParagraphInk(
     if (paintedInk.isEmpty) {
       return defects;
     }
+    final bodySource = visible.bodyBounds;
+    final paintedBody = bodySource == null
+        ? null
+        : (paragraphClips ? bodySource.intersect(box) : bodySource);
     final paintedGlobal = _globalRectOfLocal(paragraph, paintedInk);
+    final bodyGlobal = paintedBody == null || paintedBody.isEmpty
+        ? null
+        : _globalRectOfLocal(paragraph, paintedBody);
     final inner = candidate.clip.inner;
     final outer = candidate.clip.outer;
     final viewport = candidate.clip.viewport;
@@ -1045,7 +1220,23 @@ Future<List<RenderDefect>> _inspectParagraphInk(
     final shown = viewport == null
         ? paintedGlobal
         : paintedGlobal.intersect(viewport);
-    if (inner != null && !_within(paintedGlobal, inner, tolerance)) {
+    final bodyShown = viewport == null || bodyGlobal == null
+        ? bodyGlobal
+        : bodyGlobal.intersect(viewport);
+    // A clip that does not cut the ink must not mask one that does: the inner
+    // clip is checked first, and the outer clip is still checked when the inner
+    // one leaves the ink alone.
+    final innerKind = inner == null
+        ? InkOverhangKind.none
+        : classifyInkOverhang(
+            visibleInk: paintedGlobal,
+            bodyInk: bodyGlobal,
+            region: inner,
+            tolerance: tolerance,
+          );
+    // Any ancestor overhang that is not `none` is reported: the edge
+    // classification only adds evidence, it never replaces the finding.
+    if (inner != null && innerKind != InkOverhangKind.none) {
       defects.add(
         _ancestorClipDefect(
           label,
@@ -1055,18 +1246,42 @@ Future<List<RenderDefect>> _inspectParagraphInk(
           'inside the nearest viewport',
         ),
       );
-    } else if (outer != null &&
-        !shown.isEmpty &&
-        !_within(shown, outer, tolerance)) {
-      defects.add(
-        _ancestorClipDefect(
-          label,
-          target,
-          shown,
-          outer,
-          viewport == null ? 'in the tree' : 'above the nearest viewport',
-        ),
+      if (innerKind == InkOverhangKind.edgeOnly) {
+        recordAncestorEvidence(
+          paintedGlobal,
+          bodyGlobal,
+          inner,
+          'cut by a clip inside the nearest viewport',
+        );
+      }
+    } else if (outer != null && !shown.isEmpty) {
+      final outerKind = classifyInkOverhang(
+        visibleInk: shown,
+        bodyInk: bodyShown,
+        region: outer,
+        tolerance: tolerance,
       );
+      if (outerKind != InkOverhangKind.none) {
+        defects.add(
+          _ancestorClipDefect(
+            label,
+            target,
+            shown,
+            outer,
+            viewport == null ? 'in the tree' : 'above the nearest viewport',
+          ),
+        );
+      }
+      if (outerKind == InkOverhangKind.edgeOnly) {
+        recordAncestorEvidence(
+          shown,
+          bodyShown,
+          outer,
+          viewport == null
+              ? 'cut by a clip in the tree'
+              : 'cut by a clip above the nearest viewport',
+        );
+      }
     }
   }
   return defects;
@@ -1085,9 +1300,42 @@ RenderDefect _clippedDefect(
   target: target,
   detail:
       'ink ${visible.bounds == null ? 'unmeasured' : _rect(visible.bounds!)} '
+      '(body ${visible.bodyBounds == null ? 'none' : _rect(visible.bodyBounds!)}, '
+      'max alpha ${visible.maxAlpha}) '
       '(content ${content.bounds == null ? 'unmeasured' : _rect(content.bounds!)}) '
       'in box ${_size(paragraph.size)} '
       '(line ${_size(paragraph.textSize)}, '
+      'overflow: ${paragraph.overflow.name}, '
+      'maxLines: ${paragraph.maxLines ?? 'unlimited'})',
+);
+
+/// Labels a reported finding whose overhang stopped at the antialiased edge.
+///
+/// This is evidence attached to the finding, never an exemption: the finding
+/// itself is reported by the caller. It is written to the artifact metadata and
+/// printed so a reviewer can tell a platform rasterisation difference from a
+/// cut of the glyph body.
+RenderDefect _edgeInkDefect(
+  RenderParagraph paragraph,
+  String label,
+  String target,
+  int maxAlpha,
+  Rect? ink,
+  Rect? body,
+  Rect region,
+  String description,
+) => RenderDefect(
+  kind: RenderDefectKind.clippedText,
+  source: 'edge-ink',
+  label: label,
+  target: target,
+  detail:
+      'overhang stopped at the antialiased edge (body inside, within the '
+      '${harnessInkEdgeAllowance}px edge range): '
+      'ink ${ink == null ? 'unmeasured' : _rect(ink)} '
+      '(body ${body == null ? 'none' : _rect(body)}, '
+      'max alpha $maxAlpha) $description ${_rect(region)}, '
+      '(line ${_size(paragraph.textSize)}, box ${_size(paragraph.size)}, '
       'overflow: ${paragraph.overflow.name}, '
       'maxLines: ${paragraph.maxLines ?? 'unlimited'})',
 );
@@ -1154,10 +1402,29 @@ bool _hasInlineWidgets(InlineSpan span) {
 /// An empty result is not a failed measurement: whitespace-only text paints no
 /// ink, which is different from ink that cannot be measured at all.
 class _InkMeasurement {
-  const _InkMeasurement.measured(this.bounds) : unmeasured = false;
-  const _InkMeasurement.unmeasured() : bounds = null, unmeasured = true;
+  const _InkMeasurement.measured(
+    this.bounds, {
+    this.bodyBounds,
+    this.maxAlpha = 0,
+  }) : unmeasured = false;
+  const _InkMeasurement.unmeasured()
+    : bounds = null,
+      bodyBounds = null,
+      maxAlpha = 0,
+      unmeasured = true;
 
+  /// Ink above the visibility floor, in paragraph-local coordinates.
   final Rect? bounds;
+
+  /// The body of the ink: pixels whose coverage is at least half of the
+  /// strongest coverage in this raster. The antialiased edge of a glyph lives
+  /// between the two.
+  final Rect? bodyBounds;
+
+  /// Strongest alpha in the visible raster, recorded as evidence of how opaque
+  /// the painted text is.
+  final int maxAlpha;
+
   final bool unmeasured;
 }
 
@@ -1178,8 +1445,8 @@ Future<_InkMeasurement> _measureInk(
   final ellipsis = respectLimits && paragraph.overflow == TextOverflow.ellipsis
       ? '…'
       : null;
-  final painter = TextPainter(
-    text: text,
+  TextPainter painterFor(InlineSpan span) => TextPainter(
+    text: span,
     textAlign: paragraph.textAlign,
     textDirection: paragraph.textDirection,
     textScaler: paragraph.textScaler,
@@ -1190,6 +1457,13 @@ Future<_InkMeasurement> _measureInk(
     maxLines: respectLimits ? paragraph.maxLines : null,
     ellipsis: ellipsis,
   );
+
+  final painter = painterFor(text);
+  // The body of the ink is measured from an opaque copy of the same text, so a
+  // translucent span is judged by its glyph coverage instead of its colour and
+  // a paragraph that mixes opaque and translucent spans still has a body for
+  // every span.
+  final bodyPainter = painterFor(_opaqueCopy(text));
   try {
     // Mirrors `RenderParagraph._adjustMaxWidth`: without wrapping and without
     // an ellipsis the paragraph lays out at its intrinsic width.
@@ -1198,6 +1472,7 @@ Future<_InkMeasurement> _measureInk(
         ? constraints.maxWidth
         : double.infinity;
     painter.layout(minWidth: constraints.minWidth, maxWidth: maxWidth);
+    bodyPainter.layout(minWidth: constraints.minWidth, maxWidth: maxWidth);
     final size = painter.size;
     if (!size.width.isFinite || !size.height.isFinite || size.isEmpty) {
       return const _InkMeasurement.measured(null);
@@ -1209,31 +1484,77 @@ Future<_InkMeasurement> _measureInk(
       return const _InkMeasurement.unmeasured();
     }
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    painter.paint(canvas, Offset(padding.toDouble(), padding.toDouble()));
-    final picture = recorder.endRecording();
-    try {
-      final image = await picture.toImage(width, height);
-      try {
-        final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-        if (data == null) return const _InkMeasurement.unmeasured();
-        final bytes = data.buffer.asUint8List();
-        return _InkMeasurement.measured(
-          _inkBounds(bytes, width, height, padding),
-        );
-      } finally {
-        image.dispose();
-      }
-    } finally {
-      picture.dispose();
-    }
+    final visible = await _rasterInk(painter, width, height, padding);
+    if (visible == null) return const _InkMeasurement.unmeasured();
+    final body = await _rasterInk(bodyPainter, width, height, padding);
+    if (body == null) return const _InkMeasurement.unmeasured();
+    return _InkMeasurement.measured(
+      _inkBounds(visible, width, height, padding, harnessInkVisibilityFloor),
+      bodyBounds: _inkBounds(body, width, height, padding, harnessInkBodyFloor),
+      maxAlpha: _maxAlpha(visible),
+    );
   } finally {
     painter.dispose();
+    bodyPainter.dispose();
   }
 }
 
-Rect? _inkBounds(Uint8List rgba, int width, int height, int padding) {
+/// The same span with every colour forced opaque.
+///
+/// Coverage is what decides whether a pixel is part of the glyph body, so the
+/// body measurement must not depend on how translucent the text is.
+InlineSpan _opaqueCopy(InlineSpan span) {
+  if (span is! TextSpan) return span;
+  return TextSpan(
+    text: span.text,
+    children: span.children?.map(_opaqueCopy).toList(),
+    style: (span.style ?? const TextStyle()).copyWith(
+      color: (span.style?.color ?? const Color(0xff000000)).withAlpha(255),
+    ),
+    recognizer: span.recognizer,
+    semanticsLabel: span.semanticsLabel,
+  );
+}
+
+/// Paints [painter] and returns the raw raster, or null when it cannot be read.
+Future<Uint8List?> _rasterInk(
+  TextPainter painter,
+  int width,
+  int height,
+  int padding,
+) async {
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  painter.paint(canvas, Offset(padding.toDouble(), padding.toDouble()));
+  final picture = recorder.endRecording();
+  try {
+    final image = await picture.toImage(width, height);
+    try {
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      return data?.buffer.asUint8List();
+    } finally {
+      image.dispose();
+    }
+  } finally {
+    picture.dispose();
+  }
+}
+
+int _maxAlpha(Uint8List rgba) {
+  var maxAlpha = 0;
+  for (var offset = 3; offset < rgba.length; offset += 4) {
+    if (rgba[offset] > maxAlpha) maxAlpha = rgba[offset];
+  }
+  return maxAlpha;
+}
+
+Rect? _inkBounds(
+  Uint8List rgba,
+  int width,
+  int height,
+  int padding,
+  int alphaFloor,
+) {
   var minX = width;
   var minY = height;
   var maxX = -1;
@@ -1241,7 +1562,7 @@ Rect? _inkBounds(Uint8List rgba, int width, int height, int padding) {
   for (var y = 0; y < height; y += 1) {
     for (var x = 0; x < width; x += 1) {
       final alpha = rgba[(y * width + x) * 4 + 3];
-      if (alpha <= 8) continue;
+      if (alpha <= alphaFloor) continue;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
@@ -1393,6 +1714,52 @@ Future<void> pumpHarnessFrames(WidgetTester tester, {int frames = 12}) async {
   }
 }
 
+/// The painted ink of one paragraph, as the detectors measure it.
+///
+/// Exposed as evidence: a render's ink, its body and the strongest coverage in
+/// its raster are what decide whether something is cut or is a platform
+/// rasterisation edge.
+class HarnessInk {
+  const HarnessInk({
+    required this.visible,
+    required this.body,
+    required this.maxAlpha,
+    required this.unmeasured,
+  });
+
+  final Rect? visible;
+  final Rect? body;
+  final int maxAlpha;
+  final bool unmeasured;
+
+  Map<String, Object?> toMetadata() => <String, Object?>{
+    'visible': _rectMetadata(visible),
+    'body': _rectMetadata(body),
+    'maxAlpha': maxAlpha,
+    'unmeasured': unmeasured,
+  };
+
+  static Map<String, double>? _rectMetadata(Rect? rect) => rect == null
+      ? null
+      : <String, double>{
+          'left': rect.left,
+          'top': rect.top,
+          'right': rect.right,
+          'bottom': rect.bottom,
+        };
+}
+
+/// Measures the painted ink of [paragraph] exactly as the detectors do.
+Future<HarnessInk> measureHarnessInk(RenderParagraph paragraph) async {
+  final measurement = await _measureInk(paragraph, respectLimits: true);
+  return HarnessInk(
+    visible: measurement.bounds,
+    body: measurement.bodyBounds,
+    maxAlpha: measurement.maxAlpha,
+    unmeasured: measurement.unmeasured,
+  );
+}
+
 /// True when the tree contains at least one decoded image and no undecoded one.
 ///
 /// The library covers are painted through [RawImage], so this is the readiness
@@ -1512,15 +1879,499 @@ Future<Uint8List> captureHarnessArtifact(
   return bytes;
 }
 
-/// Compares the harness boundary against its committed golden.
+// ---------------------------------------------------------------------------
+// Golden policy
+// ---------------------------------------------------------------------------
+
+/// The platform whose rendering the committed goldens record.
 ///
-/// Goldens live in `test/goldens/`, next to the product-shell goldens, so the
-/// path is relative to the calling test file in `test/visual/`.
+/// The goldens in `test/goldens/` were rendered on Linux, so Linux is the
+/// reference platform and its pixel comparison is the strict one. Another
+/// platform must have its own reviewed baseline under
+/// `test/goldens/<platform>/`; until one is committed that platform is
+/// unresolved, which is reported as a failure rather than a pass. Plan decision
+/// 1 keeps structure and behaviour as the goal and expects toolkit rendering
+/// differences, so baselines are reviewed per platform instead of copying
+/// another platform's pixels.
+const String harnessGoldenReferencePlatform = 'linux';
+
+/// How a render is compared with its baseline on the running platform.
+enum HarnessGoldenMode {
+  /// Pixel comparison against the committed reference golden.
+  reference,
+
+  /// Pixel comparison against a reviewed platform baseline, which must exist.
+  platformBaseline,
+}
+
+/// The golden mode for [platform].
+HarnessGoldenMode goldenComparisonMode(String platform) =>
+    platform == harnessGoldenReferencePlatform
+    ? HarnessGoldenMode.reference
+    : HarnessGoldenMode.platformBaseline;
+
+/// Where a platform's reviewed baselines live, relative to `flutter/`.
+String harnessPlatformGoldenDirectory(String platform) =>
+    'test/goldens/$platform';
+
+/// The path handed to `matchesGoldenFile` for [name] on [platform].
+///
+/// `matchesGoldenFile` resolves a relative path against the *test entrypoint's*
+/// directory (`flutter/test/visual/`), so the reference golden is reached with
+/// one `..` and a platform baseline with `../goldens/<platform>`.
+String harnessGoldenMatcherPath(String platform, String name) =>
+    goldenComparisonMode(platform) == HarnessGoldenMode.reference
+    ? '../goldens/$name.png'
+    : '../goldens/$platform/$name.png';
+
+/// The reviewed baseline for [name] on [platform], or null when it is missing.
+File? platformGoldenFile(String platform, String name) {
+  for (final prefix in ['', 'flutter/']) {
+    final file = File(
+      '$prefix${harnessPlatformGoldenDirectory(platform)}/$name.png',
+    );
+    if (file.existsSync()) return file;
+  }
+  return null;
+}
+
+/// Edge of one structure block, in logical pixels.
+const int harnessStructureBlockSize = 40;
+
+/// Largest difference in ink coverage, as a fraction of the frame.
+const double harnessStructureInkRatioTolerance = 0.004;
+
+/// Largest ink-fraction difference a single structure block may have.
+const double harnessStructureBlockTolerance = 0.15;
+
+/// Largest number of blocks allowed to exceed the block tolerance.
+const int harnessStructureBlockLimit = 3;
+
+/// A decoded render, independent of the widget tree that produced it.
+class HarnessImage {
+  const HarnessImage({
+    required this.width,
+    required this.height,
+    required this.rgba,
+  });
+
+  final int width;
+  final int height;
+  final Uint8List rgba;
+}
+
+/// Decodes PNG bytes into raw pixels.
+Future<HarnessImage> decodeHarnessImage(Uint8List png) async {
+  final codec = await ui.instantiateImageCodec(png);
+  final frame = await codec.getNextFrame();
+  try {
+    final data = await frame.image.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    return HarnessImage(
+      width: frame.image.width,
+      height: frame.image.height,
+      rgba: data!.buffer.asUint8List(),
+    );
+  } finally {
+    frame.image.dispose();
+    codec.dispose();
+  }
+}
+
+/// Pixel and structural drift of one render against its committed golden.
+class HarnessGoldenDrift {
+  const HarnessGoldenDrift({
+    required this.name,
+    required this.baseline,
+    required this.structureOk,
+    required this.pixelDiff,
+    required this.pixelRatio,
+    required this.maxChannelDelta,
+    required this.inkRatioDelta,
+    required this.changedBlocks,
+    required this.blocks,
+    required this.notes,
+  });
+
+  final String name;
+
+  /// Which baseline the drift was measured against: `platform` when this
+  /// platform has a reviewed baseline, `reference` when it is compared with the
+  /// reference platform's rendering for information only.
+  final String baseline;
+  final bool structureOk;
+  final int pixelDiff;
+  final double pixelRatio;
+  final int maxChannelDelta;
+  final double inkRatioDelta;
+  final int changedBlocks;
+  final int blocks;
+  final List<String> notes;
+
+  Map<String, Object?> toMetadata() => <String, Object?>{
+    'name': name,
+    'baseline': baseline,
+    'structureOk': structureOk,
+    'pixelDiff': pixelDiff,
+    'pixelRatio': pixelRatio,
+    'maxChannelDelta': maxChannelDelta,
+    'inkRatioDelta': inkRatioDelta,
+    'changedBlocks': changedBlocks,
+    'blocks': blocks,
+    'notes': notes,
+    ...harnessPlatformMetrics(),
+  };
+
+  String describe() {
+    final buffer = StringBuffer(
+      'golden drift $name against $baseline: '
+      'pixels ${(pixelRatio * 100).toStringAsFixed(2)}% '
+      '($pixelDiff), max channel delta $maxChannelDelta, '
+      'ink coverage delta ${inkRatioDelta.toStringAsFixed(4)}, '
+      'changed blocks $changedBlocks/$blocks',
+    );
+    for (final note in notes) {
+      buffer.write('\n  $note');
+    }
+    return buffer.toString();
+  }
+}
+
+/// Compares [actual] with [expected] structurally, as a diagnostic.
+///
+/// Ink is every pixel that differs from the frame's background, and the
+/// comparison is done on a coarse block grid. It tolerates the one-pixel
+/// rasterisation shifts that differ between toolkits, which also means it does
+/// not catch every real change: a small element that disappears, or one that
+/// moves within a block, keeps the aggregate metrics identical (see the
+/// controls in `test/visual/render_structure_test.dart`). It is therefore
+/// evidence for a reviewer, and the pixel comparison against the platform
+/// baseline is the gate.
+HarnessGoldenDrift compareRenderStructure(
+  String name, {
+  String baseline = 'platform',
+  required HarnessImage expected,
+  required HarnessImage actual,
+}) {
+  final notes = <String>[];
+  if (expected.width != actual.width || expected.height != actual.height) {
+    notes.add(
+      'size changed: expected ${expected.width}x${expected.height}, '
+      'actual ${actual.width}x${actual.height}',
+    );
+    return HarnessGoldenDrift(
+      name: name,
+      baseline: baseline,
+      structureOk: false,
+      pixelDiff: 0,
+      pixelRatio: 1,
+      maxChannelDelta: 0,
+      inkRatioDelta: 1,
+      changedBlocks: 0,
+      blocks: 0,
+      notes: notes,
+    );
+  }
+
+  var pixelDiff = 0;
+  var maxChannelDelta = 0;
+  for (var offset = 0; offset + 3 < expected.rgba.length; offset += 4) {
+    var differs = false;
+    for (var channel = 0; channel < 4; channel += 1) {
+      final delta =
+          (expected.rgba[offset + channel] - actual.rgba[offset + channel])
+              .abs();
+      if (delta > maxChannelDelta) maxChannelDelta = delta;
+      if (delta > 0) differs = true;
+    }
+    if (differs) pixelDiff += 1;
+  }
+
+  final expectedInk = _inkMask(expected);
+  final actualInk = _inkMask(actual);
+  var expectedInkPixels = 0;
+  var actualInkPixels = 0;
+  for (var index = 0; index < expectedInk.length; index += 1) {
+    if (expectedInk[index]) expectedInkPixels += 1;
+    if (actualInk[index]) actualInkPixels += 1;
+  }
+  final totalPixels = expected.width * expected.height;
+  final inkRatioDelta =
+      (expectedInkPixels - actualInkPixels).abs() / totalPixels;
+
+  final blocksX =
+      (expected.width + harnessStructureBlockSize - 1) ~/
+      harnessStructureBlockSize;
+  final blocksY =
+      (expected.height + harnessStructureBlockSize - 1) ~/
+      harnessStructureBlockSize;
+  var changedBlocks = 0;
+  for (var blockY = 0; blockY < blocksY; blockY += 1) {
+    for (var blockX = 0; blockX < blocksX; blockX += 1) {
+      final delta = _blockInkDelta(
+        expected,
+        expectedInk,
+        actual,
+        actualInk,
+        blockX,
+        blockY,
+      );
+      if (delta > harnessStructureBlockTolerance) {
+        changedBlocks += 1;
+        if (notes.length < 6) {
+          notes.add(
+            'block $blockX,$blockY ink changed by '
+            '${delta.toStringAsFixed(2)}',
+          );
+        }
+      }
+    }
+  }
+
+  final blocks = blocksX * blocksY;
+  if (inkRatioDelta > harnessStructureInkRatioTolerance) {
+    notes.add(
+      'ink coverage changed by ${inkRatioDelta.toStringAsFixed(4)} '
+      '(limit ${harnessStructureInkRatioTolerance.toStringAsFixed(4)})',
+    );
+  }
+  if (changedBlocks > harnessStructureBlockLimit) {
+    notes.add(
+      'changed blocks $changedBlocks (limit $harnessStructureBlockLimit)',
+    );
+  }
+  return HarnessGoldenDrift(
+    name: name,
+    baseline: baseline,
+    structureOk:
+        inkRatioDelta <= harnessStructureInkRatioTolerance &&
+        changedBlocks <= harnessStructureBlockLimit,
+    pixelDiff: pixelDiff,
+    pixelRatio: pixelDiff / totalPixels,
+    maxChannelDelta: maxChannelDelta,
+    inkRatioDelta: inkRatioDelta,
+    changedBlocks: changedBlocks,
+    blocks: blocks,
+    notes: notes,
+  );
+}
+
+/// Marks the pixels that differ from the frame's background colour.
+List<bool> _inkMask(HarnessImage image) {
+  final counts = <int, int>{};
+  for (var offset = 0; offset + 3 < image.rgba.length; offset += 4) {
+    final key =
+        (image.rgba[offset] >> 3 << 10) |
+        (image.rgba[offset + 1] >> 3 << 5) |
+        (image.rgba[offset + 2] >> 3);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  var background = 0;
+  var best = -1;
+  counts.forEach((key, count) {
+    if (count > best) {
+      best = count;
+      background = key;
+    }
+  });
+  final backgroundR = (background >> 10 & 0x1f) << 3;
+  final backgroundG = (background >> 5 & 0x1f) << 3;
+  final backgroundB = (background & 0x1f) << 3;
+
+  final mask = List<bool>.filled(image.width * image.height, false);
+  for (var pixel = 0; pixel < mask.length; pixel += 1) {
+    final offset = pixel * 4;
+    final distance = <int>[
+      (image.rgba[offset] - backgroundR).abs(),
+      (image.rgba[offset + 1] - backgroundG).abs(),
+      (image.rgba[offset + 2] - backgroundB).abs(),
+    ].reduce((a, b) => a > b ? a : b);
+    mask[pixel] = distance > 24;
+  }
+  return mask;
+}
+
+/// Ink-fraction difference of one block between two renders.
+double _blockInkDelta(
+  HarnessImage expected,
+  List<bool> expectedInk,
+  HarnessImage actual,
+  List<bool> actualInk,
+  int blockX,
+  int blockY,
+) {
+  final startX = blockX * harnessStructureBlockSize;
+  final startY = blockY * harnessStructureBlockSize;
+  final endX = (startX + harnessStructureBlockSize).clamp(0, expected.width);
+  final endY = (startY + harnessStructureBlockSize).clamp(0, expected.height);
+  var expectedCount = 0;
+  var actualCount = 0;
+  var total = 0;
+  for (var y = startY; y < endY; y += 1) {
+    for (var x = startX; x < endX; x += 1) {
+      final pixel = y * expected.width + x;
+      if (expectedInk[pixel]) expectedCount += 1;
+      if (actualInk[pixel]) actualCount += 1;
+      total += 1;
+    }
+  }
+  if (total == 0) return 0;
+  return (expectedCount - actualCount).abs() / total;
+}
+
+/// Compares the harness boundary against the baseline for this platform.
+///
+/// The baseline is the platform's own reviewed golden when it exists, and the
+/// reference golden otherwise, so an unresolved platform still gets the drift
+/// numbers a reviewer needs to decide whether to commit a baseline.
+Future<HarnessGoldenDrift> compareHarnessGolden(
+  WidgetTester tester,
+  String name,
+) async {
+  final platform = Platform.operatingSystem;
+  final platformBaseline = platformGoldenFile(platform, name);
+  final baseline = platformBaseline ?? _goldenFile(name);
+  final baselineLabel = platformBaseline != null ? 'platform' : 'reference';
+  final capturedBytes = await captureHarnessPng(tester);
+  final captured = await tester.runAsync(
+    () => decodeHarnessImage(capturedBytes),
+  );
+  if (captured == null) {
+    return HarnessGoldenDrift(
+      name: name,
+      baseline: baselineLabel,
+      structureOk: false,
+      pixelDiff: 0,
+      pixelRatio: 1,
+      maxChannelDelta: 0,
+      inkRatioDelta: 1,
+      changedBlocks: 0,
+      blocks: 0,
+      notes: ['the render could not be decoded'],
+    );
+  }
+  if (baseline == null) {
+    return HarnessGoldenDrift(
+      name: name,
+      baseline: baselineLabel,
+      structureOk: false,
+      pixelDiff: 0,
+      pixelRatio: 1,
+      maxChannelDelta: 0,
+      inkRatioDelta: 1,
+      changedBlocks: 0,
+      blocks: 0,
+      notes: ['no golden or platform baseline was found for $name'],
+    );
+  }
+  final goldenBytes = baseline.readAsBytesSync();
+  final expected = await tester.runAsync(() => decodeHarnessImage(goldenBytes));
+  if (expected == null) {
+    return HarnessGoldenDrift(
+      name: name,
+      baseline: baselineLabel,
+      structureOk: false,
+      pixelDiff: 0,
+      pixelRatio: 1,
+      maxChannelDelta: 0,
+      inkRatioDelta: 1,
+      changedBlocks: 0,
+      blocks: 0,
+      notes: ['the baseline could not be decoded'],
+    );
+  }
+  return compareRenderStructure(
+    name,
+    baseline: baselineLabel,
+    expected: expected,
+    actual: captured,
+  );
+}
+
+/// The committed golden for [name], or null when it is missing.
+File? _goldenFile(String name) {
+  for (final candidate in [
+    'test/goldens/$name.png',
+    'flutter/test/goldens/$name.png',
+  ]) {
+    final file = File(candidate);
+    if (file.existsSync()) return file;
+  }
+  return null;
+}
+
+/// Writes the drift of one render next to its artifacts and reports it.
+///
+/// Drift is a diagnostic: it never fails a test. It is recorded on every
+/// platform, including the reference platform where it is expected to be zero,
+/// so a pixel or structure change is visible in the run output instead of only
+/// in a golden diff. The gate is the pixel comparison against the platform's
+/// own baseline in [expectHarnessGolden].
+void writeHarnessGoldenDrift(String name, HarnessGoldenDrift drift) {
+  // ignore: avoid_print
+  print(
+    '${drift.structureOk ? 'structure ok' : 'STRUCTURE CHANGED'} '
+    '${drift.describe()}',
+  );
+  try {
+    final directory = harnessArtifactDirectory()..createSync(recursive: true);
+    File('${directory.path}/golden-drift-$name.json').writeAsStringSync(
+      const JsonEncoder.withIndent('  ').convert(drift.toMetadata()),
+    );
+  } catch (_) {
+    // Drift recording is best effort: it is a diagnostic, and the pixel
+    // comparison against the platform baseline is the gate.
+  }
+}
+
+/// Applies the golden policy to the current render.
+///
+/// The pixel comparison is always against the running platform's own baseline:
+/// the committed reference golden on the reference platform, or a reviewed
+/// platform baseline. A platform without a baseline is unresolved and fails
+/// here with the path it needs, so a missing baseline can never be mistaken for
+/// a pass.
 Future<void> expectHarnessGolden(WidgetTester tester, String name) async {
+  final platform = Platform.operatingSystem;
+  final mode = goldenComparisonMode(platform);
+  if (mode == HarnessGoldenMode.reference) {
+    await expectLater(
+      find.byKey(harnessBoundaryKey),
+      matchesGoldenFile(harnessGoldenMatcherPath(platform, name)),
+    );
+    return;
+  }
+  if (platformGoldenFile(platform, name) == null) {
+    fail(
+      'no reviewed golden baseline for $platform: expected '
+      '${harnessPlatformGoldenDirectory(platform)}/$name.png. '
+      '$platform is unresolved, not passing. Capture the render, review it '
+      'against the reference platform render, and commit it as this platform\'s '
+      'baseline; this run\'s pixel and structural drift is recorded in '
+      'golden-drift-$name.json next to its artifacts.',
+    );
+  }
   await expectLater(
     find.byKey(harnessBoundaryKey),
-    matchesGoldenFile('../goldens/$name.png'),
+    matchesGoldenFile(harnessGoldenMatcherPath(platform, name)),
   );
+}
+
+/// Collects the drift evidence for the current render without asserting it.
+///
+/// This runs before any assertion, so a failing render still leaves its pixel
+/// and structural measurements behind, and it is recorded (and printed) on
+/// every platform, including the reference platform where it is expected to be
+/// zero. The measurements are diagnostics: the pixel comparison against the
+/// platform baseline is the gate.
+Future<HarnessGoldenDrift> collectHarnessGoldenDrift(
+  WidgetTester tester,
+  String name,
+) async {
+  final drift = await compareHarnessGolden(tester, name);
+  writeHarnessGoldenDrift(name, drift);
+  return drift;
 }
 
 /// The directory render artifacts are written to.

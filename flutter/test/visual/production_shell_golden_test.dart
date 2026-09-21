@@ -33,18 +33,32 @@ void main() {
     view.apply(tester);
     await renderHarnessState(tester, widget, ready: ready);
 
-    // Capture before asserting, so a detected regression still leaves an
-    // inspectable render and its defect list.
-    final defects = await findRenderDefects(tester);
+    // Evidence before assertions: a failing render must still leave its drift,
+    // its defect measurements and its screenshot behind.
+    final characterized = <RenderDefect>[];
+    final defects = await findRenderDefects(
+      tester,
+      characterized: characterized,
+    );
+    final drift = await collectHarnessGoldenDrift(tester, name);
     await captureHarnessArtifact(
       tester,
       name,
       metadata: <String, Object?>{
         ...view.toMetadata(),
         ...metadata,
-        'defects': defects.map((defect) => defect.id).toList(),
+        ...harnessPlatformMetrics(),
+        'defects': defects.map((defect) => defect.toMetadata()).toList(),
+        'characterized': characterized
+            .map((defect) => defect.toMetadata())
+            .toList(),
+        'drift': drift.toMetadata(),
       },
     );
+    for (final defect in characterized) {
+      // ignore: avoid_print
+      print('overhang evidence in $name: $defect');
+    }
 
     expect(
       recorder.overflowErrors,
