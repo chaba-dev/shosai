@@ -600,6 +600,12 @@ fn compare_manifests(
     );
     field(
         problems,
+        "reader_seeded_library",
+        &committed.reader_seeded_library,
+        &fresh.reader_seeded_library,
+    );
+    field(
+        problems,
         "pixel_aliases",
         &committed.pixel_aliases,
         &fresh.pixel_aliases,

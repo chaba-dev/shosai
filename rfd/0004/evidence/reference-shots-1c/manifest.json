@@ -3,9 +3,9 @@
   "package": "1C",
   "entry_point": "make reference-shots",
   "command": "make reference-shots",
-  "capture_code_revision": "e1572fbd9f6e586091571ab60f7e9a36eea1d632",
+  "capture_code_revision": "897eee0911a422fd2501fd23aa8755beface8cfe",
   "capture_code_revision_source": "jj @ working-copy commit",
-  "capture_code_change_id": "xqystyrmpvvvvonzonkrlllzvppxmoox",
+  "capture_code_change_id": "nqztxuqyrklvmzqnnrqvzlsntyxkkyvo",
   "capture_code_bookmark": "none",
   "capture_code_note": "`capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the durable mapping is the stable `capture_code_change_id` (resolve it with `jj log -r 'change_id(<id>)'` in the pinned Jujutsu, which is the command `docs/reference-captures.md` records) together with the commit that contains this evidence directory, which is the capture code revision the evidence is committed at; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.",
   "pinned_design_base": "1e54270a6bb24f15630ece336a0575bdbe5be113",
@@ -112,6 +112,11 @@
         "relative_path": "library/featured/quiet-cartographer.epub",
         "sha256": "53e827f91c5fbd289850abdd2e5f6c6dd565d08b4ce6cc533a99eb9cfe754dfd",
         "bytes": 9450
+      },
+      {
+        "relative_path": "library/featured/reader-marks.epub",
+        "sha256": "2c34040969c2b4adf0d9d1a33e92f4e12c3b2bb2a1990939a38ccfce99f34494",
+        "bytes": 3229
       },
       {
         "relative_path": "library/featured/salt-and-iron.epub",
@@ -366,11 +371,46 @@
     ],
     "reused": [
       {
-        "path": "crates/shosai-core/tests/fixtures/epub-conformance/conformance.epub",
-        "sha256": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a",
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub",
+        "sha256": "5af9e82d15fa0be324ef7e219ddfc0613cb54b9706addb161c83f188cf9b810d",
         "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
-        "purpose": "conformance sampler book in the seeded library",
-        "verified_sha256": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a"
+        "purpose": "bidi and mixed-script composition plus a content list (`FM-01`, `FM-21`)",
+        "verified_sha256": "5af9e82d15fa0be324ef7e219ddfc0613cb54b9706addb161c83f188cf9b810d"
+      },
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub",
+        "sha256": "bcd605900627847c0addb541aa5f1698df4709db14321b028aff2b9d8e9962e7",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "embedded document fonts across four container formats (`FM-22`)",
+        "verified_sha256": "bcd605900627847c0addb541aa5f1698df4709db14321b028aff2b9d8e9962e7"
+      },
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub",
+        "sha256": "0c991567a52452d3e98ef726ae17bfcc12a4b3b555e14f2578bbc63030562f8f",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "embedded font isolation from the interface fonts (`FM-22`)",
+        "verified_sha256": "0c991567a52452d3e98ef726ae17bfcc12a4b3b555e14f2578bbc63030562f8f"
+      },
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/links.epub",
+        "sha256": "bb899a2d67b7ca3c82a54564b1ecb5569dbd40c8caea4b46f7ba3d696985c29b",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "inline and block links (`FM-01`)",
+        "verified_sha256": "bb899a2d67b7ca3c82a54564b1ecb5569dbd40c8caea4b46f7ba3d696985c29b"
+      },
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub",
+        "sha256": "03f1978d9ea58cabc81643e1737bed8887a3d7783e79c719ea4c72762ed0ffe6",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "inline and display math (`FM-23`)",
+        "verified_sha256": "03f1978d9ea58cabc81643e1737bed8887a3d7783e79c719ea4c72762ed0ffe6"
+      },
+      {
+        "path": "crates/shosai-core/tests/fixtures/epub-conformance/table.epub",
+        "sha256": "9f54aac1fe4026cc06eb255a9d92a57d2d5dca7c7e6e38c8bb3bada847e48409",
+        "provenance": "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
+        "purpose": "tables and table images (`FM-23`)",
+        "verified_sha256": "9f54aac1fe4026cc06eb255a9d92a57d2d5dca7c7e6e38c8bb3bada847e48409"
       }
     ],
     "broken_symlinks_available": true
@@ -928,6 +968,642 @@
       }
     ]
   },
+  "reader_seeded_library": {
+    "profile": "1C reader seed: the shared library seed plus the reused conformance fixtures (bidi, fonts, fonts-isolation, links, mathml, table) and the generated reader-marks fixture",
+    "count": 53,
+    "page_size": 40,
+    "order": "last_read DESC NULLS LAST, date_added DESC, id DESC",
+    "continue_reading": "The Quiet Cartographer (library/featured/quiet-cartographer.epub) at 42%",
+    "books": [
+      {
+        "fixture": "library/filler/collected-papers-01.epub",
+        "id": 1,
+        "title": "Collected Papers, Volume 01",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8429,
+        "content_hash": "5e21982130686ad354a8aa376a4c1a9c338a4020e5b0776104b02b1e7da80759",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-02.epub",
+        "id": 2,
+        "title": "Collected Papers, Volume 02: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7569,
+        "content_hash": "05188ccbda04a8195eafc317886a05e7744428dece925cfb15b71b2ce3286f1d",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-03.epub",
+        "id": 3,
+        "title": "Collected Papers, Volume 03: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 9451,
+        "content_hash": "cc3b857abb9e1dec7bad79c44e22f746865056f953af547eb4c886562c9572fe",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-04.epub",
+        "id": 4,
+        "title": "Collected Papers, Volume 04: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 7629,
+        "content_hash": "616c62d7b1797ae84bd5989733b1dd70b798bd9763db72e6444b137c4de9354a",
+        "progress": 0.13,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-05.epub",
+        "id": 5,
+        "title": "Collected Papers, Volume 05",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 4281,
+        "content_hash": "f961909003e6bf47a017bf7dc46697dbeadc2fe2ad7a2fa3b964a4da762b3959",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-06.epub",
+        "id": 6,
+        "title": "Collected Papers, Volume 06: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7569,
+        "content_hash": "b146dacd6fb13182d993d0b58d1538e386c4196eb2f20259244071755ca1d917",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-07.epub",
+        "id": 7,
+        "title": "Collected Papers, Volume 07: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 9443,
+        "content_hash": "4ef9bb047ec1b8270cfb883fa1d275eefd803dbf923c88dfcf621b7a686ffdec",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-08.epub",
+        "id": 8,
+        "title": "Collected Papers, Volume 08: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7653,
+        "content_hash": "89ab8ff2ffab31c6a3118d4357634a905cd7051d3442c750b40860c46598366b",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-09.epub",
+        "id": 9,
+        "title": "Collected Papers, Volume 09",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 8445,
+        "content_hash": "76c887e7fff16767c525d8bf0f512329de8fcb90fda6c49692c6c03d56fe7d37",
+        "progress": 0.62,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-10.epub",
+        "id": 10,
+        "title": "Collected Papers, Volume 10: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 3417,
+        "content_hash": "9ac9f940265fd58156ed5f3f892d76d66e81c070f86f3f914b4e036dd2e01e00",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-11.epub",
+        "id": 11,
+        "title": "Collected Papers, Volume 11: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 9469,
+        "content_hash": "5357733cda3269a883b60fb5d554d0b47d8f122939f7492aee5b654855fea966",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-12.epub",
+        "id": 12,
+        "title": "Collected Papers, Volume 12: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7644,
+        "content_hash": "d5e35e917d32e4dd8db9e4c539b9ca33a8c76b465b4a0d79b3f5ef48f5976067",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-13.epub",
+        "id": 13,
+        "title": "Collected Papers, Volume 13",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8438,
+        "content_hash": "b0931d206d3975524057765d8f7483c3766dc6e3c89f59719ec92538dc4957af",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-14.epub",
+        "id": 14,
+        "title": "Collected Papers, Volume 14: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 7588,
+        "content_hash": "2b94dad4cdcef4c1d083f66f29edcec78e744e52fba9359d8a3b5adc898d6570",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-15.epub",
+        "id": 15,
+        "title": "Collected Papers, Volume 15: Selected Essays",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 5305,
+        "content_hash": "0684bef2e8d51f4d4a1babd343b05ae12e7234d0a4445435f8851a8ec7e19e16",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/filler/collected-papers-16.epub",
+        "id": 16,
+        "title": "Collected Papers, Volume 16: Selected Essays",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 7629,
+        "content_hash": "5c9df4103f6a9f92a505abd763b30e01b862b5816b752dd111307828600f6c2a",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-01.pdf",
+        "id": 17,
+        "title": "Annual Ledger 01",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1516,
+        "content_hash": "99ebc7d070e3f509041be9c36bbac76fbd7d913a555bb965ecf3d5265af35e2e",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-02.pdf",
+        "id": 18,
+        "title": "Annual Ledger 02",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1516,
+        "content_hash": "8382419711231fdeb33cc2d1c8e2749e3c8c06fc80086cfec2ac327dc64aa825",
+        "progress": 0.21,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-03.pdf",
+        "id": 19,
+        "title": "Annual Ledger 03",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1516,
+        "content_hash": "e8729af5bceece6c043a703a4909a8f8878927ef2a0540a02953579921a7a488",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-04.pdf",
+        "id": 20,
+        "title": "Annual Ledger 04",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1516,
+        "content_hash": "b49d675ea1298839898a19bfcf92a8def11196c82ed42c2e0d4b555f0d94ffc1",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-05.pdf",
+        "id": 21,
+        "title": "Annual Ledger 05",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1518,
+        "content_hash": "0fa54a9724d8d2d5fc72ca2113e9d667ce0195b0104add549e9007d4255d0bff",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-06.pdf",
+        "id": 22,
+        "title": "Annual Ledger 06",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1518,
+        "content_hash": "b506746dde62087e650883ec47c47d7a2b9a0d584619d9cbb1f660abde5f01e9",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-01.cbz",
+        "id": 23,
+        "title": "sketchbook-01",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "7d316ee7469d5a9e0edcfe1738060840e57ea973a6be5d5a8c09b8dd2face650",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-02.cbz",
+        "id": 24,
+        "title": "sketchbook-02",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "d5e4aaf201b519abf436da73e37df04a3d59d8aee35c1eb02fa3117ec09bdd78",
+        "progress": 0.48,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-03.cbz",
+        "id": 25,
+        "title": "sketchbook-03",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "ab383a6908cd8bc6c6a10c65521fbecaafd22a3990883e08976b210abf2ea0d3",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-04.cbz",
+        "id": 26,
+        "title": "sketchbook-04",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "c2b45368846bd694b8c525f03345eed81d5ef6272bfb314bbeccb4fb7ef6fdca",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-05.cbz",
+        "id": 27,
+        "title": "sketchbook-05",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "b13c16939fab7718ae827877f0d143fd69388668bf1c8bf17f8ccb5adfcfba48",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-06.cbz",
+        "id": 28,
+        "title": "sketchbook-06",
+        "format": "cbz",
+        "file_size": 7296,
+        "content_hash": "66161a0d822f782cebc6f30e3be4023811c422219763538657ac165fbc1c8fba",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-17.epub",
+        "id": 29,
+        "title": "Collected Papers, Volume 17",
+        "author": "Various Authors",
+        "format": "epub",
+        "file_size": 8420,
+        "content_hash": "d97561eb571445a80767f2c74bdcf0d831340e0e87182ef8df1474aa5f08936b",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/annual-ledger-07.pdf",
+        "id": 30,
+        "title": "Annual Ledger 07",
+        "author": "Shosai Press",
+        "format": "pdf",
+        "file_size": 1516,
+        "content_hash": "f6e5dabb7192460ad5bd998336a49c4cc975980f0fc6c5170fccfde3edb9f178",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/sketchbook-07.cbz",
+        "id": 31,
+        "title": "sketchbook-07",
+        "format": "cbz",
+        "file_size": 7295,
+        "content_hash": "872b77c1c41b72e9a5d3fdbb226c30020bcc99958b9a16449fd04b592dadff43",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/filler/collected-papers-18.epub",
+        "id": 32,
+        "title": "Collected Papers, Volume 18",
+        "author": "Shosai Editorial Board",
+        "format": "epub",
+        "file_size": 3422,
+        "content_hash": "182a1f1efcf93788d6bbb5e2d33781ee9dd0856173290cfa26c1c7963976cc46",
+        "progress": 0.0,
+        "date_added": "2026-01-05 08:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/conformance.epub",
+        "id": 33,
+        "title": "Shosai Conformance: conformance",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 16289,
+        "content_hash": "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a",
+        "progress": 0.0,
+        "date_added": "2026-02-13 12:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/featured/comet-courier-02.cbz",
+        "id": 34,
+        "title": "comet-courier-02",
+        "format": "cbz",
+        "file_size": 7309,
+        "content_hash": "c994e598df6d7109b478f6e4aa6369e524aca8cb9dd93b74cd8581914e4bf5da",
+        "progress": 0.0,
+        "date_added": "2026-02-02 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/annual-report-ja.pdf",
+        "id": 35,
+        "title": "技術報告書 2026 — 書斎プロジェクトの年次報告",
+        "author": "書斎編集部",
+        "format": "pdf",
+        "file_size": 1618,
+        "content_hash": "dda3a907e55dbe781cc4be14cffdf82ed6eaaca16fb385b2b0ca5a5eb72f7163",
+        "progress": 0.6,
+        "date_added": "2026-02-03 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/mizu-no-kioku.epub",
+        "id": 36,
+        "title": "水の記憶、砂の記録",
+        "author": "佐藤 健一",
+        "format": "epub",
+        "file_size": 9376,
+        "content_hash": "6bb45dc565816a5af1323c77eb22e1a063dc503018d2ddfaa350705c3cf6f045",
+        "progress": 0.24,
+        "date_added": "2026-02-04 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/toshokan-no-tebiki.epub",
+        "id": 37,
+        "title": "司書の手引き / The Librarian's Companion",
+        "author": "Darwin Shosai",
+        "format": "epub",
+        "file_size": 8593,
+        "content_hash": "0ad27221521add80d6ceadae109b36da3782d4588ae3655b78a2a33a31dff3a3",
+        "progress": 0.0,
+        "date_added": "2026-02-05 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/kaze-no-mukougawa.epub",
+        "id": 38,
+        "title": "風の向こう側にある図書館と、そこで暮らす人々の長い物語",
+        "author": "日本 花子",
+        "format": "epub",
+        "file_size": 8748,
+        "content_hash": "4cb2339292e76a591bc0d73288e21d94740e2342b04de10e6e4298c143cd4d9a",
+        "progress": 0.05,
+        "date_added": "2026-02-06 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/comet-courier.cbz",
+        "id": 39,
+        "title": "comet-courier",
+        "format": "cbz",
+        "file_size": 29471,
+        "content_hash": "44338ddf6fe912990286ea739930ba58585e7c5e85cfdcdfd2920bba8086f015",
+        "progress": 0.31,
+        "date_added": "2026-02-07 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/field-notes.pdf",
+        "id": 40,
+        "title": "Field Notes, 1962-1968",
+        "author": "R. Okafor",
+        "format": "pdf",
+        "file_size": 1521,
+        "content_hash": "e60c6c99ed43ee5509ae7255350644ec5c4c6d1a51803317e1d821905074ed50",
+        "progress": 0.0,
+        "date_added": "2026-02-08 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/small-atlas.pdf",
+        "id": 41,
+        "title": "A Small Atlas of Imaginary Coastlines",
+        "author": "P. Herrera",
+        "format": "pdf",
+        "file_size": 2720,
+        "content_hash": "77dae76187fb4e22fa7e11a1515001b4bc606e9097ded4f9357e6c761f20b734",
+        "progress": 0.0,
+        "date_added": "2026-02-09 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/workshop-proceedings.epub",
+        "id": 42,
+        "title": "Proceedings of the Ninth Shosai Workshop",
+        "author": "Shosai Project",
+        "format": "epub",
+        "file_size": 4377,
+        "content_hash": "a8eb238349d8d719a678ab767359fef940e29716166af81a9d3cb2c649c9a6cc",
+        "progress": 0.0,
+        "date_added": "2026-02-10 10:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/featured/paper-lanterns.epub",
+        "id": 43,
+        "title": "Paper Lanterns at Dusk",
+        "author": "Elena Marchetti",
+        "format": "epub",
+        "file_size": 8361,
+        "content_hash": "b31f7c0d4835fdfc466293019670cb4736d7870f0832d458a82cc1ea6f674664",
+        "progress": 0.0,
+        "date_added": "2026-02-11 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/slow-rivers.epub",
+        "id": 44,
+        "title": "A Field Guide to Slow Rivers",
+        "author": "Tomoko Sato",
+        "format": "epub",
+        "file_size": 10269,
+        "content_hash": "bee90fdac975f9be395dbcb86550d9494865c748d3ad99979712c72cc8fa2b12",
+        "progress": 0.78,
+        "date_added": "2026-02-12 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/salt-and-iron.epub",
+        "id": 45,
+        "title": "Salt and Iron",
+        "author": "Nikolai Varga",
+        "format": "epub",
+        "file_size": 8383,
+        "content_hash": "a0f0432d0b9a16bd5149e2f33979c105222492240d83d6403639eb31c8f9dd51",
+        "progress": 0.0,
+        "date_added": "2026-02-13 10:00:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "library/featured/quiet-cartographer.epub",
+        "id": 46,
+        "title": "The Quiet Cartographer",
+        "author": "Amara Okonkwo",
+        "format": "epub",
+        "file_size": 9450,
+        "content_hash": "53e827f91c5fbd289850abdd2e5f6c6dd565d08b4ce6cc533a99eb9cfe754dfd",
+        "progress": 0.42,
+        "date_added": "2026-02-14 10:00:00",
+        "last_read": "2026-02-14 09:30:00",
+        "has_cover": true
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub",
+        "id": 47,
+        "title": "Shosai Conformance: bidi",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 2492,
+        "content_hash": "5af9e82d15fa0be324ef7e219ddfc0613cb54b9706addb161c83f188cf9b810d",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub",
+        "id": 48,
+        "title": "Shosai Conformance: fonts",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 8309,
+        "content_hash": "bcd605900627847c0addb541aa5f1698df4709db14321b028aff2b9d8e9962e7",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub",
+        "id": 49,
+        "title": "Shosai Conformance: fonts-isolation",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 3944,
+        "content_hash": "0c991567a52452d3e98ef726ae17bfcc12a4b3b555e14f2578bbc63030562f8f",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/links.epub",
+        "id": 50,
+        "title": "Shosai Conformance: links",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 3299,
+        "content_hash": "bb899a2d67b7ca3c82a54564b1ecb5569dbd40c8caea4b46f7ba3d696985c29b",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub",
+        "id": 51,
+        "title": "Shosai Conformance: mathml",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 3021,
+        "content_hash": "03f1978d9ea58cabc81643e1737bed8887a3d7783e79c719ea4c72762ed0ffe6",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "repo:crates/shosai-core/tests/fixtures/epub-conformance/table.epub",
+        "id": 52,
+        "title": "Shosai Conformance: table",
+        "author": "Shosai contributors",
+        "format": "epub",
+        "file_size": 2977,
+        "content_hash": "9f54aac1fe4026cc06eb255a9d92a57d2d5dca7c7e6e38c8bb3bada847e48409",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      },
+      {
+        "fixture": "library/featured/reader-marks.epub",
+        "id": 53,
+        "title": "Reader marks",
+        "format": "epub",
+        "file_size": 3229,
+        "content_hash": "2c34040969c2b4adf0d9d1a33e92f4e12c3b2bb2a1990939a38ccfce99f34494",
+        "progress": 0.0,
+        "date_added": "2026-03-01 09:00:00",
+        "has_cover": false
+      }
+    ]
+  },
   "captures": [
     {
       "id": "rd-cbz-cont-w1280-en",
@@ -969,6 +1645,100 @@
       },
       "notes": [
         "Continuous CBZ: the same column behavior as the PDF continuous mode"
+      ]
+    },
+    {
+      "id": "rd-cbz-fit-width-w1280-en",
+      "family": "1C-CBZ-PAG",
+      "state": "reader",
+      "image": "captures/rd-cbz-fit-width-w1280-en.png",
+      "sha256": "d790a4ff4d3264222b721eece01b70b9ca0acfc2bcc4446b6c462650d1a897de",
+      "bytes": 94747,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + reader fixtures",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/comet-courier.cbz` then the paginated raster location page 3 then `Message::SetZoomFitWidth` (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-03",
+        "FM-13"
+      ],
+      "reader": {
+        "document": "comet-courier.cbz",
+        "format": "cbz",
+        "mode": "paginated",
+        "zoom": "fit-width",
+        "theme": "light",
+        "page_count": 12,
+        "location": 3,
+        "visible_pages": [
+          3,
+          4
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The CBZ fit-width spread: `Message::SetZoomFitWidth` scales the natural page to the reader width, so the page is wider than the fit-page capture of the same page and overflows the viewport height",
+        "`FM-13`'s fit modes: this is the CBZ fit-width half of the row, next to the PDF fit-width and fit-page captures"
+      ]
+    },
+    {
+      "id": "rd-cbz-manual-zoom-w1280-en",
+      "family": "1C-CBZ-PAG",
+      "state": "reader",
+      "image": "captures/rd-cbz-manual-zoom-w1280-en.png",
+      "sha256": "2ed05af3e6da470cb612960447e284bd7dc503e2e7349d0c226f162050a46618",
+      "bytes": 93009,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + reader fixtures",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/comet-courier.cbz` then the paginated raster location page 3 then `Message::ZoomIn` from the fit-page baseline (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-03",
+        "FM-13"
+      ],
+      "reader": {
+        "document": "comet-courier.cbz",
+        "format": "cbz",
+        "mode": "paginated",
+        "zoom": "manual(2.4233334)",
+        "theme": "light",
+        "page_count": 12,
+        "location": 3,
+        "visible_pages": [
+          3,
+          4
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The CBZ manual-zoom half of `FM-13`: one `Message::ZoomIn` from the fit-page baseline, so the recorded scale is the production arithmetic's own value rather than a chosen number",
+        "The declared scale is re-derived by a regression test from the fixture's page size, so a change in the arithmetic fails the test instead of drifting the manifest"
       ]
     },
     {
@@ -1199,6 +1969,107 @@
       "notes": [
         "Compact chrome below the 860 px breakpoint: the 15 px title truncated at 24 characters, the 28 px edge glyphs and the compact spacing",
         "`T200` UI text scaling has no Iced counterpart and stays with the accepting package"
+      ]
+    },
+    {
+      "id": "rd-chrome-hover-edge-c390-ja",
+      "family": "1C-RD-CHROME",
+      "state": "reader",
+      "image": "captures/rd-chrome-hover-edge-c390-ja.png",
+      "sha256": "57dc75856284080070b194edf3b4fe559d7f9d46a9d515f8d6c69ec78ffd5651",
+      "bytes": 66062,
+      "client_width": 390.0,
+      "client_height": 844.0,
+      "image_width": 390,
+      "image_height": 844,
+      "dpr": 1.0,
+      "locale": "JA",
+      "fixture": "G1 seeded library (46 books) + reader fixtures",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/mizu-no-kioku.epub` then the paginated EPUB location page 1; the frame is drawn with the pointer delivered at (366, 420), which is inside the enabled next-page edge control, so that control paints the hover state a window would show while the previous-page control stays disabled on the first page",
+      "settings": [
+        "language=ja (persisted by `Message::SelectLanguage`)"
+      ],
+      "rows": [
+        "RD-06"
+      ],
+      "reader": {
+        "document": "mizu-no-kioku.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 3,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": false,
+        "available_width": 278.0,
+        "available_height": 696.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "hover": [
+        366.0,
+        420.0
+      ],
+      "notes": [
+        "`RD-06` at the compact configuration: the same enabled next-page control hovered at the 28 px compact glyph and 8 px padding, with the disabled previous-page control beside it",
+        "The pointer position is recorded in the manifest; the same regression test that covers the wide hover capture requires this image to differ from its pointer-free render only inside the edge-control strip"
+      ]
+    },
+    {
+      "id": "rd-chrome-hover-edge-w1280-en",
+      "family": "1C-RD-CHROME",
+      "state": "reader",
+      "image": "captures/rd-chrome-hover-edge-w1280-en.png",
+      "sha256": "479c55e3c30dc4b6c4068b3644968490ccafefb402ffaef09759680941567c61",
+      "bytes": 134020,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + reader fixtures",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/slow-rivers.epub` then the paginated EPUB location page 1; the frame is drawn with the pointer delivered at (1256, 420), which is inside the enabled next-page edge control, so that control paints the hover state a window would show while the previous-page control stays disabled on the first page",
+      "settings": [],
+      "rows": [
+        "RD-06"
+      ],
+      "reader": {
+        "document": "slow-rivers.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 4,
+        "location": 1,
+        "visible_pages": [
+          1,
+          2
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "hover": [
+        1256.0,
+        420.0
+      ],
+      "notes": [
+        "`RD-06`'s hover state next to its disabled state: the frame is drawn with the pointer delivered at the enabled next-page edge control, which paints the hover background a window would paint (`theme::reader_edge_button`'s hovered style), while the previous-page control on the first page stays disabled and paints none",
+        "The pointer position is recorded in the manifest; a regression test requires the committed image to differ from the same state without a pointer, and to differ only inside the edge-control strip"
       ]
     },
     {
@@ -1565,6 +2436,52 @@
       ]
     },
     {
+      "id": "rd-epub-bidi-w1280-mix",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-bidi-w1280-mix.png",
+      "sha256": "e3dc395e50ab0d19e1902f6ff3114cc3d612edbe17f59073ac56da4265160d79",
+      "bytes": 71395,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "MIX",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-01",
+        "FM-21"
+      ],
+      "reader": {
+        "document": "bidi.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance `F5` bidi fixture at the specification's `MIX` configuration: the interface stays English while the document mixes scripts, the right-to-left paragraphs keep their direction (the Hebrew and Arabic runs occupy their logical slots) and the Latin and Japanese runs compose in the page",
+        "Two parts of the row are not visible here. The Hebrew and Arabic runs themselves are blank, because the pinned capture font set has no face for those scripts; and the fixture's authored RTL *list* direction is not preserved, because the Iced list composition is left-to-right. Both are recorded as the partial-coverage reason on `FM-21` and in the known limitations rather than being read as a rendering result"
+      ]
+    },
+    {
       "id": "rd-epub-cont-w1280-en",
       "family": "1C-EPUB-CONT",
       "state": "reader",
@@ -1649,6 +2566,232 @@
       },
       "notes": [
         "Continuous EPUB: the chapter column with 32 px chapter spacing and 20 px content padding, no page boxes, no per-page titles and no footers"
+      ]
+    },
+    {
+      "id": "rd-epub-fonts-isolation-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-fonts-isolation-w1280-en.png",
+      "sha256": "de2f28fe7909b4bd655885b65f1257d0c6c4bc9fd533f7304816cca1335405dc",
+      "bytes": 68831,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-22"
+      ],
+      "reader": {
+        "document": "fonts-isolation.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance isolation fixture: its embedded face is used only for the run the document asks for it on, while the heading and every other run keep the interface font (`FM-22`)"
+      ]
+    },
+    {
+      "id": "rd-epub-fonts-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-fonts-w1280-en.png",
+      "sha256": "65476ec703b732c3705254fbbf1094d7f63ad0de0167e40f932c378adc29e062",
+      "bytes": 74536,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-22"
+      ],
+      "reader": {
+        "document": "fonts.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance font fixture: four embedded container formats, a bold and an italic face of an embedded family, and the missing/corrupt fallbacks (`FM-22`)",
+        "Embedded faces are document fonts: they stay isolated from the interface fonts the pinned environment registers, which is what the image shows"
+      ]
+    },
+    {
+      "id": "rd-epub-links-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-links-w1280-en.png",
+      "sha256": "f4b8793bde557ef5e51b532dace2dabceb184d5a73cd1e623077eb071068d804",
+      "bytes": 90852,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/links.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-01"
+      ],
+      "reader": {
+        "document": "links.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 2,
+        "location": 1,
+        "visible_pages": [
+          1,
+          2
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance link fixture: its anchors and the cross-chapter target page compose inside the page budget, so a reviewer sees what the reader does with the fixture's link shapes",
+        "The fixture's chapter puts its anchors directly under `<main>`, and the parser's inline collector does not carry a block-level anchor's own `href` into its spans, so those anchors render as plain text. The gap is recorded in the known limitations; `FM-01`'s styled-link evidence is `rd-epub-marks-w1280-en`, whose link sits inside a paragraph and renders with the palette's link colour and underline"
+      ]
+    },
+    {
+      "id": "rd-epub-marks-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-marks-w1280-en.png",
+      "sha256": "20c4f5b6b1e77d1fec915c1a5dfe452242f75bb1abc379d0d55ff430a4faf6b8",
+      "bytes": 115310,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/reader-marks.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-01",
+        "FM-18"
+      ],
+      "reader": {
+        "document": "reader-marks.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The generated capture-only fixture: a list, a quote, a styled link and a document image in one page, which is the composition `FM-01` names",
+        "`FM-18`: the specification names `F4` (`conformance.epub`) and `F7` (`mathml.epub`) for this row, but `F4` cannot render under the pinned capture font environment and `F7` carries no document colour, so the colour evidence comes from this generated fixture: its image is filled with one exact colour the chrome never uses, and a regression test requires that colour in the rendered page, so a tinted or monochrome composite fails instead of passing unnoticed",
+        "The fixture deliberately carries no italic on the interface family: the repository's sampler book does, and the pinned capture font environment cannot shape it (see the rich-fixture limitation)"
+      ]
+    },
+    {
+      "id": "rd-epub-mathml-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-mathml-w1280-en.png",
+      "sha256": "728bf423008d8cd2d3cc61620da06f597da5b2f6f2996aacf736fd14a123943d",
+      "bytes": 64156,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-23"
+      ],
+      "reader": {
+        "document": "mathml.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance math fixture: inline and display math compose inside the page budget (`FM-23`)"
       ]
     },
     {
@@ -1788,6 +2931,50 @@
       },
       "notes": [
         "Japanese pagination and Japanese interface text in the same capture"
+      ]
+    },
+    {
+      "id": "rd-epub-table-w1280-en",
+      "family": "1C-EPUB-PAG",
+      "state": "reader",
+      "image": "captures/rd-epub-table-w1280-en.png",
+      "sha256": "744e65ba76da350fd4abf37e1ffae29cb31274dead790435a118e20daf60822b",
+      "bytes": 83776,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "1C reader seed (the shared 46-book library + six reused conformance fixtures + the generated reader-marks fixture)",
+      "state_derivation": "`Message::OpenLibraryBook` on `repo:crates/shosai-core/tests/fixtures/epub-conformance/table.epub` then the paginated EPUB location page 1 (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-23"
+      ],
+      "reader": {
+        "document": "table.epub",
+        "format": "epub",
+        "mode": "paginated",
+        "zoom": "n/a",
+        "theme": "light",
+        "page_count": 1,
+        "location": 1,
+        "visible_pages": [
+          1
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The reused conformance table fixture: table cells and a table image compose inside the page budget (`FM-23`)"
       ]
     },
     {
@@ -2349,6 +3536,53 @@
       "notes": [
         "The second fit mode of `FM-02`, and the fit-width spread `FM-13` names: `Message::SetZoomFitWidth` on the same page as `rd-pdf-pag-w1280-en`, so the spread fills the reader width instead of fitting inside it",
         "Manual zoom (the third mode both rows name) is reached by `Message::ZoomIn`/`ZoomOut` from the current fit scale and is recorded as a gap in the package limitations"
+      ]
+    },
+    {
+      "id": "rd-pdf-manual-zoom-w1280-en",
+      "family": "1C-PDF-PAG",
+      "state": "reader",
+      "image": "captures/rd-pdf-manual-zoom-w1280-en.png",
+      "sha256": "75c49c14745a519cb616ccc4c3a48fe23b307f8b6b38911eaea8b92cf25ee4a8",
+      "bytes": 74888,
+      "client_width": 1280.0,
+      "client_height": 800.0,
+      "image_width": 1280,
+      "image_height": 800,
+      "dpr": 1.0,
+      "locale": "EN",
+      "fixture": "G1 seeded library (46 books) + reader fixtures",
+      "state_derivation": "`Message::OpenLibraryBook` on `library/featured/small-atlas.pdf` then the paginated raster location page 2 then `Message::ZoomIn` from the fit-page baseline (no panel open)",
+      "settings": [],
+      "rows": [
+        "FM-02",
+        "FM-13"
+      ],
+      "reader": {
+        "document": "small-atlas.pdf",
+        "format": "pdf",
+        "mode": "paginated",
+        "zoom": "manual(1.0732324)",
+        "theme": "light",
+        "page_count": 4,
+        "location": 2,
+        "visible_pages": [
+          1,
+          2
+        ],
+        "spread": true,
+        "available_width": 1168.0,
+        "available_height": 652.0,
+        "font_size": 16.0,
+        "line_spacing": 1.6,
+        "panels": [],
+        "bookmarks": 0,
+        "search_matches": null,
+        "tabs": 1
+      },
+      "notes": [
+        "The third fit mode `FM-02` and `FM-13` name: one `Message::ZoomIn` from the fit-page baseline, recorded as the production arithmetic's own scale",
+        "The declared scale is re-derived by a regression test from the fixture's page size, so a change in the arithmetic fails the test instead of drifting the manifest"
       ]
     },
     {
@@ -3174,9 +4408,11 @@
         "status": "capture",
         "captures": [
           "rd-chrome-c390-ja",
+          "rd-chrome-hover-edge-c390-ja",
+          "rd-chrome-hover-edge-w1280-en",
           "rd-chrome-w1280-en"
         ],
-        "reason": "partial: the enabled and disabled edge-navigation states are referenced; hover needs a pointer position the offscreen renderer does not deliver, so the row's hover inspection stays with 4B"
+        "reason": ""
       },
       {
         "row": "RD-07",
@@ -3244,25 +4480,31 @@
         "row": "FM-01",
         "status": "capture",
         "captures": [
+          "rd-epub-bidi-w1280-mix",
+          "rd-epub-links-w1280-en",
+          "rd-epub-marks-w1280-en",
           "rd-epub-pag-dpr2-w1280-en",
           "rd-epub-pag-w1280-en",
           "rd-epub-pag-w1280-ja"
         ],
-        "reason": "partial: the generated EPUB fixtures carry headings and body text, so the row's styled text and page number are referenced; its lists, quotes and links need the reused conformance fixture, which the Iced reader cannot render under the pinned capture font environment (see the rich-fixture limitation), and acceptance stays with 5G"
+        "reason": ""
       },
       {
         "row": "FM-02",
         "status": "capture",
         "captures": [
           "rd-pdf-fit-width-w1280-en",
+          "rd-pdf-manual-zoom-w1280-en",
           "rd-pdf-pag-w1280-en"
         ],
-        "reason": "partial: fit-page (`rd-pdf-pag-w1280-en`) and fit-width (`rd-pdf-fit-width-w1280-en`) are referenced; manual zoom is not captured at all (see the manual-zoom limitation)"
+        "reason": ""
       },
       {
         "row": "FM-03",
         "status": "capture",
         "captures": [
+          "rd-cbz-fit-width-w1280-en",
+          "rd-cbz-manual-zoom-w1280-en",
           "rd-cbz-pag-w1280-en"
         ],
         "reason": ""
@@ -3339,13 +4581,50 @@
         "row": "FM-13",
         "status": "capture",
         "captures": [
+          "rd-cbz-fit-width-w1280-en",
+          "rd-cbz-manual-zoom-w1280-en",
           "rd-cbz-pag-w1280-en",
           "rd-pdf-fit-width-w1280-en",
+          "rd-pdf-manual-zoom-w1280-en",
           "rd-spread-cbz-w1280-en",
           "rd-spread-pdf-last-w1280-en",
           "rd-spread-pdf-w1280-en"
         ],
-        "reason": "partial: the PDF fit-page spread (`rd-spread-pdf-w1280-en`), the PDF fit-width spread (`rd-pdf-fit-width-w1280-en`) and the CBZ fit-page spreads (`rd-spread-cbz-w1280-en`, `rd-cbz-pag-w1280-en`) are referenced; there is no CBZ fit-width capture and no manual-zoom capture at all"
+        "reason": ""
+      },
+      {
+        "row": "FM-18",
+        "status": "capture",
+        "captures": [
+          "rd-epub-marks-w1280-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "FM-21",
+        "status": "capture",
+        "captures": [
+          "rd-epub-bidi-w1280-mix"
+        ],
+        "reason": "partial: the reused `bidi.epub` fixture's right-to-left paragraphs are referenced and its Latin and Japanese runs compose in the page; its Hebrew and Arabic runs are blank because the pinned capture font set (Inter, NotoSansJP, the math font) has no face for those scripts and the pinned fontconfig names an empty directory, and the fixture's authored RTL list direction is not preserved either, because the Iced list composition is left-to-right (`app/epub_view.rs`). The row's Hebrew/Arabic shaping and its RTL list direction are therefore not evidenced by this capture"
+      },
+      {
+        "row": "FM-22",
+        "status": "capture",
+        "captures": [
+          "rd-epub-fonts-isolation-w1280-en",
+          "rd-epub-fonts-w1280-en"
+        ],
+        "reason": ""
+      },
+      {
+        "row": "FM-23",
+        "status": "capture",
+        "captures": [
+          "rd-epub-mathml-w1280-en",
+          "rd-epub-table-w1280-en"
+        ],
+        "reason": ""
       }
     ],
     "manifest": [
@@ -3394,34 +4673,10 @@
         "reason": "5H — decision-12 readability fallback has no Iced implementation; the large-font captures are comparison images only"
       },
       {
-        "row": "FM-21",
-        "status": "pending",
-        "captures": [],
-        "reason": "5C — the rich composition rows name the conformance fixture, which the Iced reader cannot render under the pinned font environment (see the rich-fixture limitation); acceptance stays with 5C's own renders"
-      },
-      {
-        "row": "FM-22",
-        "status": "pending",
-        "captures": [],
-        "reason": "5C — embedded document fonts: the conformance fixture panics the Iced reader under the pinned font environment; acceptance stays with 5C"
-      },
-      {
-        "row": "FM-23",
-        "status": "pending",
-        "captures": [],
-        "reason": "5D — tables and math on the conformance fixture: same limitation; acceptance stays with 5D"
-      },
-      {
         "row": "FM-12",
         "status": "pending",
         "captures": [],
         "reason": "5H — the fallback boundary and durable-location preservation are `WT` + `5H-RENDER`"
-      },
-      {
-        "row": "FM-18",
-        "status": "pending",
-        "captures": [],
-        "reason": "5G — document-colour preservation through compositing is plan 5G's acceptance; the `1C-EPUB-PAG` captures are its Iced reference, and 1C renders no document-colour fixture of its own"
       },
       {
         "row": "FM-14",
@@ -3468,7 +4723,7 @@
     "FM-11 / FM-12 — decision-12 readability fallback: authority is the owner decision and the `5A` rule calibrated in `5B`; Iced applies a width-only 720 px spread rule and the large-font captures here are comparison images only.",
     "FM-14 / FM-15 — tiled continuous seams and mode-switch position preservation: authority is the plan's continuous-layout requirements; Iced continuous is a single chapter column with no tiled render.",
     "FM-20 — resource rejection is distinguishable from a rendering defect: authority is the plan's 5J acceptance; the limits live in the shared core and are behavioral.",
-    "FM-21 / FM-22 / FM-23 — rich composition, embedded fonts, tables and math: authority is the shared core renderer plus the 5C/5D acceptance renders. The Iced reader cannot render the conformance fixture under the pinned capture font environment (it panics in the text stack when an italic span asks for the default family and no host font is eligible), so these rows stay with 5C/5D and no 1C image is fabricated for them."
+    "FM-18 / FM-21 / FM-22 / FM-23 — document colours, bidi, embedded fonts, tables and math are captured over the reused conformance fixtures that render under the pinned font environment; acceptance stays with 5G/5C/5D, and the two fixtures that cannot render are recorded in the limitations rather than replaced by a fabricated image."
   ],
   "limitations": [
     "Iced has no production interactive selection or highlighting: `RD-12`, `FM-16` and `FM-17` are recorded as RFD 6 / retained-Flutter authority in the 1C non-Iced authority record and `docs/reference-captures.md`, never fabricated as an Iced capture.",
@@ -3477,10 +4732,14 @@
     "Iced has no text scaling (`T200`) and no decision-11 tab overflow: `RD-04`, `RD-14` and `RD-15` have no Iced counterpart and stay with 4B/4D.",
     "The document-opening capture delivers the production timer's own `ShowDocumentOpenNotice(generation)` message for the in-flight generation, because the offscreen run cannot wait on a real window's 200 ms timer without also completing the open it is capturing; the state it shows is the production opening composition.",
     "The missing-file and open-error captures need a real failure, so they remove (respectively overwrite) the disposable copy of one seeded fixture and write the original bytes back immediately afterwards; the committed fixture tree and its checksums stay complete, and the disposable root is the run's own.",
-    "The Iced reader cannot render the reused conformance fixture under the pinned capture font environment: building its view panics inside the text stack (`no default font found`). The trigger is reproducible and is a production behavior, not a harness artifact: with only the application fonts registered, an EPUB span that asks for the default family in italic has no matching face and cosmic-text's fallback iterator runs out. The capture set therefore names the generated deterministic reader fixtures for `FM-01` and records `FM-21`/`FM-22`/`FM-23` as pending with 5C/5D rather than fabricating a rich capture or weakening the font pin.",
+    "Two of the repository's conformance fixtures cannot render under the pinned capture font environment: `conformance.epub` and `css-cascade.epub` both style `font-style: italic` on the default family, which has no italic face in the pinned set, and the text stack panics (`no default font found`) instead of falling back to the family's upright face. The other twelve conformance fixtures render and are the ones the rich captures use; the trigger is a production behavior (only the application fonts are registered), and the fallback gap itself belongs with the renderer owner rather than being papered over here.",
     "The generated PDF fixtures draw shapes only (no page text), because PDFium resolves fonts for unembedded text by scanning the host font directories and does not follow `FONTCONFIG_FILE`; the native PDFium that rasterized the pages is recorded in `environment.pdfium` as run metadata, so a different build can render different pixels.",
     "Rendering is in-process software rasterization, not a compositor screenshot: window decorations, native menus, toasts and animations are outside the capture, and the disposable data root path is visible in application text that names a real path.",
-    "Every reader capture except the fit-width one uses a viewport the composition fits in, because the renderer has no scroll interaction: the reader chrome is captured at `W1280`/`W900`/`C390` and at the documented `B860±`/`B720±` probe widths. The layout rules, the theme and the composition are unchanged; only the window is the size the probe names. `rd-pdf-fit-width-w1280-en` is the exception by design: fit-width makes the page taller than the viewport, so that capture shows the overflow and the vertical scrollbar.",
-    "Four captured rows have deliberately partial reference coverage, recorded per row in the matrix (`reason`) as well: `FM-01`'s lists, quotes and links need the reused conformance fixture, which panics the Iced reader under the pinned capture font environment, so the generated fixtures' headings and body text are referenced and acceptance stays with 5G; `FM-02` and `FM-13` reference fit-page and fit-width (including the PDF fit-width spread) but not manual raster zoom, which is stepwise (`Message::ZoomIn`/`ZoomOut` from the current fit scale, derived from the document's page size) and left to the accepting package; there is no CBZ fit-width capture, so that configuration is left to the accepting package too; and `RD-06`'s hover state needs a pointer position the offscreen renderer does not deliver, so the enabled and disabled edge states are referenced and hover stays with 4B."
+    "Every reader capture uses a viewport the composition fits in, because the renderer has no scroll interaction: the reader chrome is captured at `W1280`/`W900`/`C390` and at the documented `B860±`/`B720±` probe widths. The layout rules, the theme and the composition are unchanged; only the window is the size the probe names. The zoom captures are the deliberate exceptions: `rd-pdf-fit-width-w1280-en`, `rd-cbz-fit-width-w1280-en`, `rd-pdf-manual-zoom-w1280-en` and `rd-cbz-manual-zoom-w1280-en` all scale the page past the viewport height, so those captures show the overflow and the vertical scrollbar instead of a page that fits.",
+    "The rich captures open from package 1C's own base seed (the shared library plus the reused conformance fixtures and the generated marks fixture) so the shared seed's order, and therefore package 1B's evidence, is untouched. The marks fixture is generated for these captures and carries no italic on the interface family, which is why it can render where `conformance.epub` cannot.",
+    "An anchor that is itself a block-level child of a block container loses its own `href`: the parser's inline collector applies a link only to the spans *inside* an `a` element, not to the anchor's own block. `links.epub`'s chapter puts its anchors directly under `main`, which is why `rd-epub-links-w1280-en` shows their text without the link colour or underline; the same anchor inside a paragraph (`rd-epub-marks-w1280-en`) or inside a table cell (`rd-epub-table-w1280-en`) keeps its link.",
+    "The pinned capture font set (Inter, NotoSansJP and the math font, with a fontconfig that names an empty directory) covers Latin, Japanese and the math glyphs only. `FM-21`'s Hebrew and Arabic runs in `bidi.epub`, and the emoji in its mixed line, therefore render blank in `rd-epub-bidi-w1280-mix`: the capture shows the fixture's right-to-left paragraphs and its Latin/Japanese runs, not its Hebrew or Arabic shaping. The fixture's authored RTL list direction is not preserved either, because the Iced list composition is left-to-right (`app/epub_view.rs`), which is why `FM-21` is recorded as a partially covered row. Evidencing the missing halves needs a Hebrew/Arabic face in the capture font set and an RTL-aware list composition, which are renderer/capture-contract changes and owner decisions rather than something this package may do on its own.",
+    "The shared EPUB style model carries no colour field, so document text is painted with the reader palette and no capture can show a CSS text colour: `FM-18`'s Iced reference is the document *image* path (`rd-epub-marks-w1280-en`), where the document's own pixels survive composition. A document text colour is renderer work that belongs with 5G, not something a capture here can evidence.",
+    "Document images compose only where the parser keeps an image node: a block-level `img` and an image inside a table cell render, while an `img` inside a paragraph is dropped by the inline collector (the paragraph keeps its text only) and a missing resource never reaches the page. `nested-image.epub`'s paragraph-inline image and its missing-image fallback are therefore not composed; the gap is recorded here rather than hidden by a fabricated state."
   ]
 }

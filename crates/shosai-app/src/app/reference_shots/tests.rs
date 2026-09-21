@@ -774,6 +774,149 @@ async fn seeded_library_order_and_metadata_are_deterministic() {
     );
 }
 
+/// Package 1C's rich-content base seed: documented, deterministic, and separate
+/// from the shared seed the accepted 1B evidence uses.
+///
+/// The reader captures open the reused conformance fixtures and the generated
+/// marks fixture, which are not in the shared seed, so they run from their own
+/// store. `locate_book` searches the first library page, which is why the rich
+/// books carry the newest `date_added`; this checks the real seed run, not the
+/// table, so a book that sorts onto a later page fails here.
+#[tokio::test]
+async fn reader_rich_seed_is_documented_and_deterministic() {
+    let root = temp_root();
+    let fixtures_root = root.path().join("fixtures");
+    let generated = fixtures::write_reference_fixtures_for(&fixtures_root, Package::OneC)
+        .expect("fixture tree");
+    let shared_root = root.path().join("shared");
+    let shared = fixtures::write_reference_fixtures(&shared_root).expect("the 1B fixture tree");
+
+    // The generated marks fixture is 1C-only: package 1B's tree must not grow.
+    let marks = super::reader::EPUB_MARKS;
+    assert!(
+        generated.iter().any(|record| record.relative_path == marks),
+        "package 1C's tree must carry the generated marks fixture"
+    );
+    assert!(
+        shared.iter().all(|record| record.relative_path != marks),
+        "the marks fixture must not appear in package 1B's tree"
+    );
+
+    let seed = seed::reader_library_seed();
+    assert_eq!(
+        seed.len(),
+        7,
+        "six reused conformance books and the generated marks book"
+    );
+    let shared_seed = fixtures::library_seed();
+    let mut seen = BTreeMap::new();
+    for book in &seed {
+        assert!(
+            seen.insert(book.file, ()).is_none(),
+            "{} is seeded twice",
+            book.file
+        );
+        assert!(
+            shared_seed.iter().all(|shared| shared.file != book.file),
+            "{} is also in the shared seed; the rich base must not duplicate it",
+            book.file
+        );
+        assert_eq!(book.date_added, "2026-03-01 09:00:00", "{}", book.file);
+        assert_eq!(book.progress, 0.0, "{}", book.file);
+        assert!(
+            book.last_read.is_none(),
+            "{}: the rich base must not add a continue-reading row",
+            book.file
+        );
+        if let Some(relative) = book.file.strip_prefix("repo:") {
+            let record = fixtures::READER_REUSED_FIXTURES
+                .iter()
+                .find(|fixture| fixture.path == relative)
+                .unwrap_or_else(|| panic!("{relative} is seeded without a provenance record"));
+            let bytes = std::fs::read(fixtures::repository_fixture_path(relative))
+                .unwrap_or_else(|error| panic!("read {relative}: {error}"));
+            assert_eq!(
+                fixtures::sha256_hex(&bytes),
+                record.sha256,
+                "{relative}: the provenance hash must be the file's own hash"
+            );
+            assert!(
+                record.provenance.contains("SHA256SUMS") && !record.purpose.is_empty(),
+                "{relative}: the provenance record must name its source and purpose"
+            );
+            continue;
+        }
+        let record = generated
+            .iter()
+            .find(|record| record.relative_path == book.file)
+            .unwrap_or_else(|| panic!("{} is seeded but not generated", book.file));
+        assert_eq!(
+            record.sha256.len(),
+            64,
+            "{}: the generated fixture must carry a SHA-256",
+            book.file
+        );
+    }
+
+    // A real seed run twice: the same rows, in the same order, with the rich
+    // books newest so they are on the first library page.
+    let first = temp_root();
+    let seeded = seed::seed_reader_library(first.path(), &fixtures_root)
+        .await
+        .expect("seed the rich base");
+    assert_eq!(seeded.books.len(), 46 + seed.len());
+    let mut expected = seeded.books.clone();
+    expected.sort_by(|left, right| {
+        right
+            .last_read
+            .is_some()
+            .cmp(&left.last_read.is_some())
+            .then_with(|| right.date_added.cmp(&left.date_added))
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    // The shared seed's single continue-reading row sorts first; the rich books
+    // are the newest of the rest, so they are the next rows of the first page.
+    let rich_titles: Vec<String> = expected
+        .iter()
+        .skip(1)
+        .take(seed.len())
+        .map(|book| book.title.clone())
+        .collect();
+    assert!(
+        expected
+            .iter()
+            .skip(1)
+            .take(seed.len())
+            .all(|book| book.date_added == "2026-03-01 09:00:00"),
+        "the rich books must be the newest rows, otherwise they are not on the first page"
+    );
+    let page = seeded
+        .library
+        .page(None, None, 40, 0)
+        .await
+        .expect("library page");
+    let visible: Vec<String> = page
+        .books
+        .iter()
+        .skip(1)
+        .take(seed.len())
+        .map(|book| book.title.clone())
+        .collect();
+    assert_eq!(
+        visible, rich_titles,
+        "every rich book must be on the first library page the captures load"
+    );
+
+    let second = temp_root();
+    let repeated = seed::seed_reader_library(second.path(), &fixtures_root)
+        .await
+        .expect("seed a second rich base");
+    assert_eq!(
+        seeded.books, repeated.books,
+        "two rich seed runs must produce identical rows"
+    );
+}
+
 /// The capture table must be self-consistent: unique ids, known families, rows
 /// that exist in the matrix mapping, and no fabricated Iced counterparts for
 /// Flutter-only rows.
@@ -1008,6 +1151,7 @@ fn pixel_alias_rules_reject_both_kinds_of_mismatch() {
         settings: Vec::new(),
         rows: vec!["LB-01".to_owned()],
         reader: None,
+        hover: None,
         notes: Vec::new(),
     };
 
@@ -1077,6 +1221,7 @@ fn stale_evidence_files_are_pruned() {
         settings: Vec::new(),
         rows: vec!["LB-01".to_owned()],
         reader: None,
+        hover: None,
         notes: Vec::new(),
     };
     super::runner::prune_stale_evidence(output.path(), &[entry.clone()])
@@ -1148,15 +1293,30 @@ fn expected_manifest_for(package: Package) -> &'static super::manifest::Manifest
                     tempfile::tempdir().map_err(|error| format!("fixture temp dir: {error}"))?;
                 let library_root =
                     tempfile::tempdir().map_err(|error| format!("library temp dir: {error}"))?;
-                fixtures::write_reference_fixtures(fixtures_root.path())
+                fixtures::write_reference_fixtures_for(fixtures_root.path(), package)
                     .map_err(|error| format!("write the fixture tree: {error}"))?;
                 let seeded = seed::seed_library(library_root.path(), fixtures_root.path())
                     .await
                     .map_err(|error| format!("seed the disposable library: {error:#}"))?;
+                // Package 1C's captures open from their own rich-content seed, so
+                // the unrendered expectation carries that record too: without it
+                // the comparison would skip the rich seed entirely.
+                let reader_seeded = if package == Package::OneC {
+                    let rich_root =
+                        tempfile::tempdir().map_err(|error| format!("rich temp dir: {error}"))?;
+                    Some(
+                        seed::seed_reader_library(rich_root.path(), fixtures_root.path())
+                            .await
+                            .map_err(|error| format!("seed the rich library: {error:#}"))?,
+                    )
+                } else {
+                    None
+                };
                 super::runner::expected_manifest(
                     package,
                     fixtures_root.path(),
                     &seeded,
+                    reader_seeded.as_ref(),
                     &manifest_revision(),
                 )
                 .await
@@ -2255,6 +2415,30 @@ fn evidence_validator_rejects_a_changed_seeded_order() {
             });
         },
         "seeded_library changed",
+    );
+}
+
+/// The rich-content base seed is part of the package 1C manifest, so a
+/// committed rich seed that drifted from a fresh one must be rejected: without
+/// this comparison the reader seed would be recorded but never verified.
+#[cfg(unix)]
+#[test]
+fn evidence_validator_rejects_a_changed_rich_seed() {
+    tampered_evidence_for(
+        Package::OneC,
+        |root| {
+            tamper_manifest(root, |manifest| {
+                let rich = manifest["reader_seeded_library"]["books"]
+                    .as_array_mut()
+                    .expect("rich seed books");
+                assert!(
+                    !rich.is_empty(),
+                    "the committed 1C manifest must record the rich-content seed"
+                );
+                rich[0]["title"] = serde_json::json!("A Different Rich Book");
+            });
+        },
+        "reader_seeded_library changed",
     );
 }
 
@@ -3657,10 +3841,17 @@ fn reader_declared_geometry_follows_the_specification() {
             );
             continue;
         }
-        let expected_spread = facts.page_count > 1 && available.0 >= 720.0;
+        // The spread rules are the production ones, and they differ by format:
+        // `app::epub_uses_spread` is the width rule alone, while
+        // `app::uses_page_spreads` additionally needs more than one raster page.
+        let expected_spread = if facts.format == "epub" {
+            available.0 >= 720.0
+        } else {
+            facts.page_count > 1 && available.0 >= 720.0
+        };
         assert_eq!(
             facts.spread, expected_spread,
-            "{}: the declared spread state is not the 720 px rule",
+            "{}: the declared spread state is not the production spread rule",
             scenario.id
         );
         if facts.page_count > 0 {
@@ -3854,9 +4045,11 @@ fn reader_fixture_page_counts_are_declared() {
 
     let root = temp_root();
     let fixtures_root = root.path().join("fixtures");
-    fixtures::write_reference_fixtures(&fixtures_root).expect("fixture tree");
+    fixtures::write_reference_fixtures_for(&fixtures_root, super::package::Package::OneC)
+        .expect("fixture tree");
 
     let mut checked = 0usize;
+    let mut mismatches: Vec<String> = Vec::new();
     for scenario in super::reader::scenarios() {
         let super::scenarios::Kind::Reader(kind) = scenario.kind else {
             continue;
@@ -3887,26 +4080,31 @@ fn reader_fixture_page_counts_are_declared() {
             1.6,
             crate::epub::LayoutSize::new(page.width, page.height),
         );
-        assert_eq!(
-            pages.len(),
-            facts.page_count,
-            "{}: {fixture} at a {font_size} px book font paginated to {} pages at available \
-             {}x{} (spread {}), but the capture declares {}",
-            scenario.id,
-            pages.len(),
-            facts.available_width,
-            facts.available_height,
-            facts.spread,
-            facts.page_count
-        );
-        assert_eq!(
-            pages.len(),
-            super::reader::epub_page_count_at(fixture, font_size),
-            "{}: the declared table disagrees with the paginator",
-            scenario.id
-        );
+        if pages.len() != facts.page_count {
+            mismatches.push(format!(
+                "{}: {fixture} at a {font_size} px book font paginated to {} pages at available \
+                 {}x{} (spread {}), but the capture declares {}",
+                scenario.id,
+                pages.len(),
+                facts.available_width,
+                facts.available_height,
+                facts.spread,
+                facts.page_count
+            ));
+        }
+        if pages.len() != super::reader::epub_page_count_at(fixture, font_size) {
+            mismatches.push(format!(
+                "{}: the declared table disagrees with the paginator for {fixture} at {font_size} px",
+                scenario.id
+            ));
+        }
         checked += 1;
     }
+    assert!(
+        mismatches.is_empty(),
+        "the declared page counts do not match the core paginator: {}",
+        mismatches.join("; ")
+    );
     assert!(
         checked >= 10,
         "the page-count check must cover the paginated EPUB captures, saw {checked}"
@@ -4297,6 +4495,7 @@ async fn the_fit_mode_captures_reach_their_recorded_zoom() {
         ("rd-pdf-fit-width-w1280-en", "fit-width"),
         ("rd-pdf-pag-w1280-en", "fit-page"),
         ("rd-cbz-pag-w1280-en", "fit-page"),
+        ("rd-cbz-fit-width-w1280-en", "fit-width"),
     ] {
         let scenario = capture(id);
         let mut harness = super::runner::base_harness(Some(&seeded), Package::OneC)
@@ -4308,6 +4507,36 @@ async fn the_fit_mode_captures_reach_their_recorded_zoom() {
             .unwrap_or_else(|error| panic!("{id}: {error:#}"));
         let observed = super::reader::observe(&harness.state);
         assert_eq!(observed.zoom, expected, "{id}: the reached zoom mode");
+        assert_eq!(
+            scenario.reader.as_ref().expect("facts"),
+            &observed,
+            "{id}: the declaration must equal the state the messages reached"
+        );
+    }
+
+    // The manual captures reach their scale through `Message::ZoomIn` from the
+    // fit-page baseline; the observed value must be the declaration, and the
+    // state must really carry a manual zoom rather than a fit mode.
+    for id in ["rd-pdf-manual-zoom-w1280-en", "rd-cbz-manual-zoom-w1280-en"] {
+        let scenario = capture(id);
+        let mut harness = super::runner::base_harness(Some(&seeded), Package::OneC)
+            .await
+            .expect("capture harness");
+        super::runner::apply_window(&scenario, &mut harness);
+        super::scenarios::apply(&scenario, &mut harness, &fixtures_root, &data_root)
+            .await
+            .unwrap_or_else(|error| panic!("{id}: {error:#}"));
+        let observed = super::reader::observe(&harness.state);
+        assert!(
+            observed.zoom.starts_with("manual("),
+            "{id}: the reached zoom must be the manual scale, not {}",
+            observed.zoom
+        );
+        assert!(
+            matches!(harness.state.zoom, crate::pdf::ZoomMode::Manual(_)),
+            "{id}: the state must carry a manual zoom, not {:?}",
+            harness.state.zoom
+        );
         assert_eq!(
             scenario.reader.as_ref().expect("facts"),
             &observed,
@@ -4375,9 +4604,15 @@ fn partially_covered_rows_are_captured_and_explained() {
 
     // The intended set, pinned by name: a row that stops being partial, or a
     // partial row that is not recorded, fails here rather than drifting.
+    let partial: Vec<&str> = super::reader::CAPTURED_PARTIAL
+        .iter()
+        .map(|(row, _)| *row)
+        .collect();
     assert_eq!(
-        super::reader::CAPTURED_PARTIAL.map(|(row, _)| row),
-        ["FM-01", "FM-02", "FM-13", "RD-06"]
+        partial,
+        ["FM-21"],
+        "the set of partially covered rows must be exactly the recorded one: `FM-21`'s \
+         Hebrew/Arabic runs are blank under the pinned capture font set"
     );
     // `FM-13`'s reason names the captures it counts on, and each must really
     // carry the row.
@@ -4389,8 +4624,11 @@ fn partially_covered_rows_are_captured_and_explained() {
     for id in [
         "rd-spread-pdf-w1280-en",
         "rd-pdf-fit-width-w1280-en",
+        "rd-pdf-manual-zoom-w1280-en",
         "rd-spread-cbz-w1280-en",
         "rd-cbz-pag-w1280-en",
+        "rd-cbz-fit-width-w1280-en",
+        "rd-cbz-manual-zoom-w1280-en",
     ] {
         assert!(
             fm13.captures.iter().any(|capture| capture == id),
@@ -4411,10 +4649,9 @@ fn partially_covered_rows_are_captured_and_explained() {
     // Each qualification the matrix reasons make must appear there too, so the
     // standalone section cannot silently lose one of them.
     for qualification in [
-        "no CBZ fit-width capture",
-        "not manual raster zoom",
-        "panics the Iced reader",
-        "hover stays with 4B",
+        "conformance.epub",
+        "css-cascade.epub",
+        "no italic face in the pinned set",
     ] {
         assert!(
             limitations.contains(qualification),
@@ -4433,26 +4670,48 @@ fn partially_covered_rows_are_captured_and_explained() {
     );
 }
 
-/// The raster zoom mode must be recorded, and the fit-width capture must select
-/// it through the production message rather than being declared into existence.
+/// The raster zoom mode must be recorded, and the fit-width and manual captures
+/// must select their mode through production messages rather than being declared
+/// into existence.
 #[test]
 fn reader_zoom_modes_are_recorded() {
     use super::reader::{RasterZoom, ReaderKind};
 
-    assert_eq!(RasterZoom::FitPage.stored(), "fit-page");
-    assert_eq!(RasterZoom::FitWidth.stored(), "fit-width");
+    assert_eq!(RasterZoom::FitPage.mode(), "fit-page");
+    assert_eq!(RasterZoom::FitWidth.mode(), "fit-width");
+    assert_eq!(RasterZoom::Manual.mode(), "manual");
 
     let scenarios = super::reader::scenarios();
-    let fit_width = scenarios
-        .iter()
-        .find(|scenario| scenario.id == "rd-pdf-fit-width-w1280-en")
-        .expect("the fit-width capture");
-    assert_eq!(fit_width.reader.as_ref().expect("facts").zoom, "fit-width");
-    match fit_width.kind {
-        super::scenarios::Kind::Reader(ReaderKind::RasterPage { zoom, .. }) => {
-            assert_eq!(zoom, RasterZoom::FitWidth);
-        }
-        other => panic!("the fit-width capture must be a raster page, not {other:?}"),
+    // The captures that leave the application default zoom, pinned by name and
+    // by the mode the manifest must record for them.
+    let changed: [(&str, RasterZoom); 4] = [
+        ("rd-pdf-fit-width-w1280-en", RasterZoom::FitWidth),
+        ("rd-pdf-manual-zoom-w1280-en", RasterZoom::Manual),
+        ("rd-cbz-fit-width-w1280-en", RasterZoom::FitWidth),
+        ("rd-cbz-manual-zoom-w1280-en", RasterZoom::Manual),
+    ];
+    for (id, zoom) in changed {
+        let scenario = scenarios
+            .iter()
+            .find(|scenario| scenario.id == id)
+            .unwrap_or_else(|| panic!("missing capture {id}"));
+        let facts = scenario.reader.as_ref().expect("facts");
+        let (fixture, available) = match scenario.kind {
+            super::scenarios::Kind::Reader(ReaderKind::RasterPage {
+                fixture,
+                zoom: declared,
+                ..
+            }) => {
+                assert_eq!(declared, zoom, "{id}: the declared zoom mode");
+                (fixture, (facts.available_width, facts.available_height))
+            }
+            other => panic!("{id} must be a raster page, not {other:?}"),
+        };
+        assert_eq!(
+            facts.zoom,
+            zoom.recorded(fixture, available, facts.visible_pages.len()),
+            "{id}: the recorded zoom must be the mode's own value"
+        );
     }
 
     let mut defaulted = 0usize;
@@ -4464,7 +4723,7 @@ fn reader_zoom_modes_are_recorded() {
             "{}: the recorded zoom is not a mode the state can carry",
             scenario.id
         );
-        if scenario.id == "rd-pdf-fit-width-w1280-en" {
+        if changed.iter().any(|(id, _)| *id == scenario.id) {
             continue;
         }
         // Every other capture is either a raster page at the application
@@ -4477,7 +4736,7 @@ fn reader_zoom_modes_are_recorded() {
         assert_eq!(
             facts.zoom,
             if raster { "fit-page" } else { "n/a" },
-            "{}: only the fit-width capture changes the zoom mode",
+            "{}: only the captures named above change the zoom mode",
             scenario.id
         );
         defaulted += 1;
@@ -4486,6 +4745,411 @@ fn reader_zoom_modes_are_recorded() {
         defaulted >= 45,
         "expected the rest of the capture table to record a zoom, checked {defaulted}"
     );
+}
+
+/// The page size a raster fixture's own bytes declare.
+///
+/// Deliberately independent of [`super::reader::raster_page_size_at`]: a PDF's
+/// `/MediaBox` and a CBZ page image's PNG `IHDR` are read out of the generated
+/// bytes, and every page of a fixture must carry the same size, because the
+/// declaration table holds one size per fixture.
+fn fixture_page_size_from_bytes(fixture: &str, bytes: &[u8]) -> (f32, f32) {
+    if fixture.ends_with(".pdf") {
+        let text = String::from_utf8_lossy(bytes);
+        let open = "/MediaBox [";
+        let mut rest = text.as_ref();
+        let mut pages = Vec::new();
+        while let Some(start) = rest.find(open) {
+            let start = start + open.len();
+            let end = start + rest[start..].find(']').expect("a closed /MediaBox");
+            let numbers: Vec<f32> = rest[start..end]
+                .split_whitespace()
+                .map(|number| number.parse().expect("a MediaBox number"))
+                .collect();
+            assert_eq!(
+                numbers.len(),
+                4,
+                "{fixture}: /MediaBox carries four numbers"
+            );
+            pages.push((numbers[2] - numbers[0], numbers[3] - numbers[1]));
+            rest = &rest[end..];
+        }
+        assert!(!pages.is_empty(), "{fixture}: no /MediaBox found");
+        let first = pages[0];
+        assert!(
+            pages.iter().all(|page| *page == first),
+            "{fixture}: every page must carry the same /MediaBox size, saw {pages:?}"
+        );
+        return first;
+    }
+
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).expect("open the CBZ");
+    let mut pages = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).expect("CBZ entry");
+        let name = entry.name().to_ascii_lowercase();
+        if !name.ends_with(".png") {
+            continue;
+        }
+        let mut png = Vec::new();
+        entry.read_to_end(&mut png).expect("read the page image");
+        assert_eq!(
+            &png[12..16],
+            b"IHDR",
+            "{fixture}: the first PNG chunk must be IHDR"
+        );
+        let width = u32::from_be_bytes(png[16..20].try_into().expect("IHDR width"));
+        let height = u32::from_be_bytes(png[20..24].try_into().expect("IHDR height"));
+        pages.push((width as f32, height as f32));
+    }
+    let first = *pages
+        .first()
+        .unwrap_or_else(|| panic!("{fixture}: no page image"));
+    assert!(
+        pages.iter().all(|page| *page == first),
+        "{fixture}: every page image must carry the same size, saw {pages:?}"
+    );
+    first
+}
+
+/// The manual zoom scale must be production arithmetic over the fixture's own
+/// page size, not a number the declaration table chose.
+///
+/// Production scales every page the spread shows (`app::paginated_raster_scale`
+/// over `app::paginated_raster_pages`), so the re-derivation covers each
+/// visible page. A fixture that changed size without the declaration table
+/// following it fails here instead of agreeing with it.
+#[test]
+fn reader_manual_zoom_scales_are_rederived_from_fixture_bytes() {
+    let root = temp_root();
+    let fixtures_root = root.path().join("fixtures");
+    fixtures::write_reference_fixtures_for(&fixtures_root, Package::OneC).expect("fixture tree");
+
+    let mut checked = 0usize;
+    for scenario in super::reader::scenarios() {
+        let super::scenarios::Kind::Reader(super::reader::ReaderKind::RasterPage {
+            fixture,
+            zoom: super::reader::RasterZoom::Manual,
+            ..
+        }) = scenario.kind
+        else {
+            continue;
+        };
+        let facts = scenario.reader.as_ref().expect("facts");
+        let bytes = std::fs::read(seed::seed_path(&fixtures_root, fixture))
+            .unwrap_or_else(|error| panic!("read {fixture}: {error}"));
+        let page = fixture_page_size_from_bytes(fixture, &bytes);
+        assert_eq!(
+            page,
+            super::reader::raster_page_size_at(fixture),
+            "{fixture}: the declared page size must be the size the bytes carry"
+        );
+        let sizes = vec![page; facts.visible_pages.len().max(1)];
+        let fit = crate::pdf::fit_scale(
+            &sizes,
+            iced::Size::new(facts.available_width, facts.available_height),
+            super::super::PAGE_GUTTER,
+            true,
+        );
+        let expected = (fit + 0.25).clamp(0.25, 5.0);
+        assert_eq!(
+            super::reader::manual_zoom_scale(
+                fixture,
+                (facts.available_width, facts.available_height),
+                facts.visible_pages.len(),
+            ),
+            expected,
+            "{}: the declaration helper and the fixture bytes must agree",
+            scenario.id
+        );
+        // Both committed captures are height-limited, so one page and two pages
+        // reach the same fit scale there. This width-limited case is not: at
+        // 720x1000 the PDF's two 612 px pages fit to (720 - 20) / 1224, while a
+        // single page would fit to 720 / 612, so the helper's page count is
+        // observable in the arithmetic rather than only in the manifest.
+        let width_limited = super::reader::manual_zoom_scale(fixture, (720.0, 1000.0), 2);
+        let single_page = super::reader::manual_zoom_scale(fixture, (720.0, 1000.0), 1);
+        if fixture.ends_with(".pdf") {
+            assert!(
+                (width_limited - (700.0 / 1224.0 + 0.25)).abs() < 1e-6,
+                "{fixture}: the two-page width-limited scale must be (720 - 20) / 1224 + 0.25, \
+                 got {width_limited}"
+            );
+            assert!(
+                (single_page - (720.0 / 612.0 + 0.25)).abs() < 1e-6,
+                "{fixture}: the single-page width-limited scale must be 720 / 612 + 0.25, got \
+                 {single_page}"
+            );
+        } else {
+            assert!(
+                (width_limited - (700.0 / 400.0 + 0.25)).abs() < 1e-6,
+                "{fixture}: the two-page width-limited scale must be (720 - 20) / 400 + 0.25, \
+                 got {width_limited}"
+            );
+            assert!(
+                (single_page - (1000.0 / 300.0 + 0.25)).abs() < 1e-6,
+                "{fixture}: the single-page width-limited scale must be min(720 / 200, 1000 / \
+                 300) + 0.25, got {single_page}"
+            );
+        }
+        assert!(
+            (width_limited - single_page).abs() > 0.1,
+            "{fixture}: the page count must change the width-limited scale, otherwise this case \
+             cannot catch a one-page regression"
+        );
+        assert_eq!(
+            facts.zoom,
+            format!("manual({expected})"),
+            "{}: the recorded zoom must be the manual scale over the spread the capture shows",
+            scenario.id
+        );
+        checked += 1;
+    }
+    assert_eq!(
+        checked, 2,
+        "the PDF and the CBZ must each carry a manual-zoom capture"
+    );
+}
+
+/// Apply a reader capture to a fresh harness and return the rendered frame.
+///
+/// This mirrors the capture run: the same base seed, the same window messages,
+/// the same production messages, and the capture's own pointer state unless
+/// `cursor` overrides it.
+async fn render_reader_capture_with(
+    id: &str,
+    seeded: &seed::SeededLibrary,
+    fixtures_root: &Path,
+    data_root: &Path,
+    cursor: Option<iced::mouse::Cursor>,
+) -> image::RgbaImage {
+    let scenario = super::reader::scenarios()
+        .into_iter()
+        .find(|scenario| scenario.id == id)
+        .unwrap_or_else(|| panic!("missing capture {id}"));
+    let mut harness = super::runner::base_harness(Some(seeded), Package::OneC)
+        .await
+        .unwrap_or_else(|error| panic!("{id}: capture harness: {error:#}"));
+    if let Some(cursor) = cursor {
+        harness.cursor = cursor;
+    } else if let super::scenarios::Kind::Reader(kind) = scenario.kind
+        && let Some((x, y)) = super::reader::hover_position(kind)
+    {
+        harness.cursor = iced::mouse::Cursor::Available(iced::Point::new(x, y));
+    }
+    super::runner::apply_window(&scenario, &mut harness);
+    super::scenarios::apply(&scenario, &mut harness, fixtures_root, data_root)
+        .await
+        .unwrap_or_else(|error| panic!("{id}: {error:#}"));
+    super::scenarios::assert_reached(&scenario, &harness.state);
+    let (width, height) = scenario.client;
+    let image = harness.render_image(width, height, scenario.dpr).await;
+    super::scenarios::assert_reached(&scenario, &harness.state);
+    image::load_from_memory(&image.png)
+        .expect("decode the rendered frame")
+        .to_rgba8()
+}
+
+/// Render a reader capture the way the capture run does, pointer included.
+async fn render_reader_capture(
+    id: &str,
+    seeded: &seed::SeededLibrary,
+    fixtures_root: &Path,
+    data_root: &Path,
+) -> image::RgbaImage {
+    render_reader_capture_with(id, seeded, fixtures_root, data_root, None).await
+}
+
+/// `FM-18`: the captured EPUB page must carry the document's own colour.
+///
+/// The generated marks fixture paints one run in [`fixtures::READER_MARKS_COLOUR`],
+/// which no chrome token uses, so the exact colour in the rendered frame is the
+/// document's colour surviving composition rather than a chrome colour that
+/// happens to match. A capture of a fixture without that run is the negative
+/// control.
+#[tokio::test]
+async fn reader_marks_capture_keeps_the_document_colour() {
+    let root = temp_root();
+    let data_root = root.path().join("data");
+    let fixtures_root = data_root.join("fixtures");
+    fixtures::write_reference_fixtures_for(&fixtures_root, Package::OneC).expect("fixture tree");
+    let seeded = seed::seed_reader_library(&data_root.join("reader"), &fixtures_root)
+        .await
+        .expect("rich seed");
+
+    let colour = fixtures::READER_MARKS_COLOUR;
+    let expected = [colour.0, colour.1, colour.2];
+    let count = |image: &image::RgbaImage, tolerance: u8| {
+        image
+            .pixels()
+            .filter(|pixel| {
+                pixel.0[..3]
+                    .iter()
+                    .zip(expected)
+                    .all(|(channel, expected)| channel.abs_diff(expected) <= tolerance)
+            })
+            .count()
+    };
+
+    let marks = render_reader_capture(
+        "rd-epub-marks-w1280-en",
+        &seeded,
+        &fixtures_root,
+        &data_root,
+    )
+    .await;
+    let exact = count(&marks, 0);
+    assert!(
+        exact > 0,
+        "the marks capture must contain the document colour {expected:?} exactly;          pixels within 8 of it: {}",
+        count(&marks, 8)
+    );
+
+    // The negative control: the same reader screen on a generated fixture whose
+    // text carries no document colour must not contain it at all.
+    let plain =
+        render_reader_capture("rd-epub-pag-w1280-en", &seeded, &fixtures_root, &data_root).await;
+    assert_eq!(
+        count(&plain, 0),
+        0,
+        "a fixture that paints no run in {expected:?} must not show that colour"
+    );
+}
+
+/// `RD-06`: every hover capture must be the same state as its accepted base
+/// capture plus the pointer, and the pointer must change only the edge-control
+/// strip — with the control's own hovered background.
+#[tokio::test]
+async fn hover_captures_change_only_the_edge_control_strip() {
+    /// The horizontal band an edge control occupies. The button is a
+    /// full-height control with 16 px (8 px compact) padding around a 36 px
+    /// (28 px compact) glyph, so its strip is the last ~50 logical pixels;
+    /// anything wider would mean the pointer changed a layout, not a control's
+    /// hover state.
+    const EDGE_STRIP_WIDTH: f32 = 80.0;
+
+    let root = temp_root();
+    let data_root = root.path().join("data");
+    let fixtures_root = data_root.join("fixtures");
+    fixtures::write_reference_fixtures_for(&fixtures_root, Package::OneC).expect("fixture tree");
+    let seeded = seed::seed_reader_library(&data_root.join("reader"), &fixtures_root)
+        .await
+        .expect("rich seed");
+
+    // The hovered style is `theme::reader_edge_button`'s hovered background:
+    // `SURFACE_MUTED` at 70% alpha over whatever the control covers.
+    let edge = crate::theme::SURFACE_MUTED.scale_alpha(0.7);
+    let blend = |foreground: f32, background: u8| -> i32 {
+        (foreground * 255.0 * 0.7 + background as f32 * 0.3).round() as i32
+    };
+
+    // Every capture that injects a pointer, with the pointer-free capture of
+    // the same reader state.
+    for (id, base_id) in [
+        ("rd-chrome-hover-edge-w1280-en", "rd-chrome-w1280-en"),
+        ("rd-chrome-hover-edge-c390-ja", "rd-chrome-c390-ja"),
+    ] {
+        let scenario = super::reader::scenarios()
+            .into_iter()
+            .find(|scenario| scenario.id == id)
+            .unwrap_or_else(|| panic!("missing capture {id}"));
+        let super::scenarios::Kind::Reader(hover_kind) = scenario.kind else {
+            panic!("{id} must be a reader capture");
+        };
+        let (x, y) = super::reader::hover_position(hover_kind)
+            .unwrap_or_else(|| panic!("{id} injects no pointer"));
+        let (width, height) = scenario.client;
+        assert!(
+            x > width - EDGE_STRIP_WIDTH && x < width,
+            "{id}: the injected pointer must be inside the next-page control's strip: {x} of \
+             {width}"
+        );
+        assert!(
+            y > 0.0 && y < height,
+            "{id}: the injected pointer must be inside the reader: {y} of {height}"
+        );
+
+        let pointer_free = render_reader_capture_with(
+            id,
+            &seeded,
+            &fixtures_root,
+            &data_root,
+            Some(iced::mouse::Cursor::Unavailable),
+        )
+        .await;
+        let hovered = render_reader_capture_with(
+            id,
+            &seeded,
+            &fixtures_root,
+            &data_root,
+            Some(iced::mouse::Cursor::Available(iced::Point::new(x, y))),
+        )
+        .await;
+
+        // The pointer-free render of the hover capture must be the accepted
+        // base capture of the same reader state: the same document, location and
+        // panels, with no pointer. Rendering that capture here proves the two
+        // states are the same, so the only difference in the evidence set is the
+        // pointer.
+        let base = render_reader_capture(base_id, &seeded, &fixtures_root, &data_root).await;
+        assert_eq!(
+            pointer_free.dimensions(),
+            base.dimensions(),
+            "{id}: the hover capture and {base_id} must have the same raster size"
+        );
+        assert!(
+            pointer_free == base,
+            "{id}: the pointer-free hover capture must render exactly like {base_id}"
+        );
+        assert_eq!(
+            pointer_free.dimensions(),
+            hovered.dimensions(),
+            "{id}: the pointer must not change the raster size"
+        );
+
+        let mut changed = 0usize;
+        let mut outside = 0usize;
+        let mut styled = 0usize;
+        for y in 0..hovered.height() {
+            for x in 0..hovered.width() {
+                let before = pointer_free.get_pixel(x, y).0;
+                let after = hovered.get_pixel(x, y).0;
+                if before == after {
+                    continue;
+                }
+                changed += 1;
+                if (x as f32) < width - EDGE_STRIP_WIDTH {
+                    outside += 1;
+                }
+                let expected = [
+                    blend(edge.r, before[0]),
+                    blend(edge.g, before[1]),
+                    blend(edge.b, before[2]),
+                ];
+                if after[..3]
+                    .iter()
+                    .zip(expected)
+                    .all(|(channel, expected)| (*channel as i32 - expected).abs() <= 2)
+                {
+                    styled += 1;
+                }
+            }
+        }
+        assert!(
+            changed > 0,
+            "{id}: the pointer inside the enabled next-page control must change pixels"
+        );
+        assert_eq!(
+            outside, 0,
+            "{id}: the pointer must change only the edge-control strip, not the layout"
+        );
+        assert!(
+            styled > 0,
+            "{id}: some changed pixels must be the control's hovered background {edge:?} \
+             ({styled} of {changed} changed pixels)"
+        );
+    }
 }
 
 /// Reader state a capture can persist must not leak into the next capture.
@@ -4661,7 +5325,14 @@ fn rendered_pixels_carry_the_application_colors() {
     let mut cache = iced_runtime::user_interface::Cache::new();
     let mut image = None;
     for _ in 0..MAX_REDRAW_EVENTS {
-        match super::render::render_frame(&state, 320.0, 200.0, 1.0, cache) {
+        match super::render::render_frame(
+            &state,
+            320.0,
+            200.0,
+            1.0,
+            cache,
+            iced::mouse::Cursor::Unavailable,
+        ) {
             FrameOutcome::Settled(rendered) => {
                 image = Some(rendered);
                 break;

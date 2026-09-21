@@ -228,6 +228,7 @@ pub(crate) fn render_frame(
     height: f32,
     dpr: f32,
     cache: iced_runtime::user_interface::Cache,
+    cursor: iced::mouse::Cursor,
 ) -> FrameOutcome {
     install_application_fonts();
 
@@ -264,7 +265,7 @@ pub(crate) fn render_frame(
         let produced_before = produced.len();
         let (state, _) = interface.update(
             std::slice::from_ref(&event),
-            iced::mouse::Cursor::Unavailable,
+            cursor,
             &mut renderer,
             &mut clipboard,
             &mut produced,
@@ -291,12 +292,7 @@ pub(crate) fn render_frame(
     let mut clip_mask = tiny_skia::Mask::new(physical.width, physical.height)
         .expect("capture clip mask allocation");
 
-    interface.draw(
-        &mut renderer,
-        &theme,
-        &renderer_style,
-        iced::mouse::Cursor::Unavailable,
-    );
+    interface.draw(&mut renderer, &theme, &renderer_style, cursor);
 
     let iced::Renderer::Secondary(tiny_skia) = &mut renderer else {
         unreachable!("the capture renderer is always the tiny-skia secondary renderer");

@@ -43,6 +43,12 @@ pub(crate) struct Harness {
     /// would drop the focus ring or the scroll offset the capture is supposed to
     /// show.
     pub(crate) interface_cache: iced_runtime::user_interface::Cache,
+    /// The pointer position the frames are drawn with.
+    ///
+    /// A capture that shows a hover state (`RD-06`) sets it; every other
+    /// capture keeps the pointer unavailable, which is what a window with no
+    /// pointer over it delivers.
+    pub(crate) cursor: iced::mouse::Cursor,
 }
 
 impl Harness {
@@ -51,6 +57,7 @@ impl Harness {
             state,
             settled: 0,
             interface_cache: iced_runtime::user_interface::Cache::new(),
+            cursor: iced::mouse::Cursor::Unavailable,
         }
     }
 
@@ -143,7 +150,7 @@ impl Harness {
         let mut rounds: Vec<Vec<Message>> = Vec::new();
         for _ in 0..MAX_FRAME_ROUNDS {
             let cache = std::mem::take(&mut self.interface_cache);
-            match super::render::render_frame(&self.state, width, height, dpr, cache) {
+            match super::render::render_frame(&self.state, width, height, dpr, cache, self.cursor) {
                 super::render::FrameOutcome::Settled(image) => return image,
                 super::render::FrameOutcome::Requests(messages, next_cache) => {
                     self.interface_cache = next_cache;

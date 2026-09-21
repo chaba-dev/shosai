@@ -76,6 +76,11 @@ pub(crate) struct CaptureEntry {
     /// fields it had before 1C.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) reader: Option<super::scenarios::ReaderFacts>,
+    /// Package 1C: the client position the frame was drawn with as the pointer,
+    /// when the capture injects one (`RD-06`). Absent otherwise, and skipped
+    /// when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) hover: Option<(f32, f32)>,
     /// Notes about intentional gaps (for example native pickers).
     pub(crate) notes: Vec<String>,
 }
@@ -202,6 +207,11 @@ pub(crate) struct Manifest {
     pub(crate) fonts: Vec<FontRecord>,
     pub(crate) fixtures: FixtureInventory,
     pub(crate) seeded_library: SeededLibraryRecord,
+    /// Package 1C: the rich-content base seed the reader captures open from
+    /// (the shared seed plus the reused conformance fixtures and the generated
+    /// marks fixture). Absent for package 1B, and skipped when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) reader_seeded_library: Option<SeededLibraryRecord>,
     pub(crate) captures: Vec<CaptureEntry>,
     /// Capture pairs that intentionally render identical pixels.
     pub(crate) pixel_aliases: Vec<PixelAliasRecord>,
@@ -277,10 +287,11 @@ pub(crate) fn environment() -> Environment {
 
 /// Fixture inventory for the manifest.
 pub(crate) fn fixture_inventory(
+    package: super::package::Package,
     records: &[FixtureRecord],
     broken_symlinks_available: bool,
 ) -> Result<FixtureInventory> {
-    let reused = super::fixtures::REUSED_FIXTURES
+    let reused = super::fixtures::reused_fixtures(package)
         .iter()
         .map(|fixture| {
             let path = super::fixtures::repository_fixture_path(fixture.path);
@@ -470,6 +481,13 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
         manifest.seeded_library.page_size,
         manifest.seeded_library.order
     ));
+    if let Some(reader_seed) = &manifest.reader_seeded_library {
+        out.push_str(&format!(
+            "\n## Reader rich-content seed (package 1C)\n\n\
+             {} books (`{}`), page size {}, order `{}`.\n\n",
+            reader_seed.count, reader_seed.profile, reader_seed.page_size, reader_seed.order
+        ));
+    }
     if let Some(continue_reading) = &manifest.seeded_library.continue_reading {
         out.push_str(&format!("- Continue-reading seed: {continue_reading}\n"));
     }
@@ -521,6 +539,12 @@ pub(crate) fn readme(manifest: &Manifest) -> String {
                 capture.settings.join("; ")
             }
         ));
+        if let Some((x, y)) = capture.hover {
+            out.push_str(&format!(
+                "- Pointer: delivered at ({x}, {y}) logical pixels, so the control under it shows \
+                 its hover state\n"
+            ));
+        }
         if let Some(reader) = &capture.reader {
             out.push_str(&format!(
                 "- Reader: {} `{}` · {} · palette {} · page {} of {} · visible {} · spread {} · \

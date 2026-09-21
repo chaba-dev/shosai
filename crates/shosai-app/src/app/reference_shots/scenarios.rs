@@ -78,6 +78,9 @@ pub(crate) enum Base {
     /// A fourth seed for the completed-import capture (the import adds rows to
     /// its disposable store).
     ImportCompleted,
+    /// Package 1C's rich-content base: the shared seed plus the reused
+    /// conformance fixtures and the generated marks fixture.
+    Reader,
     /// Seeded schema with no books (`LB-18`).
     Empty,
     /// No store at all: the real storage-failure state (`LB-20`).
@@ -688,6 +691,10 @@ impl Scenario {
             settings: self.settings(),
             rows: self.rows.iter().map(|row| (*row).to_owned()).collect(),
             reader: self.reader.clone(),
+            hover: match self.kind {
+                Kind::Reader(kind) => super::reader::hover_position(kind),
+                _ => None,
+            },
             notes: self.notes.iter().map(|note| (*note).to_owned()).collect(),
         }
     }

@@ -878,11 +878,20 @@ async fn run_package(roots: &super::package::PackageRoots) -> Result<()> {
         output.display(),
         fixtures_root.display()
     );
-    let fixture_records = fixtures::write_reference_fixtures(&fixtures_root)?;
+    let fixture_records = fixtures::write_reference_fixtures_for(&fixtures_root, package)?;
     let broken_symlinks_available = fixtures::broken_symlinks_available(&fixtures_root);
 
     let seeded = seed::seed_library(&data.join("seeded"), &fixtures_root).await?;
     let empty = seed::seed_empty_library(&data.join("empty")).await?;
+    // Package 1C's rich-content captures open from their own base seed: the
+    // shared library plus the reused conformance fixtures and the generated
+    // marks fixture. It is a separate store so the shared seed's order (and
+    // therefore package 1B's evidence) is untouched.
+    let reader_seeded = if package == Package::OneC {
+        Some(seed::seed_reader_library(&data.join("reader"), &fixtures_root).await?)
+    } else {
+        None
+    };
     println!(
         "reference-shots [{}]: seeded {} books, {} fixtures",
         package.id(),
@@ -904,6 +913,11 @@ async fn run_package(roots: &super::package::PackageRoots) -> Result<()> {
         // its base store, so no capture can observe another's state.
         let base_seed: Option<&seed::SeededLibrary> = match scenario.base {
             Base::Seeded => Some(&seeded),
+            Base::Reader => Some(
+                reader_seeded
+                    .as_ref()
+                    .context("the rich-content base seed is only built for package 1C")?,
+            ),
             Base::Empty => Some(&empty),
             Base::NoStore => None,
             Base::Import | Base::ImportRemoval | Base::ImportCompleted => {
@@ -927,6 +941,11 @@ async fn run_package(roots: &super::package::PackageRoots) -> Result<()> {
         };
 
         let mut harness = base_harness(base_seed, package).await?;
+        if let scenarios::Kind::Reader(kind) = scenario.kind
+            && let Some((x, y)) = reader::hover_position(kind)
+        {
+            harness.cursor = iced::mouse::Cursor::Available(iced::Point::new(x, y));
+        }
         apply_window(scenario, &mut harness);
         scenarios::apply(scenario, &mut harness, &fixtures_root, &data).await?;
         scenarios::assert_reached(scenario, &harness.state);
@@ -998,6 +1017,7 @@ async fn run_package(roots: &super::package::PackageRoots) -> Result<()> {
         &fixture_records,
         broken_symlinks_available,
         &seeded,
+        reader_seeded.as_ref(),
         captures,
         matrix,
         &revision,
@@ -1059,6 +1079,7 @@ pub(crate) fn build_manifest(
     fixture_records: &[fixtures::FixtureRecord],
     broken_symlinks_available: bool,
     seeded: &seed::SeededLibrary,
+    reader_seeded: Option<&seed::SeededLibrary>,
     captures: Vec<manifest::CaptureEntry>,
     matrix: manifest::MatrixCoverage,
     revision: &CaptureRevision,
@@ -1086,7 +1107,7 @@ pub(crate) fn build_manifest(
                 sha256,
             })
             .collect(),
-        fixtures: manifest::fixture_inventory(fixture_records, broken_symlinks_available)?,
+        fixtures: manifest::fixture_inventory(package, fixture_records, broken_symlinks_available)?,
         seeded_library: manifest::SeededLibraryRecord {
             profile: "G1 library seed: 14 featured books (incl. one reused conformance book and \
                       two without covers) + 32 filler books, one continue-reading entry"
@@ -1104,6 +1125,24 @@ pub(crate) fn build_manifest(
             }),
             books: seeded.books.clone(),
         },
+        reader_seeded_library: reader_seeded.map(|reader| manifest::SeededLibraryRecord {
+            profile: "1C reader seed: the shared library seed plus the reused conformance \
+                          fixtures (bidi, fonts, fonts-isolation, links, mathml, table) and the \
+                          generated reader-marks fixture"
+                .to_owned(),
+            count: reader.books.len(),
+            page_size: super::super::LIBRARY_PAGE_SIZE,
+            order: "last_read DESC NULLS LAST, date_added DESC, id DESC".to_owned(),
+            continue_reading: reader.continue_reading().map(|book| {
+                format!(
+                    "{} ({}) at {:.0}%",
+                    book.title,
+                    book.fixture,
+                    book.progress * 100.0
+                )
+            }),
+            books: reader.books.clone(),
+        }),
         captures,
         pixel_aliases: package
             .pixel_aliases()
@@ -1196,9 +1235,10 @@ pub(crate) async fn expected_manifest(
     package: Package,
     fixtures_root: &Path,
     seeded: &seed::SeededLibrary,
+    reader_seeded: Option<&seed::SeededLibrary>,
     revision: &CaptureRevision,
 ) -> Result<manifest::Manifest> {
-    let records = fixtures::write_reference_fixtures(fixtures_root)?;
+    let records = fixtures::write_reference_fixtures_for(fixtures_root, package)?;
     let captures = package
         .scenarios()
         .iter()
@@ -1209,6 +1249,7 @@ pub(crate) async fn expected_manifest(
         &records,
         fixtures::broken_symlinks_available(fixtures_root),
         seeded,
+        reader_seeded,
         captures,
         matrix(package),
         revision,

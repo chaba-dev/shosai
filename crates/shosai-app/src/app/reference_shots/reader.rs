@@ -63,6 +63,28 @@ const B720_CLOSED: [(f32, f32); 3] = [(831.0, 700.0), (832.0, 700.0), (833.0, 70
 /// width `client − 112 − 300` is 719 / 720 / 721.
 const B720_BOOKMARKS: [(f32, f32); 3] = [(1131.0, 700.0), (1132.0, 700.0), (1133.0, 700.0)];
 
+/// The pointer position the hover capture injects, inside the *next-page* edge
+/// control of the `W1280` client.
+///
+/// The control is a full-height button at the reader's right edge with 16 px
+/// horizontal padding, so its strip covers the last ~50 logical pixels and the
+/// vertical centre is inside it. The capture points at the next-page control
+/// rather than the previous-page one because it shows the first page: a
+/// previous-page control there is disabled (`app::reader_edge_button` passes
+/// `on_press_maybe(None)`), and `iced_widget::button` paints
+/// `Status::Disabled` — never `Status::Hovered` — for a button with no action,
+/// so a pointer over it would produce no hover state at all. The frame
+/// therefore shows the disabled control, the enabled control and the hovered
+/// control in one state, which is what `RD-06` asks for.
+const HOVER_EDGE_POSITION: (f32, f32) = (W1280.0 - 24.0, 420.0);
+
+/// The same pointer position for the compact (`C390`) client.
+///
+/// The compact control keeps the full-height strip and its 8 px padding, so the
+/// last ~45 logical pixels hold the 28 px glyph and the same vertical centre is
+/// inside it.
+const HOVER_EDGE_POSITION_COMPACT: (f32, f32) = (C390_READER.0 - 24.0, 420.0);
+
 /// Deterministic reader fixtures, all reused from the shared generator.
 ///
 /// 1C adds no fixture of its own: the shared reference tree already carries
@@ -78,6 +100,27 @@ pub(crate) const PDF_FOUR: &str = "library/featured/small-atlas.pdf";
 pub(crate) const PDF_TWO: &str = "library/featured/field-notes.pdf";
 pub(crate) const CBZ_TWELVE: &str = "library/featured/comet-courier.cbz";
 pub(crate) const CBZ_THREE: &str = "library/featured/comet-courier-02.cbz";
+
+/// The generated capture-only fixture package 1C adds (lists, a quote, a link
+/// and a coloured run).
+pub(crate) const EPUB_MARKS: &str = "library/featured/reader-marks.epub";
+/// Reused conformance fixtures that render under the pinned font environment.
+pub(crate) const EPUB_LINKS: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/links.epub";
+pub(crate) const EPUB_BIDI: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub";
+pub(crate) const EPUB_FONTS: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub";
+pub(crate) const EPUB_FONTS_ISOLATION: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub";
+pub(crate) const EPUB_TABLE: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/table.epub";
+pub(crate) const EPUB_MATHML: &str =
+    "repo:crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub";
+
+/// The fixture string the rich-content captures record.
+const READER_SEED_LABEL: &str = "1C reader seed (the shared 46-book library + six reused \
+                                    conformance fixtures + the generated reader-marks fixture)";
 
 /// A panel state a capture opens after it reaches its document location.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,15 +211,69 @@ pub(crate) enum RasterZoom {
     FitPage,
     /// Fit the page width, so the height may overflow.
     FitWidth,
+    /// One `Message::ZoomIn` from the fit-page baseline.
+    Manual,
 }
 
 impl RasterZoom {
-    /// The value recorded in [`ReaderFacts::zoom`].
-    pub(crate) fn stored(self) -> &'static str {
+    /// The mode name, without the manual scale.
+    pub(crate) fn mode(self) -> &'static str {
         match self {
             Self::FitPage => "fit-page",
             Self::FitWidth => "fit-width",
+            Self::Manual => "manual",
         }
+    }
+
+    /// The value recorded in [`ReaderFacts::zoom`].
+    ///
+    /// The manual mode's scale is derived by production arithmetic from the
+    /// sizes of the pages the spread shows, so it is computed here from the same
+    /// page-size table and a test re-derives it from the fixture bytes.
+    pub(crate) fn recorded(
+        self,
+        fixture: &str,
+        available: (f32, f32),
+        visible_pages: usize,
+    ) -> String {
+        match self {
+            Self::Manual => format!(
+                "manual({})",
+                manual_zoom_scale(fixture, available, visible_pages)
+            ),
+            other => other.mode().to_owned(),
+        }
+    }
+}
+
+/// The scale one `Message::ZoomIn` reaches from the fit-page baseline.
+///
+/// Production computes `paginated_raster_scale(state, pages) + 0.25`, clamped
+/// to `[0.25, 5.0]` (`app::zoom_step_scale`), and the fit-page scale is
+/// `pdf::fit_scale` over the sizes of every page the spread shows at the
+/// reader's available size (`app::paginated_raster_scale`). `raster_page_size_at`
+/// supplies one page's size and `visible_pages` says how many the spread shows,
+/// so the declaration is arithmetic rather than an observation, and
+/// `reader_manual_zoom_scales_are_rederived_from_fixture_bytes` re-derives both
+/// from the fixture bytes.
+pub(crate) fn manual_zoom_scale(fixture: &str, available: (f32, f32), visible_pages: usize) -> f32 {
+    let page = raster_page_size_at(fixture);
+    let sizes = vec![page; visible_pages.max(1)];
+    let fit = crate::pdf::fit_scale(
+        &sizes,
+        iced::Size::new(available.0, available.1),
+        super::super::PAGE_GUTTER,
+        true,
+    );
+    (fit + 0.25).clamp(0.25, 5.0)
+}
+
+/// The page size the shared fixture generator writes for a raster fixture.
+pub(crate) fn raster_page_size_at(fixture: &str) -> (f32, f32) {
+    match fixture {
+        PDF_FOUR | PDF_TWO => (612.0, 792.0),
+        CBZ_TWELVE | CBZ_THREE => (200.0, 300.0),
+        other => panic!("no declared page size for {other}"),
     }
 }
 
@@ -224,6 +321,21 @@ pub(crate) enum ReaderKind {
         fixture: &'static str,
         theme: ReaderTheme,
     },
+    /// A paginated EPUB with the pointer delivered at a client position, so the
+    /// control under it shows its hover state (`RD-06`).
+    Hover {
+        fixture: &'static str,
+        page: usize,
+        position: (f32, f32),
+    },
+}
+
+/// The client position a capture injects as the pointer, if it injects one.
+pub(crate) fn hover_position(kind: ReaderKind) -> Option<(f32, f32)> {
+    match kind {
+        ReaderKind::Hover { position, .. } => Some(position),
+        _ => None,
+    }
 }
 
 impl ReaderKind {
@@ -257,8 +369,9 @@ impl ReaderKind {
                 location_text(*page),
                 match zoom {
                     RasterZoom::FitPage => String::new(),
-                    RasterZoom::FitWidth => {
-                        " then `Message::SetZoomFitWidth`".to_owned()
+                    RasterZoom::FitWidth => " then `Message::SetZoomFitWidth`".to_owned(),
+                    RasterZoom::Manual => {
+                        " then `Message::ZoomIn` from the fit-page baseline".to_owned()
                     }
                 },
                 panel_text(*panel)
@@ -300,6 +413,20 @@ impl ReaderKind {
                 "{} then `Message::CycleTheme` until the reader palette is `{}`",
                 open(fixture),
                 theme.stored()
+            ),
+            Self::Hover {
+                fixture,
+                page,
+                position,
+            } => format!(
+                "{} then the paginated EPUB location {}; the frame is drawn with the pointer \
+                 delivered at ({}, {}), which is inside the enabled next-page edge control, so that \
+                 control paints the hover state a window would show while the previous-page control \
+                 stays disabled on the first page",
+                open(fixture),
+                location_text(*page),
+                position.0,
+                position.1
             ),
         }
     }
@@ -355,6 +482,9 @@ impl ReaderKind {
                 let mut facts = epub_facts(fixture, 0, Panel::None, client, 16.0);
                 facts.theme = theme.stored().to_owned();
                 facts
+            }
+            Self::Hover { fixture, page, .. } => {
+                epub_facts(fixture, *page, Panel::None, client, 16.0)
             }
         }
     }
@@ -416,6 +546,33 @@ fn reader(
         base: Base::Seeded,
         kind: super::scenarios::Kind::Reader(kind),
         fixture: "G1 seeded library (46 books) + reader fixtures",
+        reader: Some(kind.facts(client)),
+        notes,
+    }
+}
+
+/// One reader capture on the rich-content base seed.
+#[allow(clippy::too_many_arguments)]
+fn reader_rich(
+    id: &'static str,
+    family: &'static str,
+    rows: &'static [&'static str],
+    locale: Locale,
+    client: (f32, f32),
+    dpr: f32,
+    kind: ReaderKind,
+    notes: &'static [&'static str],
+) -> Scenario {
+    Scenario {
+        id,
+        family,
+        rows,
+        locale,
+        client,
+        dpr,
+        base: Base::Reader,
+        kind: super::scenarios::Kind::Reader(kind),
+        fixture: READER_SEED_LABEL,
         reader: Some(kind.facts(client)),
         notes,
     }
@@ -590,6 +747,49 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
                  error rather than a substituted message",
                 "The fixture is written back immediately afterwards, so the committed fixture tree \
                  and its checksums stay complete",
+            ],
+        ),
+        reader(
+            "rd-chrome-hover-edge-w1280-en",
+            "1C-RD-CHROME",
+            &["RD-06"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::Hover {
+                fixture: EPUB_EVEN,
+                page: 0,
+                position: HOVER_EDGE_POSITION,
+            },
+            &[
+                "`RD-06`'s hover state next to its disabled state: the frame is drawn with the \
+                 pointer delivered at the enabled next-page edge control, which paints the hover \
+                 background a window would paint (`theme::reader_edge_button`'s hovered style), \
+                 while the previous-page control on the first page stays disabled and paints none",
+                "The pointer position is recorded in the manifest; a regression test requires the \
+                 committed image to differ from the same state without a pointer, and to differ \
+                 only inside the edge-control strip",
+            ],
+        ),
+        reader(
+            "rd-chrome-hover-edge-c390-ja",
+            "1C-RD-CHROME",
+            &["RD-06"],
+            Locale::Ja,
+            C390_READER,
+            1.0,
+            ReaderKind::Hover {
+                fixture: EPUB_JA,
+                page: 0,
+                position: HOVER_EDGE_POSITION_COMPACT,
+            },
+            &[
+                "`RD-06` at the compact configuration: the same enabled next-page control hovered \
+                 at the 28 px compact glyph and 8 px padding, with the disabled previous-page \
+                 control beside it",
+                "The pointer position is recorded in the manifest; the same regression test that \
+                 covers the wide hover capture requires this image to differ from its pointer-free \
+                 render only inside the edge-control strip",
             ],
         ),
         reader(
@@ -923,6 +1123,27 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
                  in the package limitations",
             ],
         ),
+        reader(
+            "rd-pdf-manual-zoom-w1280-en",
+            "1C-PDF-PAG",
+            &["FM-02", "FM-13"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::RasterPage {
+                fixture: PDF_FOUR,
+                page: 1,
+                panel: Panel::None,
+                zoom: RasterZoom::Manual,
+            },
+            &[
+                "The third fit mode `FM-02` and `FM-13` name: one `Message::ZoomIn` from the \
+                 fit-page baseline, recorded as the production arithmetic's own scale",
+                "The declared scale is re-derived by a regression test from the fixture's page \
+                 size, so a change in the arithmetic fails the test instead of drifting the \
+                 manifest",
+            ],
+        ),
         // -- 1C-PDF-CONT ------------------------------------------------------
         reader(
             "rd-pdf-cont-w1280-en",
@@ -959,6 +1180,49 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
                  in-process `image` path rather than PDFium",
                 "The CBZ page pair is also the fit-page CBZ spread `FM-13` names: the two pages sit \
                  side by side in their own slots",
+            ],
+        ),
+        reader(
+            "rd-cbz-fit-width-w1280-en",
+            "1C-CBZ-PAG",
+            &["FM-03", "FM-13"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::RasterPage {
+                fixture: CBZ_TWELVE,
+                page: 2,
+                panel: Panel::None,
+                zoom: RasterZoom::FitWidth,
+            },
+            &[
+                "The CBZ fit-width spread: `Message::SetZoomFitWidth` scales the natural page to \
+                 the reader width, so the page is wider than the fit-page capture of the same page \
+                 and overflows the viewport height",
+                "`FM-13`'s fit modes: this is the CBZ fit-width half of the row, next to the PDF \
+                 fit-width and fit-page captures",
+            ],
+        ),
+        reader(
+            "rd-cbz-manual-zoom-w1280-en",
+            "1C-CBZ-PAG",
+            &["FM-03", "FM-13"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::RasterPage {
+                fixture: CBZ_TWELVE,
+                page: 2,
+                panel: Panel::None,
+                zoom: RasterZoom::Manual,
+            },
+            &[
+                "The CBZ manual-zoom half of `FM-13`: one `Message::ZoomIn` from the fit-page \
+                 baseline, so the recorded scale is the production arithmetic's own value rather \
+                 than a chosen number",
+                "The declared scale is re-derived by a regression test from the fixture's page \
+                 size, so a change in the arithmetic fails the test instead of drifting the \
+                 manifest",
             ],
         ),
         // -- 1C-CBZ-CONT ------------------------------------------------------
@@ -1231,6 +1495,154 @@ pub(crate) fn scenarios() -> Vec<Scenario> {
                  font",
             ],
         ),
+        // -- 1C-EPUB-PAG: rich composition over the reused conformance set --
+        reader_rich(
+            "rd-epub-marks-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-01", "FM-18"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_MARKS,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The generated capture-only fixture: a list, a quote, a styled link and a document \
+                 image in one page, which is the composition `FM-01` names",
+                "`FM-18`: the specification names `F4` (`conformance.epub`) and `F7` \
+                 (`mathml.epub`) for this row, but `F4` cannot render under the pinned capture font \
+                 environment and `F7` carries no document colour, so the colour evidence comes from \
+                 this generated fixture: its image is filled with one exact colour the chrome never \
+                 uses, and a regression test requires that colour in the rendered page, so a tinted \
+                 or monochrome composite fails instead of passing unnoticed",
+                "The fixture deliberately carries no italic on the interface family: the repository's \
+                 sampler book does, and the pinned capture font environment cannot shape it (see the \
+                 rich-fixture limitation)",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-links-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-01"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_LINKS,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance link fixture: its anchors and the cross-chapter target \
+                 page compose inside the page budget, so a reviewer sees what the reader does \
+                 with the fixture's link shapes",
+                "The fixture's chapter puts its anchors directly under `<main>`, and the parser's \
+                 inline collector does not carry a block-level anchor's own `href` into its spans, \
+                 so those anchors render as plain text. The gap is recorded in the known \
+                 limitations; `FM-01`'s styled-link evidence is `rd-epub-marks-w1280-en`, whose \
+                 link sits inside a paragraph and renders with the palette's link colour and \
+                 underline",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-bidi-w1280-mix",
+            "1C-EPUB-PAG",
+            &["FM-01", "FM-21"],
+            Locale::Mix,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_BIDI,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance `F5` bidi fixture at the specification's `MIX` \
+                 configuration: the interface stays English while the document mixes scripts, the \
+                 right-to-left paragraphs keep their direction (the Hebrew and Arabic runs occupy \
+                 their logical slots) and the Latin and Japanese runs compose in the page",
+                "Two parts of the row are not visible here. The Hebrew and Arabic runs themselves \
+                 are blank, because the pinned capture font set has no face for those scripts; and \
+                 the fixture's authored RTL *list* direction is not preserved, because the Iced \
+                 list composition is left-to-right. Both are recorded as the partial-coverage \
+                 reason on `FM-21` and in the known limitations rather than being read as a \
+                 rendering result",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-fonts-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-22"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_FONTS,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance font fixture: four embedded container formats, a bold and \
+                 an italic face of an embedded family, and the missing/corrupt fallbacks \
+                 (`FM-22`)",
+                "Embedded faces are document fonts: they stay isolated from the interface fonts the \
+                 pinned environment registers, which is what the image shows",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-fonts-isolation-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-22"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_FONTS_ISOLATION,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance isolation fixture: its embedded face is used only for the \
+                 run the document asks for it on, while the heading and every other run keep the \
+                 interface font (`FM-22`)",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-table-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-23"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_TABLE,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance table fixture: table cells and a table image compose inside \
+                 the page budget (`FM-23`)",
+            ],
+        ),
+        reader_rich(
+            "rd-epub-mathml-w1280-en",
+            "1C-EPUB-PAG",
+            &["FM-23"],
+            Locale::En,
+            W1280,
+            1.0,
+            ReaderKind::EpubPage {
+                fixture: EPUB_MATHML,
+                page: 0,
+                panel: Panel::None,
+            },
+            &[
+                "The reused conformance math fixture: inline and display math compose inside the \
+                 page budget (`FM-23`)",
+            ],
+        ),
         reader(
             "rd-spread-large-font-bf48-w1280-en",
             "1C-SPREAD",
@@ -1388,6 +1800,10 @@ pub(crate) async fn apply(
             goto_epub_page(harness, page).await?;
             apply_panel(harness, panel).await?;
         }
+        ReaderKind::Hover { fixture, page, .. } => {
+            open_book(harness, &fixtures_root, fixture).await?;
+            goto_epub_page(harness, page).await?;
+        }
         ReaderKind::EpubContinuous { fixture, panel } => {
             open_book(harness, &fixtures_root, fixture).await?;
             harness.dispatch(Message::ToggleReadingMode).await;
@@ -1407,6 +1823,9 @@ pub(crate) async fn apply(
                 }
                 RasterZoom::FitWidth => {
                     harness.dispatch(Message::SetZoomFitWidth).await;
+                }
+                RasterZoom::Manual => {
+                    harness.dispatch(Message::ZoomIn).await;
                 }
             }
             apply_panel(harness, panel).await?;
@@ -1572,11 +1991,11 @@ pub(crate) fn observe(state: &super::super::State) -> ReaderFacts {
             (
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_)),
                 crate::pdf::ZoomMode::FitPage,
-            ) => RasterZoom::FitPage.stored().to_owned(),
+            ) => RasterZoom::FitPage.mode().to_owned(),
             (
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_)),
                 crate::pdf::ZoomMode::FitWidth,
-            ) => RasterZoom::FitWidth.stored().to_owned(),
+            ) => RasterZoom::FitWidth.mode().to_owned(),
             (
                 Some(OpenDocument::Pdf(_)) | Some(OpenDocument::Cbz(_)),
                 crate::pdf::ZoomMode::Manual(scale),
@@ -1707,33 +2126,16 @@ pub(crate) const PIXEL_ALIASES: [(&str, &str, &str); 0] = [];
 /// covers, so an accepting package reads the gap instead of inferring complete
 /// coverage from the row id. The same gaps are listed in
 /// [`limitations`], and the owner is asked to accept them with the package.
-pub(crate) const CAPTURED_PARTIAL: [(&str, &str); 4] = [
-    (
-        "FM-01",
-        "partial: the generated EPUB fixtures carry headings and body text, so the row's styled \
-         text and page number are referenced; its lists, quotes and links need the reused \
-         conformance fixture, which the Iced reader cannot render under the pinned capture font \
-         environment (see the rich-fixture limitation), and acceptance stays with 5G",
-    ),
-    (
-        "FM-02",
-        "partial: fit-page (`rd-pdf-pag-w1280-en`) and fit-width (`rd-pdf-fit-width-w1280-en`) are \
-         referenced; manual zoom is not captured at all (see the manual-zoom limitation)",
-    ),
-    (
-        "FM-13",
-        "partial: the PDF fit-page spread (`rd-spread-pdf-w1280-en`), the PDF fit-width spread \
-         (`rd-pdf-fit-width-w1280-en`) and the CBZ fit-page spreads (`rd-spread-cbz-w1280-en`, \
-         `rd-cbz-pag-w1280-en`) are referenced; there is no CBZ fit-width capture and no \
-         manual-zoom capture at all",
-    ),
-    (
-        "RD-06",
-        "partial: the enabled and disabled edge-navigation states are referenced; hover needs a \
-         pointer position the offscreen renderer does not deliver, so the row's hover inspection \
-         stays with 4B",
-    ),
-];
+pub(crate) const CAPTURED_PARTIAL: [(&str, &str); 1] = [(
+    "FM-21",
+    "partial: the reused `bidi.epub` fixture's right-to-left paragraphs are referenced and its \
+     Latin and Japanese runs compose in the page; its Hebrew and Arabic runs are blank because \
+     the pinned capture font set (Inter, NotoSansJP, the math font) has no face for those scripts \
+     and the pinned fontconfig names an empty directory, and the fixture's authored RTL list \
+     direction is not preserved either, because the Iced list composition is left-to-right \
+     (`app/epub_view.rs`). The row's Hebrew/Arabic shaping and its RTL list direction are \
+     therefore not evidenced by this capture",
+)];
 
 /// The matrix rows this capture set satisfies, split by *how*.
 pub(crate) fn matrix_rows() -> (
@@ -1744,7 +2146,7 @@ pub(crate) fn matrix_rows() -> (
     let captured = vec![
         "RD-01", "RD-02", "RD-03", "RD-05", "RD-06", "RD-07", "RD-08", "RD-09", "RD-10", "RD-11",
         "RD-16", "RD-17", "FM-01", "FM-02", "FM-03", "FM-04", "FM-05", "FM-06", "FM-07", "FM-08",
-        "FM-09", "FM-10", "FM-13",
+        "FM-09", "FM-10", "FM-13", "FM-18", "FM-21", "FM-22", "FM-23",
     ];
     // `XA-10` is the provenance row: `manifest.json` with `captures.sha256`,
     // `fixtures.sha256` and the README satisfies it, not an image.
@@ -1779,30 +2181,8 @@ pub(crate) fn matrix_rows() -> (
              captures are comparison images only",
         ),
         (
-            "FM-21",
-            "5C — the rich composition rows name the conformance fixture, which the Iced reader \
-             cannot render under the pinned font environment (see the rich-fixture limitation); \
-             acceptance stays with 5C's own renders",
-        ),
-        (
-            "FM-22",
-            "5C — embedded document fonts: the conformance fixture panics the Iced reader under the \
-             pinned font environment; acceptance stays with 5C",
-        ),
-        (
-            "FM-23",
-            "5D — tables and math on the conformance fixture: same limitation; acceptance stays \
-             with 5D",
-        ),
-        (
             "FM-12",
             "5H — the fallback boundary and durable-location preservation are `WT` + `5H-RENDER`",
-        ),
-        (
-            "FM-18",
-            "5G — document-colour preservation through compositing is plan 5G's acceptance; the \
-             `1C-EPUB-PAG` captures are its Iced reference, and 1C renders no document-colour \
-             fixture of its own",
         ),
         (
             "FM-14",
@@ -1860,14 +2240,13 @@ pub(crate) fn limitations(broken_symlinks_available: bool) -> Vec<String> {
          immediately afterwards; the committed fixture tree and its checksums stay complete, and \
          the disposable root is the run's own."
             .to_owned(),
-        "The Iced reader cannot render the reused conformance fixture under the pinned capture \
-         font environment: building its view panics inside the text stack (`no default font \
-         found`). The trigger is reproducible and is a production behavior, not a harness \
-         artifact: with only the application fonts registered, an EPUB span that asks for the \
-         default family in italic has no matching face and cosmic-text's fallback iterator runs \
-         out. The capture set therefore names the generated deterministic reader fixtures for \
-         `FM-01` and records `FM-21`/`FM-22`/`FM-23` as pending with 5C/5D rather than fabricating \
-         a rich capture or weakening the font pin."
+        "Two of the repository's conformance fixtures cannot render under the pinned capture font \
+         environment: `conformance.epub` and `css-cascade.epub` both style `font-style: italic` on \
+         the default family, which has no italic face in the pinned set, and the text stack panics \
+         (`no default font found`) instead of falling back to the family's upright face. The other \
+         twelve conformance fixtures render and are the ones the rich captures use; the trigger is \
+         a production behavior (only the application fonts are registered), and the fallback gap \
+         itself belongs with the renderer owner rather than being papered over here."
             .to_owned(),
         "The generated PDF fixtures draw shapes only (no page text), because PDFium resolves fonts \
          for unembedded text by scanning the host font directories and does not follow \
@@ -1878,24 +2257,51 @@ pub(crate) fn limitations(broken_symlinks_available: bool) -> Vec<String> {
          decorations, native menus, toasts and animations are outside the capture, and the \
          disposable data root path is visible in application text that names a real path."
             .to_owned(),
-        "Every reader capture except the fit-width one uses a viewport the composition fits in, \
-         because the renderer has no scroll interaction: the reader chrome is captured at \
-         `W1280`/`W900`/`C390` and at the documented `B860±`/`B720±` probe widths. The layout \
-         rules, the theme and the composition are unchanged; only the window is the size the probe \
-         names. `rd-pdf-fit-width-w1280-en` is the exception by design: fit-width makes the page \
-         taller than the viewport, so that capture shows the overflow and the vertical scrollbar."
+        "Every reader capture uses a viewport the composition fits in, because the renderer has no \
+         scroll interaction: the reader chrome is captured at `W1280`/`W900`/`C390` and at the \
+         documented `B860±`/`B720±` probe widths. The layout rules, the theme and the composition \
+         are unchanged; only the window is the size the probe names. The zoom captures are the \
+         deliberate exceptions: `rd-pdf-fit-width-w1280-en`, `rd-cbz-fit-width-w1280-en`, \
+         `rd-pdf-manual-zoom-w1280-en` and `rd-cbz-manual-zoom-w1280-en` all scale the page past \
+         the viewport height, so those captures show the overflow and the vertical scrollbar \
+         instead of a page that fits."
             .to_owned(),
-        "Four captured rows have deliberately partial reference coverage, recorded per row in the \
-         matrix (`reason`) as well: `FM-01`'s lists, quotes and links need the reused conformance \
-         fixture, which panics the Iced reader under the pinned capture font environment, so the \
-         generated fixtures' headings and body text are referenced and acceptance stays with 5G; \
-         `FM-02` and `FM-13` reference fit-page and fit-width (including the PDF fit-width spread) \
-         but not manual raster zoom, which is stepwise (`Message::ZoomIn`/`ZoomOut` from the \
-         current fit scale, derived from the document's page size) and left to the accepting \
-         package; there is no CBZ fit-width capture, so that configuration is left to the \
-         accepting package too; and `RD-06`'s hover state needs a pointer position the offscreen \
-         renderer does not deliver, so the enabled and disabled edge states are referenced and \
-         hover stays with 4B."
+        "The rich captures open from package 1C's own base seed (the shared library plus the \
+         reused conformance fixtures and the generated marks fixture) so the shared seed's order, \
+         and therefore package 1B's evidence, is untouched. The marks fixture is generated for \
+         these captures and carries no italic on the interface family, which is why it can render \
+         where `conformance.epub` cannot."
+            .to_owned(),
+        "An anchor that is itself a block-level child of a block container loses its own `href`: \
+         the parser's inline collector applies a link only to the spans *inside* an `a` element, \
+         not to the anchor's own block. `links.epub`'s chapter puts its anchors directly under \
+         `main`, which is why `rd-epub-links-w1280-en` shows their text without the link colour \
+         or underline; the same anchor inside a paragraph (`rd-epub-marks-w1280-en`) or inside a \
+         table cell (`rd-epub-table-w1280-en`) keeps its link."
+            .to_owned(),
+        "The pinned capture font set (Inter, NotoSansJP and the math font, with a fontconfig that \
+         names an empty directory) covers Latin, Japanese and the math glyphs only. `FM-21`'s \
+         Hebrew and Arabic runs in `bidi.epub`, and the emoji in its mixed line, therefore render \
+         blank in `rd-epub-bidi-w1280-mix`: the capture shows the fixture's right-to-left \
+         paragraphs and its Latin/Japanese runs, not its Hebrew or Arabic shaping. The fixture's \
+         authored RTL list direction is not preserved either, because the Iced list composition \
+         is left-to-right (`app/epub_view.rs`), which is why `FM-21` is recorded as a partially \
+         covered row. Evidencing the missing halves needs a Hebrew/Arabic face in the capture \
+         font set and an RTL-aware list composition, which are renderer/capture-contract changes \
+         and owner decisions rather than something this package may do on its own."
+            .to_owned(),
+        "The shared EPUB style model carries no colour field, so document text is painted with the \
+         reader palette and no capture can show a CSS text colour: `FM-18`'s Iced reference is the \
+         document *image* path (`rd-epub-marks-w1280-en`), where the document's own pixels survive \
+         composition. A document text colour is renderer work that belongs with 5G, not something \
+         a capture here can evidence."
+            .to_owned(),
+        "Document images compose only where the parser keeps an image node: a block-level `img` and \
+         an image inside a table cell render, while an `img` inside a paragraph is dropped by the \
+         inline collector (the paragraph keeps its text only) and a missing resource never reaches \
+         the page. `nested-image.epub`'s paragraph-inline image and its missing-image fallback are \
+         therefore not composed; the gap is recorded here rather than hidden by a fabricated \
+         state."
             .to_owned(),
     ];
     if !broken_symlinks_available {
@@ -1970,7 +2376,11 @@ fn epub_facts(
 ) -> ReaderFacts {
     let available = available_for(client, panel);
     let page_count = epub_page_count_at(fixture, font_size);
-    let spread = available.0 >= 720.0 && page_count > 1;
+    // `app::epub_uses_spread` is the width rule alone: an EPUB in paginated mode
+    // uses the spread layout above the threshold even when the document has a
+    // single page, which then sits in the first slot with the intentional
+    // half-width filler beside it (`FM-08`).
+    let spread = available.0 >= 720.0;
     ReaderFacts {
         document: file_name(fixture),
         format: format_of(fixture).to_owned(),
@@ -2013,15 +2423,16 @@ fn raster_facts(
     let page_count = raster_page_count(fixture);
     let available = available_for(client, panel);
     let spread = available.0 >= 720.0 && page_count > 1;
+    let visible = visible_for(page, page_count, spread);
     ReaderFacts {
         document: file_name(fixture),
         format: format_of(fixture).to_owned(),
         mode: "paginated".to_owned(),
-        zoom: zoom.stored().to_owned(),
+        zoom: zoom.recorded(fixture, available, visible.len()),
         theme: ReaderTheme::Light.stored().to_owned(),
         page_count,
         location: page + 1,
-        visible_pages: visible_for(page, page_count, spread),
+        visible_pages: visible,
         spread,
         available_width: available.0,
         available_height: available.1,
@@ -2099,6 +2510,13 @@ pub(crate) fn epub_page_count_at(fixture: &str, font_size: f32) -> usize {
         (EPUB_ODD, 16) => 3,
         (EPUB_JA, 16) => 3,
         (EPUB_JA_TWO, 16) => 2,
+        (EPUB_MARKS, 16) => 1,
+        (EPUB_LINKS, 16) => 2,
+        (EPUB_BIDI, 16) => 1,
+        (EPUB_FONTS, 16) => 1,
+        (EPUB_FONTS_ISOLATION, 16) => 1,
+        (EPUB_TABLE, 16) => 1,
+        (EPUB_MATHML, 16) => 1,
         (fixture, font_size) => {
             panic!("no declared page count for {fixture} at a {font_size} px book font")
         }
@@ -2147,11 +2565,10 @@ pub(crate) fn non_iced_authority() -> Vec<String> {
         "FM-20 — resource rejection is distinguishable from a rendering defect: authority is the \
          plan's 5J acceptance; the limits live in the shared core and are behavioral."
             .to_owned(),
-        "FM-21 / FM-22 / FM-23 — rich composition, embedded fonts, tables and math: authority is \
-         the shared core renderer plus the 5C/5D acceptance renders. The Iced reader cannot render \
-         the conformance fixture under the pinned capture font environment (it panics in the text \
-         stack when an italic span asks for the default family and no host font is eligible), so \
-         these rows stay with 5C/5D and no 1C image is fabricated for them."
+        "FM-18 / FM-21 / FM-22 / FM-23 — document colours, bidi, embedded fonts, tables and math \
+         are captured over the reused conformance fixtures that render under the pinned font \
+         environment; acceptance stays with 5G/5C/5D, and the two fixtures that cannot render are \
+         recorded in the limitations rather than replaced by a fabricated image."
             .to_owned(),
     ]
 }
