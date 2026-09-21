@@ -238,7 +238,15 @@ class _SettingSwitch extends StatelessWidget {
   }
 }
 
-class _DialogActionTile extends StatelessWidget {
+/// A full-width dialog choice that behaves like a button.
+///
+/// It is a [ShadCard] rather than a `ShadButton` because [ShadDialog] measures
+/// its content with unbounded width: a button's fixed height and infinite
+/// minimum width clip and overflow the two-line label. The card carries the
+/// icon, title and subtitle, while the surrounding [Semantics] and
+/// [FocusableActionDetector] supply the button role, the enabled state, a
+/// visible focus ring and Enter/Space activation through [ActivateIntent].
+class _DialogActionTile extends StatefulWidget {
   const _DialogActionTile({
     required this.icon,
     required this.title,
@@ -252,34 +260,79 @@ class _DialogActionTile extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
+  State<_DialogActionTile> createState() => _DialogActionTileState();
+}
+
+class _DialogActionTileState extends State<_DialogActionTile> {
+  bool _focused = false;
+
+  void _activate() => widget.onPressed();
+
+  @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final radius = theme.cardTheme.radius ?? theme.radius;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: ShadButton.ghost(
-        width: double.infinity,
-        mainAxisAlignment: MainAxisAlignment.start,
-        onPressed: onPressed,
-        child: Row(
-          children: [
-            Icon(icon),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.muted.fallback(
-                      color: theme.colorScheme.mutedForeground,
+      child: Semantics(
+        container: true,
+        button: true,
+        enabled: true,
+        onTap: _activate,
+        child: FocusableActionDetector(
+          mouseCursor: SystemMouseCursors.click,
+          onShowFocusHighlight: (focused) => setState(() => _focused = focused),
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                _activate();
+                return null;
+              },
+            ),
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTap: _activate,
+            child: Container(
+              foregroundDecoration: _focused
+                  ? BoxDecoration(
+                      border: Border.all(
+                        color: theme.colorScheme.ring,
+                        width: 2,
+                      ),
+                      borderRadius: radius,
+                    )
+                  : null,
+              child: ShadCard(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: [
+                    Icon(widget.icon),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(widget.title),
+                          Text(
+                            widget.subtitle,
+                            style: theme.textTheme.muted.fallback(
+                              color: theme.colorScheme.mutedForeground,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
