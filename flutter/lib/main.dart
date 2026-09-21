@@ -124,11 +124,15 @@ ExternalLibrary? nativeLibrary() {
   return null;
 }
 
-class ShosaiApp extends StatelessWidget {
-  const ShosaiApp({super.key, this.bridge, this.productBridgeFactory});
+/// The production application composition: Shad and Material themes, the
+/// localization delegates and the [ShadAppBuilder] layer that installs the
+/// toaster and sonner hosts. [home] is the shell content, so widget tests can
+/// render the real composition while substituting only the platform boundary
+/// beneath it.
+class ShosaiShell extends StatelessWidget {
+  const ShosaiShell({super.key, required this.home});
 
-  final FlutterBridge? bridge;
-  final FlutterBridge Function()? productBridgeFactory;
+  final Widget home;
 
   @override
   Widget build(BuildContext context) {
@@ -146,21 +150,35 @@ class ShosaiApp extends StatelessWidget {
         ],
         builder: (context, child) => ShadAppBuilder(child: child!),
         restorationScopeId: 'shosai',
-        home: productBridgeFactory == null
-            ? ReaderScreen(bridge: bridge)
-            : ProductShell(
-                bridgeFactory: productBridgeFactory!,
-                readerBuilder:
-                    (bridge, book, settings, path, bookId, locatorChanged) =>
-                        ReaderScreen(
-                          bridge: bridge,
-                          initialPath: path,
-                          initialBookId: bookId,
-                          initialSettings: settings,
-                          onLocatorChanged: locatorChanged,
-                        ),
-              ),
+        home: home,
       ),
+    );
+  }
+}
+
+class ShosaiApp extends StatelessWidget {
+  const ShosaiApp({super.key, this.bridge, this.productBridgeFactory});
+
+  final FlutterBridge? bridge;
+  final FlutterBridge Function()? productBridgeFactory;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShosaiShell(
+      home: productBridgeFactory == null
+          ? ReaderScreen(bridge: bridge)
+          : ProductShell(
+              bridgeFactory: productBridgeFactory!,
+              readerBuilder:
+                  (bridge, book, settings, path, bookId, locatorChanged) =>
+                      ReaderScreen(
+                        bridge: bridge,
+                        initialPath: path,
+                        initialBookId: bookId,
+                        initialSettings: settings,
+                        onLocatorChanged: locatorChanged,
+                      ),
+            ),
     );
   }
 }

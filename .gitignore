@@ -35,3 +35,6 @@ __pycache__/
 # Hugo build output
 /website/public/
 /website/.hugo_build.lock
+
+# Golden-test failure artifacts written next to the goldens
+/flutter/test/failures/
