@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-21
+## [0.1.0] - 2026-09-22
 
 ### 🚀 Features
 
@@ -47,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - *(flutter)* Adopt flutter-shadcn-ui for the library shell (#106)
 - *(flutter)* Adopt flutter-shadcn-ui for the reader (#107)
 - *(reference)* Add reproducible reference captures for library, import and settings (#117)
+- *(reference)* Add Iced reader reference captures for package 1C (#119)
 
 ### 🐛 Bug Fixes
 
