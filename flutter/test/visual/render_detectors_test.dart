@@ -1,0 +1,1861 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../support/production_shell_harness.dart';
+
+/// Negative controls for the render detectors.
+///
+/// Each fixture is a controlled failure of a known shape, so a detector that
+/// stops working fails here instead of silently passing the production renders.
+/// The clipped-label fixtures deliberately produce no `RenderFlex` overflow
+/// report: the geometry detector is the only thing that can catch them.
+void main() {
+  setUpAll(loadHarnessFonts);
+
+  const view = HarnessView(size: Size(900, 400));
+
+  Future<void> pumpFixture(
+    WidgetTester tester,
+    Widget home, {
+    HarnessView at = view,
+  }) async {
+    at.apply(tester);
+    await tester.pumpWidget(productionShell(home: home));
+    await tester.pumpAndSettle();
+  }
+
+  /// A fixed-width tab strip whose labels are wider than their boxes.
+  Widget clippedTabs({TextOverflow overflow = TextOverflow.clip}) => Scaffold(
+    body: Align(
+      alignment: Alignment.topLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final label in ['All', 'EPUB', 'PDF', 'CBZ'])
+            SizedBox(
+              width: 26,
+              height: 22,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: overflow,
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+
+  List<RenderDefect> clipped(List<RenderDefect> defects) => defects
+      .where((defect) => defect.kind == RenderDefectKind.clippedText)
+      .toList();
+
+  testWidgets('flex overflow is reported by the framework and by geometry', (
+    tester,
+  ) async {
+    final recorder = RenderErrorRecorder.install();
+    addTearDown(recorder.dispose);
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 100,
+            height: 40,
+            child: Row(
+              children: const [
+                SizedBox(width: 80, height: 20),
+                SizedBox(width: 80, height: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final defects = await findRenderDefects(tester);
+    expect(
+      defects.where((defect) => defect.kind == RenderDefectKind.layoutOverflow),
+      isNotEmpty,
+      reason: 'geometry detector must report the overflowing row',
+    );
+    expect(
+      defects.where(
+        (defect) =>
+            defect.kind == RenderDefectKind.layoutOverflow &&
+            defect.source == 'geometry',
+      ),
+      isNotEmpty,
+      reason: 'the geometry source must be independent of Flutter reporting',
+    );
+    expect(
+      recorder.overflowErrors,
+      isNotEmpty,
+      reason: 'Flutter must also report this fixture, which is the known shape',
+    );
+    // The framework report is an expected part of this fixture.
+    expect(tester.takeException(), isNotNull);
+  });
+
+  testWidgets('the historical 900x700 200% tab fixture is detected', (
+    tester,
+  ) async {
+    // Faithful reproduction of the historical library tab-strip clipping
+    // (rfd/0004/evidence/parity-review-2026-09-14/07-golden-clipped-tabs-3x.png)
+    // at the XA-03 configuration: 900 logical pixels wide, 200% text. The
+    // production library no longer clips at this configuration, so the
+    // historical failing input is preserved here as its own control.
+    final recorder = RenderErrorRecorder.install();
+    addTearDown(recorder.dispose);
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 900,
+            child: Row(
+              children: [
+                for (final label in ['All', 'EPUB', 'PDF', 'CBZ'])
+                  SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      at: const HarnessView(size: Size(900, 700), textScale: 2),
+    );
+
+    final labels = clipped(
+      await findClippingDefects(tester),
+    ).map((defect) => defect.label).join('\n');
+    expect(
+      labels,
+      allOf(contains('EPUB'), contains('PDF'), contains('CBZ')),
+      reason: 'every label wider than its tab must be reported',
+    );
+    expect(
+      recorder.overflowErrors,
+      isEmpty,
+      reason:
+          'the historical shape produced no RenderFlex report, so only the '
+          'clipping check can catch it',
+    );
+    expect(tester.takeException(), isNull);
+
+    writeHarnessArtifact(
+      'negative-historical-clipped-tabs-900-t200',
+      await captureHarnessPng(tester),
+      metadata: <String, Object?>{
+        'fixture': 'G2 historical clipped tabs',
+        'expected': 'clippedText',
+      },
+    );
+  });
+
+  testWidgets('clipped labels fail the clipping check without a flex report', (
+    tester,
+  ) async {
+    final recorder = RenderErrorRecorder.install();
+    addTearDown(recorder.dispose);
+    await pumpFixture(tester, clippedTabs());
+
+    final labels = clipped(
+      await findClippingDefects(tester),
+    ).map((defect) => defect.label).join('\n');
+    expect(
+      labels,
+      allOf(contains('EPUB'), contains('CBZ')),
+      reason: 'every label wider than its box must be reported',
+    );
+    expect(
+      recorder.overflowErrors,
+      isEmpty,
+      reason:
+          'this fixture is the historical clipped-label shape: Flutter '
+          'reports no RenderFlex overflow, so only the clipping check '
+          'can catch it',
+    );
+    expect(tester.takeException(), isNull);
+
+    // Record the failing render so the detection can be inspected.
+    writeHarnessArtifact(
+      'negative-clipped-labels',
+      await captureHarnessPng(tester),
+      metadata: <String, Object?>{
+        'fixture': 'clipped-tabs',
+        'expected': 'clippedText',
+        'defects': clipped(
+          await findClippingDefects(tester),
+        ).map((defect) => defect.id).toList(),
+      },
+    );
+  });
+
+  testWidgets('no-wrap text in a tall box is still detected', (tester) async {
+    // Without wrapping the paragraph lays out at its intrinsic width, so a box
+    // that is tall enough for two wrapped lines still cuts the single line.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 30,
+            height: 200,
+            child: Text('EPUB EPUB', softWrap: false, maxLines: 1),
+          ),
+        ),
+      ),
+    );
+
+    expect(clipped(await findClippingDefects(tester)), isNotEmpty);
+  });
+
+  testWidgets('an ellipsized label is truncation, not silent clipping', (
+    tester,
+  ) async {
+    await pumpFixture(tester, clippedTabs(overflow: TextOverflow.ellipsis));
+
+    expect(
+      clipped(await findClippingDefects(tester)),
+      isEmpty,
+      reason: 'an ellipsis is visible truncation, not a hidden cut',
+    );
+    expect(
+      await findTruncationDefects(tester),
+      isNotEmpty,
+      reason: 'the truncation must still be reported',
+    );
+  });
+
+  testWidgets('labels that fit report no defects', (tester) async {
+    final recorder = RenderErrorRecorder.install();
+    addTearDown(recorder.dispose);
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final label in ['All', 'EPUB', 'PDF', 'CBZ'])
+                SizedBox(
+                  width: 80,
+                  height: 22,
+                  child: Text(label, maxLines: 1, softWrap: false),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(await findRenderDefects(tester), isEmpty);
+    expect(recorder.overflowErrors, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a label cut by an ancestor clip is reported', (tester) async {
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 40,
+              height: 22,
+              child: OverflowBox(
+                maxWidth: 240,
+                alignment: Alignment.centerLeft,
+                child: const Text(
+                  'EPUB label wider than its clip',
+                  maxLines: 1,
+                  softWrap: false,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+      reason: 'the paragraph box fits but the ancestor clip cuts the glyphs',
+    );
+  });
+
+  testWidgets('a clip that removes only empty space is not reported', (
+    tester,
+  ) async {
+    // The paragraph box is 60 tall while its ink is one short line; the clip
+    // cuts only the paragraph's empty lower half.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 200,
+              height: 30,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 200,
+                minHeight: 0,
+                maxHeight: 60,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 200,
+                  height: 60,
+                  child: Text('EPUB', maxLines: 1, softWrap: false),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  testWidgets('a clipped label inside a scrollable is reported', (
+    tester,
+  ) async {
+    // The viewport's own clipping is scrolling, but a clip inside it is not.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: ListView(
+          children: [
+            Align(
+              alignment: Alignment.topLeft,
+              child: ClipRect(
+                child: SizedBox(
+                  width: 40,
+                  height: 22,
+                  child: OverflowBox(
+                    minWidth: 0,
+                    maxWidth: 240,
+                    alignment: Alignment.centerLeft,
+                    child: const Text(
+                      'EPUB label wider than its clip',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 1000),
+          ],
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+      reason: 'a clip below the viewport still cuts the label',
+    );
+  });
+
+  testWidgets('scroll clipping is not reported as a defect', (tester) async {
+    // The label straddles the bottom edge of the viewport, so its ink is cut by
+    // the viewport itself: that is scrolling, not a defect.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: ListView(
+          children: const [
+            SizedBox(height: 390),
+            SizedBox(
+              height: 40,
+              child: Text('A paragraph crossing the edge', maxLines: 1),
+            ),
+            SizedBox(height: 400),
+          ],
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  testWidgets('a clip above a viewport is reported when it crops shown ink', (
+    tester,
+  ) async {
+    // Geometry: outer clip 80 tall, viewport 100 tall, ink at 70..86. The
+    // viewport shows the ink and the outer clip removes part of it.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 80,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 300,
+                minHeight: 0,
+                maxHeight: 100,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 300,
+                  height: 100,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: const [
+                      SizedBox(height: 70),
+                      SizedBox(
+                        height: 40,
+                        child: Text('Cropped by an outer clip', maxLines: 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+    );
+  });
+
+  testWidgets('a non-cutting inner clip does not mask an outer cut', (
+    tester,
+  ) async {
+    // The same geometry as the outer-clip control, with one addition: a
+    // ClipRect inside the viewport that is tall enough for the text. It must
+    // not stop the outer clip from being reported.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 80,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 300,
+                minHeight: 0,
+                maxHeight: 100,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 300,
+                  height: 100,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: const [
+                      SizedBox(height: 70),
+                      ClipRect(
+                        child: SizedBox(
+                          height: 40,
+                          child: Text('Cropped by an outer clip', maxLines: 1),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+      reason: 'the inner clip does not cut, so the outer cut must still report',
+    );
+  });
+
+  testWidgets('a viewport narrower than its outer clip is not reported', (
+    tester,
+  ) async {
+    // Same ink, but the outer clip is taller than the viewport, so the viewport
+    // already removes everything the outer clip would: no additional crop.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 200,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 300,
+                minHeight: 0,
+                maxHeight: 100,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 300,
+                  height: 100,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: const [
+                      SizedBox(height: 70),
+                      SizedBox(
+                        height: 40,
+                        child: Text('Fully inside the outer clip', maxLines: 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  testWidgets('a clip between nested viewports is still reported', (
+    tester,
+  ) async {
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 200,
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  ClipRect(
+                    child: SizedBox(
+                      width: 300,
+                      height: 60,
+                      child: OverflowBox(
+                        minWidth: 0,
+                        maxWidth: 300,
+                        minHeight: 0,
+                        maxHeight: 120,
+                        alignment: Alignment.topLeft,
+                        child: SizedBox(
+                          width: 300,
+                          height: 120,
+                          child: ListView(
+                            padding: EdgeInsets.zero,
+                            children: const [
+                              SizedBox(height: 100),
+                              SizedBox(
+                                height: 40,
+                                child: Text('Inside nested viewports'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+    );
+  });
+
+  testWidgets('an active fade is visible truncation, not a hidden cut', (
+    tester,
+  ) async {
+    // Width-only fade: one line, no maxLines limit, faded at the right edge.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 30,
+            height: 40,
+            child: Text(
+              'EPUB',
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.fade,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      clipped(await findClippingDefects(tester)),
+      isEmpty,
+      reason: 'the faded edge is the visible indication',
+    );
+    expect(await findTruncationDefects(tester), isNotEmpty);
+
+    // Height-only fade: wrapping text in a short box.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 200,
+            height: 10,
+            child: Text(
+              'EPUB text that needs more height than the box provides',
+              overflow: TextOverflow.fade,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(clipped(await findClippingDefects(tester)), isEmpty);
+    expect(await findTruncationDefects(tester), isNotEmpty);
+  });
+
+  testWidgets('an unmeasurable visible overflow is reported, not skipped', (
+    tester,
+  ) async {
+    // The paragraph lays out at its intrinsic width, which is far beyond the
+    // harness raster limit, so the ink cannot be measured.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 100,
+              height: 20,
+              child: Text(
+                'x' * 5000,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.visible,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final defects = clipped(await findClippingDefects(tester));
+    expect(defects, isNotEmpty);
+    expect(
+      defects.map((defect) => defect.detail).join('\n'),
+      contains('unmeasured'),
+    );
+  });
+
+  testWidgets('visible overflow is reported only when a clip cuts it', (
+    tester,
+  ) async {
+    Widget fixture({required bool clipped}) {
+      final label = const SizedBox(
+        width: 30,
+        height: 22,
+        child: Text(
+          'EPUB',
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.visible,
+        ),
+      );
+      return Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: clipped ? ClipRect(child: label) : label,
+        ),
+      );
+    }
+
+    await pumpFixture(tester, fixture(clipped: false));
+    expect(
+      await findClippingDefects(tester),
+      isEmpty,
+      reason: 'visible overflow paints the whole label; nothing is cut',
+    );
+
+    await pumpFixture(tester, fixture(clipped: true));
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+      reason: 'an ancestor clip cuts the visibly overflowing label',
+    );
+  });
+
+  testWidgets('right-to-left labels are measured in their own direction', (
+    tester,
+  ) async {
+    await pumpFixture(
+      tester,
+      const Directionality(
+        textDirection: TextDirection.rtl,
+        child: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 30,
+              height: 22,
+              child: Text(
+                'שלום עולם',
+                maxLines: 1,
+                softWrap: false,
+                textDirection: TextDirection.rtl,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(clipped(await findClippingDefects(tester)), isNotEmpty);
+  });
+
+  testWidgets('wrapped CJK text is not reported, an unbreakable run is', (
+    tester,
+  ) async {
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 120,
+            height: 120,
+            child: Text('海辺の図書館をめぐる長い旅路'),
+          ),
+        ),
+      ),
+    );
+    expect(
+      await findClippingDefects(tester),
+      isEmpty,
+      reason: 'Japanese text wraps inside a wide enough box',
+    );
+
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 40,
+            height: 22,
+            child: Text('海辺の図書館', maxLines: 1, softWrap: false),
+          ),
+        ),
+      ),
+    );
+    expect(clipped(await findClippingDefects(tester)), isNotEmpty);
+  });
+
+  testWidgets('inline widgets are reported as unmeasured, not guessed', (
+    tester,
+  ) async {
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 30,
+            height: 22,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  const TextSpan(text: 'A'),
+                  WidgetSpan(child: SizedBox(width: 40, height: 10)),
+                ],
+              ),
+              maxLines: 1,
+              softWrap: false,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final defects = clipped(await findClippingDefects(tester));
+    expect(defects, isNotEmpty);
+    expect(
+      defects.map((defect) => defect.detail).join('\n'),
+      contains('inline widgets'),
+    );
+  });
+
+  testWidgets('a clip inside a viewport is not masked by the viewport', (
+    tester,
+  ) async {
+    // The inner clip's edge coincides with the viewport edge, but the clip
+    // moves with the content, so the glyph part it removes stays removed.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 300,
+            height: 100,
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                ClipRect(
+                  child: SizedBox(
+                    width: 300,
+                    height: 100,
+                    child: OverflowBox(
+                      minWidth: 0,
+                      maxWidth: 300,
+                      minHeight: 0,
+                      maxHeight: 120,
+                      alignment: Alignment.topLeft,
+                      child: SizedBox(
+                        width: 300,
+                        height: 120,
+                        child: Column(
+                          children: const [
+                            SizedBox(height: 90),
+                            Text('Permanently cut label', maxLines: 1),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 300),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+    );
+  });
+
+  testWidgets('an outer viewport still bounds a taller inner viewport', (
+    tester,
+  ) async {
+    // Outer clip 80 tall, viewport A 75 tall, inner viewport B 100 tall, ink
+    // 70..86: A already removes everything past 75, so the outer clip adds no
+    // further crop.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 80,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 300,
+                minHeight: 0,
+                maxHeight: 75,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 300,
+                  height: 75,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      SizedBox(
+                        height: 100,
+                        child: ListView(
+                          padding: EdgeInsets.zero,
+                          children: const [
+                            SizedBox(height: 70),
+                            SizedBox(
+                              height: 40,
+                              child: Text('Nested label', maxLines: 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  testWidgets('ink entirely outside the viewport is not reported', (
+    tester,
+  ) async {
+    // The label is scrolled far below the viewport, so no visible ink remains
+    // for an outer clip to remove.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 300,
+              height: 80,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 300,
+                minHeight: 0,
+                maxHeight: 100,
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 300,
+                  height: 100,
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: const [
+                      SizedBox(height: 150),
+                      SizedBox(
+                        height: 40,
+                        child: Text('Below the viewport', maxLines: 1),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  testWidgets('a faded label is not blamed for ink the fade already clips', (
+    tester,
+  ) async {
+    // The ancestor clip matches the paragraph box exactly, so it removes
+    // nothing the faded paragraph does not already clip.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 30,
+              height: 40,
+              child: Text(
+                'EPUB',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.fade,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      await findClippingDefects(tester),
+      isEmpty,
+      reason: 'truncation is reported separately; nothing else is cut',
+    );
+    expect(await findTruncationDefects(tester), isNotEmpty);
+
+    // A genuinely smaller ancestor clip still cuts the painted label.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: ClipRect(
+            child: SizedBox(
+              width: 20,
+              height: 40,
+              child: OverflowBox(
+                minWidth: 0,
+                maxWidth: 30,
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: 30,
+                  height: 40,
+                  child: Text(
+                    'EPUB',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.fade,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      (await findClippingDefects(
+        tester,
+      )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+      isNotEmpty,
+    );
+  });
+
+  testWidgets('a rotated clip keeps a valid axis-aligned bound', (
+    tester,
+  ) async {
+    // A 45-degree rotation of a 100x100 clip has a ~141x141 bounding box. The
+    // label sits inside the rotated clip, so the bound must contain it.
+    await pumpFixture(
+      tester,
+      Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: Transform.rotate(
+            angle: math.pi / 4,
+            child: ClipRect(
+              child: SizedBox(
+                width: 100,
+                height: 100,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: SizedBox(
+                    width: 60,
+                    height: 20,
+                    child: Text('Rotated', maxLines: 1, softWrap: false),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(await findClippingDefects(tester), isEmpty);
+  });
+
+  /// A paragraph whose line metrics fit its box but whose glyph ink overhangs
+  /// it. Flutter does not clip a fitting line box, so the overhang is only cut
+  /// when an ancestor clip is smaller than the ink.
+  Widget overhangingLabel({required double clipHeight}) => Scaffold(
+    body: Align(
+      alignment: Alignment.topLeft,
+      child: ClipRect(
+        child: SizedBox(
+          width: 200,
+          height: clipHeight,
+          child: const Align(
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 120,
+              height: 8,
+              child: Text(
+                'Overhang',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(fontSize: 16, height: 0.5),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('glyph overhang inside a generous clip is not a defect', (
+    tester,
+  ) async {
+    // The 16px glyphs are taller than the 8px line box, so their ink paints
+    // outside the paragraph box, but the enclosing clip contains all of it.
+    await pumpFixture(tester, overhangingLabel(clipHeight: 40));
+
+    expect(
+      await findClippingDefects(tester),
+      isEmpty,
+      reason: 'a fitting line box is not clipped by Flutter itself',
+    );
+  });
+
+  testWidgets('glyph overhang cut by an ancestor clip is reported', (
+    tester,
+  ) async {
+    // The clip matches the paragraph box exactly, so the overhang above and
+    // below the line box is removed even though Flutter never enabled the
+    // paragraph's own clip.
+    await pumpFixture(tester, overhangingLabel(clipHeight: 8));
+
+    final defects = await findClippingDefects(tester);
+    expect(
+      defects.where(
+        (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+      ),
+      isNotEmpty,
+      reason: 'the ancestor clip cuts glyph ink the paragraph still paints',
+    );
+    expect(
+      defects.where((defect) => defect.kind == RenderDefectKind.clippedText),
+      isEmpty,
+      reason:
+          'a fitting line box must not be reported as a self-clipping paragraph',
+    );
+  });
+
+  /// Two lines of text in a box tall enough for both, limited to one line: the
+  /// layout drops the second line without any ink leaving the box.
+  Widget droppedLine({required TextOverflow overflow}) => Scaffold(
+    body: Align(
+      alignment: Alignment.topLeft,
+      child: SizedBox(
+        width: 240,
+        height: 100,
+        child: Text(
+          'EPUB\nPDF',
+          maxLines: 1,
+          overflow: overflow,
+          style: const TextStyle(fontSize: 16, height: 1),
+        ),
+      ),
+    ),
+  );
+
+  for (final overflow in [TextOverflow.clip, TextOverflow.visible]) {
+    testWidgets('a dropped line is reported for ${overflow.name}', (
+      tester,
+    ) async {
+      await pumpFixture(tester, droppedLine(overflow: overflow));
+
+      final defects = await findRenderDefects(tester, includeTruncation: true);
+      expect(
+        defects.where(
+          (defect) =>
+              defect.kind == RenderDefectKind.clippedText &&
+              defect.detail.contains('maxLines'),
+        ),
+        isNotEmpty,
+        reason:
+            'maxLines removed the second line and ${overflow.name} shows no '
+            'indication of it',
+      );
+    });
+  }
+
+  group('ink overhang classification', () {
+    const box = Rect.fromLTWH(0, 0, 100, 50);
+
+    test('ink inside the box is not an overhang', () {
+      expect(
+        classifyInkOverhang(
+          visibleInk: const Rect.fromLTWH(0, 0, 100, 50),
+          bodyInk: const Rect.fromLTWH(0, 0, 100, 50),
+          region: box,
+        ),
+        InkOverhangKind.none,
+      );
+    });
+
+    test('a glyph body outside the box is a material cut', () {
+      expect(
+        classifyInkOverhang(
+          visibleInk: const Rect.fromLTWH(-3, 0, 100, 50),
+          bodyInk: const Rect.fromLTWH(-3, 0, 100, 50),
+          region: box,
+        ),
+        InkOverhangKind.material,
+      );
+    });
+
+    test('only the antialiased edge outside the box is labelled an edge', () {
+      expect(
+        classifyInkOverhang(
+          visibleInk: const Rect.fromLTWH(-1, 0, 100, 50),
+          bodyInk: const Rect.fromLTWH(0, 0, 100, 50),
+          region: box,
+        ),
+        InkOverhangKind.edgeOnly,
+      );
+    });
+
+    test('an edge overhang beyond the edge range is labelled material', () {
+      // The label only describes the overhang; reporting is decided by the
+      // tolerance alone, so this case is still reported.
+      expect(
+        classifyInkOverhang(
+          visibleInk: const Rect.fromLTWH(-2, 0, 100, 50),
+          bodyInk: const Rect.fromLTWH(0, 0, 100, 50),
+          region: box,
+        ),
+        InkOverhangKind.material,
+      );
+    });
+
+    test('the tolerance still applies to the visible ink', () {
+      expect(
+        classifyInkOverhang(
+          visibleInk: const Rect.fromLTWH(-0.4, 0, 100, 50),
+          bodyInk: const Rect.fromLTWH(0, 0, 100, 50),
+          region: box,
+        ),
+        InkOverhangKind.none,
+      );
+    });
+  });
+
+  group('edge ink characterisation', () {
+    Widget labelInBox({
+      required double width,
+      required String label,
+      double height = 40,
+    }) => Scaffold(
+      body: Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: Text(label, maxLines: 1, softWrap: false),
+        ),
+      ),
+    );
+
+    /// Measures the label in a roomy box, so the control can clip exactly its
+    /// antialiased edge or its body without guessing glyph geometry.
+    Future<HarnessInk> measureLabel(
+      WidgetTester tester, {
+      required String label,
+    }) async {
+      await pumpFixture(tester, labelInBox(width: 300, label: label));
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
+      final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
+      return ink!;
+    }
+
+    /// Labels the edge-only fixtures may measure, in preference order.
+    ///
+    /// An edge-only cut needs a label whose ink leaves its body on the trailing
+    /// side, because that antialiased fringe is what the clip cuts. Which labels
+    /// have one is decided by the platform's glyph rasteriser: macOS rounds the
+    /// trailing column of some labels to full coverage, so the fixture asks the
+    /// platform instead of assuming one label rasterises the same way
+    /// everywhere. The first candidate is the label the reference platform
+    /// rasterises with a fringe, so a platform that can do the same keeps the
+    /// fixture unchanged.
+    const candidateLabels = <String>[
+      'Adding books',
+      'Adding book',
+      'Adding books.',
+    ];
+
+    /// Measures the first candidate whose ink has a trailing overhang that the
+    /// unchanged reporting rule gates and the unchanged edge allowance still
+    /// describes as an edge.
+    ///
+    /// The precondition is measured geometry, not the classifier: a platform
+    /// whose fringe is too small to gate, or too wide to be an edge, cannot
+    /// build these fixtures, and that is reported as a failure rather than
+    /// skipped.
+    Future<(String, HarnessInk)> measureEdgeLabel(WidgetTester tester) async {
+      final measured = <String>[];
+      for (final label in candidateLabels) {
+        final ink = await measureLabel(tester, label: label);
+        final visible = ink.visible;
+        final body = ink.body;
+        if (visible == null || body == null) {
+          measured.add('$label: unmeasured');
+          continue;
+        }
+        final overhang = visible.right - body.right;
+        measured.add(
+          '$label: visible $visible body $body '
+          'overhang ${overhang.toStringAsFixed(2)}',
+        );
+        if (overhang > harnessInkOverhangTolerance &&
+            overhang <= harnessInkEdgeAllowance) {
+          return (label, ink);
+        }
+      }
+      fail(
+        'no candidate label has a trailing antialiased overhang between '
+        '$harnessInkOverhangTolerance and $harnessInkEdgeAllowance px on '
+        'this platform, so the edge-only fixtures cannot be built: '
+        '${measured.join("; ")}',
+      );
+    }
+
+    testWidgets('an edge-only overhang is reported and labelled as an edge', (
+      tester,
+    ) async {
+      final (label, ink) = await measureEdgeLabel(tester);
+      expect(
+        ink.visible!.right,
+        greaterThan(ink.body!.right),
+        reason: 'the fixture needs an antialiased edge to clip',
+      );
+
+      // The box ends exactly at the body, so only the edge leaves it.
+      await pumpFixture(
+        tester,
+        labelInBox(width: ink.body!.right, label: label),
+      );
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
+      expect(
+        clipped(defects),
+        isNotEmpty,
+        reason: 'ink that leaves the box is reported on every platform',
+      );
+      final recorded = characterized
+          .where((defect) => defect.source == 'edge-ink')
+          .toList();
+      expect(
+        recorded,
+        isNotEmpty,
+        reason: 'the finding records that the overhang stopped at the edge',
+      );
+      expect(
+        recorded.first.detail,
+        contains('stopped at the antialiased edge'),
+      );
+      expect(recorded.first.detail, contains('max alpha'));
+    });
+
+    testWidgets('a cut into a translucent span is not labelled as an edge', (
+      tester,
+    ) async {
+      // Mixed opacity: the opaque span must not make the trailing translucent
+      // span's body look like an antialiased edge, so the body is measured from
+      // coverage and not from the strongest colour in the paragraph.
+      Widget mixedOpacityLabel({required double width}) => Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: width,
+            height: 40,
+            child: const Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Opaque',
+                    style: TextStyle(color: Color(0xff111111)),
+                  ),
+                  TextSpan(
+                    text: 'Faint',
+                    style: TextStyle(color: Color(0x40ff0000)),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              softWrap: false,
+            ),
+          ),
+        ),
+      );
+
+      Future<HarnessInk> measure(double width) async {
+        await pumpFixture(tester, mixedOpacityLabel(width: width));
+        final paragraph = tester.renderObject<RenderParagraph>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is RichText &&
+                widget.text.toPlainText() == 'OpaqueFaint',
+          ),
+        );
+        final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
+        return ink!;
+      }
+
+      final roomy = await measure(300);
+      // Two pixels into the trailing span's body: the cut reaches coverage, so
+      // it must not be described as an edge effect.
+      await pumpFixture(
+        tester,
+        mixedOpacityLabel(width: roomy.body!.right - 2),
+      );
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
+      expect(
+        clipped(defects),
+        isNotEmpty,
+        reason: 'the translucent span is cut',
+      );
+      expect(
+        characterized.where((defect) => defect.source == 'edge-ink'),
+        isEmpty,
+        reason: 'the overhang reached the body of the translucent glyphs',
+      );
+    });
+
+    testWidgets('a body overhang inside the edge allowance is still gated', (
+      tester,
+    ) async {
+      final ink = await measureLabel(tester, label: candidateLabels.first);
+
+      // Three quarters of a pixel into the body: the visible overhang stays
+      // inside the edge allowance, so only the body rule can gate this, which
+      // keeps the allowance from hiding a cut of the glyph itself.
+      await pumpFixture(
+        tester,
+        labelInBox(
+          width: 300,
+          label: candidateLabels.first,
+          height: ink.body!.bottom - 0.75,
+        ),
+      );
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
+      expect(
+        clipped(defects),
+        isNotEmpty,
+        reason: 'the body of the glyph is cut',
+      );
+    });
+
+    testWidgets('a deep body overhang is gated', (tester) async {
+      final ink = await measureLabel(tester, label: candidateLabels.first);
+
+      // Two pixels into the body, as a clipped label would be.
+      await pumpFixture(
+        tester,
+        labelInBox(width: ink.body!.right - 2, label: candidateLabels.first),
+      );
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
+      expect(
+        clipped(defects),
+        isNotEmpty,
+        reason: 'the body of the glyph is cut',
+      );
+    });
+
+    testWidgets('an edge-only cut below a viewport is a gating finding', (
+      tester,
+    ) async {
+      // The paragraph does not clip (`overflow: visible`), so a clip below a
+      // real viewport cuts the antialiased edge: it must gate, and the finding
+      // must name the clip inside the nearest viewport.
+      final (label, ink) = await measureEdgeLabel(tester);
+      expect(
+        ink.visible!.right,
+        greaterThan(ink.body!.right),
+        reason: 'the fixture needs an antialiased edge to clip',
+      );
+
+      await pumpFixture(
+        tester,
+        Scaffold(
+          body: ClipRect(
+            child: SizedBox(
+              width: 400,
+              height: 200,
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  Align(
+                    alignment: Alignment.topLeft,
+                    child: ClipRect(
+                      child: SizedBox(
+                        width: ink.body!.right,
+                        height: 60,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.visible,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 1000),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
+      final ancestor = defects
+          .where((defect) => defect.kind == RenderDefectKind.clippedByAncestor)
+          .toList();
+      expect(
+        ancestor,
+        isNotEmpty,
+        reason: 'an ancestor cut is reported without needing the evidence list',
+      );
+      expect(
+        ancestor.first.detail,
+        contains('inside the nearest viewport'),
+        reason: 'the cut is below the viewport, not above it',
+      );
+      expect(
+        characterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip inside the nearest viewport'),
+        ),
+        reason: 'the below-viewport cut is characterised as an edge cut',
+      );
+    });
+
+    testWidgets('an edge-only cut by an outer clip is a gating finding', (
+      tester,
+    ) async {
+      final (label, ink) = await measureEdgeLabel(tester);
+
+      await pumpFixture(
+        tester,
+        Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: ClipRect(
+              child: SizedBox(
+                width: ink.body!.right,
+                height: 60,
+                child: OverflowBox(
+                  minWidth: 0,
+                  maxWidth: 400,
+                  minHeight: 0,
+                  maxHeight: 200,
+                  alignment: Alignment.topLeft,
+                  child: SizedBox(
+                    width: 400,
+                    height: 60,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final characterized = <RenderDefect>[];
+      expect(
+        (await findRenderDefects(
+          tester,
+          characterized: characterized,
+        )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
+        isNotEmpty,
+        reason: 'the outer clip cuts the antialiased edge and must report',
+      );
+      expect(
+        characterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip in the tree'),
+        ),
+        reason: 'the outer cut is characterised as an edge cut',
+      );
+    });
+
+    testWidgets('an edge-cutting inner clip reports when an outer clip cuts', (
+      tester,
+    ) async {
+      // Two independent cuts: an outer clip 14 tall above a taller viewport
+      // (a material vertical cut of ink at y 4..18) and, below the viewport, a
+      // clip ending at the body edge (an edge cut). The inner cut must gate and
+      // be named; removing it must leave the outer cut reported on its own.
+      final (label, ink) = await measureEdgeLabel(tester);
+
+      Widget composition({required bool withInnerClip}) => Scaffold(
+        body: ClipRect(
+          child: SizedBox(
+            width: 400,
+            height: 14,
+            child: OverflowBox(
+              minWidth: 0,
+              maxWidth: 400,
+              minHeight: 0,
+              maxHeight: 200,
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 400,
+                height: 200,
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    Align(
+                      alignment: Alignment.topLeft,
+                      child: withInnerClip
+                          ? ClipRect(
+                              child: SizedBox(
+                                width: ink.body!.right,
+                                height: 60,
+                                child: Text(
+                                  label,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  overflow: TextOverflow.visible,
+                                ),
+                              ),
+                            )
+                          : SizedBox(
+                              width: 60,
+                              height: 60,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.visible,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(height: 1000),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await pumpFixture(tester, composition(withInnerClip: true));
+      final withInnerCharacterized = <RenderDefect>[];
+      final withInner =
+          (await findRenderDefects(
+                tester,
+                characterized: withInnerCharacterized,
+              ))
+              .where(
+                (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+              )
+              .toList();
+      expect(withInner, isNotEmpty, reason: 'the inner edge cut is a real cut');
+      expect(
+        withInner.first.detail,
+        contains('inside the nearest viewport'),
+        reason: 'the inner cut is the one below the viewport',
+      );
+      expect(
+        withInnerCharacterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip inside the nearest viewport'),
+        ),
+        reason: 'the inner cut carries the edge characterisation',
+      );
+
+      await pumpFixture(tester, composition(withInnerClip: false));
+      final withoutInnerCharacterized = <RenderDefect>[];
+      final withoutInner =
+          (await findRenderDefects(
+                tester,
+                characterized: withoutInnerCharacterized,
+              ))
+              .where(
+                (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+              )
+              .toList();
+      expect(
+        withoutInner,
+        isNotEmpty,
+        reason: 'the outer clip still cuts the ink above the viewport',
+      );
+      expect(
+        withoutInner.first.detail,
+        contains('above the nearest viewport'),
+        reason: 'with the inner clip removed the outer cut reports on its own',
+      );
+      expect(
+        withoutInnerCharacterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        isEmpty,
+        reason:
+            'the remaining outer cut is material, so it carries no edge '
+            'characterisation',
+      );
+    });
+  });
+
+  testWidgets('a translucent clipped label is still a cut', (tester) async {
+    // The body of the ink decides, not its colour: a faint label whose body is
+    // clipped must still fail, otherwise the edge allowance would hide real
+    // clipping of low-contrast text.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 26,
+            height: 22,
+            child: Text(
+              'EPUB',
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(color: Color(0x40FF0000)),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      clipped(await findClippingDefects(tester)),
+      isNotEmpty,
+      reason: 'the body of a translucent label is still clipped',
+    );
+  });
+
+  testWidgets('a sub-visible label is not reported as clipped ink', (
+    tester,
+  ) async {
+    // Ink below the visibility floor is not ink a user can see, so it is not a
+    // cut; the same fixture in a visible colour is checked by the controls
+    // above, which keeps the floor from hiding real clipping.
+    await pumpFixture(
+      tester,
+      const Scaffold(
+        body: Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 26,
+            height: 22,
+            child: Text(
+              'EPUB',
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(color: Color(0x04FF0000)),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      clipped(await findClippingDefects(tester)),
+      isEmpty,
+      reason: 'ink below the visibility floor is not visible ink',
+    );
+  });
+
+  testWidgets(
+    'a faded label with no ink inside its box is not blamed on a clip',
+    (tester) async {
+      // The paragraph box is one pixel tall, so its own overflow removes all of
+      // its ink before any ancestor clip applies. The ancestor check must skip
+      // that paragraph rather than normalize an empty intersection into a
+      // phantom rect that the clip appears to cut.
+      await pumpFixture(
+        tester,
+        const Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: ClipRect(
+              child: SizedBox(
+                width: 30,
+                height: 1,
+                child: Text(
+                  'EPUB',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.fade,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final defects = await findRenderDefects(tester, includeTruncation: true);
+      expect(
+        defects.where(
+          (defect) => defect.kind == RenderDefectKind.truncatedText,
+        ),
+        isNotEmpty,
+        reason: 'the fade is still reported as visible truncation',
+      );
+      expect(
+        defects.where(
+          (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+        ),
+        isEmpty,
+        reason: 'an empty intersection is not ink an ancestor can cut',
+      );
+    },
+  );
+}
