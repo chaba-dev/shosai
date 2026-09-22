@@ -461,6 +461,7 @@ class _ReaderControls extends StatelessWidget {
       ),
     );
     final button = ShadButton(
+      height: shosaiShadButtonHeight(context),
       focusNode: openFocus,
       onPressed: model.busy ? null : open,
       leading: const Icon(LucideIcons.bookOpen),

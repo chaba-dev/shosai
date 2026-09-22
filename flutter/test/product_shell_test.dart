@@ -9,29 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
-import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
+import 'support/production_shell_harness.dart';
+
 void main() {
-  setUpAll(() async {
-    final inter = FontLoader('Inter')
-      ..addFont(rootBundle.load('../assets/fonts/InterVariable.ttf'));
-    final noto = FontLoader('Noto Sans JP')
-      ..addFont(rootBundle.load('../assets/fonts/NotoSansJP-Variable.ttf'));
-    final materialIcons = FontLoader('MaterialIcons')
-      ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
-    final lucide = FontLoader('packages/lucide_icons_flutter/Lucide')
-      ..addFont(
-        rootBundle.load('packages/lucide_icons_flutter/assets/lucide.ttf'),
-      );
-    await Future.wait([
-      inter.load(),
-      noto.load(),
-      materialIcons.load(),
-      lucide.load(),
-    ]);
-  });
+  setUpAll(loadHarnessFonts);
 
   testWidgets('expanded library golden', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
@@ -40,11 +24,6 @@ void main() {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
       _libraryApp(
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
-          useMaterial3: true,
-          fontFamily: 'Inter',
-        ),
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -72,11 +51,6 @@ void main() {
     final channel = _CleanupChannel([1, 0]);
     await tester.pumpWidget(
       _libraryApp(
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
-          useMaterial3: true,
-          fontFamily: 'Inter',
-        ),
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -544,7 +518,6 @@ void main() {
     final bridge = _LibraryBridge();
     await tester.pumpWidget(
       _libraryApp(
-        restorationScopeId: 'app',
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, path, bookId, locatorChanged) => Scaffold(
@@ -1266,11 +1239,6 @@ void main() {
     );
     await tester.pumpWidget(
       _libraryApp(
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff745b3e)),
-          useMaterial3: true,
-          fontFamily: 'Inter',
-        ),
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1322,10 +1290,6 @@ void main() {
       MediaQuery(
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
         child: _libraryApp(
-          theme: ThemeData(
-            fontFamily: 'Inter',
-            fontFamilyFallback: const ['Noto Sans JP'],
-          ),
           home: ProductShell(
             bridgeFactory: () => bridge,
             readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1727,15 +1691,6 @@ class _ControlledLibraryBridge implements FlutterBridge {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-Widget _libraryApp({
-  ThemeData? theme,
-  String? restorationScopeId,
-  required Widget home,
-}) => ShadTheme(
-  data: shosaiShadTheme(Brightness.light),
-  child: MaterialApp(
-    theme: theme,
-    restorationScopeId: restorationScopeId,
-    home: home,
-  ),
-);
+/// The production shell, so these tests render the same composition the
+/// application does instead of a lookalike theme wrapper.
+Widget _libraryApp({required Widget home}) => productionShell(home: home);

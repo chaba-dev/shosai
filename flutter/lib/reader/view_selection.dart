@@ -32,6 +32,7 @@ class _SelectionActions extends StatelessWidget {
             runSpacing: 8,
             children: [
               ShadButton.ghost(
+                height: shosaiShadButtonHeight(context),
                 focusNode: copyEnabled ? focusNode : null,
                 onPressed: !copyEnabled
                     ? null
@@ -40,6 +41,7 @@ class _SelectionActions extends StatelessWidget {
               ),
               for (final color in FlutterHighlightColor.values)
                 ShadButton(
+                  height: shosaiShadButtonHeight(context),
                   focusNode:
                       !copyEnabled &&
                           persistenceEnabled &&
@@ -52,12 +54,14 @@ class _SelectionActions extends StatelessWidget {
                   child: Text(_colorName(color)),
                 ),
               ShadButton.ghost(
+                height: shosaiShadButtonHeight(context),
                 onPressed: !persistenceEnabled
                     ? null
                     : () => dispatch(const ReaderSelectionNoteRequested()),
                 child: const Text('Add note'),
               ),
               ShadButton.ghost(
+                height: shosaiShadButtonHeight(context),
                 focusNode: !copyEnabled && !persistenceEnabled
                     ? focusNode
                     : null,
