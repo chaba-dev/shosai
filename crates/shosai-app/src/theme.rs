@@ -985,7 +985,9 @@ mod tests {
                     && let (Ok(text), Ok(relative)) =
                         (std::fs::read_to_string(&path), path.strip_prefix(root))
                 {
-                    sources.push((relative.display().to_string(), text));
+                    // The scan compares paths with `/` on every platform, so a
+                    // Windows checkout matches the same allowlist entries.
+                    sources.push((relative.display().to_string().replace('\\', "/"), text));
                 }
             }
         }
