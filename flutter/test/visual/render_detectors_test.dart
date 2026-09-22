@@ -1255,32 +1255,89 @@ void main() {
   });
 
   group('edge ink characterisation', () {
-    Widget labelInBox({required double width, double height = 40}) => Scaffold(
+    Widget labelInBox({
+      required double width,
+      required String label,
+      double height = 40,
+    }) => Scaffold(
       body: Align(
         alignment: Alignment.topLeft,
         child: SizedBox(
           width: width,
           height: height,
-          child: const Text('Adding books', maxLines: 1, softWrap: false),
+          child: Text(label, maxLines: 1, softWrap: false),
         ),
       ),
     );
 
     /// Measures the label in a roomy box, so the control can clip exactly its
     /// antialiased edge or its body without guessing glyph geometry.
-    Future<HarnessInk> measureLabel(WidgetTester tester) async {
-      await pumpFixture(tester, labelInBox(width: 300));
-      final paragraph = tester.renderObject<RenderParagraph>(
-        find.text('Adding books'),
-      );
+    Future<HarnessInk> measureLabel(
+      WidgetTester tester, {
+      required String label,
+    }) async {
+      await pumpFixture(tester, labelInBox(width: 300, label: label));
+      final paragraph = tester.renderObject<RenderParagraph>(find.text(label));
       final ink = await tester.runAsync(() => measureHarnessInk(paragraph));
       return ink!;
+    }
+
+    /// Labels the edge-only fixtures may measure, in preference order.
+    ///
+    /// An edge-only cut needs a label whose ink leaves its body on the trailing
+    /// side, because that antialiased fringe is what the clip cuts. Which labels
+    /// have one is decided by the platform's glyph rasteriser: macOS rounds the
+    /// trailing column of some labels to full coverage, so the fixture asks the
+    /// platform instead of assuming one label rasterises the same way
+    /// everywhere. The first candidate is the label the reference platform
+    /// rasterises with a fringe, so a platform that can do the same keeps the
+    /// fixture unchanged.
+    const candidateLabels = <String>[
+      'Adding books',
+      'Adding book',
+      'Adding books.',
+    ];
+
+    /// Measures the first candidate whose ink has a trailing overhang that the
+    /// unchanged reporting rule gates and the unchanged edge allowance still
+    /// describes as an edge.
+    ///
+    /// The precondition is measured geometry, not the classifier: a platform
+    /// whose fringe is too small to gate, or too wide to be an edge, cannot
+    /// build these fixtures, and that is reported as a failure rather than
+    /// skipped.
+    Future<(String, HarnessInk)> measureEdgeLabel(WidgetTester tester) async {
+      final measured = <String>[];
+      for (final label in candidateLabels) {
+        final ink = await measureLabel(tester, label: label);
+        final visible = ink.visible;
+        final body = ink.body;
+        if (visible == null || body == null) {
+          measured.add('$label: unmeasured');
+          continue;
+        }
+        final overhang = visible.right - body.right;
+        measured.add(
+          '$label: visible $visible body $body '
+          'overhang ${overhang.toStringAsFixed(2)}',
+        );
+        if (overhang > harnessInkOverhangTolerance &&
+            overhang <= harnessInkEdgeAllowance) {
+          return (label, ink);
+        }
+      }
+      fail(
+        'no candidate label has a trailing antialiased overhang between '
+        '$harnessInkOverhangTolerance and $harnessInkEdgeAllowance px on '
+        'this platform, so the edge-only fixtures cannot be built: '
+        '${measured.join("; ")}',
+      );
     }
 
     testWidgets('an edge-only overhang is reported and labelled as an edge', (
       tester,
     ) async {
-      final ink = await measureLabel(tester);
+      final (label, ink) = await measureEdgeLabel(tester);
       expect(
         ink.visible!.right,
         greaterThan(ink.body!.right),
@@ -1288,7 +1345,10 @@ void main() {
       );
 
       // The box ends exactly at the body, so only the edge leaves it.
-      await pumpFixture(tester, labelInBox(width: ink.body!.right));
+      await pumpFixture(
+        tester,
+        labelInBox(width: ink.body!.right, label: label),
+      );
       final characterized = <RenderDefect>[];
       final defects = await findRenderDefects(
         tester,
@@ -1386,14 +1446,18 @@ void main() {
     testWidgets('a body overhang inside the edge allowance is still gated', (
       tester,
     ) async {
-      final ink = await measureLabel(tester);
+      final ink = await measureLabel(tester, label: candidateLabels.first);
 
       // Three quarters of a pixel into the body: the visible overhang stays
       // inside the edge allowance, so only the body rule can gate this, which
       // keeps the allowance from hiding a cut of the glyph itself.
       await pumpFixture(
         tester,
-        labelInBox(width: 300, height: ink.body!.bottom - 0.75),
+        labelInBox(
+          width: 300,
+          label: candidateLabels.first,
+          height: ink.body!.bottom - 0.75,
+        ),
       );
       final characterized = <RenderDefect>[];
       final defects = await findRenderDefects(
@@ -1408,10 +1472,13 @@ void main() {
     });
 
     testWidgets('a deep body overhang is gated', (tester) async {
-      final ink = await measureLabel(tester);
+      final ink = await measureLabel(tester, label: candidateLabels.first);
 
       // Two pixels into the body, as a clipped label would be.
-      await pumpFixture(tester, labelInBox(width: ink.body!.right - 2));
+      await pumpFixture(
+        tester,
+        labelInBox(width: ink.body!.right - 2, label: candidateLabels.first),
+      );
       final characterized = <RenderDefect>[];
       final defects = await findRenderDefects(
         tester,
@@ -1430,7 +1497,7 @@ void main() {
       // The paragraph does not clip (`overflow: visible`), so a clip below a
       // real viewport cuts the antialiased edge: it must gate, and the finding
       // must name the clip inside the nearest viewport.
-      final ink = await measureLabel(tester);
+      final (label, ink) = await measureEdgeLabel(tester);
       expect(
         ink.visible!.right,
         greaterThan(ink.body!.right),
@@ -1453,8 +1520,8 @@ void main() {
                       child: SizedBox(
                         width: ink.body!.right,
                         height: 60,
-                        child: const Text(
-                          'Adding books',
+                        child: Text(
+                          label,
                           maxLines: 1,
                           softWrap: false,
                           overflow: TextOverflow.visible,
@@ -1470,7 +1537,11 @@ void main() {
         ),
       );
 
-      final defects = await findRenderDefects(tester);
+      final characterized = <RenderDefect>[];
+      final defects = await findRenderDefects(
+        tester,
+        characterized: characterized,
+      );
       final ancestor = defects
           .where((defect) => defect.kind == RenderDefectKind.clippedByAncestor)
           .toList();
@@ -1484,12 +1555,23 @@ void main() {
         contains('inside the nearest viewport'),
         reason: 'the cut is below the viewport, not above it',
       );
+      expect(
+        characterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip inside the nearest viewport'),
+        ),
+        reason: 'the below-viewport cut is characterised as an edge cut',
+      );
     });
 
     testWidgets('an edge-only cut by an outer clip is a gating finding', (
       tester,
     ) async {
-      final ink = await measureLabel(tester);
+      final (label, ink) = await measureEdgeLabel(tester);
 
       await pumpFixture(
         tester,
@@ -1506,11 +1588,11 @@ void main() {
                   minHeight: 0,
                   maxHeight: 200,
                   alignment: Alignment.topLeft,
-                  child: const SizedBox(
+                  child: SizedBox(
                     width: 400,
                     height: 60,
                     child: Text(
-                      'Adding books',
+                      label,
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.visible,
@@ -1523,12 +1605,25 @@ void main() {
         ),
       );
 
+      final characterized = <RenderDefect>[];
       expect(
         (await findRenderDefects(
           tester,
+          characterized: characterized,
         )).where((defect) => defect.kind == RenderDefectKind.clippedByAncestor),
         isNotEmpty,
         reason: 'the outer clip cuts the antialiased edge and must report',
+      );
+      expect(
+        characterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip in the tree'),
+        ),
+        reason: 'the outer cut is characterised as an edge cut',
       );
     });
 
@@ -1539,7 +1634,7 @@ void main() {
       // (a material vertical cut of ink at y 4..18) and, below the viewport, a
       // clip ending at the body edge (an edge cut). The inner cut must gate and
       // be named; removing it must leave the outer cut reported on its own.
-      final ink = await measureLabel(tester);
+      final (label, ink) = await measureEdgeLabel(tester);
 
       Widget composition({required bool withInnerClip}) => Scaffold(
         body: ClipRect(
@@ -1565,19 +1660,19 @@ void main() {
                               child: SizedBox(
                                 width: ink.body!.right,
                                 height: 60,
-                                child: const Text(
-                                  'Adding books',
+                                child: Text(
+                                  label,
                                   maxLines: 1,
                                   softWrap: false,
                                   overflow: TextOverflow.visible,
                                 ),
                               ),
                             )
-                          : const SizedBox(
+                          : SizedBox(
                               width: 60,
                               height: 60,
                               child: Text(
-                                'Adding books',
+                                label,
                                 maxLines: 1,
                                 softWrap: false,
                                 overflow: TextOverflow.visible,
@@ -1594,20 +1689,45 @@ void main() {
       );
 
       await pumpFixture(tester, composition(withInnerClip: true));
-      final withInner = (await findRenderDefects(tester))
-          .where((defect) => defect.kind == RenderDefectKind.clippedByAncestor)
-          .toList();
+      final withInnerCharacterized = <RenderDefect>[];
+      final withInner =
+          (await findRenderDefects(
+                tester,
+                characterized: withInnerCharacterized,
+              ))
+              .where(
+                (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+              )
+              .toList();
       expect(withInner, isNotEmpty, reason: 'the inner edge cut is a real cut');
       expect(
         withInner.first.detail,
         contains('inside the nearest viewport'),
         reason: 'the inner cut is the one below the viewport',
       );
+      expect(
+        withInnerCharacterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        allOf(
+          contains('stopped at the antialiased edge'),
+          contains('cut by a clip inside the nearest viewport'),
+        ),
+        reason: 'the inner cut carries the edge characterisation',
+      );
 
       await pumpFixture(tester, composition(withInnerClip: false));
-      final withoutInner = (await findRenderDefects(tester))
-          .where((defect) => defect.kind == RenderDefectKind.clippedByAncestor)
-          .toList();
+      final withoutInnerCharacterized = <RenderDefect>[];
+      final withoutInner =
+          (await findRenderDefects(
+                tester,
+                characterized: withoutInnerCharacterized,
+              ))
+              .where(
+                (defect) => defect.kind == RenderDefectKind.clippedByAncestor,
+              )
+              .toList();
       expect(
         withoutInner,
         isNotEmpty,
@@ -1617,6 +1737,16 @@ void main() {
         withoutInner.first.detail,
         contains('above the nearest viewport'),
         reason: 'with the inner clip removed the outer cut reports on its own',
+      );
+      expect(
+        withoutInnerCharacterized
+            .where((defect) => defect.source == 'edge-ink')
+            .map((defect) => defect.detail)
+            .join('\n'),
+        isEmpty,
+        reason:
+            'the remaining outer cut is material, so it carries no edge '
+            'characterisation',
       );
     });
   });

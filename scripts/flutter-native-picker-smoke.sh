@@ -19,7 +19,11 @@
 #   macOS  the real session: the panel is an NSOpenPanel sheet, so the runner
 #          needs Accessibility (to inspect and dismiss it) and Screen Recording
 #          (to capture it). Both are preflighted and reported as UNAVAILABLE with
-#          the owner action; the runner never grants permissions itself.
+#          the owner action; the runner never grants permissions itself, and the
+#          Screen Recording preflight takes no capture. Every capture is scoped
+#          to this run's own window (`-l <CGWindowID> -o`), resolved from the
+#          verified application pid; a window that cannot be resolved is
+#          missing evidence, never a whole-screen capture.
 #   other  UNAVAILABLE (exit 2), never an assumed pass.
 #
 # Usage:
@@ -501,7 +505,7 @@ case "$platform" in
     ;;
   Darwin)
     test_device="macos"
-    prerequisites=(flutter cargo ps screencapture osascript timeout mktemp)
+    prerequisites=(flutter cargo ps screencapture osascript swiftc timeout mktemp)
     ;;
   *)
     log "UNAVAILABLE: no native picker automation path for platform $platform"
@@ -571,34 +575,245 @@ if [[ "$platform" == Darwin ]]; then
   # AppleScript call below addresses this run's process by unix id instead of
   # by name (another instance of the same application may be running).
   darwin_app_pid_file="$profile/app-pid"
+  # Ownership state: `darwin_pid` is set once the run has verified that the
+  # application it drives belongs to this run's process group. Capture
+  # resolution refuses until then, so an early failure records missing evidence
+  # instead of reaching for a window that was never established.
+  darwin_pid=""
   if ! sw_vers -productVersion >/dev/null 2>&1; then
     log "UNAVAILABLE: sw_vers did not report a macOS version"
     exit 2
   fi
   log "macOS $(sw_vers -productVersion) on $(uname -m)"
 
-  if ! bounded "${X_COMMAND_TIMEOUT:-10}" osascript -e 'tell application "System Events" to get name of first process' \
-      >/dev/null 2>&1; then
-    log "UNAVAILABLE: the automation host has no Accessibility permission, so the"
-    log "native panel cannot be dismissed or inspected. Owner action: grant"
-    log "Accessibility to the process running this script (System Settings ->"
-    log "Privacy & Security -> Accessibility), then re-run."
+  # ---------------------------------------------------------------------------
+  # Capture scope probe
+  # ---------------------------------------------------------------------------
+  # macOS has no private display, so a capture can reach unrelated desktop
+  # content. The probe below decides what may be captured without taking a
+  # capture: it answers the Screen Recording authorization, and it resolves a
+  # window id from CGWindowListCopyWindowInfo for a pid this run verified, so
+  # every screencapture call is scoped to that window with -l.
+  darwin_probe_dir="$profile/window-probe"
+  darwin_probe_source="$darwin_probe_dir/shosai-window-probe.swift"
+  darwin_probe="$darwin_probe_dir/shosai-window-probe"
+
+  if ! mkdir -p "$darwin_probe_dir"; then
+    log "UNAVAILABLE: the capture probe directory could not be created under the"
+    log "disposable profile. Owner action: check that ${TMPDIR:-/tmp} is writable."
+    exit 2
+  fi
+  cat >"$darwin_probe_source" <<'SWIFT'
+import AppKit
+import Carbon
+import CoreGraphics
+import Foundation
+
+// Answers the two questions a capture decision needs, without capturing:
+// whether Screen Recording is granted, and which window belongs to a pid this
+// run verified. Window names are never read: they need Screen Recording, and
+// nothing here may depend on that permission.
+func fail(_ message: String, _ code: Int32) -> Never {
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+    exit(code)
+}
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+guard let mode = arguments.first else {
+    fail("usage: probe <screen-recording|window-id|window-list> [options]", 2)
+}
+
+func option(_ name: String) -> String? {
+    guard let index = arguments.firstIndex(of: name), index + 1 < arguments.count else {
+        return nil
+    }
+    return arguments[index + 1]
+}
+
+switch mode {
+case "screen-recording":
+    // Reports the current authorization and never prompts or captures.
+    exit(CGPreflightScreenCaptureAccess() ? 0 : 3)
+case "system-events":
+    // Apple Events access to System Events is the Automation service, which is
+    // not the same grant as Accessibility, and asking for it raises a consent
+    // prompt. `askUserIfNeeded: false` answers without prompting: 0 granted,
+    // 3 denied, 4 consent would be required.
+    let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.systemevents")
+    let wildcard = AEEventClass(0x2A2A2A2A)
+    var status = AEDeterminePermissionToAutomateTarget(
+        target.aeDesc, wildcard, AEEventID(0x2A2A2A2A), false)
+    if status == -600 {
+        // procNotFound: System Events is launched on demand, and consent for a
+        // target that is not running cannot be determined. It is a background
+        // agent with no UI that this runner drives moments later, so it is
+        // started here (inactively) and the question is asked again. Nothing
+        // prompts.
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        let started = DispatchSemaphore(value: 0)
+        NSWorkspace.shared.openApplication(
+            at: URL(fileURLWithPath: "/System/Library/CoreServices/System Events.app"),
+            configuration: configuration
+        ) { _, _ in started.signal() }
+        _ = started.wait(timeout: .now() + 5)
+        var waited = 0.0
+        while waited < 5.0, status == -600 {
+            Thread.sleep(forTimeInterval: 0.25)
+            waited += 0.25
+            status = AEDeterminePermissionToAutomateTarget(
+                target.aeDesc, wildcard, AEEventID(0x2A2A2A2A), false)
+        }
+    }
+    switch status {
+    case 0: exit(0)  // noErr
+    case -1743: exit(3)  // errAEEventNotPermitted
+    case -1744: exit(4)  // errAEEventWouldRequireUserConsent
+    default: fail("the Apple Events preflight returned \(status)", 5)
+    }
+case "window-id", "window-list":
+    guard let pidText = option("--pid"), let pid = Int(pidText) else {
+        fail("--pid is required", 2)
+    }
+    let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+    // `--records FILE` replaces the live window list with synthetic records
+    // (`pid id x y width height` per line). It exists so the ownership filter
+    // and the bounds match can be controlled without a window server, and it
+    // never captures. Both sources produce the same records and pass through the
+    // same ownership filter below, so a synthetic control protects the live
+    // filter instead of a second implementation of it.
+    var records: [(pid: Int, id: Int, rect: CGRect)] = []
+    if let recordsPath = option("--records") {
+        guard let text = try? String(contentsOfFile: recordsPath, encoding: .utf8) else {
+            fail("the records file could not be read", 5)
+        }
+        for line in text.split(separator: "\n") {
+            let fields = line.split(separator: " ").compactMap { Double($0) }
+            guard fields.count == 6 else { continue }
+            records.append(
+                (Int(fields[0]), Int(fields[1]),
+                 CGRect(x: fields[2], y: fields[3], width: fields[4], height: fields[5])))
+        }
+    } else {
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            fail("the window list is unavailable", 5)
+        }
+        for window in windows {
+            guard let owner = window[kCGWindowOwnerPID as String] as? Int,
+                  let number = window[kCGWindowNumber as String] as? Int,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
+            records.append((owner, number, rect))
+        }
+    }
+    let owned = records.filter { $0.pid == pid }.map { (id: $0.id, rect: $0.rect) }
+    if mode == "window-list" {
+        for window in owned {
+            print("\(window.id) \(Int(window.rect.origin.x)) \(Int(window.rect.origin.y)) "
+                + "\(Int(window.rect.width)) \(Int(window.rect.height))")
+        }
+        exit(owned.isEmpty ? 4 : 0)
+    }
+    guard let rectText = option("--rect") else { fail("--rect is required", 2) }
+    let parts = rectText.split(separator: ",").compactMap { Double($0) }
+    guard parts.count == 4 else { fail("--rect needs x,y,width,height", 2) }
+    let wanted = CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+    let tolerance = CGFloat(Double(option("--tolerance") ?? "2") ?? 2)
+    let ranked = owned.compactMap { window -> (id: Int, distance: CGFloat)? in
+        let distance = max(
+            abs(window.rect.origin.x - wanted.origin.x),
+            abs(window.rect.origin.y - wanted.origin.y),
+            abs(window.rect.width - wanted.width),
+            abs(window.rect.height - wanted.height))
+        return distance <= tolerance ? (window.id, distance) : nil
+    }.sorted { $0.distance < $1.distance }
+    guard let best = ranked.first else { exit(4) }
+    if ranked.count > 1, ranked[1].distance - best.distance <= 0.01 {
+        // Two windows of this pid fit the reported geometry equally well, so the
+        // capture target is ambiguous and is refused rather than guessed.
+        fail("the reported rect matches more than one window of pid \(pid)", 4)
+    }
+    print(best.id)
+default:
+    fail("unknown mode \(mode)", 2)
+}
+SWIFT
+  if ! bounded 60 swiftc -O -o "$darwin_probe" "$darwin_probe_source" \
+      >"$artifacts/probe-build.log" 2>&1; then
+    log "UNAVAILABLE: the capture probe did not compile, so no capture can be"
+    log "scoped to this run's own window. Owner action: check the macOS toolchain"
+    log "(swiftc) and $artifacts/probe-build.log, then re-run."
+    exit 2
+  fi
+
+  # Apple Events consent for System Events is a separate TCC service from
+  # Accessibility, and asking for it raises a consent prompt. It is checked
+  # without prompting first, so a host that lacks it is told which setting to
+  # change instead of leaving a prompt pending for the run's whole bound.
+  system_events_status=0
+  bounded 20 "$darwin_probe" system-events || system_events_status=$?
+  if (( system_events_status != 0 )); then
+    case "$system_events_status" in
+      4)
+        log "UNAVAILABLE: the automation host has not been granted Apple Events"
+        log "access to System Events, so the native panel cannot be inspected or"
+        log "dismissed, and asking would raise a consent prompt. Owner action:"
+        log "System Settings -> Privacy & Security -> Automation, then allow the"
+        log "process running this script to control System Events."
+        ;;
+      3)
+        log "UNAVAILABLE: Apple Events access to System Events was denied for the"
+        log "process running this script. Owner action: System Settings -> Privacy"
+        log "& Security -> Automation, then enable System Events for it."
+        ;;
+      *)
+        log "UNAVAILABLE: the Apple Events preflight did not answer (status"
+        log "$system_events_status). Owner action: re-run, and if it repeats"
+        log "check $artifacts/probe-build.log."
+        ;;
+    esac
+    exit 2
+  fi
+  log "Apple Events preflight: System Events is reachable, without prompting"
+
+  accessibility_status=0
+  bounded "${X_COMMAND_TIMEOUT:-10}" osascript -e 'tell application "System Events" to get name of first process' \
+    >/dev/null 2>&1 || accessibility_status=$?
+  if (( accessibility_status != 0 )); then
+    if (( accessibility_status == 124 || accessibility_status == 137 )); then
+      log "UNAVAILABLE: the accessibility preflight did not finish within its"
+      log "command or run time limit (status $accessibility_status), so the native"
+      log "panel cannot be inspected or dismissed. Owner action: raise"
+      log "X_COMMAND_TIMEOUT if the per-command limit expired, or re-run with a"
+      log "larger --timeout if the run budget was exhausted; this outcome does not"
+      log "indicate a missing permission."
+    else
+      log "UNAVAILABLE: System Events did not answer the accessibility preflight,"
+      log "so the native panel cannot be dismissed or inspected. Owner action:"
+      log "grant Accessibility to the process running this script (System Settings"
+      log "-> Privacy & Security -> Accessibility), then re-run."
+    fi
     exit 2
   fi
   log "Accessibility preflight: System Events is reachable"
 
-  screenshot_probe="$artifacts/.screenshot-probe.png"
-  if ! bounded 20 screencapture -x "$screenshot_probe" ||
-    [[ ! -s "$screenshot_probe" ]]; then
-    log "UNAVAILABLE: screencapture produced no image, so failure screenshots"
-    log "cannot be captured. Owner action: grant Screen Recording to the process"
-    log "running this script (System Settings -> Privacy & Security -> Screen"
-    log "Recording), then re-run."
-    rm -f "$screenshot_probe"
+  screen_recording_status=0
+  bounded 20 "$darwin_probe" screen-recording || screen_recording_status=$?
+  if (( screen_recording_status != 0 )); then
+    if (( screen_recording_status == 3 )); then
+      log "UNAVAILABLE: Screen Recording is not granted, so the picker cannot be"
+      log "captured. Owner action: grant Screen Recording to the process running"
+      log "this script (System Settings -> Privacy & Security -> Screen"
+      log "Recording), then re-run."
+    else
+      log "UNAVAILABLE: the Screen Recording preflight did not answer (status"
+      log "$screen_recording_status), so no capture can be scoped safely. Owner"
+      log "action: re-run, and if it repeats check $artifacts/probe-build.log and"
+      log "the macOS toolchain."
+    fi
     exit 2
   fi
-  log "Screen Recording preflight: screencapture wrote $(wc -c <"$screenshot_probe") bytes"
-  rm -f "$screenshot_probe"
+  log "Screen Recording preflight: allowed, and no capture was taken to ask"
 fi
 
 mkdir -p "$profile/xdg-data" "$profile/xdg-config" "$profile/xdg-state"
@@ -782,27 +997,57 @@ else
     fi
   }
 
-  capture_screen() {
-    local target="$1"
-    local geometry x y width height
-    geometry="$(panel_geometry)"
-    if [[ "$geometry" =~ ^([0-9-]+),([0-9-]+),([0-9]+),([0-9]+)$ ]]; then
-      x="${BASH_REMATCH[1]}"
-      y="${BASH_REMATCH[2]}"
-      width="${BASH_REMATCH[3]}"
-      height="${BASH_REMATCH[4]}"
-      bounded "${X_COMMAND_TIMEOUT:-10}" screencapture -x \
-        -R "${x},${y},${width},${height}" "$target" 2>/dev/null && return 0
+  # The window id this run captures. It is established once from the rect
+  # System Events reports for the verified pid and then reused, so the teardown
+  # capture needs no further query. The id is left in `darwin_window_id` rather
+  # than printed, because `log` writes to stdout and a command substitution
+  # would swallow the missing-evidence messages.
+  darwin_window_id=""
+
+  darwin_establish_window_id() {
+    [[ -n "$darwin_window_id" ]] && return 0
+    if [[ -z "$darwin_pid" ]]; then
+      log "no capture: this run has not established which application it owns"
+      return 1
     fi
-    # Fall back to the whole screen; the artifact then holds more than this run,
-    # which the report records.
-    log "the panel rect was unavailable; capturing the whole screen"
-    bounded "${X_COMMAND_TIMEOUT:-10}" screencapture -x "$target" 2>/dev/null
+    local geometry id
+    geometry="$(panel_geometry)"
+    if [[ ! "$geometry" =~ ^([0-9-]+),([0-9-]+),([0-9]+),([0-9]+)$ ]]; then
+      log "no capture: System Events reported no sheet or window rect for pid $darwin_pid"
+      return 1
+    fi
+    id="$(bounded "${X_COMMAND_TIMEOUT:-10}" "$darwin_probe" window-id \
+      --pid "$darwin_pid" \
+      --rect "${BASH_REMATCH[1]},${BASH_REMATCH[2]},${BASH_REMATCH[3]},${BASH_REMATCH[4]}" \
+      2>/dev/null)" || id=""
+    if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+      log "no capture: no window owned by pid $darwin_pid matches the reported rect"
+      return 1
+    fi
+    darwin_window_id="$id"
   }
 
-  # Teardown capture: the run budget is gone, so the shared grace applies.
+  # Every capture is scoped to this run's own window: `-l` takes the window id
+  # established from the verified pid, and `-o` omits the window shadow, which
+  # would otherwise sample the desktop behind it. A target that cannot be
+  # established is missing evidence, never an unscoped capture.
+  capture_screen() {
+    local target="$1"
+    darwin_establish_window_id || return 1
+    bounded "${X_COMMAND_TIMEOUT:-10}" screencapture -x -o -l "$darwin_window_id" "$target" 2>/dev/null
+  }
+
+  # Teardown capture: the run budget is gone, so the shared grace applies. The
+  # window id is reused when the run established one earlier; a run that never
+  # did has no scoped target and records missing evidence instead.
   capture_screen_forced() {
-    timeout --foreground --kill-after=5 "$1" screencapture -x "$2" 2>/dev/null
+    local grace="$1" target="$2"
+    if [[ -z "$darwin_window_id" ]]; then
+      log "no capture: the run never established this window's id"
+      return 1
+    fi
+    timeout --foreground --kill-after=5 "$grace" \
+      screencapture -x -o -l "$darwin_window_id" "$target" 2>/dev/null
   }
 
   dismiss_panel() {
@@ -876,6 +1121,12 @@ done
 (( panel_found == 1 )) ||
   fail "no native picker window appeared within ${timeout_seconds}s"
 log "native picker panel: $(panel_description)"
+if [[ "$platform" == Darwin ]]; then
+  # Resolve the capture target once, while the run budget still allows the
+  # System Events query, so both the normal and the teardown capture are scoped
+  # to this run's own window.
+  darwin_establish_window_id || true
+fi
 capture "picker-open"
 if (( $(remaining) > 0 )); then
   if capture_screen "$artifacts/picker-dialog.png"; then
