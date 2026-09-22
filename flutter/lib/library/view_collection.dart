@@ -64,6 +64,7 @@ class LibraryCollection extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 child: Center(
                   child: ShadButton.outline(
+                    height: shosaiShadButtonHeight(context),
                     width: double.infinity,
                     onPressed: model.busy ? null : loadMore,
                     trailing: const Icon(LucideIcons.chevronDown),
@@ -79,6 +80,8 @@ class LibraryCollection extends StatelessWidget {
               );
             }
             final book = model.books[index];
+            final titleStyle = Theme.of(context).textTheme.titleMedium;
+            final bodyStyle = DefaultTextStyle.of(context).style;
             return ShadCard(
               padding: const EdgeInsets.all(14),
               child: GestureDetector(
@@ -105,13 +108,22 @@ class LibraryCollection extends StatelessWidget {
                               book.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium,
+                              style: titleStyle == null
+                                  ? null
+                                  : shosaiInterfaceStyleForText(
+                                      titleStyle,
+                                      book.title,
+                                    ),
                             ),
                             if (book.author case final author?)
                               Text(
                                 author,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                                style: shosaiInterfaceStyleForText(
+                                  bodyStyle,
+                                  author,
+                                ),
                               ),
                             const SizedBox(height: 8),
                             ShadProgress(value: book.progress, minHeight: 8),
@@ -164,6 +176,7 @@ class _BookActionsMenuState extends State<_BookActionsMenu> {
     popover: (context) => Padding(
       padding: const EdgeInsets.all(4),
       child: ShadButton.ghost(
+        height: shosaiShadButtonHeight(context),
         width: double.infinity,
         mainAxisAlignment: MainAxisAlignment.start,
         onPressed: () {

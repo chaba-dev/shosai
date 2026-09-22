@@ -24,11 +24,13 @@ class _AnnotationAssociationDialogState
           : Axis.horizontal,
       actions: [
         ShadButton.outline(
+          height: shosaiShadButtonHeight(context),
           onPressed: () =>
               Navigator.pop(context, const AnnotationAssociationCancelled()),
           child: const Text('Cancel'),
         ),
         ShadButton(
+          height: shosaiShadButtonHeight(context),
           onPressed: _selected == null
               ? null
               : () => Navigator.pop(
@@ -81,6 +83,7 @@ class _AnnotationAssociationDialogState
                 children: [
                   if (widget.page.canGoBack)
                     ShadButton.ghost(
+                      height: shosaiShadButtonHeight(context),
                       onPressed: () => Navigator.pop(
                         context,
                         const AnnotationAssociationPreviousPage(),
@@ -89,6 +92,7 @@ class _AnnotationAssociationDialogState
                     ),
                   if (widget.page.canGoForward)
                     ShadButton.ghost(
+                      height: shosaiShadButtonHeight(context),
                       onPressed: () => Navigator.pop(
                         context,
                         const AnnotationAssociationNextPage(),
@@ -138,10 +142,12 @@ class _NoteDialogState extends State<_NoteDialog> {
         : Axis.horizontal,
     actions: [
       ShadButton.outline(
+        height: shosaiShadButtonHeight(context),
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
       ShadButton(
+        height: shosaiShadButtonHeight(context),
         onPressed: () => Navigator.pop(context, controller.text),
         child: const Text('Save'),
       ),

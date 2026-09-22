@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
+import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/reader/controller.dart';
@@ -181,6 +182,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           ),
           actions: [
             ShadButton.outline(
+              height: shosaiShadButtonHeight(context),
               onPressed: () => Navigator.pop(context),
               child: const Text('Close'),
             ),
@@ -406,10 +408,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
           title: Text(directory ? 'Review folder import' : 'Review books'),
           actions: [
             ShadButton.outline(
+              height: shosaiShadButtonHeight(context),
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
             ShadButton(
+              height: shosaiShadButtonHeight(context),
               onPressed: () => Navigator.pop(
                 context,
                 LibraryImportSelection(
@@ -503,10 +507,12 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
             ),
             actions: [
               ShadButton.outline(
+                height: shosaiShadButtonHeight(context),
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text('Cancel'),
               ),
               ShadButton.destructive(
+                height: shosaiShadButtonHeight(context),
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text('Remove and delete'),
               ),
@@ -540,6 +546,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
         ],
       ),
       floatingActionButton: ShadButton(
+        height: shosaiShadButtonHeight(context),
         onPressed: model.busy
             ? null
             : () => controller.dispatch(const LibraryImportRequested()),
