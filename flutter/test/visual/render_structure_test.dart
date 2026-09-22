@@ -76,8 +76,13 @@ void main() {
     );
     expect(
       platformGoldenFile('macos', 'library-normal-1280'),
+      isNotNull,
+      reason: 'the reviewed macOS baseline is committed under its own path',
+    );
+    expect(
+      platformGoldenFile('windows', 'library-normal-1280'),
       isNull,
-      reason: 'no macOS baseline is committed yet, so macOS is unresolved',
+      reason: 'a platform without a reviewed baseline stays unresolved',
     );
   });
 
