@@ -12,10 +12,12 @@ Future<FlutterReaderSettings?> _settingsDialog(
         title: const Text('Reader settings'),
         actions: [
           ShadButton.outline(
+            height: shosaiShadButtonHeight(context),
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
           ShadButton(
+            height: shosaiShadButtonHeight(context),
             onPressed: () => Navigator.pop(context, value),
             child: const Text('Save'),
           ),

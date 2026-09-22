@@ -44,15 +44,79 @@ pub(crate) struct ReusedFixture {
     pub(crate) purpose: &'static str,
 }
 
-/// Reused fixtures. Only the conformance family carries an explicit
-/// redistribution statement in this repository, so it is the only reused
-/// asset; generated fixtures stay generated.
+/// Reused fixtures of package 1B. Only the conformance family carries an
+/// explicit redistribution statement in this repository, so it is the only
+/// reused asset; generated fixtures stay generated.
 pub(crate) const REUSED_FIXTURES: [ReusedFixture; 1] = [ReusedFixture {
     path: "crates/shosai-core/tests/fixtures/epub-conformance/conformance.epub",
     sha256: "2f9687c08a59b36f7a27e8ae6a0e15bee672485a338bbd914caf48f2d5e4908a",
     provenance: "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)",
     purpose: "conformance sampler book in the seeded library",
 }];
+
+/// Rich conformance fixtures package 1C reuses for the reader rows that need
+/// more than headings and body text.
+///
+/// They are the repository's own conformance EPUBs (same provenance and
+/// redistribution statement as the reused sampler book) and they are exactly
+/// the ones that render under the pinned capture font environment: `FM-01`
+/// (links), `FM-21` (bidi and mixed script), `FM-22` (embedded fonts, missing
+/// and corrupt fallback) and `FM-23` (tables, math). `conformance.epub` and
+/// `css-cascade.epub` are deliberately absent: both style `font-style: italic`
+/// on a family with no admitted face, which the pinned environment cannot shape
+/// (see the package limitations). `nested-image.epub` is absent too: its only
+/// images are 1 px square, so a capture of it records a degenerate 1 px layout
+/// rather than a document image, and `FM-18`'s colour evidence is the generated
+/// marks fixture instead.
+pub(crate) const READER_REUSED_FIXTURES: [ReusedFixture; 6] = [
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub",
+        sha256: "5af9e82d15fa0be324ef7e219ddfc0613cb54b9706addb161c83f188cf9b810d",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "bidi and mixed-script composition plus a content list (`FM-01`, `FM-21`)",
+    },
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub",
+        sha256: "bcd605900627847c0addb541aa5f1698df4709db14321b028aff2b9d8e9962e7",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "embedded document fonts across four container formats (`FM-22`)",
+    },
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub",
+        sha256: "0c991567a52452d3e98ef726ae17bfcc12a4b3b555e14f2578bbc63030562f8f",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "embedded font isolation from the interface fonts (`FM-22`)",
+    },
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/links.epub",
+        sha256: "bb899a2d67b7ca3c82a54564b1ecb5569dbd40c8caea4b46f7ba3d696985c29b",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "inline and block links (`FM-01`)",
+    },
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub",
+        sha256: "03f1978d9ea58cabc81643e1737bed8887a3d7783e79c719ea4c72762ed0ffe6",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "inline and display math (`FM-23`)",
+    },
+    ReusedFixture {
+        path: "crates/shosai-core/tests/fixtures/epub-conformance/table.epub",
+        sha256: "9f54aac1fe4026cc06eb255a9d92a57d2d5dca7c7e6e38c8bb3bada847e48409",
+        provenance: REUSED_CONFORMANCE_PROVENANCE,
+        purpose: "tables and table images (`FM-23`)",
+    },
+];
+
+/// The redistribution statement every reused conformance fixture shares.
+const REUSED_CONFORMANCE_PROVENANCE: &str = "crates/shosai-core/tests/fixtures/epub-conformance/README.md + SHA256SUMS (documented redistribution-safe)";
+
+/// The reused fixtures a package's manifest records.
+pub(crate) fn reused_fixtures(package: super::package::Package) -> &'static [ReusedFixture] {
+    match package {
+        super::package::Package::OneB => &REUSED_FIXTURES,
+        super::package::Package::OneC => &READER_REUSED_FIXTURES,
+    }
+}
 
 /// Absolute path of a repository-relative fixture used by the captures.
 pub(crate) fn repository_fixture_path(relative: &str) -> PathBuf {
@@ -750,8 +814,137 @@ pub(crate) fn symlink_defects(root: &Path) -> Vec<String> {
 /// cannot create them the affected capture records the gap instead of
 /// fabricating the state.
 pub(crate) fn write_reference_fixtures(root: &Path) -> std::io::Result<Vec<FixtureRecord>> {
+    write_fixture_files(root, reference_fixtures())
+}
+
+/// Write the fixture tree a package renders from.
+///
+/// Each package has its own disposable data root and mirrors its own tree into
+/// its own evidence directory, so package 1C adds its capture-only fixture here
+/// and package 1B's tree, mirror, checksums and manifest stay byte-identical.
+pub(crate) fn write_reference_fixtures_for(
+    root: &Path,
+    package: super::package::Package,
+) -> std::io::Result<Vec<FixtureRecord>> {
+    let mut files = reference_fixtures();
+    if package == super::package::Package::OneC {
+        files.push(reader_marks_fixture());
+    }
+    write_fixture_files(root, files)
+}
+
+/// The generated capture-only fixture package 1C adds.
+///
+/// One chapter that carries the marks `FM-01` names — a list, a quote, a link,
+/// a coloured document image — without the unmatched italic that keeps the
+/// repository's sampler book from rendering under the pinned font environment.
+/// The image is also `FM-18`'s evidence: the capture must record exactly
+/// [`READER_MARKS_COLOUR`] where the document paints it.
+pub(crate) fn reader_marks_fixture() -> FixtureFile {
+    let mut archive = ArchiveWriter::new();
+    archive.add("mimetype", b"application/epub+zip");
+    archive.add(
+        "META-INF/container.xml",
+        br#"<?xml version="1.0" encoding="utf-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"#,
+    );
+    archive.add(
+        "OEBPS/style.css",
+        b"body { margin: 1.5em; }\nh1 { font-size: 1.4em; }\np { margin: 0.8em 0; }\nblockquote { margin: 1em 2em; }\n",
+    );
+    archive.add("OEBPS/images/mark.png", &colour_mark_png());
+    archive.add(
+        "OEBPS/nav.xhtml",
+        br#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en">
+  <head><title>Reader marks</title></head>
+  <body><nav epub:type="toc"><ol><li><a href="text/chapter-1.xhtml">Marks</a></li></ol></nav></body>
+</html>
+"#,
+    );
+    let chapter = r#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+  <head>
+    <title>Reader marks</title>
+    <link rel="stylesheet" type="text/css" href="../style.css"/>
+  </head>
+  <body>
+    <h1>Marks on a Survey Sheet</h1>
+    <p>The survey sheet carries three kinds of mark.</p>
+    <img src="../images/mark.png" alt="Colour mark"/>
+    <ul>
+      <li>A list item that names the first mark.</li>
+      <li>A list item that names the second mark.</li>
+    </ul>
+    <blockquote><p>A quoted line from the field notebook, indented on both sides.</p></blockquote>
+    <p>A paragraph that ends with <a href="https://example.invalid/notes">a link to the notes</a>.</p>
+  </body>
+</html>
+"#;
+    archive.add("OEBPS/text/chapter-1.xhtml", chapter.as_bytes());
+    archive.add(
+        "OEBPS/content.opf",
+        br#"<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">reader-marks</dc:identifier>
+    <dc:title>Reader marks</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="chapter-1" href="text/chapter-1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+    <item id="mark" href="images/mark.png" media-type="image/png"/>
+  </manifest>
+  <spine><itemref idref="chapter-1"/></spine>
+</package>
+"#,
+    );
+    FixtureFile {
+        relative_path: "library/featured/reader-marks.epub".to_owned(),
+        bytes: archive.finish(),
+    }
+}
+
+/// The colour the generated marks fixture paints its document image in, so
+/// `FM-18`'s evidence can assert that the capture recorded the document's own
+/// colour through composition.
+///
+/// It is carried by an *image* rather than by a CSS text colour because the
+/// shared EPUB style model has no colour field at all: document text is painted
+/// with the reader palette, so only the image path can show a document colour
+/// surviving composition.
+pub(crate) const READER_MARKS_COLOUR: (u8, u8, u8) = (0xB3, 0x47, 0x00);
+
+/// The opaque image the generated marks fixture embeds, filled with
+/// [`READER_MARKS_COLOUR`].
+///
+/// It is larger than one pixel so the rendered page has an interior region that
+/// must be exactly the document colour, and it is drawn at its intrinsic size
+/// (`pagination::epub_image_layout` clamps to the available width, which is
+/// wider here), so no resampling touches the colour.
+fn colour_mark_png() -> Vec<u8> {
+    const SIZE: u32 = 64;
+    let (red, green, blue) = READER_MARKS_COLOUR;
+    let mut pixels = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    for _ in 0..SIZE * SIZE {
+        pixels.extend_from_slice(&[red, green, blue, 0xFF]);
+    }
+    encode_png(&pixels, SIZE, SIZE)
+}
+
+fn write_fixture_files(
+    root: &Path,
+    files: Vec<FixtureFile>,
+) -> std::io::Result<Vec<FixtureRecord>> {
     let mut records = Vec::new();
-    for file in reference_fixtures() {
+    for file in files {
         let path = root.join(&file.relative_path);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
