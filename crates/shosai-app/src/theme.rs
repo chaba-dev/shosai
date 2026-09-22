@@ -981,12 +981,11 @@ mod tests {
                 let path = entry.path();
                 if path.is_dir() {
                     walk(root, &path, sources);
-                } else if path.extension().is_some_and(|extension| extension == "rs") {
-                    if let (Ok(text), Ok(relative)) =
+                } else if path.extension().is_some_and(|extension| extension == "rs")
+                    && let (Ok(text), Ok(relative)) =
                         (std::fs::read_to_string(&path), path.strip_prefix(root))
-                    {
-                        sources.push((relative.display().to_string(), text));
-                    }
+                {
+                    sources.push((relative.display().to_string(), text));
                 }
             }
         }
@@ -1213,10 +1212,10 @@ mod tests {
     /// `as <numeric type>` cast.
     fn is_numeric_literal(argument: &str) -> bool {
         let mut value = argument.trim();
-        if let Some((body, cast)) = value.rsplit_once(" as ") {
-            if is_numeric_type(cast.trim()) {
-                value = body.trim();
-            }
+        if let Some((body, cast)) = value.rsplit_once(" as ")
+            && is_numeric_type(cast.trim())
+        {
+            value = body.trim();
         }
         if value.is_empty()
             || value.chars().any(|character| {
