@@ -116,6 +116,7 @@ All notable changes to this project will be documented in this file.
 - *(epub)* Probe Linux Wry clipboard routing (#45)
 - *(epub)* Verify macOS Wry visual restoration (#46)
 - *(epub)* Add conformance fixture matrix (#47)
+- *(flutter)* Add production-shell render harness and native picker smoke (#120)
 
 ### ⚙️ Miscellaneous Tasks
 
