@@ -600,11 +600,23 @@ fn compare_manifests(
     );
     field(
         problems,
+        "reader_seeded_library",
+        &committed.reader_seeded_library,
+        &fresh.reader_seeded_library,
+    );
+    field(
+        problems,
         "pixel_aliases",
         &committed.pixel_aliases,
         &fresh.pixel_aliases,
     );
     field(problems, "matrix", &committed.matrix, &fresh.matrix);
+    field(
+        problems,
+        "non_iced_authority",
+        &committed.non_iced_authority,
+        &fresh.non_iced_authority,
+    );
     field(
         problems,
         "limitations",

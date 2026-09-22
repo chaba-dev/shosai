@@ -206,6 +206,27 @@ pub(crate) async fn reset_capture_preferences(store: &ReadingStateStore) -> Resu
         .context("reset capture preferences")
 }
 
+/// Clear the durable reader state a package 1C capture can write.
+///
+/// The reader captures turn pages and save places, and the application persists
+/// both: without this reset a capture that navigated to page 4 would decide
+/// where the next capture of the same book opens, and the saved-places captures
+/// would see each other's bookmarks. The reset touches only the disposable
+/// capture store — the same class of operation as
+/// [`reset_capture_preferences`] — and never the reader model, which is still
+/// driven by production messages alone.
+pub(crate) async fn reset_capture_reader_state(store: &ReadingStateStore) -> Result<()> {
+    sqlx::query("DELETE FROM bookmarks")
+        .execute(store.pool())
+        .await
+        .context("clear the disposable bookmark store")?;
+    sqlx::query("DELETE FROM reading_state")
+        .execute(store.pool())
+        .await
+        .context("clear the disposable reading state")?;
+    Ok(())
+}
+
 /// Seed the full reference library into `data_dir` from an already written
 /// fixture tree.
 pub(crate) async fn seed_library(data_dir: &Path, fixtures_root: &Path) -> Result<SeededLibrary> {
@@ -222,6 +243,72 @@ pub(crate) async fn seed_library(data_dir: &Path, fixtures_root: &Path) -> Resul
     Ok(SeededLibrary {
         store,
         library,
+        books,
+    })
+}
+
+/// The extra books package 1C's rich-content captures open, with the newest
+/// `date_added` values in the seed.
+///
+/// `locate_book` searches the library page the capture state has loaded, so a
+/// capture that opens a book must find it on the first page; these books sort
+/// ahead of the shared seed's books for exactly that reason, and they live in
+/// their own base store so the shared seed's order is untouched.
+const READER_SEED: [(&str, &str); 7] = [
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/bidi.epub",
+        "2026-03-01 09:00:00",
+    ),
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts.epub",
+        "2026-03-01 09:00:00",
+    ),
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/fonts-isolation.epub",
+        "2026-03-01 09:00:00",
+    ),
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/links.epub",
+        "2026-03-01 09:00:00",
+    ),
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/mathml.epub",
+        "2026-03-01 09:00:00",
+    ),
+    (
+        "repo:crates/shosai-core/tests/fixtures/epub-conformance/table.epub",
+        "2026-03-01 09:00:00",
+    ),
+    ("library/featured/reader-marks.epub", "2026-03-01 09:00:00"),
+];
+
+/// The rich-content books package 1C adds to its own base seed.
+pub(crate) fn reader_library_seed() -> Vec<SeedBook> {
+    READER_SEED
+        .iter()
+        .map(|(file, date_added)| SeedBook {
+            file,
+            progress: 0.0,
+            last_read: None,
+            date_added,
+        })
+        .collect()
+}
+
+/// Seed package 1C's rich-content base: the shared library plus the reused
+/// conformance fixtures and the generated marks fixture.
+pub(crate) async fn seed_reader_library(
+    data_dir: &Path,
+    fixtures_root: &Path,
+) -> Result<SeededLibrary> {
+    let seeded = seed_library(data_dir, fixtures_root).await?;
+    let mut books = seeded.books.clone();
+    for seed in reader_library_seed() {
+        books.push(import_seed_book(&seeded.store, &seeded.library, fixtures_root, seed).await?);
+    }
+    Ok(SeededLibrary {
+        store: seeded.store,
+        library: seeded.library,
         books,
     })
 }

@@ -18,16 +18,47 @@ use super::super::{Message, State, update};
 /// fails the run instead of hanging it.
 const SETTLE_LIMIT: usize = 200_000;
 
+/// Upper bound on the frame rounds a capture may take to settle.
+///
+/// `iced_winit` bounds the redraw events it delivers per message batch
+/// ([`super::render::MAX_REDRAW_EVENTS`]), but its event loop then dispatches the
+/// messages and draws again: a view that publishes a message per frame — the
+/// reader's continuous-mode chapter sensors and scroll viewport do — settles
+/// over several such rounds as the state it reads converges. This is the
+/// harness's equivalent of that outer loop, so the bound is larger than the
+/// inner one. A capture that never settles still fails instead of looping.
+const MAX_FRAME_ROUNDS: usize = 16;
+
 /// A capture-state driver.
 pub(crate) struct Harness {
     pub(crate) state: State,
     /// How many task outputs were delivered, for the run log.
     pub(crate) settled: usize,
+    /// The interface tree the capture is building.
+    ///
+    /// It is carried across the scenario, the widget operations the scenario's
+    /// messages start (a focus request, a scroll) and every rendered frame, the
+    /// way a window carries one interface across its event loop. A widget
+    /// operation mutates widget-local state, so applying it to a fresh tree
+    /// would drop the focus ring or the scroll offset the capture is supposed to
+    /// show.
+    pub(crate) interface_cache: iced_runtime::user_interface::Cache,
+    /// The pointer position the frames are drawn with.
+    ///
+    /// A capture that shows a hover state (`RD-06`) sets it; every other
+    /// capture keeps the pointer unavailable, which is what a window with no
+    /// pointer over it delivers.
+    pub(crate) cursor: iced::mouse::Cursor,
 }
 
 impl Harness {
     pub(crate) fn new(state: State) -> Self {
-        Self { state, settled: 0 }
+        Self {
+            state,
+            settled: 0,
+            interface_cache: iced_runtime::user_interface::Cache::new(),
+            cursor: iced::mouse::Cursor::Unavailable,
+        }
     }
 
     /// Dispatch one production message and settle every task it starts.
@@ -54,15 +85,28 @@ impl Harness {
                 continue;
             };
             while let Some(action) = stream.next().await {
-                let iced_runtime::Action::Output(message) = action else {
-                    continue;
-                };
-                self.settled += 1;
-                assert!(
-                    self.settled <= SETTLE_LIMIT,
-                    "capture task did not settle within {SETTLE_LIMIT} messages"
-                );
-                pending.push_back(update(&mut self.state, message));
+                match action {
+                    iced_runtime::Action::Output(message) => {
+                        self.settled += 1;
+                        assert!(
+                            self.settled <= SETTLE_LIMIT,
+                            "capture task did not settle within {SETTLE_LIMIT} messages"
+                        );
+                        pending.push_back(update(&mut self.state, message));
+                    }
+                    // A widget operation is part of the production path: the
+                    // reader's continuous-mode scroll resolution is one. In a
+                    // window the runtime applies it to the live interface;
+                    // `render::operate` applies it to an interface built from
+                    // the same state and view, so the task completes with the
+                    // value it would have reported.
+                    iced_runtime::Action::Widget(mut operation) => {
+                        let cache = std::mem::take(&mut self.interface_cache);
+                        self.interface_cache =
+                            super::render::operate(&self.state, operation.as_mut(), cache);
+                    }
+                    _ => continue,
+                }
             }
         }
     }
@@ -79,7 +123,16 @@ impl Harness {
         let Some(mut stream) = iced_runtime::task::into_stream(task) else {
             return;
         };
-        while stream.next().await.is_some() {}
+        while let Some(action) = stream.next().await {
+            // The outputs are deliberately not delivered, but a widget
+            // operation has to run for the stream to make progress at all: the
+            // task is waiting on the value the operation sends.
+            if let iced_runtime::Action::Widget(mut operation) = action {
+                let cache = std::mem::take(&mut self.interface_cache);
+                self.interface_cache =
+                    super::render::operate(&self.state, operation.as_mut(), cache);
+            }
+        }
     }
 
     /// Render the current state through the production view.
@@ -94,21 +147,23 @@ impl Harness {
         height: f32,
         dpr: f32,
     ) -> super::render::RenderedImage {
-        let mut cache = iced_runtime::user_interface::Cache::new();
-        for _ in 0..super::render::MAX_REDRAW_EVENTS {
-            match super::render::render_frame(&self.state, width, height, dpr, cache) {
+        let mut rounds: Vec<Vec<Message>> = Vec::new();
+        for _ in 0..MAX_FRAME_ROUNDS {
+            let cache = std::mem::take(&mut self.interface_cache);
+            match super::render::render_frame(&self.state, width, height, dpr, cache, self.cursor) {
                 super::render::FrameOutcome::Settled(image) => return image,
                 super::render::FrameOutcome::Requests(messages, next_cache) => {
-                    cache = next_cache;
-                    for message in messages {
-                        self.dispatch(message).await;
+                    self.interface_cache = next_cache;
+                    for message in &messages {
+                        self.dispatch(message.clone()).await;
                     }
+                    rounds.push(messages);
                 }
             }
         }
         panic!(
-            "the capture view still asked for new frames after {} redraw events",
-            super::render::MAX_REDRAW_EVENTS
+            "the capture view still asked for new frames after {MAX_FRAME_ROUNDS} frame rounds; \
+             the last frames asked for {rounds:?}"
         );
     }
 }
