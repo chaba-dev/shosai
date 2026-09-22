@@ -1,14 +1,13 @@
 # 1B reference captures (Iced, package 1B)
 
-Generated evidence for the `1B-LIB-*`, `1B-IMPORT` and `1B-SETTINGS` families of the
-Flutter UI reference specification. These images are the **Iced reference**, not
+Generated evidence for the `1B-LIB-*`, `1B-IMPORT` and `1B-SETTINGS` families of the Flutter UI reference specification. These images are the **Iced reference**, not
 acceptance evidence for the Flutter restoration: each accepting package still produces
 and inspects its own renders (specification §4.0).
 
 - Entry point: `make reference-shots`
 - Command: `make reference-shots`
-- Capture-code revision: `db552cafd475db8292ff6a0618365ab987fcfde9` (from jj @ working-copy commit, Jujutsu change `nvmkwtxkwsyyrryoyyyznzunnzzwznnl`, bookmark `feat/reference-shots-1b`)
-- Revision note: `capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the durable mapping is the stable `capture_code_change_id` (resolve it with `jj log -r 'change(<id>)'`) together with the commit that contains this evidence directory, which is the capture code revision the evidence is committed at; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.
+- Capture-code revision: `4cce3370aa60c425c953440277b555404465c766` (from jj @ working-copy commit, Jujutsu change `xqystyrmpvvvvonzonkrlllzvppxmoox`, bookmark `none`)
+- Revision note: `capture_code_revision` is the working-copy commit id at render time. Jujutsu rewrites a commit id when its change is described or committed, so the durable mapping is the stable `capture_code_change_id` (resolve it with `jj log -r 'change_id(<id>)'` in the pinned Jujutsu, which is the command `docs/reference-captures.md` records) together with the commit that contains this evidence directory, which is the capture code revision the evidence is committed at; `make reference-shots VERIFY=1` re-renders this evidence byte-identically at any revision that carries the change.
 - Pinned design base: `1e54270a6bb24f15630ece336a0575bdbe5be113` — main@origin #108 (refactor(flutter): organize the frontend into Elm modules mirroring Iced)
 - Preference baseline: `language=en-US`, `library.add_behavior=ask`, `reader.default_mode=paginated`, `reader.default_theme=light`, `reader.default_epub_font_size=16`, `reader.default_epub_line_spacing=1.6`, `reader.default_pdf_zoom=fit-page`
 - Renderer: iced_tiny_skia 0.14 (software, in-process) · theme theme::application() — iced::Theme::custom(APP_BACKGROUND #F4F2ED) · default font Inter Variable (bundled InterVariable.ttf) at 16 px
@@ -36,65 +35,65 @@ and inspects its own renders (specification §4.0).
 
 | Evidence id | Family | State | Rows | Client | Image | DPR | Locale | Fixture | SHA-256 (12) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `lib-wide-w1280-en` | 1B-LIB-WIDE | library | LB-01 LB-03 LB-04 LB-06 LB-07 LB-11 LB-12 LB-16 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `f465e87aa73d` |
-| `lib-wide-w900-en` | 1B-LIB-WIDE | library | LB-01 LB-07 LB-11 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `396ac4ed6593` |
-| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `c7a5d87718fb` |
-| `lib-wide-w1280-dpr2` | 1B-LIB-WIDE | library | LB-15 | 1280×800 | 2560×1600 | 2 | MIX | G1 seeded library (46 books) | `7c61250363ca` |
-| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `3ca984ca9db6` |
-| `lib-compact-c390-ja` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-13 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `544e77a381cb` |
-| `lib-breakpoint-759-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 759×700 | 759×700 | 1 | EN | G1 seeded library (46 books) | `ebe43c4a0283` |
-| `lib-breakpoint-760-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 760×700 | 760×700 | 1 | EN | G1 seeded library (46 books) | `4ca89a0372eb` |
-| `lib-breakpoint-761-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 761×700 | 761×700 | 1 | EN | G1 seeded library (46 books) | `74f20a72670c` |
-| `lib-breakpoint-759-ja` | 1B-LIB-COMPACT | library | LB-03 | 759×700 | 759×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `fbcd691921d4` |
-| `lib-breakpoint-760-ja` | 1B-LIB-COMPACT | library | LB-03 | 760×700 | 760×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `70feb055a76d` |
-| `lib-breakpoint-761-ja` | 1B-LIB-COMPACT | library | LB-03 | 761×700 | 761×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `4abd85fd8c5d` |
-| `lib-compact-c390-dpr2` | 1B-LIB-COMPACT | library | LB-15 | 390×844 | 780×1688 | 2 | EN | G1 seeded library (46 books) | `123cfe0d7671` |
-| `lib-state-search-ja-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | MIX | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `67c95208e9df` |
-| `lib-state-search-no-matches-w1280` | 1B-LIB-STATE | library | LB-08 LB-19 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `a344e11c2e1b` |
-| `lib-state-filter-pdf-w1280` | 1B-LIB-STATE | library | LB-06 LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c2702451bb69` |
-| `lib-state-search-with-filter-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `70ac88d42319` |
-| `lib-state-loading-skeleton-w1280` | 1B-LIB-STATE | library | LB-17 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `3f8d4e941214` |
-| `lib-state-loading-more-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `38079805817c` |
-| `lib-state-paged-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `b652b4ffea8d` |
-| `lib-state-empty-w1280` | 1B-LIB-STATE | library | LB-18 | 1280×800 | 1280×800 | 1 | EN | empty disposable store | `ab7c1f7a4825` |
-| `lib-state-empty-c390` | 1B-LIB-STATE | library | LB-18 | 390×844 | 390×844 | 1 | EN | empty disposable store | `fa5ca4778697` |
-| `lib-state-load-error-w1280` | 1B-LIB-STATE | library | LB-20 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `1684117496aa` |
-| `lib-state-storage-error-w900` | 1B-LIB-STATE | library | LB-20 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `c55f39b9c388` |
-| `lib-state-book-menu-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `507687a1753c` |
-| `lib-state-remove-modal-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `4ac44fe8f176` |
-| `lib-state-remove-pending-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c10e95469ad7` |
-| `lib-meta-no-cover-w1280` | 1B-LIB-META | library | LB-12 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `22bbe352cd7f` |
-| `lib-meta-no-cover-c390` | 1B-LIB-META | library | LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `2ed927bea6bc` |
-| `lib-meta-long-ja-w1280` | 1B-LIB-META | library | LB-13 | 1280×800 | 1280×800 | 1 | MIX | G3 Japanese/mixed metadata | `fa8322e06030` |
-| `lib-meta-long-ja-c390` | 1B-LIB-META | library | LB-13 | 390×844 | 390×844 | 1 | MIX | G3 Japanese/mixed metadata | `23bef08c4d54` |
-| `import-entry-w900-en` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `5b23b2cda216` |
-| `import-entry-w900-ja` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `19289eff97f3` |
-| `import-entry-c390-en` | 1B-IMPORT | library+import-dialog | IM-10 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `539a03c17c78` |
-| `import-discovery-enumerating-w900` | 1B-IMPORT | library+import-dialog | IM-03 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `2be3b6569c54` |
-| `import-discovery-checking-w900` | 1B-IMPORT | library+import-dialog | IM-03 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `d521edf2fc00` |
-| `import-review-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `dd1768e6bd6c` |
-| `import-review-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1537efddc6c8` |
-| `import-review-no-match-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `decb0ef58114` |
-| `import-review-deselect-all-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `3631678123c2` |
-| `import-files-selection-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `c8e511f7ab48` |
-| `import-no-supported-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `9841307bb8ab` |
-| `import-storage-copy-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `676e88b9f740` |
-| `import-storage-current-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `a2bc73687dbb` |
-| `import-progress-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `1a5e9bb47739` |
-| `import-completed-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `31563983b232` |
-| `import-review-dpr2-w900` | 1B-IMPORT | library+import-dialog | IM-10 | 900×700 | 1800×1400 | 2 | EN | G1 seeded library (46 books) + import folder | `d2c317b6922a` |
-| `settings-wide-w900-en` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `2a1d876828e2` |
-| `settings-wide-w900-ja` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | JA | G1 seeded library (46 books) | `7c4fe6937f44` |
-| `settings-compact-c390-en` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `1c11d2be4a71` |
-| `settings-compact-c390-ja` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) | `315b2aa01731` |
-| `settings-changed-w900-en` | 1B-SETTINGS | settings | ST-04 ST-05 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `68238c21e2cc` |
-| `settings-move-dialog-w900-ja` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `18465f9101c7` |
-| `settings-move-progress-w900-en` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `e3a6ef1dae91` |
-| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `26acdd982ace` |
-| `settings-disabled-importing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `6dccc2341bd1` |
-| `settings-disabled-removing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `6dccc2341bd1` |
-| `settings-unavailable-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `92e372b11819` |
-| `settings-compact-c390-dpr2-ja` | 1B-SETTINGS | settings | ST-09 | 390×844 | 780×1688 | 2 | JA | G1 seeded library (46 books) | `ea3313da6276` |
+| `lib-wide-w1280-en` | 1B-LIB-WIDE | library | LB-01 LB-03 LB-04 LB-06 LB-07 LB-11 LB-12 LB-16 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `7e105495933c` |
+| `lib-wide-w900-en` | 1B-LIB-WIDE | library | LB-01 LB-07 LB-11 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `2bf30833feb3` |
+| `lib-wide-w1280-ja` | 1B-LIB-WIDE | library | LB-03 LB-04 LB-07 LB-11 LB-13 | 1280×800 | 1280×800 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `9e9d72673e18` |
+| `lib-wide-w1280-dpr2` | 1B-LIB-WIDE | library | LB-15 | 1280×800 | 2560×1600 | 2 | MIX | G1 seeded library (46 books) | `00a45d4a369c` |
+| `lib-compact-c390-en` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `6bd80dfcbcd0` |
+| `lib-compact-c390-ja` | 1B-LIB-COMPACT | library | LB-02 LB-05 LB-13 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `28ea12a34b17` |
+| `lib-breakpoint-759-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 759×700 | 759×700 | 1 | EN | G1 seeded library (46 books) | `be35b192476c` |
+| `lib-breakpoint-760-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 760×700 | 760×700 | 1 | EN | G1 seeded library (46 books) | `519e8446f04d` |
+| `lib-breakpoint-761-en` | 1B-LIB-COMPACT | library | LB-02 LB-03 | 761×700 | 761×700 | 1 | EN | G1 seeded library (46 books) | `56adffdbef10` |
+| `lib-breakpoint-759-ja` | 1B-LIB-COMPACT | library | LB-03 | 759×700 | 759×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `9dc527500879` |
+| `lib-breakpoint-760-ja` | 1B-LIB-COMPACT | library | LB-03 | 760×700 | 760×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `dd7218a17235` |
+| `lib-breakpoint-761-ja` | 1B-LIB-COMPACT | library | LB-03 | 761×700 | 761×700 | 1 | JA | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `242199da1cc7` |
+| `lib-compact-c390-dpr2` | 1B-LIB-COMPACT | library | LB-15 | 390×844 | 780×1688 | 2 | EN | G1 seeded library (46 books) | `2a624863c446` |
+| `lib-state-search-ja-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | MIX | G1 seeded library (46 books) + G3 Japanese/mixed metadata | `8c0c60fab44e` |
+| `lib-state-search-no-matches-w1280` | 1B-LIB-STATE | library | LB-08 LB-19 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c9cc742c36ce` |
+| `lib-state-filter-pdf-w1280` | 1B-LIB-STATE | library | LB-06 LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `b6e8e69e59e3` |
+| `lib-state-search-with-filter-w1280` | 1B-LIB-STATE | library | LB-08 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `ce16c7764fe3` |
+| `lib-state-loading-skeleton-w1280` | 1B-LIB-STATE | library | LB-17 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `c9802989ddb6` |
+| `lib-state-loading-more-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `8f0c87b51a15` |
+| `lib-state-paged-w1280` | 1B-LIB-STATE | library | LB-22 | 1280×3250 | 1280×3250 | 1 | EN | G1 seeded library (46 books) | `857c4c71cc7d` |
+| `lib-state-empty-w1280` | 1B-LIB-STATE | library | LB-18 | 1280×800 | 1280×800 | 1 | EN | empty disposable store | `391bbdec5994` |
+| `lib-state-empty-c390` | 1B-LIB-STATE | library | LB-18 | 390×844 | 390×844 | 1 | EN | empty disposable store | `db7db8d95fae` |
+| `lib-state-load-error-w1280` | 1B-LIB-STATE | library | LB-20 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `1bc299fc8931` |
+| `lib-state-storage-error-w900` | 1B-LIB-STATE | library | LB-20 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `fe0c4338e603` |
+| `lib-state-book-menu-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `5c3228625c74` |
+| `lib-state-remove-modal-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `38106476365b` |
+| `lib-state-remove-pending-w1280` | 1B-LIB-STATE | library | LB-14 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `3b8aa4ed4a3a` |
+| `lib-meta-no-cover-w1280` | 1B-LIB-META | library | LB-12 | 1280×800 | 1280×800 | 1 | EN | G1 seeded library (46 books) | `caae28851b53` |
+| `lib-meta-no-cover-c390` | 1B-LIB-META | library | LB-12 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `b64886721865` |
+| `lib-meta-long-ja-w1280` | 1B-LIB-META | library | LB-13 | 1280×800 | 1280×800 | 1 | MIX | G3 Japanese/mixed metadata | `f8fad18cb544` |
+| `lib-meta-long-ja-c390` | 1B-LIB-META | library | LB-13 | 390×844 | 390×844 | 1 | MIX | G3 Japanese/mixed metadata | `2fbaac7caa1d` |
+| `import-entry-w900-en` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `f58f7aae892b` |
+| `import-entry-w900-ja` | 1B-IMPORT | library+import-dialog | IM-01 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `a6cb910711e9` |
+| `import-entry-c390-en` | 1B-IMPORT | library+import-dialog | IM-10 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `ea557f0a0fb5` |
+| `import-discovery-enumerating-w900` | 1B-IMPORT | library+import-dialog | IM-03 IM-10 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `568593be55e0` |
+| `import-discovery-checking-w900` | 1B-IMPORT | library+import-dialog | IM-03 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `aeb61b66cfda` |
+| `import-review-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-10 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `0d67cdca5008` |
+| `import-review-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 IM-06 IM-07 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `94206d869467` |
+| `import-review-no-match-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `4d5d3b9e2730` |
+| `import-review-deselect-all-w900-en` | 1B-IMPORT | library+import-dialog | IM-04 IM-05 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `d5cad6292a9e` |
+| `import-files-selection-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 IM-12 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `127d9638cbd8` |
+| `import-no-supported-w900-ja` | 1B-IMPORT | library+import-dialog | IM-04 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `536fa1d18b34` |
+| `import-storage-copy-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `834b50b7efd8` |
+| `import-storage-current-w900-en` | 1B-IMPORT | library+import-dialog | IM-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `fa4c54ac6852` |
+| `import-progress-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources (duplicates, failures, long JA paths) | `c24c3e127d2a` |
+| `import-completed-w900-en` | 1B-IMPORT | library | IM-08 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) + import sources | `f3826e282faf` |
+| `import-review-dpr2-w900` | 1B-IMPORT | library+import-dialog | IM-10 | 900×700 | 1800×1400 | 2 | EN | G1 seeded library (46 books) + import folder | `86391c5d00ef` |
+| `settings-wide-w900-en` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `0a8840cca326` |
+| `settings-wide-w900-ja` | 1B-SETTINGS | settings | ST-01 ST-02 ST-04 ST-05 ST-09 | 900×1200 | 900×1200 | 1 | JA | G1 seeded library (46 books) | `ff5317114ff3` |
+| `settings-compact-c390-en` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | EN | G1 seeded library (46 books) | `d931aa3c329b` |
+| `settings-compact-c390-ja` | 1B-SETTINGS | settings | ST-09 ST-01 | 390×844 | 390×844 | 1 | JA | G1 seeded library (46 books) | `a970294bee22` |
+| `settings-changed-w900-en` | 1B-SETTINGS | settings | ST-04 ST-05 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `c2c1906889cc` |
+| `settings-move-dialog-w900-ja` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | JA | G1 seeded library (46 books) | `2077d72a3aa5` |
+| `settings-move-progress-w900-en` | 1B-SETTINGS | settings | ST-03 ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `708a42b15b27` |
+| `settings-error-w900-en` | 1B-SETTINGS | settings | ST-06 | 900×1200 | 900×1200 | 1 | EN | G1 seeded library (46 books) | `2aa09273f2a0` |
+| `settings-disabled-importing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `4945e2626c53` |
+| `settings-disabled-removing-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | G1 seeded library (46 books) | `4945e2626c53` |
+| `settings-unavailable-w900-en` | 1B-SETTINGS | settings | ST-07 | 900×700 | 900×700 | 1 | EN | no store (real open failure) | `8435eddc7512` |
+| `settings-compact-c390-dpr2-ja` | 1B-SETTINGS | settings | ST-09 | 390×844 | 780×1688 | 2 | JA | G1 seeded library (46 books) | `023b3a133ed1` |
 
 ## State derivation and settings
 
