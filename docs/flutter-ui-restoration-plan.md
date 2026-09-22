@@ -5,7 +5,7 @@ useful Flutter capabilities. This is a presentation rebuild and targeted reader
 contract work, not a frontend restart or pixel-identical port.
 
 - Opened: 2026-09-14. Restructured: 2026-09-20.
-- Status: Stage 1 in progress; 0/30 delivery packages accepted. Current: 1A.
+- Status: Stages 1–2 in progress; 3/30 delivery packages fully accepted (1A, 1B, 2A). 1C and 2B are merged with the follow-ups below still explicit. Current: 2C, authorized by the owner on 2026-09-22.
 - Governing documents: [RFD 4](../rfd/0004/README.adoc), its
   [implementation checklist](../rfd/0004/IMPLEMENTATION.org),
   [performance contract](../rfd/0004/PHASE-0.adoc), and
@@ -23,8 +23,17 @@ there. Do not claim the governing records have already been updated.
 
 - [x] Restoration direction and retained Flutter capabilities documented.
 - [x] Six stages, package dependencies and delegation contract written.
-- [ ] Delivery packages accepted: 0/30 (tracked in the stage checklists below).
+- [ ] Delivery packages accepted: 3/30 (tracked in the stage checklists below).
 - [ ] Final restoration exit criteria met and governing records reconciled.
+
+**2026-09-22 handoff:** reader references (#119), the Flutter harness and approved
+font/clipping baselines (#120), and the Git-filtered Nix wrapper (#121) are merged.
+The implementation base for 2C is remote `main` at
+[`2473383`](https://github.com/chaba-dev/shosai/commit/2473383965179e05c4155d228e41fc94e923da55),
+not the stale local `main` bookmark. Owner authorized proceeding to 2C while the
+native macOS picker check remains open; this is not a passing native check or
+blanket acceptance of Iced parity. Completed 1C and 2B implementation/verification
+threads are archived; their evidence and outstanding items remain linked below.
 
 **How to update this plan:** each package has a parent acceptance checkbox and
 child checkboxes for deliverables, verification and specific decisions. Tick children
@@ -142,11 +151,17 @@ The EPUB gap is not merely visual styling. `crates/shosai-core/src/bridge.rs` re
 also identifies the durable chapter. Presentation pages, durable locations and
 progress must be separated before real pagination can work safely.
 
-Open PR disposition, checked 2026-09-20:
+PR disposition, updated 2026-09-21: #109–#115 closed with owner approval and
+per-PR salvage/supersession comments. Their seven local bookmarks and remote
+branches were subsequently deleted with owner approval; use the closed PRs and
+their recorded commits as salvage references. #116 was subsequently closed and
+its local bookmark/remote branch deleted with owner approval after #118 merged.
+The unrelated release PR #9 remains open; closing the stack does not complete any
+restoration package.
 
 | PR | Planned treatment |
 | --- | --- |
-| [#116](https://github.com/chaba-dev/shosai/pull/116) | Keep the dialog crash fix; restore focus, Enter/Space activation and button semantics before integration. |
+| [#116](https://github.com/chaba-dev/shosai/pull/116) | Closed as superseded by merged #118; crash fix and focus, Enter/Space activation and button semantics repairs delivered and accepted in 2A. Branch deleted with owner approval. |
 | [#110](https://github.com/chaba-dev/shosai/pull/110) | Retain `Notice`/`SonnerBridge` infrastructure without pulling in rejected visual ancestors. |
 | [#109](https://github.com/chaba-dev/shosai/pull/109), [#113](https://github.com/chaba-dev/shosai/pull/113) | Supersede the accent and library-tab visual direction. |
 | [#111](https://github.com/chaba-dev/shosai/pull/111), [#112](https://github.com/chaba-dev/shosai/pull/112) | Salvage feedback behavior selectively; keep actionable failures and persistent debt visible. |
@@ -173,8 +188,8 @@ package below, not an entire stage. `TODO` means not completed, not ready to dis
 
 | Stage | Delivery milestone | Packages | Accepted | Status |
 | --- | --- | --- | --- | --- |
-| 1. Freeze the reference | Pinned base, values, behavior inventory and approved evidence | 1A–1D | 1/4 | IN PROGRESS |
-| 2. Safe foundations | Accessible add-books dialog, production-shell harness, theme mappings and retained notices | 2A–2D | 0/4 | TODO |
+| 1. Freeze the reference | Pinned base, values, behavior inventory and approved evidence | 1A–1D | 2/4 | IN PROGRESS |
+| 2. Safe foundations | Accessible add-books dialog, production-shell harness, theme mappings and retained notices | 2A–2D | 1/4 | IN PROGRESS |
 | 3. Library restoration | Iced-shaped library with working existing actions | 3A–3D | 0/4 | TODO |
 | 4. Reader presentation | Verified reader components and typed presentation contract | 4A–4D | 0/4 | TODO |
 | 5. Reader capabilities | Real sessions, rich EPUB, navigation, selection and reading modes | 5A–5J | 0/10 | TODO |
@@ -217,12 +232,19 @@ capture, harness work and contract design to overlap without circular dependenci
   - [Reference specification](flutter-ui-reference-spec.md) produced by [DeepSeek on framework16](https://ampcode.com/threads/T-01a0bdba-4f23-755e-bb41-720410e2859f), corrected through parent review and accepted by the owner as the working contract. Capture-fixture and font follow-ups remain assigned below; acceptance does not certify later implementation rows.
   - [x] Fixture provenance research returned by [DeepSeek on framework16](https://ampcode.com/threads/T-01a0bdd6-6149-73c3-8c23-05289f53b308), recorded in the [fixture README](../crates/shosai-core/tests/fixtures/README.md). Original `sample.*` authoring sources remain unknown; `sample.pdf` also has incorrect xref offsets. Research completion does not approve those assets. Keep regression fixtures unchanged; 1B owns shared deterministic reference-fixture generation for 1B/1C, with per-capture hashes and provenance. Font-toolchain/source records remain with 2C.
   - [x] Baseline verified by parent (2026-09-20): `.agents/dev jj` now works with a system-Nix fallback. Syntax check, JJ status/log and baseline diffs pass; GitHub API confirms remote `main` at [#108](https://github.com/chaba-dev/shosai/commit/1e54270a6bb24f15630ece336a0575bdbe5be113). Pin that revision as the Iced reference and accepted pre-stack base, not stale local `main`. Current application code is [#116](https://github.com/chaba-dev/shosai/commit/f9f64204811b7c475121b8c207b9aea1613ab3da), differing only in the dialog and its test; it still needs 2A's keyboard/semantics repair. Uncommitted additions are planning/evidence plus the wrapper fix, not accepted UI implementation. Future capture-tool changes must record their own revision and this reference base in the manifest.
-- [ ] **1B accepted — library, import and settings reference** — IN PROGRESS — [DeepSeek implementation on framework16](https://ampcode.com/threads/T-01a0bde0-3ccb-72be-8eec-b3f465993d20). Isolated workspace; Oracle review/fix/regression-test loop required before PR creation. Parent retains capture acceptance.
-  - [ ] Documented reference fixtures generated without overwriting existing regression fixtures; shared generation reused by 1C.
-  - [ ] Capture runner, library state captures, import/settings capture families and provenance manifest produced.
-  - [ ] Reproduction checked; captures inspected and library/import/settings reference checklist approved.
-- [ ] **1C accepted — reader reference**
-  - [ ] Reader format/mode captures and non-Iced authority records produced.
+- [x] **1B accepted — library, import and settings reference** — owner accepted 2026-09-21 in the [verification thread](https://ampcode.com/threads/T-01a0c2a5-aa80-77ef-82c0-64a5eb1024e0), after [PR #117](https://github.com/chaba-dev/shosai/pull/117) merged. Acceptance applies to [merge revision](https://github.com/chaba-dev/shosai/commit/565187cff25efeffe0c228bf443b98ecf57a0bf8), including W900_TALL (900×1200) and W1280_TALL (1280×3250) exceptions. It does not certify Flutter implementation or the non-blocking findings below.
+  - [x] Documented reference fixtures generated without overwriting existing regression fixtures; shared generation available for 1C reuse.
+  - [x] Capture runner, 59 library/import/settings captures and provenance manifest produced in PR #117.
+  - Worker reports 14 Oracle rounds with no outstanding findings, 1197 passing workspace tests, and byte-identical re-render verification. Parent independently confirmed passing GitHub checks at [the PR head](https://github.com/chaba-dev/shosai/commit/b900f911b908a745feb651a516854aff3de29ebd), verified 59 capture and 58 fixture file hashes, and inspected wide Japanese library, compact English library and Japanese import-review captures. The independent verification below supplied the remaining review basis for owner acceptance.
+  - [x] Host resource blocker resolved (parent verified 2026-09-21): 2.7 TB available; Cargo registry cache is a real directory with 523 archives, no longer a volatile symlink. Worker reports owner-approved restoration and removal of its isolated build symlink. Earlier unapproved shared-cache deletions remain disclosed; restoration does not erase that incident.
+  - [x] Independent reproduction verified by [DeepSeek acceptance thread](https://ampcode.com/threads/T-01a0c2a5-aa80-77ef-82c0-64a5eb1024e0) on the exact #117 merge: two byte-identical 59-capture runs, 86 harness tests passing, negative controls rejecting corrupted evidence/unpinned environment, and unchanged working-tree inventory. All 59 states reported inspected; owner acceptance recorded above.
+  - [ ] Non-blocking follow-ups accepted as deferred by the owner: F1 duplicate-selected-file labels and F2 post-import book visibility → 6A; F3 eight-card first-load skeleton → 3C; F4 reference-only mapping and F5 invalid JJ lookup command → 1C shared evidence documentation; F6 absolute output path → document permitted run metadata in 1C; F7 nonzero managed-library move summary → 6B; F8 avoid copying Iced placeholder clipping → 3A/3C. Deferred findings are not evidence of those states. No competing 1B follow-up PR is running.
+  - [x] Library/import/settings reference checklist approved by owner on the disclosed basis: two consecutive `make reference-shots VERIFY=1` passes, 86 passing harness tests, unchanged 519-file tree, manifest/checksum/provenance checks and all 59 states inspected. Reported limitations and tall-viewport exceptions remain explicit.
+- [ ] **1C accepted — reader reference** — MERGED, REFERENCE DISPOSITIONS RECORDED BELOW — [PR #119](https://github.com/chaba-dev/shosai/pull/119) merged as [950b8a8](https://github.com/chaba-dev/shosai/commit/950b8a8e836b9966480cfa7408b34e82c5e29a21) on 2026-09-22; [DeepSeek implementation](https://ampcode.com/threads/T-01a0c2bf-b12e-7578-9bd6-40491e118496) archived. Worker reports two follow-up Oracle rounds ending clean, after five initial rounds. Merge is recorded separately from the explicit reference acceptance items below.
+  - [x] 60 reader captures delivered, including new rich fixtures, document image colours, manual PDF/CBZ zoom, CBZ fit-width and hover. Worker reports two byte-identical reproduction runs and 408 app tests passing (110 harness tests). Follow-up leaves the proposed colour-corrected 1B evidence unchanged, not the older accepted #117 baseline.
+  - [ ] Owner accepts FM-21 as a partial Iced reference: pinned fonts leave Hebrew/Arabic blank and Iced list composition does not preserve authored RTL direction. Parent inspected the mixed-script original and confirmed these are limitations, not successful shaping evidence. Full Flutter/Rust behavior remains required in 5C. FM-18 demonstrates document image colours only; CSS text-colour support remains with 5G. Other recorded Iced defects (block-anchor href loss, inline images/fallbacks) are not restoration targets.
+  - [ ] Owner approves proposed 1B colour rebaseline: PR #119 corrects BGRA/RGBA encoding and replaces all 59 previously accepted 1B PNGs. Existing 1B acceptance remains tied to #117 until explicitly superseded. Parent inspected corrected library and odd-final EPUB originals; this is not rebaseline approval.
+  - Parent inspected the new marks capture: list, quote, styled link and coloured image are visible. Reproduction is against the proposed corrected baselines, not the previously accepted 1B PNG bytes.
   - [ ] Reproduction checked; evidence inspected and reader checklist approved.
 - [ ] **1D accepted — governing records**
   - [ ] RFD/checklist/performance crosswalk and applicable boundary documentation updated.
@@ -252,13 +274,15 @@ under one owner rather than building competing runners.
 
 ### Delivery checklist
 
-- [ ] **2A accepted — add-books repair**
-  - [ ] Layout fix and accessible activation behavior implemented.
-  - [ ] Both choices verified with pointer, focus, Enter/Space and active semantics.
-- [ ] **2B accepted — verification harness**
-  - [ ] Production-shell golden harness and bounded native smoke runner implemented.
-  - [ ] Known clipping/overflow regressions detected; capture and smoke paths exercised.
-- [ ] **2C accepted — theme mappings**
+- [x] **2A accepted — add-books repair** — owner accepted 2026-09-21; [PR #118](https://github.com/chaba-dev/shosai/pull/118) merged as [46cf21e](https://github.com/chaba-dev/shosai/commit/46cf21e7903b10bb6e5df20a2ae80aebef82b3b9). [DeepSeek implementation](https://ampcode.com/threads/T-01a0c2c0-52e7-729b-8f71-ba87a82ea1bd) incorporates #116 plus accessibility repairs. #116 is closed as superseded and its branch deleted with owner approval.
+  - [x] Layout fix and accessible activation behavior implemented in the two owned dialog/test files. Oracle round 1 raised three test-strength findings; round 2 confirmed all resolved with no outstanding issues.
+  - [x] Both choices verified with pointer, focus, Enter/Space and active semantics. Parent independently reran all 14 targeted tests (passing), confirmed all 15 CI checks pass, and inspected both focus-ring renders with no clipping or displacement. Worker reports 295 full-suite tests passing and no unfocused visual change versus #116. Native screen-reader and native-picker smoke remain untested here; 2B owns platform smoke coverage.
+- [ ] **2B accepted — verification harness** — MERGED, NATIVE macOS FOLLOW-UP OPEN — [PR #120](https://github.com/chaba-dev/shosai/pull/120) merged as [0dde645](https://github.com/chaba-dev/shosai/commit/0dde6455b7beb16d86e8b0d7daee4224e2514f3b) on 2026-09-22. [Linux implementation/validation](https://ampcode.com/threads/T-01a0c335-958f-7254-a60e-f8e17960a06a) and [macOS fixes/verification](https://ampcode.com/threads/T-01a0c5f1-a66a-70bc-a689-66c6c65c8d09) threads archived after publication and verification.
+  - [x] Production-shell golden harness, bounded Linux native smoke runner and window-scoped macOS capture path implemented. Final published revision [01623b6](https://github.com/chaba-dev/shosai/commit/01623b69a9f9030baf421e846d1528854c159617) verified on both platforms: 69 visual tests each; Linux 370 full-suite passes, macOS 368 passes and two Linux-only skips; zero clipping findings; all 12 renders byte-identical across repeated runs. Linux X11 picker dismissal/recovery passes. Oracle fixes and follow-up reviews closed; no detector tolerance widening or hidden skips.
+  - [x] Owner approved nine new macOS baselines and six updated Linux baselines for the typography and scaled-button clipping fixes on 2026-09-22. All 15 installed images hash-match the approved candidates. This approves current rendering, not Iced layout parity or the known overlap below.
+  - [ ] Native macOS dismissal, recovery and window-scoped screenshots remain unverified. Accessibility and Screen Recording preflights pass; Automation access to System Events remains missing. The runner refuses without prompting or capturing. Owner authorized continuing with 2C while this platform check remains explicit, not waived or passed.
+  - Deferred production defect: at 900×700 with 200% Japanese text, the floating Add books button overlaps the bottom-right card metadata. Stage 3 owns the layout fix; geometric clipping detectors do not claim to detect arbitrary overlap.
+- [ ] **2C accepted — theme mappings** — IN PROGRESS — owner authorized 2026-09-22; [DeepSeek on framework16](https://ampcode.com/threads/T-01a0cadd-7849-70e5-af58-c76125f2da29) in isolated workspace `shosai-2c-theme`, starting from merged #121. Theme mapping only; library composition remains Stage 3.
   - [ ] Shared tokens and all Rust/Shad/Material mappings implemented.
   - [ ] Mapping/literal checks pass; palette renders inspected and baselines reviewed.
 - [ ] **2D accepted — notices**
@@ -546,9 +570,11 @@ blocker, never as a passing gate.
 
 ## First dispatch and historical crosswalk
 
-**Current package: 1A (in progress).** No implementation package is complete merely because this plan
-exists. After 1A, prioritize 2A and 2B alongside reference capture; start library
-restoration as soon as 1B/2C are accepted, independently of renderer completion.
+**Current package: 2C (in progress); 1C/2B merged with explicit follow-ups;
+1A/1B/2A fully accepted.** Start theme mapping from merged #121, preserving #120's
+approved typography and clipping checks. Start library restoration after 2C
+acceptance, independently of renderer completion. The remaining native macOS
+picker check stays open and does not become a pass by advancing the plan.
 
 | Previous plan phase | New owner(s) |
 | --- | --- |
