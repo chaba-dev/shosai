@@ -13,5 +13,33 @@ if [[ ! -x "$nix_bin" ]]; then
   exit 1
 fi
 
+# A secondary JJ workspace has no .git. Passing it to Nix as a path copies
+# everything, including target/ and flutter/build/, into a new store snapshot.
+# Reuse the colocated checkout's Git-filtered flake without changing command cwd.
+flake_root="$repo_root"
+if [[ ! -e "$flake_root/.git" && -f "$repo_root/.jj/repo" ]]; then
+  jj_repo="$(cat "$repo_root/.jj/repo")"
+  if [[ "$jj_repo" != /* ]]; then
+    jj_repo="$repo_root/.jj/$jj_repo"
+  fi
+  flake_root="$(cd "$jj_repo/../.." && pwd -P)"
+fi
+
+if [[ ! -e "$flake_root/.git" ]]; then
+  echo "Refusing an unfiltered Nix path input: no Git-backed flake for $repo_root." >&2
+  exit 1
+fi
+
+if [[ "$flake_root" != "$repo_root" ]]; then
+  # These are the local inputs to the current dev shell. Fail rather than use
+  # another workspace's toolchain when its flake or package metadata differs.
+  for input in flake.nix flake.lock Cargo.toml; do
+    if ! cmp -s "$repo_root/$input" "$flake_root/$input"; then
+      echo "Cannot reuse dev shell: $input differs from $flake_root. Use a Git-backed checkout with matching inputs." >&2
+      exit 1
+    fi
+  done
+fi
+
 exec "$nix_bin" --extra-experimental-features 'nix-command flakes' \
-  develop "$repo_root" --command "$@"
+  develop "git+file://$flake_root" --command "$@"
