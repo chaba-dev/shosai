@@ -70,7 +70,7 @@ class PagePainter extends CustomPainter {
         canvas,
         anchor! < focus! ? anchor! : focus!,
         anchor! < focus! ? focus! : anchor!,
-        const Color(0x6690caf9),
+        ShosaiTokens.readerSelectionDragFill,
         false,
       );
     }
@@ -206,10 +206,16 @@ void _paintPageContent(
 Rect pageImageSource(ui.Image image) =>
     Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
 
+/// The paint color of one annotation highlight.
+///
+/// These are retained Flutter colors: RFD 6 selection/highlighting has no Iced
+/// reference (plan decision 8), so the values are the ones this application
+/// already painted with, recorded in the shared token source instead of as
+/// literals here.
 Color _highlightColor(FlutterHighlightColor? color) => switch (color) {
-  FlutterHighlightColor.green => const Color(0x6670b77e),
-  FlutterHighlightColor.blue => const Color(0x666aa9e9),
-  FlutterHighlightColor.pink => const Color(0x66dc7ca5),
-  FlutterHighlightColor.purple => const Color(0x668876c5),
-  FlutterHighlightColor.yellow || null => const Color(0x66e2bd54),
+  FlutterHighlightColor.green => ShosaiTokens.readerAnnotationGreen,
+  FlutterHighlightColor.blue => ShosaiTokens.readerAnnotationBlue,
+  FlutterHighlightColor.pink => ShosaiTokens.readerAnnotationPink,
+  FlutterHighlightColor.purple => ShosaiTokens.readerAnnotationPurple,
+  FlutterHighlightColor.yellow || null => ShosaiTokens.readerAnnotationYellow,
 };

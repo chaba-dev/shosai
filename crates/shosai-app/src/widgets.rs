@@ -8,9 +8,12 @@ pub fn primary_button<'a, Message: Clone + 'a>(
     message: Option<Message>,
     font: Font,
 ) -> Button<'a, Message> {
-    button(text(label.into()).size(14).font(font))
+    button(text(label.into()).size(theme::BUTTON_LABEL_SIZE).font(font))
         .on_press_maybe(message)
-        .padding([9, 14])
+        .padding([
+            theme::BUTTON_PRIMARY_PADDING_VERTICAL,
+            theme::BUTTON_PRIMARY_PADDING_HORIZONTAL,
+        ])
         .style(theme::primary_button)
 }
 
@@ -19,9 +22,12 @@ pub fn secondary_button<'a, Message: Clone + 'a>(
     message: Option<Message>,
     font: Font,
 ) -> Button<'a, Message> {
-    button(text(label.into()).size(14).font(font))
+    button(text(label.into()).size(theme::BUTTON_LABEL_SIZE).font(font))
         .on_press_maybe(message)
-        .padding([9, 14])
+        .padding([
+            theme::BUTTON_SECONDARY_PADDING_VERTICAL,
+            theme::BUTTON_SECONDARY_PADDING_HORIZONTAL,
+        ])
         .style(theme::secondary_button)
 }
 
@@ -31,9 +37,12 @@ pub fn navigation_button<'a, Message: Clone + 'a>(
     message: Message,
     font: Font,
 ) -> Button<'a, Message> {
-    button(text(label.into()).size(14).font(font))
+    button(text(label.into()).size(theme::BUTTON_LABEL_SIZE).font(font))
         .on_press(message)
-        .padding([9, 12])
+        .padding([
+            theme::BUTTON_NAVIGATION_PADDING_VERTICAL,
+            theme::BUTTON_NAVIGATION_PADDING_HORIZONTAL,
+        ])
         .width(Length::Fill)
         .style(theme::navigation_button(selected))
 }
@@ -44,13 +53,13 @@ pub fn book_button<'a, Message: Clone + 'a>(
 ) -> Button<'a, Message> {
     button(content)
         .on_press_maybe(message)
-        .padding(8)
+        .padding(theme::BUTTON_BOOK_PADDING)
         .width(Length::Fill)
         .style(theme::book_button)
 }
 
 pub fn reading_progress(progress: f64) -> ProgressBar<'static> {
     progress_bar(0.0..=1.0, progress.clamp(0.0, 1.0) as f32)
-        .girth(4)
+        .girth(theme::PROGRESS_GIRTH)
         .style(theme::progress)
 }

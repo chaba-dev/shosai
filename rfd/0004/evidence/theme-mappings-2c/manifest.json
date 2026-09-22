@@ -1,0 +1,722 @@
+{
+  "package": "2C \u2014 shared theme mappings",
+  "evidence": "2C-PALETTE",
+  "recorded": "2026-09-22",
+  "runner": "framework16",
+  "base_revision": "2473383965179e05c4155d228e41fc94e923da55",
+  "reference_revision": "1e54270a6bb24f15630ece336a0575bdbe5be113",
+  "authorities": {
+    "app": "Iced (crates/shosai-app/src/theme.rs at the pinned reference)",
+    "app.dark": "Retained Flutter (Iced defines no dark application palette)",
+    "reader": "Iced (the reader document palettes)",
+    "reader.selection": "Retained Flutter (RFD 6 has no Iced reference)",
+    "reader.annotation": "Retained Flutter (no Iced reference)",
+    "radius/type/layout": "Iced (reference specification sections 3.4 and 3.5)"
+  },
+  "token_source": {
+    "path": "assets/theme/tokens.json",
+    "sha256": "9f4247264490dc7e02372df00f27e9a354ae48a5f91d030c9e854df0537b5e76"
+  },
+  "generator": {
+    "path": "scripts/generate-theme-tokens.py",
+    "sha256": "34c5c2fc03f149f01d5611fd4ac689431da301a3b8499bb97f7130cc3f00c857"
+  },
+  "generated": [
+    {
+      "path": "crates/shosai-app/src/theme_tokens.rs",
+      "sha256": "2502e1e393f4318fde0a53c076e18c962ec9d342a59f87f80beecf7f4545a360"
+    },
+    {
+      "path": "flutter/lib/theme_tokens.dart",
+      "sha256": "a5e3e78c566b8760bb51b8cfb25fdb1237915b9a0a82097333fcb63decddba0c"
+    }
+  ],
+  "palette_renders": [
+    {
+      "path": "rfd/0004/evidence/theme-mappings-2c/palette/2c-library-light-1280.png",
+      "sha256": "55560631664534cff1c4f31c251b9c6de4c44b4885dd203bb042716a06b00ce1",
+      "state": "library, application light palette",
+      "config": "W1280 D1 EN",
+      "inspected": "2026-09-22 by the 2C worker (view_media)"
+    },
+    {
+      "path": "rfd/0004/evidence/theme-mappings-2c/palette/2c-library-dark-1280.png",
+      "sha256": "e3f5b6bee61c07ed16866329ef66f14e2b4082bdfb840d1bbd4020d963257413",
+      "state": "library, retained dark palette",
+      "config": "W1280 D1 EN",
+      "inspected": "2026-09-22 by the 2C worker (view_media)"
+    },
+    {
+      "path": "rfd/0004/evidence/theme-mappings-2c/palette/2c-reader-light-1280.png",
+      "sha256": "18107c8e6cd8fd48ae15e2646f134d42afc482c9dd9f84a60173e9cbbfb8128e",
+      "state": "reader, light document palette",
+      "config": "W1280 D1 EN",
+      "inspected": "2026-09-22 by the 2C worker (view_media)"
+    },
+    {
+      "path": "rfd/0004/evidence/theme-mappings-2c/palette/2c-reader-dark-1280.png",
+      "sha256": "df20ccd274115cc6e1df15895195bfee8382e99cb24376adcb43521e7575b04b",
+      "state": "reader, dark document palette",
+      "config": "W1280 D1 EN",
+      "inspected": "2026-09-22 by the 2C worker (view_media)"
+    },
+    {
+      "path": "rfd/0004/evidence/theme-mappings-2c/palette/2c-reader-sepia-1280.png",
+      "sha256": "a1e1a6e53acff255ca2f08bbee17b79f7e7f980c94eecb7ae28585433a0571c4",
+      "state": "reader, sepia document palette",
+      "config": "W1280 D1 EN",
+      "inspected": "2026-09-22 by the 2C worker (view_media)"
+    }
+  ],
+  "golden_candidates": {
+    "status": "PENDING OWNER APPROVAL. The approved Linux baselines are unchanged; these candidates are the renders the mapped theme produces.",
+    "approved_directory": "flutter/test/goldens",
+    "candidate_directory": "rfd/0004/evidence/theme-mappings-2c/candidates/linux",
+    "entries": [
+      {
+        "name": "library-cleanup-pending.png",
+        "approved_sha256": "ecceace5ea0f86c4019946ae3c2106491c77328e4325448d61bd1eebd15c3ff0",
+        "candidate_sha256": "a1154b1f189f938b1b85f7d1a9e9b50e60ac7aebbbb44ce5265a00a25890e215",
+        "size": "800x700",
+        "differing_pixels": 560000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            96.5
+          ],
+          [
+            "#1C1917",
+            1.2
+          ],
+          [
+            "#E7E5E4",
+            0.7
+          ],
+          [
+            "#0C0A09",
+            0.1
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            89.1
+          ],
+          [
+            "#FFFEFB",
+            7.6
+          ],
+          [
+            "#4D5E86",
+            1.2
+          ],
+          [
+            "#D9D5CB",
+            0.7
+          ]
+        ]
+      },
+      {
+        "name": "library-compact-390.png",
+        "approved_sha256": "56d4cf40717f805eb1a69cbf73fdbbcb928c3b924859b37f86f93fde64470e1e",
+        "candidate_sha256": "ac24bb2d2874a51f2a906ce2d5d32f7b9846ecaf694aa486623faab60d07a0cc",
+        "size": "390x780",
+        "differing_pixels": 290760,
+        "differing_ratio": 0.9558,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            85.4
+          ],
+          [
+            "#1C1917",
+            2.8
+          ],
+          [
+            "#E7E5E4",
+            1.4
+          ],
+          [
+            "#F5F5F4",
+            0.9
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFEFB",
+            56.2
+          ],
+          [
+            "#F4F2ED",
+            30.1
+          ],
+          [
+            "#4D5E86",
+            2.8
+          ],
+          [
+            "#D9D5CB",
+            1.4
+          ]
+        ]
+      },
+      {
+        "name": "library-compact-390-ja-t200.png",
+        "approved_sha256": "3dcc902916af375e845e191e0169bf0555e43ddbc3ad16d14b898d1d6d4d45d3",
+        "candidate_sha256": "62b033ae6d400098d48961da596d3c3fc680fe67d9cb1a65f906d43bf40dd48c",
+        "size": "390x780",
+        "differing_pixels": 295240,
+        "differing_ratio": 0.9705,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            85.1
+          ],
+          [
+            "#1C1917",
+            3.6
+          ],
+          [
+            "#0C0A09",
+            1.6
+          ],
+          [
+            "#E7E5E4",
+            1.1
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFEFB",
+            55.1
+          ],
+          [
+            "#F4F2ED",
+            30.8
+          ],
+          [
+            "#4D5E86",
+            3.6
+          ],
+          [
+            "#282724",
+            1.6
+          ]
+        ]
+      },
+      {
+        "name": "library-compact-large-text.png",
+        "approved_sha256": "bf686e757a8dbfa3eff324640885dcab1ca18c19f7722640752748d74f67c116",
+        "candidate_sha256": "9066a0f4191402c2edf1d593f0f320feaca7156fa6ee19f3311c52d2549730aa",
+        "size": "360x640",
+        "differing_pixels": 230400,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            88.8
+          ],
+          [
+            "#1C1917",
+            4.7
+          ],
+          [
+            "#E7E5E4",
+            1.0
+          ],
+          [
+            "#0C0A09",
+            0.9
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            52.2
+          ],
+          [
+            "#FFFEFB",
+            37.0
+          ],
+          [
+            "#4D5E86",
+            4.7
+          ],
+          [
+            "#D9D5CB",
+            1.0
+          ]
+        ]
+      },
+      {
+        "name": "library-empty-1280.png",
+        "approved_sha256": "eca3a38d2ebc263c5b35b8bc2521c86ddc573aab2894f9875a1111bba4330d68",
+        "candidate_sha256": "6e3454bf4e7919f7586670f9a6dae6899b4b41c8329241e930bf09be7fd3fce6",
+        "size": "1280x800",
+        "differing_pixels": 1024000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            98.6
+          ],
+          [
+            "#1C1917",
+            0.6
+          ],
+          [
+            "#E7E5E4",
+            0.3
+          ],
+          [
+            "#0C0A09",
+            0.0
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            98.6
+          ],
+          [
+            "#4D5E86",
+            0.6
+          ],
+          [
+            "#D9D5CB",
+            0.3
+          ],
+          [
+            "#282724",
+            0.0
+          ]
+        ]
+      },
+      {
+        "name": "library-expanded.png",
+        "approved_sha256": "b00ed14bbfb372bcf2124122ecb06181d019f939a56a70e1d82983460ed2f5fc",
+        "candidate_sha256": "948991cb6cfed25280334d39ec9d71d03726b4a701b3b31ba7c9f6c9855a1f30",
+        "size": "1280x800",
+        "differing_pixels": 1024000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            98.4
+          ],
+          [
+            "#1C1917",
+            0.6
+          ],
+          [
+            "#E7E5E4",
+            0.3
+          ],
+          [
+            "#0C0A09",
+            0.1
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            94.6
+          ],
+          [
+            "#FFFEFB",
+            3.9
+          ],
+          [
+            "#4D5E86",
+            0.6
+          ],
+          [
+            "#D9D5CB",
+            0.3
+          ]
+        ]
+      },
+      {
+        "name": "library-managed-deletion-pending.png",
+        "approved_sha256": "411a5230ab369b1dc45a4836f6308fb0f773cf3a0bfb49dafb4c8132163390da",
+        "candidate_sha256": "a40ff9afb7c40044372441b2d3370be14204c2547801412a0b454f360137e3bd",
+        "size": "800x700",
+        "differing_pixels": 560000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            96.5
+          ],
+          [
+            "#1C1917",
+            1.2
+          ],
+          [
+            "#E7E5E4",
+            0.7
+          ],
+          [
+            "#0C0A09",
+            0.1
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            89.1
+          ],
+          [
+            "#FFFEFB",
+            7.6
+          ],
+          [
+            "#4D5E86",
+            1.2
+          ],
+          [
+            "#D9D5CB",
+            0.7
+          ]
+        ]
+      },
+      {
+        "name": "library-mixed-1280.png",
+        "approved_sha256": "b1de10e2b3f196547e8d864aeec3c6b9e13f71e988d44977011ec859a705b87f",
+        "candidate_sha256": "b44693347820f9b8c5ecf812850fbe989d04a90021d04283534ea1e4f7f9702b",
+        "size": "1280x800",
+        "differing_pixels": 1010560,
+        "differing_ratio": 0.9869,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            96.2
+          ],
+          [
+            "#1C1917",
+            0.7
+          ],
+          [
+            "#E7E5E4",
+            0.4
+          ],
+          [
+            "#F5F5F4",
+            0.1
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            86.2
+          ],
+          [
+            "#FFFEFB",
+            10.1
+          ],
+          [
+            "#4D5E86",
+            0.7
+          ],
+          [
+            "#D9D5CB",
+            0.4
+          ]
+        ]
+      },
+      {
+        "name": "library-normal-1280.png",
+        "approved_sha256": "c5a70103e7c9209c89504a23b63172ae375c19235dde0db80ead6ec6a65f9c5e",
+        "candidate_sha256": "55560631664534cff1c4f31c251b9c6de4c44b4885dd203bb042716a06b00ce1",
+        "size": "1280x800",
+        "differing_pixels": 997120,
+        "differing_ratio": 0.9738,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            93.7
+          ],
+          [
+            "#1C1917",
+            0.8
+          ],
+          [
+            "#E7E5E4",
+            0.6
+          ],
+          [
+            "#F5F5F4",
+            0.2
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#F4F2ED",
+            73.6
+          ],
+          [
+            "#FFFEFB",
+            20.4
+          ],
+          [
+            "#4D5E86",
+            0.8
+          ],
+          [
+            "#D9D5CB",
+            0.6
+          ]
+        ]
+      },
+      {
+        "name": "library-wide-900-ja-t200.png",
+        "approved_sha256": "bcfdb933b1a3a87dc95bd65890ed4e5c2c758261e74e4758b7239b0f14047278",
+        "candidate_sha256": "2fa4b63a65a5c1f7cd9c09a83d2fa44bc890c58c7c862c4a631bfbe179360db6",
+        "size": "900x700",
+        "differing_pixels": 607152,
+        "differing_ratio": 0.9637,
+        "max_channel_delta": 232,
+        "before_dominant": [
+          [
+            "#FFFFFF",
+            87.9
+          ],
+          [
+            "#1C1917",
+            1.9
+          ],
+          [
+            "#0C0A09",
+            1.6
+          ],
+          [
+            "#E7E5E4",
+            0.9
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFEFB",
+            56.5
+          ],
+          [
+            "#F4F2ED",
+            31.7
+          ],
+          [
+            "#4D5E86",
+            1.9
+          ],
+          [
+            "#282724",
+            1.6
+          ]
+        ]
+      },
+      {
+        "name": "reader-epub-1280.png",
+        "approved_sha256": "41367151fc236a91ae78af05d57ee578685746910890057e601953bb24285630",
+        "candidate_sha256": "18107c8e6cd8fd48ae15e2646f134d42afc482c9dd9f84a60173e9cbbfb8128e",
+        "size": "1280x800",
+        "differing_pixels": 1024000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 235,
+        "before_dominant": [
+          [
+            "#FFF8F5",
+            49.8
+          ],
+          [
+            "#221A14",
+            48.2
+          ],
+          [
+            "#88511D",
+            0.9
+          ],
+          [
+            "#1C1917",
+            0.6
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFFFF",
+            49.9
+          ],
+          [
+            "#1A1A1A",
+            48.2
+          ],
+          [
+            "#4D5E86",
+            1.5
+          ],
+          [
+            "#C6C6C6",
+            0.2
+          ]
+        ]
+      },
+      {
+        "name": "reader-pdf-1280.png",
+        "approved_sha256": "eddaaab71819fb9489ba63ea5f4c39984d76d666a370b8ffc93508de1a9e5527",
+        "candidate_sha256": "43cde51e7b4dcad3cda2319ec5bbaa0922a87b1a806f7ee0ddf9f255736198d1",
+        "size": "1280x800",
+        "differing_pixels": 530962,
+        "differing_ratio": 0.5185,
+        "max_channel_delta": 235,
+        "before_dominant": [
+          [
+            "#FFF8F5",
+            49.8
+          ],
+          [
+            "#F4E8D8",
+            20.6
+          ],
+          [
+            "#E6E8EF",
+            20.6
+          ],
+          [
+            "#1F3355",
+            4.3
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFFFF",
+            49.9
+          ],
+          [
+            "#F4E8D8",
+            20.6
+          ],
+          [
+            "#E6E8EF",
+            20.6
+          ],
+          [
+            "#1F3355",
+            4.3
+          ]
+        ]
+      },
+      {
+        "name": "reader-welcome-1280.png",
+        "approved_sha256": "0ecbf16693dc43b058c0bd09eda33d05384f013a6aef7e1f845150da9fa7b18a",
+        "candidate_sha256": "b5b05a4e978671cdf695e63b47b59f8765848ba51ee01788d2dd561914fe94b1",
+        "size": "1280x800",
+        "differing_pixels": 1024000,
+        "differing_ratio": 1.0,
+        "max_channel_delta": 235,
+        "before_dominant": [
+          [
+            "#FFF8F5",
+            98.9
+          ],
+          [
+            "#1C1917",
+            0.6
+          ],
+          [
+            "#E7E5E4",
+            0.1
+          ],
+          [
+            "#221A14",
+            0.0
+          ]
+        ],
+        "after_dominant": [
+          [
+            "#FFFFFF",
+            98.9
+          ],
+          [
+            "#4D5E86",
+            0.6
+          ],
+          [
+            "#D9D5CB",
+            0.1
+          ],
+          [
+            "#1A1A1A",
+            0.0
+          ]
+        ]
+      }
+    ]
+  },
+  "macos_baselines": {
+    "status": "unchanged; a macOS run has to render, review and commit its own candidates (cannot be produced on Linux)",
+    "approved_sha256": {
+      "reader-pdf-1280.png": "0c67abecf6ec9ad82b3a0a6d0d197dde761ac4e664cfdc571454bcc18110f19e",
+      "library-mixed-1280.png": "4bdbd9e46472394b5830c6323cdd1cc76cdee516a8341b21325bce0ecb75891f",
+      "library-empty-1280.png": "528b6a151282959c8555ad7b8a335c1b2c9dba139d3d3c34a6951ac5c0799e85",
+      "library-normal-1280.png": "5c86160abd8347ad37d36d6d8a8c7f90074d68f0e3586970a7652252019499cd",
+      "reader-welcome-1280.png": "904daf20b310c83f878be607bdd36c0d7d1b663ee81d9f2a6171424af8014648",
+      "library-wide-900-ja-t200.png": "9091795c11bac4498a8255241d4477859391a6e4671a81f661931d8f169e04d0",
+      "reader-epub-1280.png": "91f0c5f9ce0e7faefce0230c435bd6e10eb791430decb8918e598a784e7b47ce",
+      "library-compact-390.png": "9f8ef828818d0aec7dc2523f98c651e391dcfcc3703ccb3920e8aef7eaffa60b",
+      "library-compact-390-ja-t200.png": "d7026ba46be98ec886594d9c84ea5ec7bac257eb5ff6f5bf828099c74814a938"
+    }
+  },
+  "test_results": {
+    "rust_workspace": {
+      "command": "cargo test --workspace --no-fail-fast",
+      "result": "1229 passed, 0 failed, 2 ignored (the reference-shot captures)",
+      "log": "rust-final6.txt"
+    },
+    "rust_theme_tests": {
+      "command": "cargo test -p shosai-app --bin shosai theme::tests",
+      "result": "8 passed: application palette, reader palettes, accent/brown, consumed constants, font families, the literal-color scan and its two scanner controls"
+    },
+    "flutter_full_against_approved_baselines": {
+      "command": "flutter test",
+      "result": "381 passed, 13 failed \u2014 every failure is a golden pixel comparison against the approved baseline",
+      "log": "flutter-full-final6.txt"
+    },
+    "flutter_theme_tests": {
+      "command": "flutter test test/app_theme_test.dart test/visual/theme_palette_test.dart",
+      "result": "19 + 5 passed: mapping assertions from hand-written specification values, the JSON cross-check, the Dart literal scan and its control, the rendered tooltip, and the five palette renders"
+    },
+    "flutter_candidate_verification": {
+      "command": "flutter test --update-goldens test/product_shell_test.dart test/visual/production_shell_golden_test.dart test/visual/render_structure_test.dart && flutter test <same files>",
+      "result": "66 passed with the candidates installed; the second run passes without --update-goldens"
+    },
+    "scripts": {
+      "command": "python3 -m unittest discover -s scripts/tests",
+      "result": "106 tests, 96 passed and 10 skipped; the generator tests cover the color grammar, authority resolution, invariants (including the brown in any notation) and the --check gate",
+      "log": "script-final6.txt"
+    },
+    "formatting": {
+      "command": "cargo fmt --all -- --check && dart format --output=none --set-exit-if-changed integration_test lib test",
+      "result": "clean, including both generated files"
+    }
+  },
+  "checks": {
+    "literal_theme_colors": "crates/shosai-app/src/theme.rs scans application modules with a comment/string-aware scanner that ignores dynamic conversions and keeps one occurrence-counted exception (the EPUB document text fallback); flutter/test/app_theme_test.dart scans lib/ the same way. Both have control tests for literal and dynamic spellings.",
+    "generated_files": "scripts/generate-theme-tokens.py --check is byte-exact and runs in make test-scripts; flutter/test/app_theme_test.dart re-reads assets/theme/tokens.json and compares the Dart tokens with it."
+  },
+  "limitations": [
+    "macOS baselines are unchanged and need their own reviewed candidates from a macOS run.",
+    "The palette renders and goldens are Linux (FreeType) renderings; macOS rasterisation differs and is reviewed per platform (2B policy).",
+    "app.dark.* is a retained-Flutter palette because Iced defines no dark application palette.",
+    "math_layout::MATH_FONT_FAMILY in shosai-core keeps its own literal; an app-side test asserts it equals the token.",
+    "The native macOS picker smoke remains open from 2B; this package makes no macOS validation claim.",
+    "Observed flake, not reproduced: one full workspace run failed 1C's app::reference_shots::tests::hover_captures_change_only_the_edge_control_strip (rd-chrome-c390-ja reached page_count 1 where the capture declares 3, i.e. the document was still loading). It passed twice in isolation and in the next full run. It belongs to the 1C capture harness, not to this package's changes."
+  ]
+}

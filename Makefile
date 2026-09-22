@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -65,8 +65,17 @@ reference-shots:
 	SHOSAI_REFERENCE_SHOTS_COMMAND="make reference-shots$(if $(VERIFY), VERIFY=$(VERIFY),)" \
 	cargo test --package shosai-app --bin shosai reference_shots_capture -- --ignored --nocapture
 
+## Regenerate the shared design-token modules from assets/theme/tokens.json
+theme-tokens:
+	python3 scripts/generate-theme-tokens.py
+
+## Verify the generated token modules still match the token source
+check-theme-tokens:
+	python3 scripts/generate-theme-tokens.py --check
+
 ## Run all Rust, script, bridge, and Flutter tests
 test:
+	$(MAKE) check-theme-tokens
 	$(MAKE) test-rust
 	$(MAKE) test-scripts
 	$(MAKE) check-frb
