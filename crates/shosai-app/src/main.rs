@@ -5,6 +5,7 @@ mod pdf;
 #[cfg(test)]
 mod selection_spike;
 mod theme;
+mod theme_tokens;
 mod typography;
 mod widgets;
 

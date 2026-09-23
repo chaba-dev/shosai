@@ -1248,7 +1248,7 @@ fn render_code_block<'a>(
     if let Some(highlighted_lines) = highlight::highlight_code(code, language, theme_name) {
         let bg_color = highlight::theme_background(theme_name)
             .map(|(r, g, b)| iced::Color::from_rgb8(r, g, b))
-            .unwrap_or(iced::Color::from_rgb(0.15, 0.15, 0.18));
+            .unwrap_or(crate::theme::READER_CODE_BLOCK_FALLBACK_BACKGROUND);
 
         let mut lines_col = column![].spacing(0);
         let mut code_offset = text_offset;
@@ -1306,9 +1306,9 @@ fn render_code_block<'a>(
     .padding(12)
     .width(Length::Fill)
     .style(move |_theme| container::Style {
-        background: Some(iced::Background::Color(iced::Color::from_rgb(
-            0.15, 0.15, 0.18,
-        ))),
+        background: Some(iced::Background::Color(
+            crate::theme::READER_CODE_BLOCK_FALLBACK_BACKGROUND,
+        )),
         border: iced::Border {
             radius: 4.0.into(),
             ..Default::default()

@@ -142,6 +142,7 @@ class ShosaiShell extends StatelessWidget {
       appBuilder: (context) => MaterialApp(
         debugShowCheckedModeBanner: false,
         theme: shosaiMaterialTheme(context),
+        darkTheme: shosaiMaterialTheme(context, Brightness.dark),
         localizationsDelegates: const [
           GlobalShadLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
