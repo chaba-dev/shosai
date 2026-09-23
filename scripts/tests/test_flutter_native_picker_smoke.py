@@ -14,6 +14,7 @@ whatever the host's TCC state is.
 """
 
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -173,9 +174,14 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             '    if [[ -f "$SHOSAI_TEST_DISMISSED" ]]; then printf \'1\\n\'; '
             "else printf '2\\n'; fi\n"
             "    exit 0 ;;\n"
-            "  *'item 1 of ('*) printf 'System Events error -1700\\n' >&2; exit 1 ;;\n"
-            "  *'position of sheet 1'*) printf '100, 200, 792, 404\\n'; exit 0 ;;\n"
-            "  *'position of window 1'*) printf '100, 200, 720, 570\\n'; exit 0 ;;\n"
+            "  *'return {position of sheet 1 of window 1, size of sheet 1 of window 1}'*)\n"
+            "    [[ \"${SHOSAI_TEST_SHEET_GEOMETRY:-ok}\" == ok ]] || { printf 'System Events error -1728: no sheet\\n' >&2; exit 1; }\n"
+            "    printf '100, 200, 792, 404\\n'; exit 0 ;;\n"
+            "  *'return {position of window 1, size of window 1}'*)\n"
+            "    printf '100, 200, 720, 570\\n'; exit 0 ;;\n"
+            "  *'position of '*|*'size of '*)\n"
+            "    printf 'System Events error -1700: unsupported geometry request\\n' >&2\n"
+            "    exit 1 ;;\n"
             "  *'name of first process'*)\n"
             '    [[ "${SHOSAI_TEST_ACCESSIBILITY:-allowed}" == hang ]] && sleep 30\n'
             '    [[ "${SHOSAI_TEST_ACCESSIBILITY:-allowed}" == allowed ]] || exit 1\n'
@@ -376,15 +382,19 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         # coordinate lists whole; otherwise it resolves no geometry, reports
         # missing evidence and captures nothing.
         # The guard reads code lines only: the comment above the expression names
-        # the rejected form on purpose, so it must not be mistaken for a use.
-        code = [
+        # the rejected form on purpose, so it must not be mistaken for a use. It
+        # matches the indexing class rather than one spelling, so a spaced or
+        # reordered variant of the rejected form cannot slip through.
+        code = "\n".join(
             line
             for line in RUNNER.read_text().splitlines()
             if not line.strip().startswith("#")
-        ]
-        self.assertNotIn(
-            "item 1 of (",
-            "\n".join(code),
+        )
+        pattern = (
+            "item[ \t]+[0-9]+[ \t]+of[ \t]*[(]?[ \t]*(?:position|size)[ \t]+of"
+        )
+        self.assertIsNone(
+            re.search(pattern, code),
             "the runner asks System Events for the coordinate lists whole",
         )
 
@@ -394,6 +404,51 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         self.assertNotIn(
             "no capture: System Events reported no sheet or window rect",
             result.stdout,
+        )
+        captured = self.captures_taken()
+        self.assertTrue(captured, "the run captures its own picker window")
+        for line in captured:
+            self.assert_capture_is_window_scoped(line)
+
+    def test_panel_geometry_prefers_the_sheet_rect(self):
+        # The panel is the sheet, so the capture target must be the sheet's own
+        # rect; the window rect is only the fallback.
+        result = self.run_runner("--timeout", "60")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = self.probe_calls.read_text()
+        self.assertIn(
+            "--rect 100,200,792,404",
+            calls,
+            "the sheet rect is the capture target",
+        )
+        self.assertNotIn(
+            "--rect 100,200,720,570",
+            calls,
+            "the application window rect is not the capture target when a sheet is up",
+        )
+
+    def test_panel_geometry_falls_back_to_the_window_rect(self):
+        # A sheet query that fails (no sheet, or an expression System Events
+        # rejects) must fall back to the window rect instead of giving up and
+        # losing the capture.
+        result = self.run_runner(
+            "--timeout",
+            "60",
+            env={"SHOSAI_TEST_SHEET_GEOMETRY": "missing"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = self.probe_calls.read_text()
+        self.assertIn(
+            "--rect 100,200,720,570",
+            calls,
+            "the window rect is the fallback target",
+        )
+        self.assertNotIn(
+            "--rect 100,200,792,404",
+            calls,
+            "no sheet rect is available to target",
         )
         captured = self.captures_taken()
         self.assertTrue(captured, "the run captures its own picker window")
