@@ -173,6 +173,7 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             '    if [[ -f "$SHOSAI_TEST_DISMISSED" ]]; then printf \'1\\n\'; '
             "else printf '2\\n'; fi\n"
             "    exit 0 ;;\n"
+            "  *'item 1 of ('*) printf 'System Events error -1700\\n' >&2; exit 1 ;;\n"
             "  *'position of sheet 1'*) printf '100, 200, 792, 404\\n'; exit 0 ;;\n"
             "  *'position of window 1'*) printf '100, 200, 720, 570\\n'; exit 0 ;;\n"
             "  *'name of first process'*)\n"
@@ -364,6 +365,36 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS:", result.stdout)
+        captured = self.captures_taken()
+        self.assertTrue(captured, "the run captures its own picker window")
+        for line in captured:
+            self.assert_capture_is_window_scoped(line)
+
+    def test_panel_geometry_avoids_the_macos_incompatible_expression(self):
+        # Current macOS rejects `item 1 of (position of window 1)` with error
+        # -1700 (the osascript stub models that), so the runner must ask for the
+        # coordinate lists whole; otherwise it resolves no geometry, reports
+        # missing evidence and captures nothing.
+        # The guard reads code lines only: the comment above the expression names
+        # the rejected form on purpose, so it must not be mistaken for a use.
+        code = [
+            line
+            for line in RUNNER.read_text().splitlines()
+            if not line.strip().startswith("#")
+        ]
+        self.assertNotIn(
+            "item 1 of (",
+            "\n".join(code),
+            "the runner asks System Events for the coordinate lists whole",
+        )
+
+        result = self.run_runner("--timeout", "60")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(
+            "no capture: System Events reported no sheet or window rect",
+            result.stdout,
+        )
         captured = self.captures_taken()
         self.assertTrue(captured, "the run captures its own picker window")
         for line in captured:
