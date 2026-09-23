@@ -161,6 +161,23 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             "osascript",
             'joined="$*"\n'
             'printf \'%s\\n\' "$joined" >> "$SHOSAI_TEST_OSASCRIPT_CALLS"\n'
+            'geometry=""\n'
+            'for argument in "$@"; do\n'
+            '  case "$argument" in\n'
+            "    *'return {'*) geometry=\"$argument\" ;;\n"
+            '  esac\n'
+            'done\n'
+            'case "$geometry" in\n'
+            "  '  return {position of sheet 1 of window 1, size of sheet 1 of window 1}')\n"
+            "    [[ \"${SHOSAI_TEST_SHEET_GEOMETRY:-ok}\" == ok ]] || { printf 'System Events error -1728: no sheet\\n' >&2; exit 1; }\n"
+            "    printf '100, 200, 792, 404\\n'; exit 0 ;;\n"
+            "  '  return {position of window 1, size of window 1}')\n"
+            "    printf '100, 200, 720, 570\\n'; exit 0 ;;\n"
+            "  '') ;;\n"
+            "  *)\n"
+            "    printf 'System Events error -1700: unsupported geometry request\\n' >&2\n"
+            "    exit 1 ;;\n"
+            'esac\n'
             'case "$joined" in\n'
             "  *'key code 53'*)\n"
             '    [[ "${SHOSAI_TEST_DISMISSAL:-works}" == works ]] && '
@@ -174,14 +191,6 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             '    if [[ -f "$SHOSAI_TEST_DISMISSED" ]]; then printf \'1\\n\'; '
             "else printf '2\\n'; fi\n"
             "    exit 0 ;;\n"
-            "  *'return {position of sheet 1 of window 1, size of sheet 1 of window 1}'*)\n"
-            "    [[ \"${SHOSAI_TEST_SHEET_GEOMETRY:-ok}\" == ok ]] || { printf 'System Events error -1728: no sheet\\n' >&2; exit 1; }\n"
-            "    printf '100, 200, 792, 404\\n'; exit 0 ;;\n"
-            "  *'return {position of window 1, size of window 1}'*)\n"
-            "    printf '100, 200, 720, 570\\n'; exit 0 ;;\n"
-            "  *'position of '*|*'size of '*)\n"
-            "    printf 'System Events error -1700: unsupported geometry request\\n' >&2\n"
-            "    exit 1 ;;\n"
             "  *'name of first process'*)\n"
             '    [[ "${SHOSAI_TEST_ACCESSIBILITY:-allowed}" == hang ]] && sleep 30\n'
             '    [[ "${SHOSAI_TEST_ACCESSIBILITY:-allowed}" == allowed ]] || exit 1\n'
@@ -280,6 +289,16 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             for line in self.captures.read_text().splitlines()
             if line.strip()
         ]
+
+    def probe_rects(self):
+        """The complete `--rect` argument of every window-id probe call."""
+        rects = []
+        for line in self.probe_calls.read_text().splitlines():
+            tokens = line.split()
+            if "window-id" not in tokens or "--rect" not in tokens:
+                continue
+            rects.append(tokens[tokens.index("--rect") + 1])
+        return rects
 
     def assert_capture_is_window_scoped(self, line, expected_id="4242"):
         tokens = line.split()
@@ -381,10 +400,11 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         # -1700 (the osascript stub models that), so the runner must ask for the
         # coordinate lists whole; otherwise it resolves no geometry, reports
         # missing evidence and captures nothing.
-        # The guard reads code lines only: the comment above the expression names
-        # the rejected form on purpose, so it must not be mistaken for a use. It
-        # matches the indexing class rather than one spelling, so a spaced or
-        # reordered variant of the rejected form cannot slip through.
+        # A supplementary heuristic, not an AppleScript validator: it reads code
+        # lines only (the comment above the expression names the rejected form on
+        # purpose), it does not cover every spelling of the indexing class, and it
+        # could in principle match a diagnostic string. The stub below is the
+        # authority: it answers only the complete supported statements.
         code = "\n".join(
             line
             for line in RUNNER.read_text().splitlines()
@@ -412,20 +432,16 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
 
     def test_panel_geometry_prefers_the_sheet_rect(self):
         # The panel is the sheet, so the capture target must be the sheet's own
-        # rect; the window rect is only the fallback.
+        # rect; the window rect is only the fallback. The comparison is over the
+        # complete `--rect` argument, so a wrong coordinate cannot pass on a
+        # matching prefix.
         result = self.run_runner("--timeout", "60")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        calls = self.probe_calls.read_text()
-        self.assertIn(
-            "--rect 100,200,792,404",
-            calls,
-            "the sheet rect is the capture target",
-        )
-        self.assertNotIn(
-            "--rect 100,200,720,570",
-            calls,
-            "the application window rect is not the capture target when a sheet is up",
+        self.assertEqual(
+            set(self.probe_rects()),
+            {"100,200,792,404"},
+            "every capture target is exactly the sheet rect",
         )
 
     def test_panel_geometry_falls_back_to_the_window_rect(self):
@@ -439,16 +455,10 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        calls = self.probe_calls.read_text()
-        self.assertIn(
-            "--rect 100,200,720,570",
-            calls,
-            "the window rect is the fallback target",
-        )
-        self.assertNotIn(
-            "--rect 100,200,792,404",
-            calls,
-            "no sheet rect is available to target",
+        self.assertEqual(
+            set(self.probe_rects()),
+            {"100,200,720,570"},
+            "every capture target is exactly the window rect",
         )
         captured = self.captures_taken()
         self.assertTrue(captured, "the run captures its own picker window")
