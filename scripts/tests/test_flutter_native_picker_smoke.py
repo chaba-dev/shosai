@@ -58,6 +58,7 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         self.probe_calls = self.root / "probe.log"
         self.swiftc_calls = self.root / "swiftc.log"
         self.osascript_calls = self.root / "osascript.log"
+        self.rects = self.root / "rects.log"
         self.dismissed = self.root / "dismissed"
         self.probe_template = self.root / "probe-template"
         for path in (
@@ -65,6 +66,7 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             self.probe_calls,
             self.swiftc_calls,
             self.osascript_calls,
+            self.rects,
         ):
             path.write_text("")
 
@@ -90,6 +92,13 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
             "  window-id)\n"
             '    if [[ "${SHOSAI_TEST_WINDOW_ID_STALL:-no}" == yes ]]; then exec sleep 30; fi\n'
             '    if [[ "${SHOSAI_TEST_WINDOW_ID:-4242}" == none ]]; then exit 4; fi\n'
+            '    rect=""\n'
+            '    previous=""\n'
+            '    for argument in "$@"; do\n'
+            '      [[ "$previous" == --rect ]] && rect="$argument"\n'
+            '      previous="$argument"\n'
+            '    done\n'
+            '    [[ -z "$rect" ]] || printf \'%s\\n\' "$rect" >> "${SHOSAI_TEST_RECTS:-/dev/null}"\n'
             '    printf \'%s\' "${SHOSAI_TEST_WINDOW_ID:-4242}"\n'
             "    exit 0 ;;\n"
             "  window-list)\n"
@@ -257,6 +266,7 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
                 "SHOSAI_TEST_PROBE_CALLS": str(self.probe_calls),
                 "SHOSAI_TEST_SWIFTC_CALLS": str(self.swiftc_calls),
                 "SHOSAI_TEST_OSASCRIPT_CALLS": str(self.osascript_calls),
+                "SHOSAI_TEST_RECTS": str(self.rects),
                 "SHOSAI_TEST_PROBE_TEMPLATE": str(self.probe_template),
                 "SHOSAI_TEST_DISMISSED": str(self.dismissed),
                 "SHOSAI_TEST_ACCESSIBILITY": "allowed",
@@ -291,14 +301,15 @@ class NativePickerCaptureScopeTests(unittest.TestCase):
         ]
 
     def probe_rects(self):
-        """The complete `--rect` argument of every window-id probe call."""
-        rects = []
-        for line in self.probe_calls.read_text().splitlines():
-            tokens = line.split()
-            if "window-id" not in tokens or "--rect" not in tokens:
-                continue
-            rects.append(tokens[tokens.index("--rect") + 1])
-        return rects
+        """The complete `--rect` argument of every window-id probe call.
+
+        The probe stub records each value on its own line, so an argument that
+        contains whitespace is compared whole instead of being split into
+        tokens.
+        """
+        return [
+            line for line in self.rects.read_text().splitlines() if line
+        ]
 
     def assert_capture_is_window_scoped(self, line, expected_id="4242"):
         tokens = line.split()
