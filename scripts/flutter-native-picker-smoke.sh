@@ -986,10 +986,14 @@ else
   }
 
   # The panel rect, in screen points, so the capture holds only this run's UI.
+  # `position` and `size` are coordinate lists, which System Events prints as
+  # `x, y, w, h`. Indexing them in place (`item 1 of (position of window 1)`)
+  # is rejected with error -1700 on current macOS, so the lists are returned
+  # whole; the parser below accepts exactly the printed form.
   panel_geometry() {
     local sheet_rect window_rect
-    sheet_rect="$(darwin_osascript 'return {(item 1 of (position of sheet 1 of window 1)), (item 2 of (position of sheet 1 of window 1)), (item 1 of (size of sheet 1 of window 1)), (item 2 of (size of sheet 1 of window 1))}')"
-    window_rect="$(darwin_osascript 'return {(item 1 of (position of window 1)), (item 2 of (position of window 1)), (item 1 of (size of window 1)), (item 2 of (size of window 1))}')" 
+    sheet_rect="$(darwin_osascript 'return {position of sheet 1 of window 1, size of sheet 1 of window 1}')"
+    window_rect="$(darwin_osascript 'return {position of window 1, size of window 1}')"
     if [[ "$sheet_rect" == *","* ]]; then
       printf '%s\n' "$sheet_rect" | tr -d ' '
     else
