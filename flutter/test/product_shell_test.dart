@@ -582,8 +582,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Reader settings'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await _openReaderSettings(tester);
     expect(find.text('Reader theme'), findsOneWidget);
     expect(find.text('Continuous reading'), findsOneWidget);
     expect(find.text('EPUB text size'), findsOneWidget);
@@ -632,8 +631,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Reader settings'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await _openReaderSettings(tester);
 
     expect(find.text('275% (custom)'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -658,8 +656,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Reader settings'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _openReaderSettings(tester);
 
       expect(find.byType(SingleChildScrollView), findsWidgets);
       expect(tester.takeException(), isNull);
@@ -1694,3 +1691,13 @@ class _ControlledLibraryBridge implements FlutterBridge {
 /// The production shell, so these tests render the same composition the
 /// application does instead of a lookalike theme wrapper.
 Widget _libraryApp({required Widget home}) => productionShell(home: home);
+
+/// Opens the reader settings from the library's navigation.
+///
+/// Package 3A moved the entry from the application bar into the collection
+/// sidebar (wide) and the filter row (compact); both dispatch the same
+/// settings intent.
+Future<void> _openReaderSettings(WidgetTester tester) async {
+  await tester.tap(find.widgetWithText(ShadButton, 'Settings'));
+  await tester.pump(const Duration(milliseconds: 300));
+}

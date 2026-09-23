@@ -44,6 +44,7 @@ final class LibraryModel {
     this.format,
     this.settings,
     this.busy = false,
+    this.importing = false,
     this.loaded = false,
     this.error,
     this.loadError,
@@ -60,6 +61,14 @@ final class LibraryModel {
   final FlutterBookFormat? format;
   final FlutterReaderSettings? settings;
   final bool busy;
+
+  /// True while the add-books import is the foreground operation.
+  ///
+  /// The header's add-books action becomes the cancel action for this effect
+  /// only; a library load is cancellable through the header's separate cancel
+  /// action instead, so the two states are deliberately distinct.
+  final bool importing;
+
   final bool loaded;
   final String? error;
   final String? loadError;
@@ -77,6 +86,7 @@ final class LibraryModel {
     Object? format = _same,
     Object? settings = _same,
     bool? busy,
+    bool? importing,
     bool? loaded,
     Object? error = _same,
     Object? loadError = _same,
@@ -96,6 +106,7 @@ final class LibraryModel {
         ? this.settings
         : settings as FlutterReaderSettings?,
     busy: busy ?? this.busy,
+    importing: importing ?? this.importing,
     loaded: loaded ?? this.loaded,
     error: identical(error, _same) ? this.error : error as String?,
     loadError: identical(loadError, _same)
