@@ -14,6 +14,12 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// The window title, matching the Iced frontend's window title (`app::title` in
+// crates/shosai-app). An empty title leaves both the header bar below and the
+// window manager's own decoration blank, so the window is indistinguishable
+// from a decoration-less one.
+static const char kWindowTitle[] = "Shosai";
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -46,9 +52,12 @@ static void my_application_activate(GApplication* application) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
+    // The header bar carries the window controls (drag, close) here, so it
+    // stays; it only needs the title it was created without.
+    gtk_header_bar_set_title(header_bar, kWindowTitle);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   }
-  gtk_window_set_title(window, "");
+  gtk_window_set_title(window, kWindowTitle);
 
   gtk_window_set_default_size(window, 1280, 720);
 
