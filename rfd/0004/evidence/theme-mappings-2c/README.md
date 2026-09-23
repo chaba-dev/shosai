@@ -9,7 +9,8 @@ paint palettes" ([restoration plan](../flutter-ui-restoration-plan.md) stage 2,
 - Pinned Iced reference: `1e54270a6bb24f15630ece336a0575bdbe5be113` (#108).
 - Recorded: 2026-09-22, runner `framework16`, Linux (FreeType) rendering.
 - **Linux candidates approved by the owner on 2026-09-23** and installed as the
-  Linux baselines; see [Approval](#approval) for the exact scope.
+  Linux baselines; the **nine macOS candidates were approved and installed the
+  same day**. See [Approval](#approval) for the exact scope.
 - Machine-readable record: [`manifest.json`](manifest.json).
 
 ## What is in this directory
@@ -58,23 +59,25 @@ findings, and the geometry of every element is unchanged.
 
 ## Approval
 
-The owner reviewed the palette and candidate previews and approved the **13 exact
-Linux candidates** committed under `candidates/linux/` on **2026-09-23**, for the
-**theme mapping only**. The scope is deliberately narrow:
+The owner reviewed the palette and candidate previews and approved, on
+**2026-09-23**, the **13 exact Linux candidates** committed under
+`candidates/linux/` and then the **nine macOS candidates** from the macOS
+verifier's archive (`98989caac590c8dc53ef95fc8fe2fda59e51216d9a2009951f7a3530d230e42e`,
+6,633,776 bytes), for the **theme mapping only**. The scope is deliberately
+narrow:
 
-- It covers the mapped palette, type, radii and the affected surfaces in those 13
-  renders. It is **not** Iced parity approval, and not approval of the current
+- It covers the mapped palette, type, radii and the affected surfaces in those
+  22 renders. It is **not** Iced parity approval, and not approval of the current
   `Open document`/path panel composition: that panel is the current Flutter UI
   and is replaced in stage 4B.
-- It does **not** resolve macOS: the nine `flutter/test/goldens/macos/` baselines
-  still need their own render verification and owner review, and the macOS
-  verifier run stays identified by revision `f867caed`, which predates this
-  baseline-only delta.
-- The native macOS picker smoke from 2B remains open.
-
-Installation was a byte copy of the approved candidates: every installed file
-matches its `candidate_sha256` in `manifest.json` (verified for all 13), and no
-image was regenerated.
+- It is not native-gate approval: the macOS picker smoke from 2B remains open.
+- Installation was a byte copy of the approved candidates in both cases: every
+  installed file matches its `candidate_sha256` in `manifest.json` (13 Linux and
+  9 macOS verified), and no image was regenerated. The five macOS palette
+  renders in the archive were not installed (they are evidence, not baselines).
+- The macOS verifier thread runs the final exact-revision pass on the head that
+  installs the macOS baselines; its earlier verification, and the disposable
+  clone conditional pass, were at `f867caed`.
 
 ## Candidate verification
 
@@ -108,32 +111,34 @@ The five renders in `palette/` were inspected with `view_media` on 2026-09-22:
   link `#683D00` on the focus ring, and the Iced accent — not the rejected
   historical brown — on the primary action.
 
-## macOS verification (independent, pending approval)
+## macOS verification and approval
 
-The macOS verifier thread completed its render verification at revision
-`f867caed7f13c986e894b7298a0586e7570af8f2` (the head before this baseline-only
-delta): 383 passed, 9 failed — all nine are golden pixel comparisons against the
-unchanged macOS baselines — and 2 skipped, with 17 renders per run and
-byte-identical SHA-256 manifests across two runs. With the nine candidates
-installed in a disposable clone: 392 passed, 0 failed, 2 skipped, and the
-failures return when the approved files are restored.
+The macOS verifier thread's independent run at revision
+`f867caed7f13c986e894b7298a0586e7570af8f2` reported 383 passed, 9 failed — all
+nine are golden pixel comparisons against the unchanged macOS baselines — and 2
+skipped, with 17 renders per run and byte-identical SHA-256 manifests across two
+runs. With the nine candidates installed in a disposable clone: 392 passed, 0
+failed, 2 skipped, and the failures return when the approved files are restored.
 
-**macOS appearance approval is not granted and nothing macOS-related is
-committed here.** The nine candidate hashes are recorded in
-`manifest.json.macos_verification` as pending owner review, together with the
-verifier's findings (the approved-to-candidate diff structure matches the Linux
-evidence for all nine names, platform drift is unchanged by the mapping, an
-ink-profile shift analysis shows best shift +0 in every non-degenerate strip,
-and the reader-pdf changed-block count is the known ink-mask boundary effect).
-Because this approval commit creates a new head, the verifier requires a fresh
-pass on that head before macOS approval.
+The owner approved those nine candidate bytes on 2026-09-23 after reviewing the
+labelled comparisons, and they are installed in `flutter/test/goldens/macos/`
+byte-identically (`manifest.json.macos_verification`). The verifier's findings
+carry over: the approved-to-candidate diff structure matches the Linux evidence
+for all nine names, platform drift is unchanged by the mapping, an ink-profile
+shift analysis shows best shift +0 in every non-degenerate strip, the reader-pdf
+changed-block count is the known ink-mask boundary effect, and the five macOS
+palette renders differ from the Linux evidence by 0.27-1.59%.
+
+The final exact-revision verification pass on the head that installs these
+baselines is run by that thread and reported separately; the conditional result
+above is a disposable-clone check, not the installed-baseline run.
 
 ## Limits
 
-- The nine macOS baselines under `flutter/test/goldens/macos/` are unchanged and
-  cannot be produced on Linux; a macOS run has to render, review and approve its
-  own candidates before that platform is resolved. The verifier's run stays
-  identified by revision `f867caed`, before this baseline-only delta.
+- The nine macOS baselines are installed from the owner-approved candidates, but
+  they cannot be re-rendered or re-verified on Linux: the macOS verifier's final
+  exact-revision pass on this head is the platform gate, and its earlier
+  verification and the conditional clone check were at `f867caed`.
 - These are Linux FreeType renders. macOS rasterisation differs and is reviewed
   per platform, per the 2B golden policy.
 - The native macOS picker smoke from 2B remains open; this package makes no

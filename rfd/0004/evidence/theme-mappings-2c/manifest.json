@@ -678,7 +678,24 @@
     ]
   },
   "macos_verification": {
-    "status": "Independent render verification completed at revision f867caed by the macOS verifier thread. macOS appearance approval is NOT granted, nothing macOS-related was committed, and the nine candidate hashes below are recorded as pending owner review. Because this Linux approval commit creates a new head, the verifier requires a fresh pass on that head before macOS approval; the candidates were produced from f867caed.",
+    "status": "APPROVED by the owner on 2026-09-23 after reviewing labelled comparisons, and installed from the approved candidate bytes without regeneration: every installed file matches its candidate_sha256. The candidates were produced from revision f867caed by the macOS verifier thread, whose independent run reported 383 passed / 9 golden failures / 2 skipped there and 392 passed / 0 failed / 2 skipped in a disposable clone with the candidates installed. The exact-revision verification pass on the final head is run by that thread; this approval covers the theme mapping only and is not Iced-parity or native-gate approval.",
+    "approved_by": "owner",
+    "approved_on": "2026-09-23",
+    "approval_scope": "theme mapping only: the nine exact macOS candidate bytes from the verifier archive, reviewed as labelled comparisons. Not approval of the Open document/path panel composition (current Flutter UI, stage 4B), not Iced parity, and not the native macOS picker gate.",
+    "archive_sha256": "98989caac590c8dc53ef95fc8fe2fda59e51216d9a2009951f7a3530d230e42e",
+    "archive_bytes": 6633776,
+    "installed": "flutter/test/goldens/macos: the nine installed baselines are byte-identical to candidate_sha256",
+    "superseded_sha256": {
+      "reader-pdf-1280.png": "0c67abecf6ec9ad82b3a0a6d0d197dde761ac4e664cfdc571454bcc18110f19e",
+      "library-mixed-1280.png": "4bdbd9e46472394b5830c6323cdd1cc76cdee516a8341b21325bce0ecb75891f",
+      "library-empty-1280.png": "528b6a151282959c8555ad7b8a335c1b2c9dba139d3d3c34a6951ac5c0799e85",
+      "library-normal-1280.png": "5c86160abd8347ad37d36d6d8a8c7f90074d68f0e3586970a7652252019499cd",
+      "reader-welcome-1280.png": "904daf20b310c83f878be607bdd36c0d7d1b663ee81d9f2a6171424af8014648",
+      "library-wide-900-ja-t200.png": "9091795c11bac4498a8255241d4477859391a6e4671a81f661931d8f169e04d0",
+      "reader-epub-1280.png": "91f0c5f9ce0e7faefce0230c435bd6e10eb791430decb8918e598a784e7b47ce",
+      "library-compact-390.png": "9f8ef828818d0aec7dc2523f98c651e391dcfcc3703ccb3920e8aef7eaffa60b",
+      "library-compact-390-ja-t200.png": "d7026ba46be98ec886594d9c84ea5ec7bac257eb5ff6f5bf828099c74814a938"
+    },
     "verified_revision": "f867caed7f13c986e894b7298a0586e7570af8f2",
     "verified_result": "383 passed, 9 failed (all golden pixel comparisons against the unchanged macOS baselines), 2 skipped; 17 renders per run with byte-identical SHA-256 manifests across two runs; in a disposable clone with the nine candidates installed 392 passed, 0 failed, 2 skipped, and the failures return when the approved files are restored",
     "candidate_sha256": {
@@ -692,7 +709,7 @@
       "reader-pdf-1280.png": "3890671e9336f4e56e6ff68565d08a8b05c0549cc133e0fb5f4a3ab8d666c681",
       "reader-epub-1280.png": "c94c6c540255b639a1c6361bd4ab4bee1cccf4d52a19da79ab83b02eb089c8c5"
     },
-    "candidate_bytes": "not committed here; they are the verifier's artifacts (shosai-verify-2c/artifacts/macos-candidates/, archive SHA-256 98989caac590c8dc53ef95fc8fe2fda59e51216d9a2009951f7a3530d230e42e)",
+    "candidate_bytes": "installed in flutter/test/goldens/macos from the verifier archive; the archive itself is not committed",
     "findings": [
       "The approved-to-candidate diff structure is numerically identical to the Linux evidence for all nine names.",
       "Platform drift is unchanged by the mapping, and an ink-profile shift analysis shows best shift +0 in every non-degenerate strip, so there is no typography or geometry displacement.",
@@ -701,17 +718,17 @@
     ]
   },
   "macos_baselines": {
-    "status": "PENDING. Nine macOS baselines are unchanged and unresolved: they need their own render verification and owner review from a macOS run (the macOS verifier thread is identified by revision f867caed, before this baseline-only delta). The Linux approval does not cover them.",
-    "unchanged_sha256": {
-      "reader-pdf-1280.png": "0c67abecf6ec9ad82b3a0a6d0d197dde761ac4e664cfdc571454bcc18110f19e",
-      "library-mixed-1280.png": "4bdbd9e46472394b5830c6323cdd1cc76cdee516a8341b21325bce0ecb75891f",
-      "library-empty-1280.png": "528b6a151282959c8555ad7b8a335c1b2c9dba139d3d3c34a6951ac5c0799e85",
-      "library-normal-1280.png": "5c86160abd8347ad37d36d6d8a8c7f90074d68f0e3586970a7652252019499cd",
-      "reader-welcome-1280.png": "904daf20b310c83f878be607bdd36c0d7d1b663ee81d9f2a6171424af8014648",
-      "library-wide-900-ja-t200.png": "9091795c11bac4498a8255241d4477859391a6e4671a81f661931d8f169e04d0",
-      "reader-epub-1280.png": "91f0c5f9ce0e7faefce0230c435bd6e10eb791430decb8918e598a784e7b47ce",
-      "library-compact-390.png": "9f8ef828818d0aec7dc2523f98c651e391dcfcc3703ccb3920e8aef7eaffa60b",
-      "library-compact-390-ja-t200.png": "d7026ba46be98ec886594d9c84ea5ec7bac257eb5ff6f5bf828099c74814a938"
+    "status": "APPROVED and installed (see macos_verification). The macOS verifier thread runs the final exact-revision verification pass on the head that installs them; its earlier verification was at f867caed, which predates the baseline-only deltas.",
+    "installed_sha256": {
+      "library-compact-390-ja-t200.png": "23f4c060f55a4eb7bb7db9ecacd25ab7323c97947a3e40fa2cf1efa60e9124e3",
+      "library-compact-390.png": "7395bb6ee7e13ea7cd421ca9539844cd17c78dce96452ecca59be0064e1e602d",
+      "library-empty-1280.png": "b7f932933a20e57b057d6b5c3ec9cc65794ea781a7c15faf6104cb0ec411ffea",
+      "library-mixed-1280.png": "2e3bcd3dbedb1d8501bfa950a9fcf47a449ac8dd398401454e37c5bd386a0b08",
+      "library-normal-1280.png": "27182cf2e8ea52f66890afe4e5e281da845be249014012b226d547f79bcbbd60",
+      "library-wide-900-ja-t200.png": "eb36a79a223c556dd623bcf4673d3278a691e36260618e9f6ffb376ea4d2c57a",
+      "reader-epub-1280.png": "c94c6c540255b639a1c6361bd4ab4bee1cccf4d52a19da79ab83b02eb089c8c5",
+      "reader-pdf-1280.png": "3890671e9336f4e56e6ff68565d08a8b05c0549cc133e0fb5f4a3ab8d666c681",
+      "reader-welcome-1280.png": "74b83467119c3f3e7026626a30fc08733888aee5494bfc3ce9d9b11562d55f50"
     }
   },
   "test_results": {
@@ -757,7 +774,7 @@
     "generated_files": "scripts/generate-theme-tokens.py --check is byte-exact and runs in make test-scripts; flutter/test/app_theme_test.dart re-reads assets/theme/tokens.json and compares the Dart tokens with it."
   },
   "limitations": [
-    "Nine macOS baselines are unchanged and unresolved: they need their own render verification and owner review from a macOS run (the macOS verifier run stays identified by revision f867caed, which predates this baseline-only delta).",
+    "The macOS verifier's final exact-revision pass on the head that installs the approved macOS baselines is reported separately by that thread; its earlier verification was at f867caed.",
     "The palette renders and goldens are Linux (FreeType) renderings; macOS rasterisation differs and is reviewed per platform (2B policy).",
     "app.dark.* is a retained-Flutter palette because Iced defines no dark application palette.",
     "math_layout::MATH_FONT_FAMILY in shosai-core keeps its own literal; an app-side test asserts it equals the token.",
