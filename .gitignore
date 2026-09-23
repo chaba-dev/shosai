@@ -38,3 +38,4 @@ __pycache__/
 
 # Golden-test failure artifacts written next to the goldens
 /flutter/test/failures/
+/flutter/test/visual/failures/

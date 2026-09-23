@@ -11,6 +11,7 @@ import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 part 'geometry.dart';
 part 'painting.dart';
@@ -323,27 +324,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 }
 
-ThemeData _readerTheme(BuildContext context, String? theme) {
-  final parent = Theme.of(context);
-  final brightness = theme == 'dark' ? Brightness.dark : Brightness.light;
-  final seed = theme == 'sepia'
-      ? const Color(0xff8a6338)
-      : parent.colorScheme.primary;
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: seed,
-    brightness: brightness,
-  );
-  return ThemeData(
-    brightness: brightness,
-    colorScheme: colorScheme,
-    useMaterial3: parent.useMaterial3,
-    fontFamily: parent.textTheme.bodyMedium?.fontFamily,
-    fontFamilyFallback: parent.textTheme.bodyMedium?.fontFamilyFallback,
-    scaffoldBackgroundColor: theme == 'sepia'
-        ? const Color(0xfffff4d6)
-        : colorScheme.surface,
-  );
-}
+/// The reader's Material theme, mapped from the shared design tokens.
+///
+/// The page and surface colors are the pinned Iced reader palettes, so
+/// [pageColors] reads the document palette for the active reader theme; the
+/// pre-2C brown seed is rejected by plan decision 2.
+ThemeData _readerTheme(BuildContext context, String? theme) =>
+    shosaiReaderMaterialTheme(context, theme);
 
 enum _ReaderComposition { compact, medium, expanded }
 

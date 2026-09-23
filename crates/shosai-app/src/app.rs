@@ -424,10 +424,11 @@ impl BookRemovalTarget {
     }
 }
 
-const LIBRARY_PAGE_SIZE: u32 = 40;
-const LIBRARY_COVER_MAX_WIDTH: u32 = 440;
-const LIBRARY_COVER_MAX_HEIGHT: u32 = 420;
-const LIBRARY_COVER_SOURCE_MAX_DIMENSION: u32 = 8_192;
+pub(crate) const LIBRARY_PAGE_SIZE: u32 = crate::theme_tokens::LAYOUT_LIBRARY_PAGE_SIZE;
+pub(crate) const LIBRARY_COVER_MAX_WIDTH: u32 = crate::theme_tokens::LAYOUT_COVER_MAX_WIDTH;
+pub(crate) const LIBRARY_COVER_MAX_HEIGHT: u32 = crate::theme_tokens::LAYOUT_COVER_MAX_HEIGHT;
+pub(crate) const LIBRARY_COVER_SOURCE_MAX_DIMENSION: u32 =
+    crate::theme_tokens::LAYOUT_COVER_SOURCE_MAX_DIMENSION;
 const LIBRARY_COVER_DECODE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const LIBRARY_COVER_DECODER_METADATA_BYTES: u64 = 1024 * 1024;
 const LIBRARY_COVER_CACHE_BYTES: usize = 64 * 1024 * 1024;
@@ -459,15 +460,19 @@ const MAX_UI_SEARCH_QUERY_BYTES: usize = 4 * 1024;
 const DOCUMENT_OPEN_WORKERS: usize = 2;
 const SEARCH_WORKERS: usize = 2;
 const PDF_MIN_RASTER_DENSITY: f32 = 2.0;
-const MIN_TWO_PAGE_WIDTH: f32 = 720.0;
-const READER_HORIZONTAL_PADDING: f32 = 112.0;
-const READER_VERTICAL_CHROME: f32 = 148.0;
-const READER_SEARCH_HEIGHT: f32 = 52.0;
-const COMPACT_READER_SEARCH_HEIGHT: f32 = 88.0;
-const READER_MORE_HEIGHT: f32 = 58.0;
-const COMPACT_READER_MORE_HEIGHT: f32 = 84.0;
-const PAGE_GUTTER: f32 = 20.0;
-const BOOKMARKS_PANEL_WIDTH: f32 = 300.0;
+pub(crate) const MIN_TWO_PAGE_WIDTH: f32 = crate::theme_tokens::LAYOUT_READER_SPREAD_MIN_WIDTH;
+pub(crate) const READER_HORIZONTAL_PADDING: f32 =
+    crate::theme_tokens::LAYOUT_READER_HORIZONTAL_PADDING;
+pub(crate) const READER_VERTICAL_CHROME: f32 = crate::theme_tokens::LAYOUT_READER_VERTICAL_CHROME;
+pub(crate) const READER_SEARCH_HEIGHT: f32 = crate::theme_tokens::LAYOUT_READER_SEARCH_HEIGHT_WIDE;
+pub(crate) const COMPACT_READER_SEARCH_HEIGHT: f32 =
+    crate::theme_tokens::LAYOUT_READER_SEARCH_HEIGHT_COMPACT;
+pub(crate) const READER_MORE_HEIGHT: f32 = crate::theme_tokens::LAYOUT_READER_MORE_HEIGHT_WIDE;
+pub(crate) const COMPACT_READER_MORE_HEIGHT: f32 =
+    crate::theme_tokens::LAYOUT_READER_MORE_HEIGHT_COMPACT;
+pub(crate) const PAGE_GUTTER: f32 = crate::theme_tokens::LAYOUT_READER_PAGE_GUTTER;
+pub(crate) const BOOKMARKS_PANEL_WIDTH: f32 =
+    crate::theme_tokens::LAYOUT_READER_BOOKMARKS_PANEL_WIDTH;
 const WINDOW_WIDTH_KEY: &str = "window.width";
 const WINDOW_HEIGHT_KEY: &str = "window.height";
 const WINDOW_X_KEY: &str = "window.x";
@@ -5501,7 +5506,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     }
 }
 
-const COMPACT_READER_WIDTH: f32 = 860.0;
+pub(crate) const COMPACT_READER_WIDTH: f32 = crate::theme_tokens::LAYOUT_READER_COMPACT_BREAKPOINT;
 
 fn reader_view(state: &State) -> Element<'_, Message> {
     container(responsive(move |size| {
@@ -5560,7 +5565,7 @@ fn reader_layout(state: &State, compact: bool) -> Element<'_, Message> {
         let mut alert = row![
             text(error.localized(&state.i18n))
                 .size(13)
-                .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
+                .color(app_theme::DANGER),
             iced::widget::Space::new().width(Length::Fill),
         ]
         .spacing(8)
@@ -6515,7 +6520,7 @@ fn library_view(state: &State) -> Element<'_, Message> {
 }
 
 fn library_layout(state: &State, available_width: f32) -> Element<'_, Message> {
-    let compact = available_width < 760.0;
+    let compact = available_width < crate::theme_tokens::LAYOUT_LIBRARY_COMPACT_BREAKPOINT;
     let header = library_header(state, compact);
     let collection = library_collection(state);
 
@@ -6642,7 +6647,7 @@ fn library_header(state: &State, compact: bool) -> Element<'_, Message> {
                 radius: 0.0.into(),
             },
             shadow: iced::Shadow {
-                color: iced::Color::from_rgba8(0x21, 0x20, 0x1E, 0.08),
+                color: app_theme::SHADOW_HAIRLINE,
                 offset: iced::Vector::new(0.0, 1.0),
                 blur_radius: 6.0,
             },
@@ -6689,7 +6694,7 @@ fn settings_view(state: &State) -> Element<'_, Message> {
 }
 
 fn settings_layout(state: &State, available_width: f32) -> Element<'_, Message> {
-    let compact = available_width < 760.0;
+    let compact = available_width < crate::theme_tokens::LAYOUT_LIBRARY_COMPACT_BREAKPOINT;
     let heading = page_header(
         state.i18n.text("settings"),
         state.i18n.text("settings-subtitle"),
@@ -6736,7 +6741,7 @@ fn page_header(title: String, subtitle: String) -> Element<'static, Message> {
     .style(|_theme| container::Style {
         background: Some(iced::Background::Color(app_theme::SURFACE)),
         shadow: iced::Shadow {
-            color: iced::Color::from_rgba8(0x21, 0x20, 0x1E, 0.08),
+            color: app_theme::SHADOW_HAIRLINE,
             offset: iced::Vector::new(0.0, 1.0),
             blur_radius: 6.0,
         },
@@ -7199,7 +7204,7 @@ fn library_collection(state: &State) -> Element<'_, Message> {
             container(
                 text(error.localized(&state.i18n))
                     .size(13)
-                    .color(iced::Color::from_rgb8(0xA5, 0x43, 0x43)),
+                    .color(app_theme::DANGER),
             )
             .padding([7, 14])
             .width(Length::Fill)
@@ -8113,15 +8118,15 @@ fn render_book_cover<'a>(
 fn cover_placeholder(width: Length, height: f32, title: &str) -> Element<'static, Message> {
     let label = text(title.chars().take(20).collect::<String>())
         .size(14)
-        .color(iced::Color::WHITE);
+        .color(app_theme::TEXT_ON_ACCENT);
 
     container(center(label))
         .width(width)
         .height(Length::Fixed(height))
         .style(|_theme| container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgb(
-                0.3, 0.3, 0.4,
-            ))),
+            background: Some(iced::Background::Color(
+                app_theme::COVER_PLACEHOLDER_BACKGROUND,
+            )),
             border: iced::Border {
                 radius: 4.0.into(),
                 ..Default::default()

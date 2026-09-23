@@ -4,8 +4,8 @@ pub const INTER_BYTES: &[u8] = include_bytes!("../../../assets/fonts/InterVariab
 pub const NOTO_SANS_JP_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/NotoSansJP-Variable.ttf");
 
-pub const INTER: Font = Font::with_name("Inter Variable");
-pub const NOTO_SANS_JP: Font = Font::with_name("Noto Sans JP");
+pub const INTER: Font = Font::with_name(crate::theme_tokens::TYPE_FAMILY_UI_LATIN_ICED);
+pub const NOTO_SANS_JP: Font = Font::with_name(crate::theme_tokens::TYPE_FAMILY_UI_JAPANESE_ICED);
 
 pub fn font_for_text(value: &str) -> Font {
     if value.chars().any(is_japanese_character) {
