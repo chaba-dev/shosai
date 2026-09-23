@@ -75,6 +75,7 @@ All notable changes to this project will be documented in this file.
 - *(reader)* Surface durable writes and reachable content (#104)
 - *(flutter)* Restore accessible activation for add-books dialog choices (#118)
 - *(dev)* Avoid copying JJ workspace build outputs into Nix store (#121)
+- *(flutter)* Use macOS-compatible System Events geometry in the picker smoke (#124)
 
 ### 🚜 Refactor
 
