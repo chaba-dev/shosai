@@ -1,0 +1,59 @@
+{
+  "@@locale": "en",
+  "libraryTitle": "Library",
+  "@libraryTitle": {
+    "description": "Iced reference key: library (crates/shosai-app/locales/en-US/main.ftl)."
+  },
+  "librarySubtitle": "Your private reading room",
+  "@librarySubtitle": {
+    "description": "Iced reference key: library-subtitle."
+  },
+  "searchLibraryPlaceholder": "Search title or author",
+  "@searchLibraryPlaceholder": {
+    "description": "Iced reference key: search-library-placeholder. The retained Flutter string keeps the approved candidate wording."
+  },
+  "collectionLabel": "COLLECTION",
+  "@collectionLabel": {
+    "description": "Iced reference key: collection. Uppercase in both locales by reference design."
+  },
+  "filterAll": "All",
+  "@filterAll": {
+    "description": "Iced reference key: all (compact filter row)."
+  },
+  "filterAllBooks": "All books",
+  "@filterAllBooks": {
+    "description": "Iced reference key: all-books (wide sidebar)."
+  },
+  "filterSettings": "Settings",
+  "@filterSettings": {
+    "description": "Iced reference key: settings."
+  },
+  "filterFormatEpub": "EPUB",
+  "@filterFormatEpub": {
+    "description": "Format names stay Latin in both locales, as in the Iced reference; the value is identical in every catalog on purpose."
+  },
+  "filterFormatPdf": "PDF",
+  "@filterFormatPdf": {
+    "description": "Format names stay Latin in both locales, as in the Iced reference; the value is identical in every catalog on purpose."
+  },
+  "filterFormatCbz": "CBZ",
+  "@filterFormatCbz": {
+    "description": "Retained Flutter extension of the Iced All/EPUB/PDF entries (plan decision 9). Latin in both locales on purpose."
+  },
+  "addBooksAction": "Add books",
+  "@addBooksAction": {
+    "description": "Iced reference key: add-books. The Flutter action draws the plus as an icon, so the label carries no plus sign."
+  },
+  "cancelImportAction": "Cancel",
+  "@cancelImportAction": {
+    "description": "Iced reference key: cancel. Iced's cancel-adding-books-progress variant needs import progress the Flutter model does not carry yet."
+  },
+  "cancelOperationTooltip": "Cancel operation",
+  "@cancelOperationTooltip": {
+    "description": "Retained Flutter capability (load cancellation); no Iced library-header counterpart."
+  },
+  "refreshLibraryTooltip": "Refresh library",
+  "@refreshLibraryTooltip": {
+    "description": "Retained Flutter capability; no Iced library-header counterpart."
+  }
+}

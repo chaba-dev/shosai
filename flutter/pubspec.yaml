@@ -28,6 +28,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Enables gen-l10n (see l10n.yaml). In this toolchain the flag is still
+  # required even though the synthetic-package mode is gone, so the generated
+  # AppLocalizations sources are written into lib/l10n and committed.
+  generate: true
   fonts:
     - family: Inter
       fonts:

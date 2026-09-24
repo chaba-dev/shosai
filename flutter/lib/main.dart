@@ -7,6 +7,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/reader/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -129,10 +130,16 @@ ExternalLibrary? nativeLibrary() {
 /// toaster and sonner hosts. [home] is the shell content, so widget tests can
 /// render the real composition while substituting only the platform boundary
 /// beneath it.
+///
+/// [locale] is the test injection point for the application language. The
+/// production app leaves it null, so the supported system locale is used and an
+/// unsupported system language falls back to the first supported locale
+/// (English).
 class ShosaiShell extends StatelessWidget {
-  const ShosaiShell({super.key, required this.home});
+  const ShosaiShell({super.key, required this.home, this.locale});
 
   final Widget home;
+  final Locale? locale;
 
   @override
   Widget build(BuildContext context) {
@@ -141,14 +148,17 @@ class ShosaiShell extends StatelessWidget {
       darkTheme: shosaiShadTheme(Brightness.dark),
       appBuilder: (context) => MaterialApp(
         debugShowCheckedModeBanner: false,
+        locale: locale,
         theme: shosaiMaterialTheme(context),
         darkTheme: shosaiMaterialTheme(context, Brightness.dark),
         localizationsDelegates: const [
+          AppLocalizations.delegate,
           GlobalShadLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
         ],
+        supportedLocales: AppLocalizations.supportedLocales,
         builder: (context, child) => ShadAppBuilder(child: child!),
         restorationScopeId: 'shosai',
         home: home,
@@ -158,14 +168,24 @@ class ShosaiShell extends StatelessWidget {
 }
 
 class ShosaiApp extends StatelessWidget {
-  const ShosaiApp({super.key, this.bridge, this.productBridgeFactory});
+  const ShosaiApp({
+    super.key,
+    this.bridge,
+    this.productBridgeFactory,
+    this.locale,
+  });
 
   final FlutterBridge? bridge;
   final FlutterBridge Function()? productBridgeFactory;
 
+  /// Application language for tests; the production app leaves it null and uses
+  /// the supported system locale.
+  final Locale? locale;
+
   @override
   Widget build(BuildContext context) {
     return ShosaiShell(
+      locale: locale,
       home: productBridgeFactory == null
           ? ReaderScreen(bridge: bridge)
           : ProductShell(

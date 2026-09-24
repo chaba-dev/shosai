@@ -47,7 +47,9 @@ class LibraryCollection extends StatelessWidget {
             ? 3
             : 1;
         return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+          // The 96 px bottom inset belonged to the floating add-books button
+          // that package 3A replaced with the header action.
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 22),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             childAspectRatio: 1.35,
@@ -131,6 +133,12 @@ class LibraryCollection extends StatelessWidget {
                               book.lastRead == null
                                   ? '${(book.progress * 100).round()}% read'
                                   : 'Continue reading · ${(book.progress * 100).round()}%',
+                              // The card's tile extent is fixed, so every text
+                              // in it needs a line bound: the title and author
+                              // already have one, and an unbounded progress
+                              // label can overflow the tile at 200% text.
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),

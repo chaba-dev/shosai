@@ -83,6 +83,9 @@ class FlutterMakefileTest(unittest.TestCase):
         self._write_executable(
             self.root / "scripts" / "check-flutter-codegen.sh", guarded_command
         )
+        self._write_executable(
+            self.root / "scripts" / "check-l10n-codegen.sh", guarded_command
+        )
         environment = os.environ.copy()
         environment.update(
             {

@@ -81,14 +81,21 @@ bool _isJapaneseCodePoint(int rune) =>
 /// theme's own height and the button only grows by the room its scaled label
 /// actually needs.
 ///
-/// The label's own line height is scaled with `TextScaler.scale`, so a nonlinear
-/// text scale is measured the way Flutter lays the label out. Multiline content,
-/// widget-level padding overrides and metrics beyond the label's line height are
-/// outside this helper's contract.
+/// [padding] overrides the size theme's padding for a control whose padding is
+/// a different mapped token, such as the Iced navigation button
+/// (`app.button.navigation`, [ShosaiTokens.layoutButtonNavigationPaddingVertical])
+/// or the header's primary action (`app.button.primary`). The label's own line
+/// height is scaled with `TextScaler.scale`, so a nonlinear text scale is
+/// measured the way Flutter lays the label out. Multiline content and metrics
+/// beyond the label's line height are outside this helper's contract.
 ///
 /// The theme in this file gives every button variant the same geometry, so the
 /// primary variant's theme resolves the height and label style for all of them.
-double shosaiShadButtonHeight(BuildContext context, {ShadButtonSize? size}) {
+double shosaiShadButtonHeight(
+  BuildContext context, {
+  ShadButtonSize? size,
+  EdgeInsetsGeometry? padding,
+}) {
   final theme = ShadTheme.of(context);
   final buttonTheme = theme.primaryButtonTheme;
   final sizeTheme = _shosaiButtonSizeTheme(
@@ -96,12 +103,12 @@ double shosaiShadButtonHeight(BuildContext context, {ShadButtonSize? size}) {
     size ?? buttonTheme.size ?? ShadButtonSize.regular,
   );
   final height = buttonTheme.height ?? sizeTheme.height;
-  final padding = sizeTheme.padding;
+  final effectivePadding = padding ?? sizeTheme.padding;
   final label = buttonTheme.textStyle ?? theme.textTheme.small;
   final lineHeight =
       MediaQuery.textScalerOf(context).scale(label.fontSize ?? 14) *
       (label.height ?? 1);
-  return math.max(height, padding.vertical + lineHeight);
+  return math.max(height, effectivePadding.vertical + lineHeight);
 }
 
 ShadButtonSizeTheme _shosaiButtonSizeTheme(

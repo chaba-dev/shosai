@@ -2,9 +2,11 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
 
@@ -94,6 +96,17 @@ Future<void> _pumpShell(
     ShadApp(
       theme: shosaiShadTheme(Brightness.light),
       navigatorObservers: [?observer],
+      // Mirrors the production composition in `ShosaiShell`: the generated
+      // application delegate plus the Shad/Material/Cupertino/Widgets
+      // delegates, so the library's localized navigation resolves here too.
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalShadLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
       home: ProductShell(
         bridgeFactory: () => _Bridge(),
         readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
