@@ -94,7 +94,26 @@ void main() {
     return bridge;
   }
 
-  Finder entry(String label) => find.widgetWithText(ShadButton, label);
+  /// The library chrome above the collection: the header, the wide sidebar and
+  /// the compact filter row.
+  ///
+  /// Scoped this way because a card is a button too, and its format label
+  /// carries the same text as a filter entry.
+  final chrome = find.byWidgetPredicate(
+    (widget) =>
+        widget is LibraryHeader ||
+        widget is LibrarySidebar ||
+        widget is LibraryFilterRow,
+  );
+
+  Finder entry(String label) => find.descendant(
+    of: chrome,
+    matching: find.widgetWithText(ShadButton, label),
+  );
+
+  /// The label paragraph inside the chrome control labelled [label].
+  Finder chromeLabel(String label) =>
+      find.descendant(of: chrome, matching: find.text(label));
 
   /// The painted color at [point] in the captured frame.
   Future<Color> paintedColorAt(WidgetTester tester, Offset point) async {
@@ -308,7 +327,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pump();
         if (tester
-                .getSemantics(find.text('EPUB'))
+                .getSemantics(chromeLabel('EPUB'))
                 .getSemanticsData()
                 .flagsCollection
                 .isFocused ==
@@ -318,7 +337,7 @@ void main() {
       }
       expect(
         tester
-            .getSemantics(find.text('EPUB'))
+            .getSemantics(chromeLabel('EPUB'))
             .getSemanticsData()
             .flagsCollection
             .isFocused,
@@ -343,7 +362,7 @@ void main() {
           // The 2B deferred defect state: the header action must not cover the
           // collection at this configuration.
           final header = tester.getRect(find.byType(LibraryHeader));
-          final grid = tester.getRect(find.byType(GridView));
+          final grid = tester.getRect(find.byType(LibraryCollection));
           expect(header.bottom, lessThanOrEqualTo(grid.top));
           // The scaled Japanese interface stays translated rather than falling
           // back to English at 200% text.

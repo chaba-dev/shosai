@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/library/view.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
+
+import '../support/production_shell_harness.dart';
 
 final _book = FlutterLibraryBook(
   bookId: 7,
@@ -16,10 +17,9 @@ final _book = FlutterLibraryBook(
   dateAdded: '2026-09-10',
 );
 
-Widget _app(Widget child) => ShadTheme(
-  data: shosaiShadTheme(Brightness.light),
-  child: MaterialApp(home: Scaffold(body: child)),
-);
+/// The collection inside the production composition, so the card's catalog
+/// lookups resolve exactly as they do in the application.
+Widget _app(Widget child) => productionShell(home: Scaffold(body: child));
 
 LibraryCollection _collection(
   LibraryModel model, {
@@ -35,6 +35,8 @@ LibraryCollection _collection(
 );
 
 void main() {
+  setUpAll(loadHarnessFonts);
+
   testWidgets('shows progress while the first page loads', (tester) async {
     await tester.pumpWidget(_app(_collection(const LibraryModel(busy: true))));
 
@@ -75,11 +77,21 @@ void main() {
       ),
     );
 
-    expect(find.text('A Book'), findsOneWidget);
+    // The title is the card's own 13 px line; the missing cover's placeholder
+    // carries a second copy of the same string.
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Text &&
+            widget.data == 'A Book' &&
+            widget.style?.fontSize == ShosaiTokens.typeSize13,
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Ada'), findsOneWidget);
-    expect(find.text('42% read'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
 
-    await tester.tap(find.text('A Book'));
+    await tester.tap(find.byType(LibraryBookCard));
     expect(opened?.bookId, 7);
   });
 

@@ -124,6 +124,18 @@ final class _LibraryImportEnded extends LibraryMessage {
   const _LibraryImportEnded();
 }
 
+/// The removal confirmation accepted the request.
+///
+/// The confirmation is an effect result like any other: it reports back as a
+/// typed message, and the handler owns the pending-card transition and starts
+/// the removal effect. A declined or stale confirmation never reaches the
+/// handler.
+final class _LibraryRemovalConfirmed extends LibraryMessage {
+  const _LibraryRemovalConfirmed(this.book);
+
+  final FlutterLibraryBook book;
+}
+
 final class _LibraryReaderClosed extends LibraryMessage {
   const _LibraryReaderClosed(this.error);
   final String? error;

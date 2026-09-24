@@ -142,6 +142,12 @@ class LibraryController implements Listenable {
         _open(message.book);
       case LibraryBookRemovalRequested():
         _requestRemoval(message.book);
+      case _LibraryRemovalConfirmed():
+        if (_closing) break;
+        // The reference marks the card as removing once the removal is
+        // confirmed and running; the mutation completion clears it again.
+        _emit(_model.copyWith(removingBookId: message.book.bookId));
+        _remove(message.book);
       case LibrarySettingsRequested():
         _settings();
       case _LibraryDebounceElapsed():
@@ -181,7 +187,13 @@ class LibraryController implements Listenable {
         }
         if (_closing) break;
         if (message.error case final error?) {
-          _emit(_model.copyWith(error: error, failure: message.failure));
+          _emit(
+            _model.copyWith(
+              error: error,
+              failure: message.failure,
+              removingBookId: null,
+            ),
+          );
           if (message.refresh) _load();
         } else {
           _emit(
@@ -192,6 +204,10 @@ class LibraryController implements Listenable {
               managedFileDeletionPending:
                   _model.managedFileDeletionPending ||
                   message.managedFileDeletionPending,
+              // A completed mutation ends any pending removal state; only a
+              // removal sets it, and a removal cannot run beside another
+              // mutation because both take the busy flag.
+              removingBookId: null,
             ),
           );
           if (message.failure == LibraryFailure.import ||
@@ -460,9 +476,38 @@ class LibraryController implements Listenable {
     _beginEffect();
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
+      bool confirmed;
       try {
-        if (!await _confirmRemoval(book)) return;
-        if (!_ownsAdapter(adapterRevision)) return;
+        confirmed = await _confirmRemoval(book);
+      } catch (error) {
+        dispatch(
+          _LibraryMutationCompleted(
+            failure: LibraryFailure.removal,
+            error: safeError(error),
+          ),
+        );
+        dispatch(const _LibraryEffectFinished());
+        return;
+      }
+      if (!confirmed) {
+        // A declined confirmation is neutral: no error and no pending card.
+        dispatch(const _LibraryEffectFinished());
+        return;
+      }
+      if (!_ownsAdapter(adapterRevision)) {
+        dispatch(const _LibraryEffectFinished());
+        return;
+      }
+      // The confirmation is a completion like any other: it reports back as a
+      // typed message and the handler owns the transition and the removal
+      // effect, so no continuation writes model state.
+      dispatch(_LibraryRemovalConfirmed(book));
+    }());
+  }
+
+  void _remove(FlutterLibraryBook book) {
+    unawaited(() async {
+      try {
         final outcome = await _bridge.removeLibraryBook(bookId: book.bookId);
         dispatch(
           _LibraryMutationCompleted(

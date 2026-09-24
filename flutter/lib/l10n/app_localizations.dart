@@ -181,6 +181,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Refresh library'**
   String get refreshLibraryTooltip;
+
+  /// Iced reference key: unknown-author. Shown on the card when a book has no author.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown author'**
+  String get cardUnknownAuthor;
+
+  /// Iced reference key: not-started. The card's reading status at zero progress.
+  ///
+  /// In en, this message translates to:
+  /// **'Not started'**
+  String get cardNotStarted;
+
+  /// Iced reference key: percent. The card's reading status above zero progress; the placeholder is the rounded percentage, never concatenated in Dart.
+  ///
+  /// In en, this message translates to:
+  /// **'{percentage}%'**
+  String cardPercentRead(int percentage);
+
+  /// Retained Flutter semantics label for the card's cover image.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover of {title}'**
+  String cardCoverSemantics(String title);
+
+  /// Retained Flutter tooltip for the card's overflow action; no Iced counterpart (Iced draws a bare glyph).
+  ///
+  /// In en, this message translates to:
+  /// **'Book actions'**
+  String get cardActionsTooltip;
+
+  /// Iced reference key: remove-from-library. The card menu's action for a referenced book.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from library'**
+  String get cardRemoveFromLibrary;
+
+  /// Retained Flutter variant of the card menu's action: a managed book also deletes the private copy. The confirmation dialog still explains the deletion.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove and delete copy'**
+  String get cardRemoveManagedCopy;
+
+  /// Iced reference key: removing. The card's status while its removal is in flight.
+  ///
+  /// In en, this message translates to:
+  /// **'Removing…'**
+  String get cardRemoving;
+
+  /// Retained Flutter paging control; Iced's library paging row (previous/next-library-page) is package 3D's. The label is the pre-3B wording, translated.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more books'**
+  String get collectionLoadMore;
 }
 
 class _AppLocalizationsDelegate

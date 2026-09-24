@@ -24,6 +24,7 @@ class _StubLibraryBridge implements FlutterBridge {
   final queries = <String?>[];
   final formats = <FlutterBookFormat?>[];
   var disposeCount = 0;
+  var removeCalls = 0;
   var _nextCancellation = BigInt.one;
 
   @override
@@ -60,6 +61,17 @@ class _StubLibraryBridge implements FlutterBridge {
   }
 
   @override
+  Future<FlutterLibraryRemoveOutcome> removeLibraryBook({
+    required int bookId,
+  }) async {
+    removeCalls += 1;
+    return const FlutterLibraryRemoveOutcome(
+      removed: true,
+      managedFileDeletionPending: false,
+    );
+  }
+
+  @override
   Future<FlutterReaderSettings> loadReaderSettings({
     required BigInt cancellationId,
   }) async => const FlutterReaderSettings(
@@ -82,6 +94,36 @@ LibraryController _controller(_StubLibraryBridge bridge) => LibraryController(
   drainReaderSaves: (_) async {},
   editSettings: (_) async => null,
 );
+
+/// A controller that records whether a model notification arrived while a
+/// dispatch was running.
+///
+/// Package 3B requires asynchronous results to report back as typed messages
+/// and the message handler to own the transition, so the removal-pending state
+/// must be published from inside `dispatch`.
+class _ObservingController extends LibraryController {
+  _ObservingController({
+    required super.bridge,
+    required super.confirmRemoval,
+    required super.pickImport,
+    required super.openBook,
+    required super.drainReaderSaves,
+    required super.editSettings,
+  });
+
+  bool inDispatch = false;
+  final List<int?> removingBookIds = <int?>[];
+
+  @override
+  void dispatch(LibraryMessage message) {
+    inDispatch = true;
+    try {
+      super.dispatch(message);
+    } finally {
+      inDispatch = false;
+    }
+  }
+}
 
 void main() {
   test('a completed page publishes books and reader settings', () async {
@@ -156,4 +198,58 @@ void main() {
     controller.dispose();
     await _settle();
   });
+
+  test('the removal-pending transition is published from dispatch', () async {
+    final bridge = _HeldRemovalBridge();
+    final controller = _ObservingController(
+      bridge: bridge,
+      confirmRemoval: (_) async => true,
+      pickImport: () async => null,
+      openBook: (_) async {},
+      drainReaderSaves: (_) async {},
+      editSettings: (_) async => null,
+    );
+    controller.addListener(() {
+      if (controller.inDispatch) {
+        controller.removingBookIds.add(controller.model.removingBookId);
+      }
+    });
+
+    controller.dispatch(const LibraryStarted());
+    await _settle();
+    bridge.pages.last.complete(
+      FlutterLibraryPage(books: [_book(3, 'A Book')], hasMore: false),
+    );
+    await _settle();
+
+    controller.dispatch(LibraryBookRemovalRequested(_book(3, 'A Book')));
+    await _settle();
+    await _settle();
+
+    expect(
+      controller.removingBookIds,
+      contains(3),
+      reason:
+          'the confirmed removal reports back as a typed message and the '
+          'handler publishes the pending book, so no continuation writes model '
+          'state',
+    );
+    expect(controller.model.removingBookId, 3);
+
+    // The held removal keeps the pending state until it completes.
+    expect(bridge.removeCalls, 1);
+    controller.dispose();
+    await _settle();
+  });
+}
+
+/// A stub bridge whose removal stays in flight.
+class _HeldRemovalBridge extends _StubLibraryBridge {
+  final removal = Completer<FlutterLibraryRemoveOutcome>();
+
+  @override
+  Future<FlutterLibraryRemoveOutcome> removeLibraryBook({required int bookId}) {
+    removeCalls += 1;
+    return removal.future;
+  }
 }

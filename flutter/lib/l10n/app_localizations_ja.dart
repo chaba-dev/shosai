@@ -49,4 +49,35 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get refreshLibraryTooltip => 'ライブラリを更新';
+
+  @override
+  String get cardUnknownAuthor => '著者不明';
+
+  @override
+  String get cardNotStarted => '未読';
+
+  @override
+  String cardPercentRead(int percentage) {
+    return '$percentage%';
+  }
+
+  @override
+  String cardCoverSemantics(String title) {
+    return '$titleの表紙';
+  }
+
+  @override
+  String get cardActionsTooltip => '本の操作';
+
+  @override
+  String get cardRemoveFromLibrary => 'ライブラリから削除';
+
+  @override
+  String get cardRemoveManagedCopy => 'コピーも削除';
+
+  @override
+  String get cardRemoving => '削除中…';
+
+  @override
+  String get collectionLoadMore => 'さらに読み込む';
 }
