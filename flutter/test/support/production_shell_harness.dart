@@ -196,18 +196,24 @@ class HarnessView {
 ///
 /// [ShosaiShell] is the same widget `ShosaiApp` builds, so a render here shows
 /// the production `ShadApp.custom` + `MaterialApp` + `ShadAppBuilder` stack.
-Widget productionShell({required Widget home}) => RepaintBoundary(
-  key: harnessBoundaryKey,
-  child: ShosaiShell(home: home),
-);
-
-/// The complete production application for a library bridge, including the
-/// production reader builder.
-Widget productionApp({required FlutterBridge Function() bridgeFactory}) =>
+/// [locale] goes through that same stack, so a localized capture exercises the
+/// application's real localization wiring rather than a test-only override.
+Widget productionShell({required Widget home, Locale? locale}) =>
     RepaintBoundary(
       key: harnessBoundaryKey,
-      child: ShosaiApp(productBridgeFactory: bridgeFactory),
+      child: ShosaiShell(locale: locale, home: home),
     );
+
+/// The complete production application for a library bridge, including the
+/// production reader builder. [locale] goes through the same composition as
+/// [productionShell].
+Widget productionApp({
+  required FlutterBridge Function() bridgeFactory,
+  Locale? locale,
+}) => RepaintBoundary(
+  key: harnessBoundaryKey,
+  child: ShosaiApp(productBridgeFactory: bridgeFactory, locale: locale),
+);
 
 // ---------------------------------------------------------------------------
 // Deterministic fixtures

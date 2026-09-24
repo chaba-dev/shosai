@@ -1,0 +1,17 @@
+{
+  "@@locale": "ja",
+  "libraryTitle": "ライブラリ",
+  "librarySubtitle": "自分だけの読書室",
+  "searchLibraryPlaceholder": "タイトル・著者を検索...",
+  "collectionLabel": "コレクション",
+  "filterAll": "すべて",
+  "filterAllBooks": "すべての本",
+  "filterSettings": "設定",
+  "filterFormatEpub": "EPUB",
+  "filterFormatPdf": "PDF",
+  "filterFormatCbz": "CBZ",
+  "addBooksAction": "本を追加",
+  "cancelImportAction": "キャンセル",
+  "cancelOperationTooltip": "操作をキャンセル",
+  "refreshLibraryTooltip": "ライブラリを更新"
+}

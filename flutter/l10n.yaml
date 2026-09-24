@@ -1,0 +1,11 @@
+# Standard Flutter localization (gen-l10n) for the Flutter frontend.
+#
+# The generated `app_localizations*.dart` files are written next to the catalogs
+# (the `synthetic-package` mode is deprecated in this toolchain) and are
+# committed, so `flutter analyze` and `flutter test` work without a generation
+# step. `scripts/check-l10n-codegen.sh` verifies they match the catalogs.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

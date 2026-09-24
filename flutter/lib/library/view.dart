@@ -7,16 +7,19 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:shosai_flutter/android_document_import_adapter.dart';
 import 'package:shosai_flutter/app_theme.dart';
+import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
+import 'package:shosai_flutter/theme_tokens.dart';
 
 export 'package:shosai_flutter/library/controller.dart';
 
 part 'view_collection.dart';
 part 'view_dialogs.dart';
+part 'view_navigation.dart';
 
 typedef ProductReaderBuilder =
     Widget Function(
@@ -525,130 +528,115 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
   @override
   Widget build(BuildContext context) {
     final model = controller.model;
+    void formatChanged(FlutterBookFormat? format) =>
+        controller.dispatch(LibraryFormatChanged(format));
+    final settingsRequest = model.settings == null
+        ? null
+        : () => controller.dispatch(const LibrarySettingsRequested());
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Shōsai'),
-        actions: [
-          ShadIconAction(
-            tooltip: 'Refresh library',
-            onPressed: model.busy
-                ? null
-                : () => controller.dispatch(const LibraryRefreshed()),
-            icon: const Icon(LucideIcons.refreshCw),
-          ),
-          ShadIconAction(
-            tooltip: 'Reader settings',
-            onPressed: model.settings == null
-                ? null
-                : () => controller.dispatch(const LibrarySettingsRequested()),
-            icon: const Icon(LucideIcons.settings),
-          ),
-        ],
-      ),
-      floatingActionButton: ShadButton(
-        height: shosaiShadButtonHeight(context),
-        onPressed: model.busy
-            ? null
-            : () => controller.dispatch(const LibraryImportRequested()),
-        leading: const Icon(LucideIcons.plus),
-        child: const Text('Add books'),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: ShadInput(
-                placeholder: const Text('Search title or author'),
-                leading: const Icon(LucideIcons.search, size: 16),
-                onChanged: (query) =>
-                    controller.dispatch(LibraryQueryChanged(query)),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: [
-                    for (final filter in <FlutterBookFormat?>[
-                      null,
-                      FlutterBookFormat.pdf,
-                      FlutterBookFormat.epub,
-                      FlutterBookFormat.cbz,
-                    ])
-                      ShadButton.raw(
-                        variant: model.format == filter
-                            ? ShadButtonVariant.primary
-                            : ShadButtonVariant.outline,
-                        size: ShadButtonSize.sm,
-                        onPressed: () =>
-                            controller.dispatch(LibraryFormatChanged(filter)),
-                        child: Text(
-                          filter == null ? 'All' : filter.name.toUpperCase(),
+      // The shared library/settings breakpoint is measured on the client
+      // width, so the probe sits outside the safe area, which insets the
+      // content rather than the window.
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact =
+              constraints.maxWidth <
+              ShosaiTokens.layoutLibraryCompactBreakpoint;
+          return SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LibraryHeader(
+                  compact: compact,
+                  model: model,
+                  // The header's add-books action is the import's cancel
+                  // action; every other cancellable operation keeps the
+                  // separate cancel action (the retained Flutter capability
+                  // Iced has no counterpart for).
+                  canCancelOperation: controller.canCancel && !model.importing,
+                  onQueryChanged: (query) =>
+                      controller.dispatch(LibraryQueryChanged(query)),
+                  onImportRequested: () =>
+                      controller.dispatch(const LibraryImportRequested()),
+                  onImportCancelled: () =>
+                      controller.dispatch(const LibraryOperationCancelled()),
+                  onOperationCancelled: () =>
+                      controller.dispatch(const LibraryOperationCancelled()),
+                  onRefresh: () =>
+                      controller.dispatch(const LibraryRefreshed()),
+                ),
+                Expanded(
+                  child: compact
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            LibraryFilterRow(
+                              model: model,
+                              onFormatChanged: formatChanged,
+                              onSettingsRequested: settingsRequest,
+                            ),
+                            Expanded(child: _libraryContent(model)),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            LibrarySidebar(
+                              model: model,
+                              onFormatChanged: formatChanged,
+                              onSettingsRequested: settingsRequest,
+                            ),
+                            Expanded(child: _libraryContent(model)),
+                          ],
                         ),
-                      ),
-                  ],
                 ),
-              ),
+              ],
             ),
-            if (model.busy)
-              Row(
-                children: [
-                  const Expanded(child: ShadProgress(minHeight: 4)),
-                  if (controller.canCancel)
-                    ShadIconAction(
-                      tooltip: 'Cancel operation',
-                      onPressed: () => controller.dispatch(
-                        const LibraryOperationCancelled(),
-                      ),
-                      icon: const Icon(LucideIcons.x),
-                    ),
-                ],
-              ),
-            if (model.providerCleanupPending)
-              LibraryBanner(
-                message: 'Temporary import data could not be removed yet.',
-                actionLabel: 'Retry cleanup',
-                onAction: () =>
-                    controller.dispatch(const LibraryCleanupRetryRequested()),
-              ),
-            if (model.managedFileDeletionPending)
-              LibraryBanner(
-                message:
-                    'Book removed. Its private copy will be deleted later.',
-                actionLabel: 'Dismiss',
-                onAction: () => controller.dispatch(
-                  const LibraryManagedDeletionNoticeDismissed(),
-                ),
-              ),
-            if (model.displayError case final error?)
-              LibraryBanner(
-                message: error,
-                actionLabel: 'Retry',
-                destructive: true,
-                onAction: () =>
-                    controller.dispatch(const LibraryRetryRequested()),
-              ),
-            Expanded(
-              child: LibraryCollection(
-                model: model,
-                openBook: (book) =>
-                    controller.dispatch(LibraryBookOpened(book)),
-                removeBook: (book) =>
-                    controller.dispatch(LibraryBookRemovalRequested(book)),
-                loadMore: () =>
-                    controller.dispatch(const LibraryMoreRequested()),
-                loadCover: controller.requestCover,
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
+
+  /// The collection column: retained debt and failure surfaces above the
+  /// collection, so the sidebar keeps the full height it has in the reference.
+  Widget _libraryContent(LibraryModel model) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (model.providerCleanupPending)
+        LibraryBanner(
+          message: 'Temporary import data could not be removed yet.',
+          actionLabel: 'Retry cleanup',
+          onAction: () =>
+              controller.dispatch(const LibraryCleanupRetryRequested()),
+        ),
+      if (model.managedFileDeletionPending)
+        LibraryBanner(
+          message: 'Book removed. Its private copy will be deleted later.',
+          actionLabel: 'Dismiss',
+          onAction: () => controller.dispatch(
+            const LibraryManagedDeletionNoticeDismissed(),
+          ),
+        ),
+      if (model.displayError case final error?)
+        LibraryBanner(
+          message: error,
+          actionLabel: 'Retry',
+          destructive: true,
+          onAction: () => controller.dispatch(const LibraryRetryRequested()),
+        ),
+      Expanded(
+        child: LibraryCollection(
+          model: model,
+          openBook: (book) => controller.dispatch(LibraryBookOpened(book)),
+          removeBook: (book) =>
+              controller.dispatch(LibraryBookRemovalRequested(book)),
+          loadMore: () => controller.dispatch(const LibraryMoreRequested()),
+          loadCover: controller.requestCover,
+        ),
+      ),
+    ],
+  );
 }
 
 class LibraryBanner extends StatelessWidget {

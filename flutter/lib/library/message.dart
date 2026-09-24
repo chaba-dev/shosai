@@ -115,6 +115,15 @@ final class _LibraryMutationCompleted extends LibraryMessage {
   final bool managedFileDeletionPending;
 }
 
+/// The add-books import effect has unwound.
+///
+/// The import's completion is its own transition: it clears the state the
+/// header's cancel action renders, before the generic effect-finished message
+/// updates the busy count.
+final class _LibraryImportEnded extends LibraryMessage {
+  const _LibraryImportEnded();
+}
+
 final class _LibraryReaderClosed extends LibraryMessage {
   const _LibraryReaderClosed(this.error);
   final String? error;

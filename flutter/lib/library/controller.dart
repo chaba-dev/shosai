@@ -199,6 +199,9 @@ class LibraryController implements Listenable {
             _load();
           }
         }
+      case _LibraryImportEnded():
+        if (_closing) break;
+        _emit(_model.copyWith(importing: false));
       case LibraryManagedDeletionNoticeDismissed():
         _emit(_model.copyWith(managedFileDeletionPending: false));
       case _LibraryReaderClosed():
@@ -249,10 +252,15 @@ class LibraryController implements Listenable {
     }
   }
 
-  void _beginEffect() {
+  void _beginEffect({bool importing = false}) {
     _activeEffects += 1;
     _activeBusyEffects += 1;
-    _emit(_model.copyWith(busy: true));
+    // Another effect may start while an import is still in flight (a search
+    // change loads during one), so starting an effect never clears the import
+    // state it did not start.
+    _emit(
+      _model.copyWith(busy: true, importing: _model.importing || importing),
+    );
   }
 
   void _retryCleanup() {
@@ -367,7 +375,7 @@ class LibraryController implements Listenable {
 
   void _import() {
     if (_closing || _model.busy) return;
-    _beginEffect();
+    _beginEffect(importing: true);
     _pendingImportAdapter = true;
     final adapterRevision = ++_adapterRevision;
     unawaited(() async {
@@ -432,6 +440,7 @@ class LibraryController implements Listenable {
         cancellation = null;
       } finally {
         _pendingImportAdapter = false;
+        dispatch(const _LibraryImportEnded());
         try {
           await selection?.cleanup?.call();
         } catch (_) {

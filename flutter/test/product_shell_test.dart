@@ -582,8 +582,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Reader settings'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await _openReaderSettings(tester);
     expect(find.text('Reader theme'), findsOneWidget);
     expect(find.text('Continuous reading'), findsOneWidget);
     expect(find.text('EPUB text size'), findsOneWidget);
@@ -632,8 +631,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Reader settings'));
-    await tester.pump(const Duration(milliseconds: 300));
+    await _openReaderSettings(tester);
 
     expect(find.text('275% (custom)'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -658,8 +656,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Reader settings'));
-      await tester.pump(const Duration(milliseconds: 300));
+      await _openReaderSettings(tester);
 
       expect(find.byType(SingleChildScrollView), findsWidgets);
       expect(tester.takeException(), isNull);
@@ -1290,6 +1287,7 @@ void main() {
       MediaQuery(
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
         child: _libraryApp(
+          locale: const Locale('ja'),
           home: ProductShell(
             bridgeFactory: () => bridge,
             readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1299,6 +1297,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('詳しい本'), findsOneWidget);
+    // The Japanese interface is selected, not only Japanese metadata.
+    expect(find.text('ライブラリ'), findsOneWidget);
+    expect(find.text('Library'), findsNothing);
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(ProductShell),
@@ -1693,4 +1694,15 @@ class _ControlledLibraryBridge implements FlutterBridge {
 
 /// The production shell, so these tests render the same composition the
 /// application does instead of a lookalike theme wrapper.
-Widget _libraryApp({required Widget home}) => productionShell(home: home);
+Widget _libraryApp({required Widget home, Locale? locale}) =>
+    productionShell(home: home, locale: locale);
+
+/// Opens the reader settings from the library's navigation.
+///
+/// Package 3A moved the entry from the application bar into the collection
+/// sidebar (wide) and the filter row (compact); both dispatch the same
+/// settings intent.
+Future<void> _openReaderSettings(WidgetTester tester) async {
+  await tester.tap(find.widgetWithText(ShadButton, 'Settings'));
+  await tester.pump(const Duration(milliseconds: 300));
+}

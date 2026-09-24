@@ -27,11 +27,18 @@ void main() {
     required Widget widget,
     Map<String, Object?> metadata = const {},
     required bool Function() ready,
+    Future<void> Function(WidgetTester tester)? verify,
   }) async {
     final recorder = RenderErrorRecorder.install();
     addTearDown(recorder.dispose);
     view.apply(tester);
     await renderHarnessState(tester, widget, ready: ready);
+
+    // Language assertions run before the artifact is written, so a state named
+    // for a locale cannot leave an artifact it did not actually render.
+    if (verify != null) {
+      await verify(tester);
+    }
 
     // Evidence before assertions: a failing render must still leave its drift,
     // its defect measurements and its screenshot behind.
@@ -85,8 +92,11 @@ void main() {
         tester,
         'library-normal-1280',
         const HarnessView(size: Size(1280, 800)),
-        widget: productionApp(bridgeFactory: () => bridge),
-        metadata: const <String, Object?>{'locale': 'en'},
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('en'),
+        ),
+        metadata: const <String, Object?>{},
         ready: () => harnessImagesReady(tester),
       );
     });
@@ -99,8 +109,11 @@ void main() {
         tester,
         'library-compact-390',
         const HarnessView(size: Size(390, 780)),
-        widget: productionApp(bridgeFactory: () => bridge),
-        metadata: const <String, Object?>{'locale': 'en'},
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('en'),
+        ),
+        metadata: const <String, Object?>{},
         ready: () => harnessImagesReady(tester),
       );
     });
@@ -135,12 +148,17 @@ void main() {
         tester,
         'library-compact-390-ja-t200',
         const HarnessView(size: Size(390, 780), textScale: 2),
-        widget: productionApp(bridgeFactory: () => bridge),
-        metadata: const <String, Object?>{
-          'locale': 'ja',
-          'config': 'C390 T200',
-        },
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('ja'),
+        ),
+        metadata: const <String, Object?>{'config': 'C390 T200'},
         ready: () => harnessImagesReady(tester),
+        verify: (tester) async {
+          // A capture named for Japanese must select that interface.
+          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('Library'), findsNothing);
+        },
       );
     });
 
@@ -150,12 +168,17 @@ void main() {
         tester,
         'library-wide-900-ja-t200',
         const HarnessView(size: Size(900, 700), textScale: 2),
-        widget: productionApp(bridgeFactory: () => bridge),
-        metadata: const <String, Object?>{
-          'locale': 'ja',
-          'config': 'W900 T200',
-        },
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('ja'),
+        ),
+        metadata: const <String, Object?>{'config': 'W900 T200'},
         ready: () => harnessImagesReady(tester),
+        verify: (tester) async {
+          // A capture named for Japanese must select that interface.
+          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('Library'), findsNothing);
+        },
       );
     });
 
@@ -169,8 +192,11 @@ void main() {
         tester,
         'library-mixed-1280',
         const HarnessView(size: Size(1280, 800)),
-        widget: productionApp(bridgeFactory: () => bridge),
-        metadata: const <String, Object?>{'locale': 'mix', 'config': 'W1280'},
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('en'),
+        ),
+        metadata: const <String, Object?>{'config': 'W1280'},
         ready: () => harnessImagesReady(tester),
       );
     });
@@ -181,7 +207,10 @@ void main() {
         tester,
         'library-empty-1280',
         const HarnessView(size: Size(1280, 800)),
-        widget: productionApp(bridgeFactory: () => bridge),
+        widget: productionApp(
+          bridgeFactory: () => bridge,
+          locale: const Locale('en'),
+        ),
         metadata: const <String, Object?>{'state': 'empty'},
         ready: () =>
             find.textContaining('library is empty').evaluate().isNotEmpty,

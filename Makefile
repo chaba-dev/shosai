@@ -1,4 +1,4 @@
-.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens
+.PHONY: dev reset lint lint-rust lint-flutter fmt fmt-rust fmt-flutter check-fmt-rust check-fmt-flutter test test-rust test-flutter test-scripts check-frb check-flutter-codegen check-l10n-codegen flutter-codegen check-flutter flutter-dev flutter-linux-debug flutter-android-profile flutter-macos-debug flutter-macos-smoke flutter-ios-simulator-debug flutter-ios-device-profile flutter-ios-device-release flutter-release measure-flutter-m2 check-rfds changelog next-version reference-shots theme-tokens check-theme-tokens
 
 DEV_DATA_HOME := $(CURDIR)/target
 
@@ -80,6 +80,7 @@ test:
 	$(MAKE) test-scripts
 	$(MAKE) check-frb
 	$(MAKE) check-flutter-codegen
+	$(MAKE) check-l10n-codegen
 	$(MAKE) test-flutter
 
 ## Run Rust workspace tests
@@ -105,6 +106,10 @@ check-frb:
 ## Verify checked-in Flutter bindings match the bridge API
 check-flutter-codegen:
 	@./scripts/check-flutter-codegen.sh
+
+## Verify generated Flutter localizations match the ARB catalogs
+check-l10n-codegen:
+	@./scripts/check-l10n-codegen.sh
 
 ## Generate Rust/Dart bindings
 flutter-codegen:
