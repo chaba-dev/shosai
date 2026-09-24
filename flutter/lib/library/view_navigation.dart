@@ -67,14 +67,18 @@ class LibraryHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = ShadTheme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     final title = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       spacing: 2,
       children: [
-        Text('Library', style: Theme.of(context).textTheme.headlineMedium),
         Text(
-          'Your private reading room',
+          l10n.libraryTitle,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        Text(
+          l10n.librarySubtitle,
           style: Theme.of(
             context,
           ).textTheme.bodySmall?.copyWith(color: scheme.mutedForeground),
@@ -94,8 +98,8 @@ class LibraryHeader extends StatelessWidget {
         // The input lays its placeholder out in a single-line box, so a scaled
         // placeholder that wraps is clipped rather than shown; an ellipsized
         // single line is the visible, non-clipping form.
-        placeholder: const Text(
-          'Search title or author',
+        placeholder: Text(
+          l10n.searchLibraryPlaceholder,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -109,12 +113,12 @@ class LibraryHeader extends StatelessWidget {
       children: [
         if (canCancelOperation)
           ShadIconAction(
-            tooltip: 'Cancel operation',
+            tooltip: l10n.cancelOperationTooltip,
             onPressed: onOperationCancelled,
             icon: const Icon(LucideIcons.x),
           ),
         ShadIconAction(
-          tooltip: 'Refresh library',
+          tooltip: l10n.refreshLibraryTooltip,
           onPressed: model.busy ? null : onRefresh,
           icon: const Icon(LucideIcons.refreshCw),
         ),
@@ -189,6 +193,7 @@ class LibraryHeader extends StatelessWidget {
       horizontal: ShosaiTokens.layoutButtonPrimaryPaddingHorizontal,
     );
     final theme = ShadTheme.of(context);
+    final l10n = AppLocalizations.of(context);
     final height = shosaiShadButtonHeight(context, padding: padding);
     final hover = theme.brightness == Brightness.dark
         ? null
@@ -201,7 +206,7 @@ class LibraryHeader extends StatelessWidget {
         pressedBackgroundColor: hover,
         onPressed: onImportCancelled,
         leading: const Icon(LucideIcons.x),
-        child: const Text('Cancel'),
+        child: Text(l10n.cancelImportAction),
       );
     }
     return ShadButton(
@@ -212,7 +217,7 @@ class LibraryHeader extends StatelessWidget {
       enabled: !model.busy,
       onPressed: model.busy ? null : onImportRequested,
       leading: const Icon(LucideIcons.plus),
-      child: const Text('Add books'),
+      child: Text(l10n.addBooksAction),
     );
   }
 }
@@ -271,26 +276,28 @@ class LibrarySidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
     final scheme = theme.colorScheme;
+    final l10n = AppLocalizations.of(context);
     final group = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 6,
       children: [
         Text(
-          'COLLECTION',
+          l10n.collectionLabel,
           style: Theme.of(
             context,
           ).textTheme.labelSmall?.copyWith(color: scheme.mutedForeground),
         ),
         ..._libraryFormatEntries(
           model: model,
-          allLabel: 'All books',
+          l10n: l10n,
+          compact: false,
           onFormatChanged: onFormatChanged,
           fillWidth: true,
         ),
       ],
     );
     final settings = LibraryNavigationButton(
-      label: 'Settings',
+      label: l10n.filterSettings,
       selected: false,
       onPressed: onSettingsRequested,
       fillWidth: true,
@@ -348,44 +355,51 @@ class LibraryFilterRow extends StatelessWidget {
   final VoidCallback? onSettingsRequested;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-    child: Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: [
-        ..._libraryFormatEntries(
-          model: model,
-          allLabel: 'All',
-          onFormatChanged: onFormatChanged,
-          fillWidth: false,
-        ),
-        LibraryNavigationButton(
-          label: 'Settings',
-          selected: false,
-          onPressed: onSettingsRequested,
-          fillWidth: false,
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          ..._libraryFormatEntries(
+            model: model,
+            l10n: l10n,
+            compact: true,
+            onFormatChanged: onFormatChanged,
+            fillWidth: false,
+          ),
+          LibraryNavigationButton(
+            label: l10n.filterSettings,
+            selected: false,
+            onPressed: onSettingsRequested,
+            fillWidth: false,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// One format entry per retained filter, in the reference's order.
 ///
-/// `All` selects the unfiltered collection; CBZ is the retained Flutter
+/// The unfiltered entry is `All books` in the sidebar and `All` in the compact
+/// row, matching the reference's two labels. Format names stay Latin in both
+/// catalogs, as they are in the reference; CBZ is the retained Flutter
 /// extension of the reference's All/EPUB/PDF entries.
 List<Widget> _libraryFormatEntries({
   required LibraryModel model,
-  required String allLabel,
+  required AppLocalizations l10n,
+  required bool compact,
   required ValueChanged<FlutterBookFormat?> onFormatChanged,
   required bool fillWidth,
 }) => [
   for (final (filter, label) in <(FlutterBookFormat?, String)>[
-    (null, allLabel),
-    (FlutterBookFormat.epub, 'EPUB'),
-    (FlutterBookFormat.pdf, 'PDF'),
-    (FlutterBookFormat.cbz, 'CBZ'),
+    (null, compact ? l10n.filterAll : l10n.filterAllBooks),
+    (FlutterBookFormat.epub, l10n.filterFormatEpub),
+    (FlutterBookFormat.pdf, l10n.filterFormatPdf),
+    (FlutterBookFormat.cbz, l10n.filterFormatCbz),
   ])
     LibraryNavigationButton(
       label: label,

@@ -108,6 +108,7 @@ jobs:
             ${{ runner.os }}-cargo-
       - run: nix develop --command make check-frb
       - run: nix develop --command make check-flutter-codegen
+      - run: nix develop --command make check-l10n-codegen
 
   rust-test:
     name: Rust tests (${{ matrix.os }})

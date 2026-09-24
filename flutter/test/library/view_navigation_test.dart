@@ -157,6 +157,7 @@ void main() {
     Size size, {
     double textScale = 1,
     List<FlutterLibraryBook>? books,
+    Locale? locale,
   }) async {
     final bridge = HarnessBridge(
       books: books ?? harnessLibraryBooks(),
@@ -167,6 +168,7 @@ void main() {
     await renderHarnessState(
       tester,
       productionShell(
+        locale: locale,
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -184,12 +186,14 @@ void main() {
     double textScale = 1,
     _ControlledBridge? bridge,
     bool settle = true,
+    Locale? locale,
   }) async {
     final effective = bridge ?? _ControlledBridge();
     final view = HarnessView(size: size, textScale: textScale);
     view.apply(tester);
     await tester.pumpWidget(
       productionShell(
+        locale: locale,
         home: ProductShell(
           bridgeFactory: () => effective,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1167,6 +1171,170 @@ void main() {
       await tester.tap(navigationEntry('Settings'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Reader theme'), findsOneWidget);
+    });
+  });
+
+  group('interface localization', () {
+    testWidgets(
+      'a Japanese interface translates the navigation, its semantics and its tooltips',
+      (tester) async {
+        await pumpLibrary(
+          tester,
+          const Size(1280, 800),
+          locale: const Locale('ja'),
+        );
+
+        // Header, sidebar, actions and the search placeholder come from the
+        // generated catalogs.
+        expect(find.text('ライブラリ'), findsOneWidget);
+        expect(find.text('自分だけの読書室'), findsOneWidget);
+        expect(find.text('タイトル・著者を検索...'), findsOneWidget);
+        expect(find.text('コレクション'), findsOneWidget);
+        expect(navigationEntry('すべての本'), findsOneWidget);
+        expect(navigationEntry('設定'), findsOneWidget);
+        expect(navigationEntry('本を追加'), findsOneWidget);
+        expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+        // Format entries stay Latin in both locales, as in the reference.
+        for (final label in const ['EPUB', 'PDF', 'CBZ']) {
+          expect(navigationEntry(label), findsOneWidget);
+        }
+        // The English chrome is gone rather than merely accompanied.
+        for (final label in const [
+          'Library',
+          'Your private reading room',
+          'COLLECTION',
+          'All books',
+          'Settings',
+          'Add books',
+        ]) {
+          expect(
+            find.text(label),
+            findsNothing,
+            reason: '$label is not shown in a Japanese interface',
+          );
+        }
+        // Controls announce themselves in the selected language.
+        expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
+        expect(find.bySemanticsLabel('すべての本'), findsOneWidget);
+        expect(find.bySemanticsLabel('設定'), findsOneWidget);
+      },
+    );
+
+    testWidgets('a Japanese interface translates the load cancel action', (
+      tester,
+    ) async {
+      final bridge = _ControlledBridge();
+      bridge.pageCompleter = Completer<FlutterLibraryPage>();
+      await pumpControlledLibrary(
+        tester,
+        const Size(1280, 800),
+        bridge: bridge,
+        settle: false,
+        locale: const Locale('ja'),
+      );
+
+      expect(find.byTooltip('操作をキャンセル'), findsOneWidget);
+      expect(find.byTooltip('Cancel operation'), findsNothing);
+
+      bridge.pageCompleter!.complete(
+        FlutterLibraryPage(books: bridge.books, hasMore: false),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('操作をキャンセル'), findsNothing);
+    });
+
+    testWidgets('an unsupported system locale falls back to English', (
+      tester,
+    ) async {
+      tester.platformDispatcher.localesTestValue = const [Locale('fr')];
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+
+      await pumpLibrary(tester, const Size(1280, 800));
+
+      expect(find.text('Library'), findsOneWidget);
+      expect(navigationEntry('Settings'), findsOneWidget);
+      expect(find.text('ライブラリ'), findsNothing);
+    });
+
+    testWidgets('a supported system locale is used when none is injected', (
+      tester,
+    ) async {
+      tester.platformDispatcher.localesTestValue = const [Locale('ja')];
+      addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+
+      await pumpLibrary(tester, const Size(1280, 800));
+
+      expect(find.text('ライブラリ'), findsOneWidget);
+      expect(navigationEntry('設定'), findsOneWidget);
+    });
+
+    testWidgets('switching the interface language keeps the library state', (
+      tester,
+    ) async {
+      // The query and the selected format live in the controller, so a language
+      // change must not reset either of them.
+      final locale = ValueNotifier<Locale?>(const Locale('en'));
+      addTearDown(locale.dispose);
+      final bridge = HarnessBridge(
+        books: harnessLibraryBooks(),
+        covers: harnessCovers(),
+      );
+      const view = HarnessView(size: Size(1280, 800));
+      view.apply(tester);
+      await renderHarnessState(
+        tester,
+        ValueListenableBuilder<Locale?>(
+          valueListenable: locale,
+          builder: (context, value, _) => productionShell(
+            locale: value,
+            home: ProductShell(
+              bridgeFactory: () => bridge,
+              readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
+            ),
+          ),
+        ),
+        ready: () => harnessImagesReady(tester),
+      );
+
+      await tester.enterText(find.byType(ShadInput), 'Donaudampf');
+      await tester.pumpAndSettle();
+      await tester.tap(navigationEntry('PDF'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('The Quiet Cartographer'), findsNothing);
+
+      locale.value = const Locale('ja');
+      await tester.pumpAndSettle();
+
+      // The interface changed, and the query and the filter survived it.
+      expect(find.text('ライブラリ'), findsOneWidget);
+      expect(
+        find.text(
+          'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
+        ),
+        findsOneWidget,
+        reason: 'the query still filters after the language change',
+      );
+      expect(
+        find.text('The Quiet Cartographer'),
+        findsNothing,
+        reason: 'the PDF filter still applies after the language change',
+      );
+      expect(
+        tester.widget<ShadButton>(navigationEntry('PDF')).backgroundColor,
+        ShosaiTokens.appAccentSoft,
+        reason: 'the selected format survives the language change',
+      );
+      expect(
+        tester.widget<ShadButton>(navigationEntry('すべての本')).backgroundColor,
+        isNull,
+        reason: 'the selection stays exclusive after the change',
+      );
     });
   });
 }
