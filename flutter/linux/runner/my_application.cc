@@ -42,11 +42,11 @@ static void my_application_activate(GApplication* application) {
 
   // The application draws no title strip of its own: the library header is the
   // top of the window content. On Wayland a GTK client-side decoration would be
-  // a second, redundant strip above it, so it stays off and moving, resizing
-  // and closing the window is left to the compositor, as it is for the Iced
-  // frontend. On X11 the window manager decorates the window; GTK only uses a
-  // client-side decoration there when the window manager expects one (e.g.
-  // GNOME Shell).
+  // a second, redundant strip above it, so it stays off and the compositor's
+  // decoration policy applies; moving, resizing and closing the window are the
+  // compositor's own mechanisms, as they are for the Iced frontend. On X11 the
+  // window manager decorates the window, and GTK only adds a client-side
+  // decoration of its own when its decoration settings ask for one.
   if (!my_application_uses_x11(window)) {
     gtk_window_set_decorated(window, FALSE);
   }
