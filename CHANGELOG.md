@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.0] - 2026-09-23
+## [0.1.0] - 2026-09-24
 
 ### 🚀 Features
 
@@ -49,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - *(reference)* Add reproducible reference captures for library, import and settings (#117)
 - *(reference)* Add Iced reader reference captures for package 1C (#119)
 - *(theme)* Map Iced design values through one shared token source (#123)
+- *(flutter)* Restore the Iced-shaped library navigation (#125)
 
 ### 🐛 Bug Fixes
 
