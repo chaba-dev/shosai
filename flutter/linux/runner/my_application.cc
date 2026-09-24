@@ -15,14 +15,23 @@ struct _MyApplication {
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // The window title, matching the Iced frontend's window title (`app::title` in
-// crates/shosai-app). An empty title leaves both the header bar below and the
-// window manager's own decoration blank, so the window is indistinguishable
-// from a decoration-less one.
+// crates/shosai-app). The compositor or window manager shows it in the
+// decoration it provides; the application itself draws no title strip.
 static const char kWindowTitle[] = "Shosai";
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+// Returns whether the window is displayed through X11, where the window manager
+// decorates the window.
+static gboolean my_application_uses_x11(GtkWindow* window) {
+#ifdef GDK_WINDOWING_X11
+  return GDK_IS_X11_SCREEN(gtk_window_get_screen(window));
+#else
+  return FALSE;
+#endif
 }
 
 // Implements GApplication::activate.
@@ -31,31 +40,15 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
-  if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    // The header bar carries the window controls (drag, close) here, so it
-    // stays; it only needs the title it was created without.
-    gtk_header_bar_set_title(header_bar, kWindowTitle);
-    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
+  // The application draws no title strip of its own: the library header is the
+  // top of the window content. On Wayland a GTK client-side decoration would be
+  // a second, redundant strip above it, so it stays off and moving, resizing
+  // and closing the window is left to the compositor, as it is for the Iced
+  // frontend. On X11 the window manager decorates the window; GTK only uses a
+  // client-side decoration there when the window manager expects one (e.g.
+  // GNOME Shell).
+  if (!my_application_uses_x11(window)) {
+    gtk_window_set_decorated(window, FALSE);
   }
   gtk_window_set_title(window, kWindowTitle);
 
