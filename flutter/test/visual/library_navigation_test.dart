@@ -47,6 +47,15 @@ void main() {
     expect(tester.takeException(), isNull);
   }
 
+  /// The locale the application actually rendered with.
+  ///
+  /// Read from the localization scope below `MaterialApp`, so a capture records
+  /// the resolved language rather than the requested one (an unsupported
+  /// request would otherwise be recorded despite falling back).
+  String renderedLocale(WidgetTester tester) => Localizations.localeOf(
+    tester.element(find.byType(LibraryHeader)),
+  ).toLanguageTag();
+
   Future<HarnessBridge> render(
     WidgetTester tester,
     String name,
@@ -54,6 +63,7 @@ void main() {
     required bool Function() ready,
     List<FlutterLibraryBook>? books,
     Locale? locale,
+    Future<void> Function(WidgetTester tester)? verify,
     Map<String, Object?> metadata = const {},
   }) async {
     final bridge = HarnessBridge(
@@ -72,11 +82,14 @@ void main() {
       ),
       ready: ready,
     );
-    // The artifact records the locale the application actually rendered with,
-    // injected here so a capture cannot claim a language it did not select.
+    // Language assertions run before the artifact is written, so a failed
+    // assertion cannot leave apparently valid evidence behind.
+    if (verify != null) {
+      await verify(tester);
+    }
     await captureState(tester, name, view, <String, Object?>{
       ...metadata,
-      'appLocale': locale?.toLanguageTag() ?? 'system',
+      'appLocale': renderedLocale(tester),
     });
     return bridge;
   }
@@ -106,8 +119,9 @@ void main() {
         tester,
         '3a-library-wide-1280-en',
         const HarnessView(size: Size(1280, 800)),
+        locale: const Locale('en'),
         ready: () => harnessImagesReady(tester),
-        metadata: const <String, Object?>{'locale': 'en', 'state': 'wide'},
+        metadata: const <String, Object?>{'state': 'wide'},
       );
 
       expect(find.byType(LibrarySidebar), findsOneWidget);
@@ -133,26 +147,33 @@ void main() {
             .toList(),
         locale: const Locale('ja'),
         ready: () => harnessImagesReady(tester),
+        verify: (tester) async {
+          // The reference's Japanese strings, taken from the Iced catalogs.
+          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(find.text('自分だけの読書室'), findsOneWidget);
+          expect(find.text('コレクション'), findsOneWidget);
+          expect(entry('すべての本'), findsOneWidget);
+          expect(entry('設定'), findsOneWidget);
+          expect(entry('本を追加'), findsOneWidget);
+          expect(find.text('タイトル・著者を検索...'), findsOneWidget);
+          // Tooltips and accessibility text are translated too.
+          expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+          expect(find.bySemanticsLabel('本を追加'), findsOneWidget);
+          expect(find.bySemanticsLabel('すべての本'), findsOneWidget);
+          expect(find.bySemanticsLabel('設定'), findsOneWidget);
+          // The English chrome must not survive a Japanese interface.
+          expect(find.text('Library'), findsNothing);
+          expect(find.text('All books'), findsNothing);
+          expect(find.text('Settings'), findsNothing);
+          expect(find.byTooltip('Refresh library'), findsNothing);
+          // Japanese metadata still renders in the same state.
+          expect(find.text('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
+          expect(
+            find.text('Mixed Script Atlas: 東京・Wien・São Paulo'),
+            findsOneWidget,
+          );
+        },
         metadata: const <String, Object?>{'state': 'wide-japanese-interface'},
-      );
-
-      // The reference's Japanese strings, taken from the Iced catalogs.
-      expect(find.text('ライブラリ'), findsOneWidget);
-      expect(find.text('自分だけの読書室'), findsOneWidget);
-      expect(find.text('コレクション'), findsOneWidget);
-      expect(entry('すべての本'), findsOneWidget);
-      expect(entry('設定'), findsOneWidget);
-      expect(entry('本を追加'), findsOneWidget);
-      expect(find.text('タイトル・著者を検索...'), findsOneWidget);
-      // The English chrome must not survive a Japanese interface.
-      expect(find.text('Library'), findsNothing);
-      expect(find.text('All books'), findsNothing);
-      expect(find.text('Settings'), findsNothing);
-      // Japanese metadata still renders in the same state.
-      expect(find.text('海辺の図書館 — 失われた書架をめぐる長い旅路'), findsOneWidget);
-      expect(
-        find.text('Mixed Script Atlas: 東京・Wien・São Paulo'),
-        findsOneWidget,
       );
     });
 
@@ -160,8 +181,8 @@ void main() {
       tester,
     ) async {
       // Metadata coverage is kept separate from interface coverage: this state
-      // selects Japanese metadata but no Japanese interface, so it cannot stand
-      // in for the localized renders.
+      // selects Japanese metadata but an explicitly English interface, so it
+      // cannot stand in for the localized renders.
       await render(
         tester,
         '3a-library-wide-1280-ja-metadata',
@@ -169,6 +190,7 @@ void main() {
         books: harnessLibraryBooks()
             .where((book) => const {2, 4, 6}.contains(book.bookId))
             .toList(),
+        locale: const Locale('en'),
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{'state': 'wide-japanese-metadata'},
       );
@@ -188,6 +210,7 @@ void main() {
       await renderHarnessState(
         tester,
         productionShell(
+          locale: const Locale('en'),
           home: ProductShell(
             bridgeFactory: () => bridge,
             readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -215,8 +238,8 @@ void main() {
         ),
         findsOneWidget,
       );
-      await captureState(tester, '3a-library-filter-pdf-1280', view, const {
-        'appLocale': 'system',
+      await captureState(tester, '3a-library-filter-pdf-1280', view, {
+        'appLocale': renderedLocale(tester),
         'state': 'selected-filter',
         'filter': 'pdf',
       });
@@ -229,9 +252,9 @@ void main() {
         tester,
         '3a-library-wide-1280-dark',
         const HarnessView(size: Size(1280, 800)),
+        locale: const Locale('en'),
         ready: () => harnessImagesReady(tester),
         metadata: const <String, Object?>{
-          'locale': 'en',
           'palette': 'application-dark',
           'state': 'wide-dark',
         },
@@ -270,6 +293,7 @@ void main() {
       await renderHarnessState(
         tester,
         productionShell(
+          locale: const Locale('en'),
           home: ProductShell(
             bridgeFactory: () => bridge,
             readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -301,8 +325,8 @@ void main() {
         ui.Tristate.isTrue,
         reason: 'the captured frame shows the EPUB entry focused',
       );
-      await captureState(tester, '3a-library-focus-1280', view, const {
-        'appLocale': 'system',
+      await captureState(tester, '3a-library-focus-1280', view, {
+        'appLocale': renderedLocale(tester),
         'state': 'focus',
         'focused': 'EPUB',
       });
@@ -315,21 +339,24 @@ void main() {
         const HarnessView(size: Size(900, 700), textScale: 2),
         locale: const Locale('ja'),
         ready: () => harnessImagesReady(tester),
+        verify: (tester) async {
+          // The 2B deferred defect state: the header action must not cover the
+          // collection at this configuration.
+          final header = tester.getRect(find.byType(LibraryHeader));
+          final grid = tester.getRect(find.byType(GridView));
+          expect(header.bottom, lessThanOrEqualTo(grid.top));
+          // The scaled Japanese interface stays translated rather than falling
+          // back to English at 200% text.
+          expect(find.text('ライブラリ'), findsOneWidget);
+          expect(entry('設定'), findsOneWidget);
+          expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+          expect(find.text('Library'), findsNothing);
+        },
         metadata: const <String, Object?>{
           'config': 'W900 T200',
           'state': 'wide-large-text',
         },
       );
-
-      // The 2B deferred defect state: the header action must not cover the
-      // collection at this configuration.
-      final header = tester.getRect(find.byType(LibraryHeader));
-      final grid = tester.getRect(find.byType(GridView));
-      expect(header.bottom, lessThanOrEqualTo(grid.top));
-      // The scaled Japanese interface stays translated rather than falling
-      // back to English at 200% text.
-      expect(find.text('ライブラリ'), findsOneWidget);
-      expect(entry('設定'), findsOneWidget);
     });
   });
 
@@ -361,29 +388,33 @@ void main() {
               : null,
           locale: locale,
           ready: () => harnessImagesReady(tester),
+          verify: (tester) async {
+            expect(find.byType(LibraryFilterRow), findsOneWidget);
+            expect(find.byType(LibrarySidebar), findsNothing);
+            final labels = japanese
+                ? const ['すべて', 'EPUB', 'PDF', 'CBZ', '設定']
+                : const ['All', 'EPUB', 'PDF', 'CBZ', 'Settings'];
+            for (final label in labels) {
+              expect(entry(label), findsOneWidget);
+              expect(tester.widget<ShadButton>(entry(label)).enabled, isTrue);
+            }
+            if (japanese) {
+              // A Japanese interface in the compact row, not English chrome
+              // with Japanese metadata.
+              expect(find.text('ライブラリ'), findsOneWidget);
+              expect(find.text('タイトル・著者を検索...'), findsOneWidget);
+              expect(find.byTooltip('ライブラリを更新'), findsOneWidget);
+              expect(find.text('All'), findsNothing);
+              expect(find.text('Settings'), findsNothing);
+              expect(find.byTooltip('Refresh library'), findsNothing);
+            }
+          },
           metadata: <String, Object?>{
             'config': 'C390${t200 ? ' T200' : ''}',
             'state': 'compact',
             'matchedSize': height == 844,
           },
         );
-
-        expect(find.byType(LibraryFilterRow), findsOneWidget);
-        expect(find.byType(LibrarySidebar), findsNothing);
-        final labels = japanese
-            ? const ['すべて', 'EPUB', 'PDF', 'CBZ', '設定']
-            : const ['All', 'EPUB', 'PDF', 'CBZ', 'Settings'];
-        for (final label in labels) {
-          expect(entry(label), findsOneWidget);
-          expect(tester.widget<ShadButton>(entry(label)).enabled, isTrue);
-        }
-        if (japanese) {
-          // A Japanese interface in the compact row, not English chrome with
-          // Japanese metadata.
-          expect(find.text('ライブラリ'), findsOneWidget);
-          expect(find.text('All'), findsNothing);
-          expect(find.text('Settings'), findsNothing);
-        }
       });
     }
   });
@@ -404,27 +435,29 @@ void main() {
             HarnessView(size: Size(width, 700)),
             locale: locale,
             ready: () => harnessImagesReady(tester),
+            verify: (tester) async {
+              final wide = width >= ShosaiTokens.layoutLibraryCompactBreakpoint;
+              expect(
+                find.byType(LibrarySidebar),
+                wide ? findsOneWidget : findsNothing,
+              );
+              expect(
+                find.byType(LibraryFilterRow),
+                wide ? findsNothing : findsOneWidget,
+              );
+              if (japanese) {
+                expect(find.text('ライブラリ'), findsOneWidget);
+                expect(entry(wide ? 'すべての本' : 'すべて'), findsOneWidget);
+                expect(entry('設定'), findsOneWidget);
+                expect(find.text('Library'), findsNothing);
+              }
+            },
             metadata: <String, Object?>{
               'config': 'B760±',
               'state': 'breakpoint',
               'clientWidth': width,
             },
           );
-
-          final wide = width >= ShosaiTokens.layoutLibraryCompactBreakpoint;
-          expect(
-            find.byType(LibrarySidebar),
-            wide ? findsOneWidget : findsNothing,
-          );
-          expect(
-            find.byType(LibraryFilterRow),
-            wide ? findsNothing : findsOneWidget,
-          );
-          if (japanese) {
-            expect(find.text('ライブラリ'), findsOneWidget);
-            expect(entry(wide ? 'すべての本' : 'すべて'), findsOneWidget);
-            expect(entry('設定'), findsOneWidget);
-          }
         });
       }
     }
@@ -440,6 +473,7 @@ void main() {
     await renderHarnessState(
       tester,
       productionShell(
+        locale: const Locale('en'),
         home: ProductShell(
           bridgeFactory: () => bridge,
           readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -463,8 +497,8 @@ void main() {
       lessThan(tester.getRect(find.byType(LibrarySidebar)).bottom),
       reason: 'Settings is reachable by scrolling the sidebar',
     );
-    await captureState(tester, '3a-library-short-900x400-t200', view, const {
-      'appLocale': 'system',
+    await captureState(tester, '3a-library-short-900x400-t200', view, {
+      'appLocale': renderedLocale(tester),
       'config': 'W900x400 T200',
       'state': 'short-window',
     });
@@ -476,6 +510,7 @@ void main() {
       '3a-library-empty-1280',
       const HarnessView(size: Size(1280, 800)),
       books: const [],
+      locale: const Locale('en'),
       ready: () =>
           find.textContaining('library is empty').evaluate().isNotEmpty,
       metadata: const <String, Object?>{'state': 'empty'},

@@ -857,8 +857,9 @@ void main() {
     testWidgets('a Japanese label keeps its ink inside the button', (
       tester,
     ) async {
-      // The Flutter interface is English until package 6B owns localization;
-      // this pins the component behavior a Japanese label will need.
+      // A component-level check that stays useful now that the interface is
+      // localized: a Japanese label arriving from the catalogs must keep its
+      // ink inside the button at 200% text.
       await tester.pumpWidget(
         productionShell(
           home: Scaffold(
@@ -970,6 +971,61 @@ void main() {
         await tester.pumpAndSettle();
         expect(navigationEntry('Add books'), findsOneWidget);
         expect(navigationEntry('Cancel'), findsNothing);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    );
+
+    testWidgets(
+      'a Japanese interface labels the import cancel action',
+      (tester) async {
+        final picker = _PickerStub(tester, const ['/books/new.epub']);
+        final bridge = _ControlledBridge();
+        bridge.importCompleter = Completer<FlutterImportReport>();
+        await pumpControlledLibrary(
+          tester,
+          const Size(1280, 800),
+          bridge: bridge,
+          locale: const Locale('ja'),
+        );
+
+        await tester.tap(navigationEntry('本を追加'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.text('Choose files'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.tap(find.text('Import'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        // The import owns the header action, and that action carries the
+        // catalog's Japanese label rather than the English one.
+        expect(picker.calls, ['openFile']);
+        expect(navigationEntry('キャンセル'), findsOneWidget);
+        expect(navigationEntry('Cancel'), findsNothing);
+        expect(navigationEntry('本を追加'), findsNothing);
+
+        await tester.tap(navigationEntry('キャンセル'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(
+          bridge.cancelled,
+          contains(bridge.importCancellations.single),
+          reason: 'the Japanese action cancels the import token',
+        );
+
+        bridge.importCompleter!.complete(
+          FlutterImportReport(
+            imported: BigInt.zero,
+            failed: BigInt.zero,
+            cancelled: true,
+            items: const [],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(navigationEntry('本を追加'), findsOneWidget);
+        expect(navigationEntry('キャンセル'), findsNothing);
       },
       variant: TargetPlatformVariant.only(TargetPlatform.linux),
     );
@@ -1300,11 +1356,17 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(navigationEntry('PDF'));
       await tester.pumpAndSettle();
+      expect(find.text('Library'), findsOneWidget);
       expect(
         find.text(
           'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
         ),
         findsOneWidget,
+      );
+      expect(
+        find.text('A Book With No Cover At All'),
+        findsNothing,
+        reason: 'the query excludes the second PDF',
       );
       expect(find.text('The Quiet Cartographer'), findsNothing);
 
@@ -1313,12 +1375,23 @@ void main() {
 
       // The interface changed, and the query and the filter survived it.
       expect(find.text('ライブラリ'), findsOneWidget);
+      expect(find.text('Library'), findsNothing);
+      expect(
+        tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+        'Donaudampf',
+        reason: 'the search field still carries the query',
+      );
       expect(
         find.text(
           'Donaudampfschifffahrtsgesellschaftskapitaenskajuettenfenster',
         ),
         findsOneWidget,
         reason: 'the query still filters after the language change',
+      );
+      expect(
+        find.text('A Book With No Cover At All'),
+        findsNothing,
+        reason: 'the query still excludes the second PDF after the change',
       );
       expect(
         find.text('The Quiet Cartographer'),

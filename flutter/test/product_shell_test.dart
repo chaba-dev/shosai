@@ -1287,6 +1287,7 @@ void main() {
       MediaQuery(
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
         child: _libraryApp(
+          locale: const Locale('ja'),
           home: ProductShell(
             bridgeFactory: () => bridge,
             readerBuilder: (_, _, _, _, _, _) => const SizedBox(),
@@ -1296,6 +1297,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('詳しい本'), findsOneWidget);
+    // The Japanese interface is selected, not only Japanese metadata.
+    expect(find.text('ライブラリ'), findsOneWidget);
+    expect(find.text('Library'), findsNothing);
     expect(tester.takeException(), isNull);
     await expectLater(
       find.byType(ProductShell),
@@ -1690,7 +1694,8 @@ class _ControlledLibraryBridge implements FlutterBridge {
 
 /// The production shell, so these tests render the same composition the
 /// application does instead of a lookalike theme wrapper.
-Widget _libraryApp({required Widget home}) => productionShell(home: home);
+Widget _libraryApp({required Widget home, Locale? locale}) =>
+    productionShell(home: home, locale: locale);
 
 /// Opens the reader settings from the library's navigation.
 ///

@@ -205,12 +205,15 @@ Widget productionShell({required Widget home, Locale? locale}) =>
     );
 
 /// The complete production application for a library bridge, including the
-/// production reader builder.
-Widget productionApp({required FlutterBridge Function() bridgeFactory}) =>
-    RepaintBoundary(
-      key: harnessBoundaryKey,
-      child: ShosaiApp(productBridgeFactory: bridgeFactory),
-    );
+/// production reader builder. [locale] goes through the same composition as
+/// [productionShell].
+Widget productionApp({
+  required FlutterBridge Function() bridgeFactory,
+  Locale? locale,
+}) => RepaintBoundary(
+  key: harnessBoundaryKey,
+  child: ShosaiApp(productBridgeFactory: bridgeFactory, locale: locale),
+);
 
 // ---------------------------------------------------------------------------
 // Deterministic fixtures
