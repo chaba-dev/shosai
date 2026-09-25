@@ -249,6 +249,7 @@ class _ShosaiAppState extends State<ShosaiApp> {
           ? ReaderScreen(bridge: widget.bridge)
           : ProductShell(
               bridgeFactory: widget.productBridgeFactory!,
+              noticeReporter: _noticeCenter.reporter,
               readerBuilder:
                   (bridge, book, settings, path, bookId, locatorChanged) =>
                       ReaderScreen(

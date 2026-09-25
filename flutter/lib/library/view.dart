@@ -11,6 +11,7 @@ import 'package:shosai_flutter/app_theme.dart';
 import 'package:shosai_flutter/l10n/app_localizations.dart';
 import 'package:shosai_flutter/library/controller.dart';
 import 'package:shosai_flutter/library/errors.dart';
+import 'package:shosai_flutter/notices/notices.dart';
 import 'package:shosai_flutter/reader/controller.dart';
 import 'package:shosai_flutter/shared/shad_widgets.dart';
 import 'package:shosai_flutter/src/rust/api.dart';
@@ -38,11 +39,16 @@ class ProductShell extends StatefulWidget {
     required this.bridgeFactory,
     required this.readerBuilder,
     this.androidImport,
+    this.noticeReporter,
   });
 
   final FlutterBridge Function() bridgeFactory;
   final ProductReaderBuilder readerBuilder;
   final AndroidDocumentImportAdapter? androidImport;
+
+  /// The application notice center's reporter, injected by the composition
+  /// root. A shell built without one presents no library feedback.
+  final NoticeReporter? noticeReporter;
 
   @override
   State<ProductShell> createState() => _ProductShellState();
@@ -68,6 +74,7 @@ class _ProductShellState extends State<ProductShell> with RestorationMixin {
     editSettings: _editSettings,
     retryProviderCleanup: _androidImport.retryCleanup,
     cancelImportAdapter: _cancelImportAdapter,
+    noticeReporter: widget.noticeReporter ?? ignoreNotice,
     evictCover: (bytes) {
       final provider = MemoryImage(bytes);
       imageCache.evict(provider, includeLive: true);
