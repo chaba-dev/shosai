@@ -17,6 +17,27 @@ typedef AnnotationAssociationPickerCanceller = void Function();
 typedef ReaderFocusAdapter = void Function(ReaderFocusTarget target);
 typedef ReaderFrameScheduler = void Function(VoidCallback callback);
 
+/// Leaves the reader (the injected platform navigation effect).
+///
+/// The controller starts it; a widget never pops the route itself.
+typedef ReaderNavigationAdapter = Future<void> Function();
+
+/// Brings a tab strip entry fully into view.
+///
+/// The widget owns the Flutter `ScrollController` that implements this; the
+/// controller decides *when* a reveal happens (after the initial layout, after
+/// the active tab changes, after a close and after a resize) and never the
+/// widget.
+typedef ReaderTabRevealAdapter = Future<void> Function(String tabId);
+
+/// Supplies the 4B progress ordinals for a loaded document (RD-05).
+///
+/// The fixture supplies them in 4B; 5G supplies real renderer values. The
+/// controller applies the `none`/`loading` precedence before consulting this
+/// source, so a fixture cannot bypass it.
+typedef ReaderProgressSource =
+    ReaderProgressPresentation Function(ReaderModel model);
+
 final class _QueuedReadingStateSave {
   const _QueuedReadingStateSave({required this.run, required this.discard});
 

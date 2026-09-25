@@ -56,8 +56,47 @@ final class ReaderBookmarkNavigated extends ReaderMessage {
   final int? offset;
 }
 
-final class ReaderToolsToggled extends ReaderMessage {
-  const ReaderToolsToggled();
+/// Toggles one of the three mutually exclusive reader panels (RD-13).
+///
+/// Toggling the open panel closes it; opening a panel closes the other two.
+final class ReaderPanelToggled extends ReaderMessage {
+  const ReaderPanelToggled(this.panel);
+  final ReaderPanel panel;
+}
+
+/// Opens or closes the search bar (RD-11).
+///
+/// Search is independent of the three panels. Closing cancels an in-flight
+/// search and clears the query and results, mirroring the Iced reference.
+final class ReaderSearchToggled extends ReaderMessage {
+  const ReaderSearchToggled();
+}
+
+/// Activates the tab with [tabId] (presentation-only in 4B).
+final class ReaderTabActivated extends ReaderMessage {
+  const ReaderTabActivated(this.tabId);
+  final String tabId;
+}
+
+/// Requests closing the tab with [tabId] (presentation-only in 4B).
+///
+/// Real close semantics (adjacent selection, last-tab return, pending saves,
+/// resource release) are 5F; 4B applies its documented fixture policy.
+final class ReaderTabCloseRequested extends ReaderMessage {
+  const ReaderTabCloseRequested(this.tabId);
+  final String tabId;
+}
+
+/// Leaves the reader. The controller invokes the injected navigation adapter;
+/// a widget never pops the route itself.
+final class ReaderBackRequested extends ReaderMessage {
+  const ReaderBackRequested();
+}
+
+/// Requests keyboard focus for the open panel through the focus adapter.
+final class ReaderPanelFocusRequested extends ReaderMessage {
+  const ReaderPanelFocusRequested(this.panel);
+  final ReaderPanel panel;
 }
 
 final class _ReaderSearchCompleted extends ReaderMessage {
@@ -596,8 +635,13 @@ final class _ReaderSurfaceFocusReady extends ReaderMessage {
 }
 
 final class _ReaderNoteEditorFinished extends ReaderMessage {
-  const _ReaderNoteEditorFinished(this.revision);
-  final int revision;
+  const _ReaderNoteEditorFinished(this.token);
+
+  /// Controller-wide ownership token of the editor that finished, so a stale
+  /// completion cannot clear a newer editor's slot even when the per-operation
+  /// revisions collide (bookmark editors count with `_bookmarkRevision`,
+  /// selection/annotation editors with `_noteRevision`).
+  final int token;
 }
 
 final class _ReaderDisposeRequested extends ReaderMessage {

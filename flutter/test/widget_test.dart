@@ -48,7 +48,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         restorationScopeId: 'test',
-        home: ReaderScreen(bridgeFactory: bridgeFactory),
+        home: ReaderScreen(debugPathEntry: true, bridgeFactory: bridgeFactory),
       ),
     );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
@@ -399,6 +399,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) async => image,
         ),
@@ -427,7 +428,9 @@ void main() {
     tester,
   ) async {
     final bridge = _FakeBridge();
-    await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
+    await tester.pumpWidget(
+      MaterialApp(home: ReaderScreen(debugPathEntry: true, bridge: bridge)),
+    );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pump();
@@ -457,6 +460,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) {
             decodeCalls += 1;
@@ -499,7 +503,9 @@ void main() {
     tester,
   ) async {
     final bridge = _FakeBridge();
-    await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
+    await tester.pumpWidget(
+      MaterialApp(home: ReaderScreen(debugPathEntry: true, bridge: bridge)),
+    );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
     await tester.tap(find.text('Open document'));
     await tester.pump();
@@ -527,6 +533,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) {
             decodeCalls += 1;
@@ -681,6 +688,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -911,7 +919,14 @@ void main() {
 
     expect(controller.model.document, isNull);
     expect(controller.model.pageImage, isNull);
-    expect(controller.model.error, 'too many cancellation tokens');
+    // User-visible bridge failures carry the kind alongside the message (the
+    // retained reader interpolated the raw error object, which rendered as
+    // "Instance of 'FlutterBridgeError'"). The assertion stays exact, so a
+    // change to either half of the format still fails here.
+    expect(
+      controller.model.error,
+      'too many cancellation tokens (invalidRequest)',
+    );
     expect(controller.model.openPath, '/tmp/second.pdf');
     expect(image.debugDisposed, isTrue);
     expect(bridge.releasedDocuments, [_documentHandle]);
@@ -1128,7 +1143,11 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: ReaderScreen(bridge: bridge, decoder: firstDecoder),
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          decoder: firstDecoder,
+        ),
       ),
     );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.pdf');
@@ -1138,7 +1157,11 @@ void main() {
     await bridge.renderStarted.future;
     await tester.pumpWidget(
       MaterialApp(
-        home: ReaderScreen(bridge: bridge, decoder: secondDecoder),
+        home: ReaderScreen(
+          debugPathEntry: true,
+          bridge: bridge,
+          decoder: secondDecoder,
+        ),
       ),
     );
     bridge.renderCompleter.complete(
@@ -1738,6 +1761,38 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('a failed highlight reload reports the bridge message and kind', () async {
+    final bridge = _ControlledBridge(immediateLists: true);
+    final controller = _epubController(bridge);
+    // The reload intent is only accepted while highlights are not ready, so the
+    // initial load is failed first: that is also the state in which the reader
+    // offers its retry action.
+    bridge.listFailure = true;
+    await _openControlled(controller, bridge, '/tmp/book.epub');
+    expect(controller.model.annotationsReady, isFalse);
+    expect(controller.model.annotationError, isNotNull);
+    bridge.listFailure = false;
+
+    final reload = Completer<List<FlutterAnnotation>>();
+    bridge.listCompleters.add(reload);
+    controller.dispatch(const ReaderAnnotationReloadRequested());
+    await _waitUntil(() => bridge.listCalls == 2);
+    reload.completeError(
+      const FlutterBridgeError(
+        kind: FlutterBridgeErrorKind.notFound,
+        message: 'highlights are gone',
+      ),
+    );
+    await bridge.waitForOp(2);
+
+    // The reload path interpolated the raw error object, so the alert rendered
+    // "Instance of 'FlutterBridgeError'". The assertion is exact in both halves,
+    // so neither the message nor the kind can drop out unnoticed.
+    expect(controller.model.annotationError, 'highlights are gone (notFound)');
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test('association and reload intents are rejected while opening', () async {
     final bridge = _ControlledBridge(
       associationSources: [_associationSource()],
@@ -1869,6 +1924,7 @@ void main() {
           child: child!,
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -1930,6 +1986,7 @@ void main() {
           child: child!,
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -1938,6 +1995,18 @@ void main() {
     await tester.enterText(find.byType(ShadInput), '/tmp/changed.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
+    // The header is a bounded scroll region on a viewport this short with a
+    // scaled interface, so the recovery action is reachable by scrolling
+    // within the header rather than clipped.
+    await tester.ensureVisible(
+      find.byTooltip('Associate highlights from an earlier version…'),
+    );
+    // The header is a bounded scroll region on a viewport this short with a
+    // scaled interface, so the recovery action is reachable by scrolling
+    // within the header rather than clipped.
+    await tester.ensureVisible(
+      find.byTooltip('Associate highlights from an earlier version…'),
+    );
     await tester.tap(
       find.byTooltip('Associate highlights from an earlier version…'),
     );
@@ -2332,7 +2401,12 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(bridge.selectionCalls, 2);
     expect(controller.model.relayoutBusy, isFalse);
-    expect(controller.model.selectionError, contains('persistent failure'));
+    // A failed page layout is recorded as a layout failure, not as a selection
+    // failure (the retained reader reused `selectionError`, which mislabelled it
+    // in the error surface). The assertion still discriminates: the failure is
+    // recorded once and not retried.
+    expect(controller.model.relayoutError, contains('persistent failure'));
+    expect(controller.model.selectionError, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -2344,12 +2418,19 @@ void main() {
     const desired = ReaderLayout(scale: 2, width: 300, fontSize: 20);
     bridge.failCancellationCreation = true;
     controller.dispatch(const ReaderLayoutChanged(desired));
+    expect(controller.model.relayoutError, isNotNull);
 
     bridge.failCancellationCreation = false;
     controller.dispatch(const ReaderOpenRequested('/tmp/replacement.epub'));
     await bridge.waitForOp(2);
 
     expect(bridge.selectionLayouts.last, desired);
+    // The layout failure belonged to the replaced document: the release path
+    // clears it, so the new document cannot inherit a stale "Layout failed"
+    // alert (a successful open whose requested layout already matches the
+    // committed one never runs a relayout that would clear it later).
+    expect(controller.model.relayoutError, isNull);
+    expect(controller.model.document, isNotNull);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -2464,6 +2545,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.pdf',
           initialSettings: const FlutterReaderSettings(
@@ -2500,6 +2582,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             initialPath: '/books/book.pdf',
             initialSettings: FlutterReaderSettings(
@@ -2570,12 +2653,17 @@ void main() {
         wordBoundaries: Uint32List.fromList([0, 10]),
         visualLines: const [],
       );
+      // The reader relayouts when the document loads (the edge columns of the
+      // restored composition appear), so every request gets a large surface.
       bridge.selectionCompleters
         ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(30)))
-        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(31)));
+        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(31)))
+        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(32)))
+        ..add(Completer<FlutterSelectionSurface>()..complete(largeSurface(33)));
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             initialPath: '/books/book.pdf',
             initialSettings: FlutterReaderSettings(
@@ -2664,6 +2752,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.epub',
           initialSettings: const FlutterReaderSettings(
@@ -2764,6 +2853,12 @@ void main() {
         )
         ..add(
           Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(41)),
+        )
+        ..add(
+          Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(42)),
+        )
+        ..add(
+          Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(43)),
         );
       Future<void> disposeReader() async {
         if (bridge.disposed.isCompleted) return;
@@ -2775,6 +2870,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             initialPath: '/books/book.pdf',
             initialSettings: const FlutterReaderSettings(
@@ -2853,7 +2949,7 @@ void main() {
       bridge.selectionCompleters.add(
         Completer<FlutterSelectionSurface>()..complete(asymmetricSurface(42)),
       );
-      await tester.tap(find.byTooltip('Next'));
+      await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
       await tester.pumpAndSettle();
       final nextVerticalScroll = find.descendant(
         of: find.byKey(const ValueKey('reader-paginated-presentation')),
@@ -2882,6 +2978,7 @@ void main() {
           fontFamilyFallback: const ['Noto Sans JP'],
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialSettings: const FlutterReaderSettings(
             continuous: false,
@@ -2922,6 +3019,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.epub',
           initialSettings: const FlutterReaderSettings(
@@ -2954,6 +3052,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.pdf',
           initialSettings: const FlutterReaderSettings(
@@ -3447,6 +3546,28 @@ void main() {
     await bridge.disposed.future;
   });
 
+  test('recovery reopen does not inherit a layout failure', () async {
+    final bridge = _ControlledBridge(immediateLists: true);
+    final controller = _epubController(bridge);
+    await _openControlled(controller, bridge, '/tmp/a.epub');
+    bridge.failCancellationCreation = true;
+    controller.dispatch(
+      const ReaderLayoutChanged(
+        ReaderLayout(scale: 2, width: 300, fontSize: 20),
+      ),
+    );
+    expect(controller.model.relayoutError, isNotNull);
+    bridge.failCancellationCreation = false;
+
+    controller.dispatch(const ReaderMemoryPressureReceived());
+    await bridge.waitForOp(2);
+
+    expect(controller.model.document, isNotNull);
+    expect(controller.model.relayoutError, isNull);
+    controller.dispose();
+    await bridge.disposed.future;
+  });
+
   test(
     'resume waits for suspended relayout cleanup before reopening',
     () async {
@@ -3745,15 +3866,19 @@ void main() {
         final controller = _epubController(bridge);
         controller.dispatch(const ReaderOpenRequested('/tmp/missing.epub'));
         await bridge.waitForFinishedOperations(1);
-        expect(controller.model.error, unavailable.$2);
+        // The open alert carries the bridge message and its kind; the assertion
+        // is exact in both halves, so the retained "Instance of
+        // 'FlutterBridgeError'" rendering cannot come back unnoticed.
+        final described = '${unavailable.$2} (${unavailable.$1.name})';
+        expect(controller.model.error, described);
 
         controller.dispatch(const ReaderSuspended());
         controller.dispatch(const ReaderMemoryPressureReceived());
-        expect(controller.model.error, unavailable.$2);
+        expect(controller.model.error, described);
         controller.dispatch(const ReaderResumed());
         await bridge.waitForFinishedOperations(2);
 
-        expect(controller.model.error, unavailable.$2);
+        expect(controller.model.error, described);
         expect(bridge.openResults, isEmpty);
         controller.dispose();
         expect(bridge.disposeCount, 1);
@@ -3765,7 +3890,9 @@ void main() {
     tester,
   ) async {
     final bridge = _FakeBridge();
-    await tester.pumpWidget(MaterialApp(home: ReaderScreen(bridge: bridge)));
+    await tester.pumpWidget(
+      MaterialApp(home: ReaderScreen(debugPathEntry: true, bridge: bridge)),
+    );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pump();
@@ -4056,6 +4183,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4131,6 +4259,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4174,6 +4303,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4213,6 +4343,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
@@ -4256,6 +4387,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) async => image,
           ),
@@ -4293,6 +4425,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4320,6 +4453,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) async => page,
         ),
@@ -4370,6 +4504,7 @@ void main() {
           child: child!,
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           key: const ValueKey('reader'),
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
@@ -4381,21 +4516,36 @@ void main() {
       await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
       await tester.tap(find.text('Open document'));
       await tester.pumpAndSettle();
+      // The reported width is the viewport minus the two RD-06 edge columns;
+      // the columns are chrome and scale with the interface, so the width is
+      // measured from the rendered control rather than hardcoded. The book font
+      // is the reader preference and does not scale with the interface text
+      // scale (contract §2.3 item 5b), so `fontSize` stays 18 at `T150`.
+      double edgeWidth() => tester
+          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
+          .width;
       expect(
         bridge.selectionLayouts.single,
-        const ReaderLayout(scale: 2, width: 552, fontSize: 27),
+        ReaderLayout(scale: 2, width: 600 - 2 * edgeWidth(), fontSize: 18),
       );
       expect(find.text('Highlight 1 — recovered'), findsOneWidget);
+      // Address the annotation strip's own scrollable: the reader chrome adds
+      // scroll regions of its own (the bounded header and the dev-only entry),
+      // so "the last scrollable in the tree" is not the strip any more.
+      final annotationStrip = find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Scrollable),
+      );
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — ambiguous'),
         300,
-        scrollable: find.byType(Scrollable).last,
+        scrollable: annotationStrip,
       );
       expect(find.text('Highlight 1 — ambiguous'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Highlight 1 — unavailable'),
         300,
-        scrollable: find.byType(Scrollable).last,
+        scrollable: annotationStrip,
       );
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
@@ -4403,7 +4553,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         bridge.selectionLayouts.last,
-        const ReaderLayout(scale: 2, width: 652, fontSize: 27),
+        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
       );
 
       final callsBeforeTheme = bridge.selectionCalls;
@@ -4414,17 +4564,21 @@ void main() {
 
       await tester.pumpWidget(app(brightness: Brightness.dark, textScale: 2));
       await tester.pumpAndSettle();
+      // At `T200` the edge columns themselves are wider, and the book font
+      // still does not scale: only the chrome does.
       expect(
         bridge.selectionLayouts.last,
-        const ReaderLayout(scale: 2, width: 652, fontSize: 36),
+        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
       );
 
       tester.view.devicePixelRatio = 3;
       tester.view.physicalSize = const Size(2100, 1500);
       await tester.pumpAndSettle();
+      // A device pixel ratio change is not an interface text-scale change: the
+      // scale of an already-open document stays the one it was opened with.
       expect(
         bridge.selectionLayouts.last,
-        const ReaderLayout(scale: 2, width: 652, fontSize: 36),
+        ReaderLayout(scale: 2, width: 700 - 2 * edgeWidth(), fontSize: 18),
       );
       expect(find.text('Highlight 1 — unavailable'), findsOneWidget);
 
@@ -4444,52 +4598,37 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
       ),
     );
     await tester.pump();
-    expect(
-      find.byKey(const ValueKey('reader-composition-compact')),
-      findsOneWidget,
-    );
     await tester.enterText(find.byType(ShadInput), '/tmp/book.epub');
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
-    expect(bridge.selectionLayouts.last.width, 342);
 
-    tester.view.physicalSize = const Size(844, 390);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('reader-composition-medium')),
-      findsOneWidget,
-    );
-    expect(bridge.selectionLayouts.last.width, 796);
-
-    tester.view.physicalSize = const Size(800, 1100);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('reader-composition-medium')),
-      findsOneWidget,
-    );
-    expect(bridge.selectionLayouts.last.width, 752);
-
-    tester.view.physicalSize = const Size(1180, 800);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('reader-composition-expanded')),
-      findsOneWidget,
-    );
-    expect(bridge.selectionLayouts.last.width, 788);
-
-    tester.view.physicalSize = const Size(1440, 900);
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('reader-composition-expanded')),
-      findsOneWidget,
-    );
-    expect(bridge.selectionLayouts.last.width, 1048);
+    // The reported reader viewport is the window minus the two RD-06 edge
+    // columns, at every device class and rotation.
+    for (final size in const [
+      Size(390, 844),
+      Size(844, 390),
+      Size(800, 1100),
+      Size(1180, 800),
+      Size(1440, 900),
+    ]) {
+      tester.view.physicalSize = size;
+      await tester.pumpAndSettle();
+      final edgeWidth = tester
+          .getSize(find.byKey(const ValueKey('reader-edge-previous')))
+          .width;
+      expect(
+        bridge.selectionLayouts.last.width,
+        size.width - 2 * edgeWidth,
+        reason: 'reported reader viewport at $size',
+      );
+    }
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -4513,6 +4652,7 @@ void main() {
           child: child!,
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4522,12 +4662,18 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pumpAndSettle();
 
-    final composition = tester.getRect(
-      find.byKey(const ValueKey('reader-composition-compact')),
+    // The safe area insets the reader; the edge columns then take their share
+    // of the content area and the document is laid out for what remains.
+    final previous = tester.getRect(
+      find.byKey(const ValueKey('reader-edge-previous')),
     );
-    expect(composition.left, 20);
-    expect(composition.right, 360);
-    expect(bridge.selectionLayouts.single.width, 292);
+    final next = tester.getRect(find.byKey(const ValueKey('reader-edge-next')));
+    expect(previous.left, 20);
+    expect(next.right, 360);
+    expect(
+      bridge.selectionLayouts.single.width,
+      340 - previous.width - next.width,
+    );
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -4545,6 +4691,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4600,6 +4747,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4646,6 +4794,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4657,14 +4806,23 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(-600, 0));
     await tester.pumpAndSettle();
     final listBefore = tester.state<ScrollableState>(
-      find.byType(Scrollable).last,
+      find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Scrollable),
+      ),
     );
     expect(listBefore.position.pixels, greaterThan(0));
 
     tester.view.physicalSize = const Size(1144, 900);
     await tester.pumpAndSettle();
+    // The highlight strip keeps its own scrollable across the breakpoint, so
+    // the offset survives the relayout; address it by the strip rather than by
+    // position, since the reader also has other scrollables.
     final listAfter = tester.state<ScrollableState>(
-      find.byType(Scrollable).last,
+      find.descendant(
+        of: find.byType(ListView),
+        matching: find.byType(Scrollable),
+      ),
     );
     expect(listAfter, same(listBefore));
     expect(listAfter.position.pixels, greaterThan(0));
@@ -4687,6 +4845,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -4706,7 +4865,6 @@ void main() {
     }
     final focusBefore = FocusManager.instance.primaryFocus!;
     expect(focusBefore.rect.overlaps(tester.getRect(highlight)), isTrue);
-
     tester.view.physicalSize = const Size(1144, 900);
     await tester.pumpAndSettle();
     expect(FocusManager.instance.primaryFocus, same(focusBefore));
@@ -4736,6 +4894,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
@@ -4890,6 +5049,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
@@ -4958,6 +5118,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
@@ -4995,6 +5156,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             decoder: (pixels, {required width, required height}) =>
                 _testImage(),
@@ -5116,6 +5278,7 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             home: ReaderScreen(
+              debugPathEntry: true,
               bridge: bridge,
               decoder: (pixels, {required width, required height}) =>
                   _testImage(),
@@ -5181,6 +5344,7 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               home: ReaderScreen(
+                debugPathEntry: true,
                 bridge: bridge,
                 decoder: (pixels, {required width, required height}) =>
                     _testImage(),
@@ -5267,6 +5431,7 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               home: ReaderScreen(
+                debugPathEntry: true,
                 bridge: bridge,
                 decoder: (pixels, {required width, required height}) =>
                     _testImage(),
@@ -5296,7 +5461,7 @@ void main() {
           );
           for (
             var tabs = 0;
-            tabs < 5 && !editable.widget.focusNode.hasFocus;
+            tabs < 12 && !editable.widget.focusNode.hasFocus;
             tabs += 1
           ) {
             await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -5343,6 +5508,7 @@ void main() {
           await tester.pumpWidget(
             MaterialApp(
               home: ReaderScreen(
+                debugPathEntry: true,
                 bridge: bridge,
                 decoder: (pixels, {required width, required height}) =>
                     _testImage(),
@@ -5440,6 +5606,7 @@ void main() {
           child: child!,
         ),
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5494,6 +5661,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5598,6 +5766,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5657,6 +5826,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5705,6 +5875,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5752,6 +5923,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/tmp/book.epub',
           decoder: (pixels, {required width, required height}) => _testImage(),
@@ -5769,7 +5941,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pump();
     await tester.pump();
-    expect(find.text('2 / 2'), findsOneWidget);
+    // The location indicator is the restored status bar (RD-05).
+    expect(find.text('Chapter 2 · 100%'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 600));
     await held.moveTo(topLeft + Offset(side * .7, side * .7));
     await held.up();
@@ -5787,6 +5960,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5847,6 +6021,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5891,6 +6066,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -5961,6 +6137,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -6011,6 +6188,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -6066,6 +6244,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           decoder: (pixels, {required width, required height}) => _testImage(),
         ),
@@ -6149,15 +6328,20 @@ void main() {
     },
   );
 
-  testWidgets('bookmark save failure stays visible when tools close', (
+  testWidgets('bookmark save failure stays visible when the panel closes', (
     tester,
   ) async {
+    // The tools *surface* is retired (contract §7.2 item 1) but the live
+    // bookmark controls are retained inside the more panel, so the failure is
+    // driven through rendered controls and asserted on the rendered live
+    // region — including after the panel that hosted the control is closed.
     final bridge = _ControlledBridge(bookId: 7, immediateLists: true);
     final toggle = Completer<FlutterBookmark?>();
     bridge.bookmarkToggleCompleters.add(toggle);
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.epub',
           initialBookId: 7,
@@ -6167,11 +6351,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
     await tester.tap(find.byTooltip('Bookmark this location'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
     toggle.completeError(StateError('bookmark commit failed'));
     await tester.pumpAndSettle();
 
@@ -6637,7 +6823,7 @@ void main() {
     );
 
     expect(controller.model.persistenceError, contains('commit failed'));
-    expect(controller.model.toolsVisible, isFalse);
+    expect(controller.model.openPanel, isNull);
     controller.dispose();
     await bridge.disposed.future;
   });
@@ -6667,6 +6853,7 @@ void main() {
         data: const MediaQueryData(textScaler: TextScaler.linear(2)),
         child: MaterialApp(
           home: ReaderScreen(
+            debugPathEntry: true,
             bridge: bridge,
             initialPath: '/books/book.epub',
             initialBookId: 7,
@@ -6678,14 +6865,23 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Next'));
+    await tester.tap(find.byKey(const ValueKey('reader-edge-next')));
     await tester.pump();
     await _waitUntil(() => bridge.savedReadingStates.isNotEmpty);
     await tester.pumpAndSettle();
 
+    final persistenceError = find.textContaining(
+      'Reading position was not saved',
+    );
+    expect(persistenceError, findsOneWidget);
+    // The recorded failure is a live region, not only visible text.
     expect(
-      find.textContaining('Reading position was not saved'),
-      findsOneWidget,
+      tester
+          .getSemantics(persistenceError)
+          .getSemanticsData()
+          .flagsCollection
+          .isLiveRegion,
+      isTrue,
     );
     expect(tester.takeException(), isNull);
     final readerRect = tester.getRect(find.byType(ReaderScreen));
@@ -6718,7 +6914,7 @@ void main() {
     await disposeReader();
   });
 
-  testWidgets('reader tools remain bounded above a compact keyboard', (
+  testWidgets('reader panels remain bounded above a compact keyboard', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 640);
@@ -6733,6 +6929,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/book.epub',
           initialBookId: 7,
@@ -6741,21 +6938,32 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+    // The tools surface is retired (contract §7.2 item 1); the live tools
+    // controls are retained inside the more panel and must stay inside the
+    // usable viewport above the keyboard (640 logical height minus the 280
+    // inset), not merely inside the window.
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
 
     expect(tester.takeException(), isNull);
+    const usableHeight = 640 - 280;
     final readerRect = tester.getRect(find.byType(ReaderScreen));
     final toolsRect = tester.getRect(
       find.byKey(const ValueKey('reader-tools-scroll')),
+    );
+    final panelRect = tester.getRect(
+      find.byKey(const ValueKey('reader-panel-more')),
     );
     final contentRect = tester.getRect(
       find.byKey(const ValueKey('reader-content-semantics')),
     );
     expect(toolsRect.height, greaterThan(0));
+    expect(panelRect.height, greaterThan(0));
     expect(contentRect.height, greaterThan(0));
     expect(readerRect.contains(toolsRect.topLeft), isTrue);
-    expect(toolsRect.bottom <= readerRect.bottom, isTrue);
+    expect(toolsRect.bottom <= usableHeight, isTrue);
+    expect(panelRect.bottom <= usableHeight, isTrue);
+    expect(contentRect.bottom <= usableHeight, isTrue);
 
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
@@ -6790,7 +6998,7 @@ void main() {
         controller.model.persistenceError,
         contains('could not be restored'),
       );
-      expect(controller.model.toolsVisible, isFalse);
+      expect(controller.model.openPanel, isNull);
       expect(bridge.savedReadingStates, isEmpty);
 
       controller.dispatch(const ReaderUnitRequested(1));
@@ -7065,7 +7273,7 @@ void main() {
     await bridge.disposed.future;
   });
 
-  testWidgets('CBZ exposes keyboard navigation and bookmark chrome', (
+  testWidgets('CBZ exposes keyboard navigation and panel chrome', (
     tester,
   ) async {
     final bridge = _ControlledBridge(
@@ -7077,6 +7285,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/comic.cbz',
           initialBookId: 7,
@@ -7089,25 +7298,40 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('reader-document-semantics')));
     await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
     await tester.pumpAndSettle();
-    expect(find.text('2 / 2'), findsOneWidget);
+    // RD-05 status wording: `Page {page} · {percentage}%` (the pinned Iced
+    // string), not the retired `2 / 2` form.
+    expect(find.text('Page 2 · 100%'), findsOneWidget);
     expect(bridge.renderUnits, [0, 1]);
     await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
     await tester.pumpAndSettle();
-    expect(find.text('1 / 2'), findsOneWidget);
+    expect(find.text('Page 1 · 50%'), findsOneWidget);
     expect(bridge.renderUnits, [0, 1, 0]);
     final semantics = tester.getSemantics(
       find.byKey(const ValueKey('reader-document-semantics')),
     );
     expect(semantics.label, contains('page 1 of 2'));
 
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+    // The tools *surface* is retired (contract §7.2 item 1) but the live
+    // bookmark controls are retained inside the more panel, so a CBZ reader
+    // still reaches its bookmark chrome.
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
+    expect(find.byKey(const ValueKey('reader-panel-more')), findsOneWidget);
     expect(find.byTooltip('Bookmark this location'), findsOneWidget);
+    expect(find.byTooltip('Bookmark with note'), findsOneWidget);
+    // A CBZ has no text search, so the retained search field stays hidden.
+    expect(find.byKey(const ValueKey('reader-search-input')), findsNothing);
     await tester.pumpWidget(const SizedBox());
     await bridge.disposed.future;
   });
 
-  testWidgets('rejected Open reveals bookmark save feedback', (tester) async {
+  testWidgets('rejected Open reveals the pending bookmark write', (
+    tester,
+  ) async {
+    // Driven through rendered controls: the retained bookmark toggle lives in
+    // the more panel (contract §7.2 item 1 retires the tools surface) and the
+    // dev-only path entry requests the replacement open. The rejected open must
+    // be visible, not silent.
     final bridge = _ControlledBridge(
       format: FlutterBookFormat.epub,
       bookId: 7,
@@ -7118,6 +7342,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: ReaderScreen(
+          debugPathEntry: true,
           bridge: bridge,
           initialPath: '/books/first.epub',
           initialBookId: 7,
@@ -7126,13 +7351,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
     await tester.tap(find.byTooltip('Bookmark this location'));
     await tester.pump();
-    await tester.tap(find.byTooltip('Search and bookmarks'));
+    await tester.tap(find.byKey(const ValueKey('reader-header-more')));
     await tester.pump();
-    expect(find.byTooltip('Bookmark this location'), findsNothing);
+    expect(find.byKey(const ValueKey('reader-panel-more')), findsNothing);
 
     await tester.enterText(
       find.bySemanticsLabel('Document path'),
@@ -7141,13 +7367,19 @@ void main() {
     await tester.tap(find.text('Open document'));
     await tester.pump();
 
+    // The rejection is rendered persistently while the pending write is open.
+    const rejection =
+        'Bookmark changes are still saving. Try opening again shortly.';
+    expect(find.text(rejection), findsOneWidget);
     expect(
-      find.text(
-        'Bookmark changes are still saving. Try opening again shortly.',
-      ),
-      findsOneWidget,
+      tester
+          .getSemantics(find.text(rejection))
+          .getSemanticsData()
+          .flagsCollection
+          .isLiveRegion,
+      isTrue,
     );
-    expect(find.byTooltip('Bookmark this location'), findsOneWidget);
+
     toggle.complete(null);
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());

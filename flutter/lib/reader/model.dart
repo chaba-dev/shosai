@@ -34,6 +34,120 @@ final class AnnotationAssociationCancelled extends AnnotationAssociationChoice {
   const AnnotationAssociationCancelled();
 }
 
+/// The three reader panels that are mutually exclusive (RD-13).
+///
+/// Search is deliberately not a member: it is an independent bar (RD-11).
+enum ReaderPanel { contents, typography, more }
+
+/// Which ordinal the reader status text names (RD-05).
+///
+/// `page` is supplied for paginated EPUB/PDF/CBZ page ordinals and `chapter`
+/// only for the EPUB logical-unit fallback; the widget never derives this from
+/// the document format.
+enum ReaderDisplayUnit { chapter, page }
+
+/// The status-wording state of the reader progress bar (RD-05).
+///
+/// `none` means no document is loaded and `loading` that an open is in flight;
+/// `single` and `range` carry supplied presentation ordinals.
+enum ReaderProgressKind { none, loading, single, range }
+
+/// The one controller-owned modal effect currently active, if any.
+///
+/// Controls that would start another modal are disabled while this is set.
+/// `documentPicker` is added by 4C with the more panel's open-book action.
+enum ReaderModalEffect {
+  selectionNote,
+  annotationNote,
+  bookmarkNote,
+  associationPicker,
+}
+
+/// One tab strip entry (RD-03, RD-04).
+///
+/// Fixture-injected in 4B: the bridge has no session or tab API, and the real
+/// tab identity and lifecycle are 5F work.
+final class ReaderTabPresentation {
+  const ReaderTabPresentation({
+    required this.id,
+    required this.title,
+    this.selected = false,
+  });
+
+  final String id;
+  final String title;
+  final bool selected;
+
+  ReaderTabPresentation copyWith({String? title, bool? selected}) =>
+      ReaderTabPresentation(
+        id: id,
+        title: title ?? this.title,
+        selected: selected ?? this.selected,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderTabPresentation &&
+      other.id == id &&
+      other.title == title &&
+      other.selected == selected;
+
+  @override
+  int get hashCode => Object.hash(id, title, selected);
+}
+
+/// The progress bar and status wording inputs (RD-05).
+///
+/// Ordinals are 1-based presentation data supplied by the fixture in 4B and by
+/// the renderer in 5G. They are never durable addresses and never double as a
+/// page total.
+final class ReaderProgressPresentation {
+  const ReaderProgressPresentation({
+    required this.kind,
+    this.hasDocument = false,
+    this.displayUnit = ReaderDisplayUnit.page,
+    this.firstOrdinal,
+    this.lastOrdinal,
+    this.percentage = 0,
+  });
+
+  final ReaderProgressKind kind;
+
+  /// Whether a document is loaded; the bar is hidden without one.
+  final bool hasDocument;
+  final ReaderDisplayUnit displayUnit;
+  final int? firstOrdinal;
+  final int? lastOrdinal;
+
+  /// Whole-percent progress, 0–100.
+  final int percentage;
+
+  bool get showsRange =>
+      kind == ReaderProgressKind.range &&
+      firstOrdinal != null &&
+      lastOrdinal != null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderProgressPresentation &&
+      other.kind == kind &&
+      other.hasDocument == hasDocument &&
+      other.displayUnit == displayUnit &&
+      other.firstOrdinal == firstOrdinal &&
+      other.lastOrdinal == lastOrdinal &&
+      other.percentage == percentage;
+
+  @override
+  int get hashCode => Object.hash(
+    kind,
+    hasDocument,
+    displayUnit,
+    firstOrdinal,
+    lastOrdinal,
+    percentage,
+  );
+}
+
 final class ReaderLayout {
   const ReaderLayout({
     this.scale = 1,
@@ -92,6 +206,7 @@ final class ReaderModel {
     List<FlutterBookmark> bookmarks = const [],
     Set<String> annotationOperations = const {},
     this.selectionError,
+    this.relayoutError,
     this.selectionActionError,
     this.annotationError,
     this.annotationsReady = false,
@@ -99,7 +214,13 @@ final class ReaderModel {
     this.bookmarkBusy = false,
     this.toolError,
     this.persistenceError,
-    this.toolsVisible = false,
+    this.openPanel,
+    this.searchOpen = false,
+    List<ReaderTabPresentation> tabs = const [],
+    this.progress = const ReaderProgressPresentation(
+      kind: ReaderProgressKind.none,
+    ),
+    this.modalEffect,
     this.layout = const ReaderLayout(),
     this.relayoutBusy = false,
     this.relayoutPending = false,
@@ -114,6 +235,7 @@ final class ReaderModel {
        annotations = List.unmodifiable(annotations.map(_freezeAnnotation)),
        searchResults = List.unmodifiable(searchResults),
        bookmarks = List.unmodifiable(bookmarks),
+       tabs = List.unmodifiable(tabs),
        annotationOperations = Set.unmodifiable(annotationOperations);
 
   final String? openPath;
@@ -138,6 +260,13 @@ final class ReaderModel {
   final List<FlutterBookmark> bookmarks;
   final Set<String> annotationOperations;
   final String? selectionError;
+
+  /// A failed page layout, kept apart from [selectionError].
+  ///
+  /// The retained reader wrote layout failures into `selectionError`, so the
+  /// shared error surface labelled them "Selection unavailable"; a layout
+  /// failure is not a selection problem and now has its own value.
+  final String? relayoutError;
   final String? selectionActionError;
   final String? annotationError;
   final bool annotationsReady;
@@ -147,7 +276,22 @@ final class ReaderModel {
 
   /// Reading-position restoration/save feedback, independent of tool chrome.
   final String? persistenceError;
-  final bool toolsVisible;
+
+  /// The single open panel, if any; at most one is open (RD-13).
+  final ReaderPanel? openPanel;
+
+  /// Whether the search bar is open. Search is independent of [openPanel].
+  final bool searchOpen;
+
+  /// Ordered tab strip entries; empty hides the strip.
+  final List<ReaderTabPresentation> tabs;
+
+  /// Progress bar and status wording inputs (RD-05).
+  final ReaderProgressPresentation progress;
+
+  /// The one controller-owned modal effect currently active, if any.
+  final ReaderModalEffect? modalEffect;
+
   final ReaderLayout layout;
   final bool relayoutBusy;
   final bool relayoutPending;
@@ -207,6 +351,7 @@ final class ReaderModel {
     List<FlutterBookmark>? bookmarks,
     Set<String>? annotationOperations,
     Object? selectionError = _unchanged,
+    Object? relayoutError = _unchanged,
     Object? selectionActionError = _unchanged,
     Object? annotationError = _unchanged,
     bool? annotationsReady,
@@ -214,7 +359,11 @@ final class ReaderModel {
     bool? bookmarkBusy,
     Object? toolError = _unchanged,
     Object? persistenceError = _unchanged,
-    bool? toolsVisible,
+    Object? openPanel = _unchanged,
+    bool? searchOpen,
+    List<ReaderTabPresentation>? tabs,
+    ReaderProgressPresentation? progress,
+    Object? modalEffect = _unchanged,
     ReaderLayout? layout,
     bool? relayoutBusy,
     bool? relayoutPending,
@@ -271,6 +420,9 @@ final class ReaderModel {
       selectionError: identical(selectionError, _unchanged)
           ? this.selectionError
           : selectionError as String?,
+      relayoutError: identical(relayoutError, _unchanged)
+          ? this.relayoutError
+          : relayoutError as String?,
       selectionActionError: identical(selectionActionError, _unchanged)
           ? this.selectionActionError
           : selectionActionError as String?,
@@ -286,7 +438,15 @@ final class ReaderModel {
       persistenceError: identical(persistenceError, _unchanged)
           ? this.persistenceError
           : persistenceError as String?,
-      toolsVisible: toolsVisible ?? this.toolsVisible,
+      openPanel: identical(openPanel, _unchanged)
+          ? this.openPanel
+          : openPanel as ReaderPanel?,
+      searchOpen: searchOpen ?? this.searchOpen,
+      tabs: tabs == null ? this.tabs : List.unmodifiable(tabs),
+      progress: progress ?? this.progress,
+      modalEffect: identical(modalEffect, _unchanged)
+          ? this.modalEffect
+          : modalEffect as ReaderModalEffect?,
       layout: layout ?? this.layout,
       relayoutBusy: relayoutBusy ?? this.relayoutBusy,
       relayoutPending: relayoutPending ?? this.relayoutPending,
@@ -302,7 +462,13 @@ enum ReaderSelectionPhase { idle, selecting, selected, committing }
 
 enum ReaderContentState { loading, ready, failed }
 
-enum ReaderFocusTarget { surface, actions }
+/// Where a controller-requested focus handoff lands.
+///
+/// `header` focuses the header action that opened the panel being closed,
+/// `panel` the open panel container and `tabStrip` the active tab's label; the
+/// widget resolves all three from its own focus nodes when the controller asks,
+/// and never moves focus on its own.
+enum ReaderFocusTarget { surface, actions, header, panel, tabStrip }
 
 enum _ReaderNoteTarget { selection, annotation, bookmark }
 

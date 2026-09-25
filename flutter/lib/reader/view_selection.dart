@@ -37,7 +37,13 @@ class _SelectionActions extends StatelessWidget {
                 onPressed: !copyEnabled
                     ? null
                     : () => dispatch(const ReaderSelectionCopyRequested()),
-                child: const Text('Copy'),
+                // A Shad button lays its content out in a Row whose
+                // non-flexible children get an unbounded width; a flexible
+                // label ellipsizes instead of overflowing when the selection
+                // surface is narrower than the label's natural width (a
+                // compact viewport at a scaled interface, where the RD-06 edge
+                // columns also scale with the interface).
+                child: const Flexible(child: Text('Copy')),
               ),
               for (final color in FlutterHighlightColor.values)
                 ShadButton(
@@ -51,14 +57,20 @@ class _SelectionActions extends StatelessWidget {
                   onPressed: !persistenceEnabled
                       ? null
                       : () => dispatch(ReaderSelectionCommitted(color: color)),
-                  child: Text(_colorName(color)),
+                  child: Flexible(
+                    child: Text(
+                      _colorName(color),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               ShadButton.ghost(
                 height: shosaiShadButtonHeight(context),
                 onPressed: !persistenceEnabled
                     ? null
                     : () => dispatch(const ReaderSelectionNoteRequested()),
-                child: const Text('Add note'),
+                child: const Flexible(child: Text('Add note')),
               ),
               ShadButton.ghost(
                 height: shosaiShadButtonHeight(context),
@@ -66,7 +78,7 @@ class _SelectionActions extends StatelessWidget {
                     ? focusNode
                     : null,
                 onPressed: () => dispatch(const ReaderSelectionCancelled()),
-                child: const Text('Cancel'),
+                child: const Flexible(child: Text('Cancel')),
               ),
             ],
           ),
