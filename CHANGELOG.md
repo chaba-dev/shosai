@@ -51,6 +51,7 @@ All notable changes to this project will be documented in this file.
 - *(theme)* Map Iced design values through one shared token source (#123)
 - *(flutter)* Restore the Iced-shaped library navigation (#125)
 - *(flutter)* Restore the Iced-shaped library cards and grid (#126)
+- *(flutter)* Restore the Iced continue-reading and collection states (#129)
 
 ### 🐛 Bug Fixes
 
